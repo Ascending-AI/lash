@@ -26,6 +26,10 @@ pub enum EmbedError {
         "commit budget is required; provide explicit byte and node limits with .commit_budget(...)"
     )]
     MissingCommitBudget,
+    #[error(
+        "queued-work batching policy is required; provide an explicit model-action reserve with .queued_work_batching(...)"
+    )]
+    MissingQueuedWorkBatching,
     #[error("failed to create store for session `{session_id}`: {message}")]
     StoreFactory { session_id: String, message: String },
     #[error("session store operation failed: {0}")]
@@ -152,6 +156,7 @@ impl EmbedError {
             | Self::MissingAttachmentStore
             | Self::MissingProcessEnvStore
             | Self::MissingCommitBudget
+            | Self::MissingQueuedWorkBatching
             | Self::StoreSessionMismatch { .. }
             | Self::MissingProcessWorkerStoreFactory
             | Self::ProcessRegistryRequiresStoreFactory

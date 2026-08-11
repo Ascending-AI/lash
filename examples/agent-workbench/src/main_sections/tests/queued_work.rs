@@ -5,7 +5,6 @@ fn queued_work_test_draft(
     lash::persistence::QueuedWorkBatchDraft::new(
         session_id,
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-        lash::persistence::SlotPolicy::Exclusive,
         vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
             "workbench-queued-work-test-frame",
             source_key,
@@ -24,9 +23,9 @@ fn workbench_process_wake_draft(
     lash::persistence::QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-        lash::persistence::SlotPolicy::Exclusive,
         vec![lash::persistence::QueuedWorkPayload::process_wake(wake)],
     )
+    .with_merge_key(lash::persistence::PROCESS_WAKE_MERGE_KEY)
     .with_source_key(source_key)
     .with_process_wake_source(process_id, sequence)
 }

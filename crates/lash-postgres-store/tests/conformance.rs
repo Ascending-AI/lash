@@ -534,7 +534,6 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
             session_id,
             lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            lash_core::SlotPolicy::Exclusive,
             vec![lash_core::runtime::QueuedWorkPayload::session_command(
                 lash_core::runtime::SessionCommand::RefreshToolCatalog {
                     reason: "fence test".to_string(),
@@ -1091,6 +1090,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             &owner,
             lash_core::runtime::QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&first.batch_id),
+            lash_core::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim source-lock wake")
@@ -1279,6 +1279,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             &second_owner,
             lash_core::runtime::QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&second.batch_id),
+            lash_core::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim second wake sequence")

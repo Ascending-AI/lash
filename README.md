@@ -78,6 +78,7 @@ fn hello_lash_core(provider: ProviderHandle, model: ModelSpec) -> lash::Result<L
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()
 }
 ```

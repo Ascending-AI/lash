@@ -680,7 +680,7 @@ impl LashRuntime {
             .map_err(|err| SessionError::Protocol(err.to_string()))
     }
 
-    fn max_context_tokens(&self) -> usize {
+    pub(super) fn max_context_tokens(&self) -> usize {
         self.state.effective_policy().context_window_tokens()
     }
 
@@ -1550,6 +1550,12 @@ impl LashRuntime {
             }
         }
         let claim = if let Some(batch_ids) = selected_batch_ids {
+            let claim_policy = self
+                .host
+                .core
+                .durability
+                .queued_work_batching
+                .claim_policy(self.max_context_tokens());
             store
                 .claim_ready_queued_work_by_batch_ids(
                     &self.state.session_id,
@@ -1557,16 +1563,23 @@ impl LashRuntime {
                     &self.runtime_lease_owner,
                     crate::QueuedWorkClaimBoundary::Idle,
                     batch_ids,
+                    claim_policy,
                 )
                 .await
         } else {
+            let claim_policy = self
+                .host
+                .core
+                .durability
+                .queued_work_batching
+                .claim_policy(self.max_context_tokens());
             store
                 .claim_ready_queued_work(
                     &self.state.session_id,
                     &session_execution_fence,
                     &self.runtime_lease_owner,
                     crate::QueuedWorkClaimBoundary::Idle,
-                    64,
+                    claim_policy,
                 )
                 .await
         }

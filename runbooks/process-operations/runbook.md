@@ -99,19 +99,20 @@ the host list contains both processes and their event tails contain `signal.read
 **Judgment — FAIL if:** the filter hides a process from the host rail, widens model visibility,
 changes a hidden operation into an untyped failure, or suppresses host signal/cancel evidence.
 
-## Phase 4 — Each-wake versus coalesced wake turns
+## Phase 4 — Per-event merge eligibility and default wake batching
 
 **Setup.** Inspect `04-wake-turn-policy.log`, produced by the complete PostgreSQL runtime
 persistence contract with a fresh store for each vector.
 
-**Action.** Enqueue two adjacent process wakes first under `WakeTurnPolicy::each_wake` and then
-under `WakeTurnPolicy::coalesce` with one group key. Claim ready work at the idle boundary.
+**Action.** Enqueue two adjacent turn-work rows without merge keys, then enqueue two adjacent
+process wakes carrying `PROCESS_WAKE_MERGE_KEY`. Claim ready work at the idle boundary.
 
-**Expected observable evidence.** Each-wake mode yields two distinct single-batch claims.
-Coalesced mode yields one claim containing both receiver batches, and settling it removes both.
+**Expected observable evidence.** The absent-key rows yield two distinct single-batch claims.
+The wakes yield one claim containing both receiver batches, and settling it removes both.
 
-**Judgment — FAIL if:** Each-wake collapses turns, Coalesce creates two turns for the same group,
-coalescing crosses a delivery boundary/key, or settlement leaves one member behind.
+**Judgment — FAIL if:** absent keys collapse turns, compatible default-key wakes create two
+turns, batching crosses a delivery boundary/key/authority gate, or settlement leaves one member
+behind.
 
 ## Phase 5 — Crash between receiver enqueue and sender mark
 

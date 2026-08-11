@@ -63,7 +63,6 @@ impl LogicalTurnClaims {
                     crate::QueuedWorkBatchDraft::new(
                         session_id,
                         crate::DeliveryPolicy::AfterCurrentTurnCommit,
-                        crate::SlotPolicy::Exclusive,
                         vec![crate::QueuedWorkPayload::agent_frame_task(
                             frame_id.clone(),
                             task.clone(),
@@ -304,6 +303,12 @@ impl LashRuntime {
                     .iter()
                     .map(|batch| batch.batch_id.clone())
                     .collect::<Vec<_>>();
+                let claim_policy = self
+                    .host
+                    .core
+                    .durability
+                    .queued_work_batching
+                    .claim_policy(self.max_context_tokens());
                 let claim = store
                     .claim_ready_queued_work_by_batch_ids(
                         &self.state.session_id,
@@ -311,6 +316,7 @@ impl LashRuntime {
                         &self.runtime_lease_owner,
                         crate::QueuedWorkClaimBoundary::Idle,
                         &batch_ids,
+                        claim_policy,
                     )
                     .await
                     .map_err(super::runtime_error_from_store_commit)?

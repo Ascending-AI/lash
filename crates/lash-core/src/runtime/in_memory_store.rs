@@ -73,7 +73,7 @@ enum InMemoryQueuedWorkClaimKind {
     LeadingSessionCommand,
     TurnWork {
         boundary: crate::QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     },
 }
 
@@ -444,7 +444,7 @@ impl InMemorySessionStore {
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
         let max_batches = match kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => 1,
-            InMemoryQueuedWorkClaimKind::TurnWork { max_batches, .. } => max_batches,
+            InMemoryQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
         if max_batches == 0 {
             return Ok(None);
@@ -476,28 +476,25 @@ impl InMemorySessionStore {
             .iter()
             .map(|index| {
                 let batch = &queued[*index].batch;
-                Ok(crate::store::queued_work::ClaimCandidate {
-                    enqueue_seq: batch.enqueue_seq,
-                    claim_fencing_token: queued[*index].claim_fencing_token,
-                    work_class: Self::queued_batch_work_class(batch)?,
-                    delivery_policy: batch.delivery_policy,
-                    slot_policy: batch.slot_policy,
-                    merge_key: batch.merge_key.clone(),
-                })
+                Self::queued_batch_work_class(batch)?;
+                Ok(crate::store::queued_work::ClaimCandidate::from_batch(
+                    batch,
+                    queued[*index].claim_fencing_token,
+                ))
             })
             .collect::<Result<Vec<_>, crate::store::StoreError>>()?;
         let selected_len = match kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
                 crate::store::queued_work::select_leading_session_command(&candidates)
             }
-            InMemoryQueuedWorkClaimKind::TurnWork {
-                boundary,
-                max_batches,
-            } => crate::store::queued_work::select_turn_work_claim_prefix(
-                &candidates,
-                boundary,
-                max_batches,
-            ),
+            InMemoryQueuedWorkClaimKind::TurnWork { boundary, policy } => {
+                crate::store::queued_work::select_turn_work_claim_prefix(
+                    &candidates,
+                    boundary,
+                    policy,
+                    now,
+                )?
+            }
         };
         if selected_len == 0 {
             return Ok(None);

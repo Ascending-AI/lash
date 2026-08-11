@@ -195,7 +195,10 @@ fn inline_worker_with_trigger_store(
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
-            RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512)),
+            RuntimeHostConfig::in_memory(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            ),
             Arc::new(InlineSessionStoreFactory),
             registry,
         )
@@ -916,8 +919,10 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
     );
     let registry = driver.process_registry();
-    let mut runtime_host =
-        RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
+    let mut runtime_host = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_engine(nested_engine);
     runtime_host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider));
@@ -998,8 +1003,10 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
 async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let runs = Arc::new(AtomicUsize::new(0));
-    let mut runtime_host =
-        RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
+    let mut runtime_host = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     runtime_host.process_engines =
         crate::ProcessEngineRegistry::new().with_engine(Arc::new(BoundaryThenTerminalEngine {
             runs: Arc::clone(&runs),
@@ -1120,8 +1127,10 @@ async fn snapshot_recovery_fixture(
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
     let payloads = Arc::new(Mutex::new(Vec::new()));
-    let mut runtime_host =
-        RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
+    let mut runtime_host = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     runtime_host.process_engines =
         crate::ProcessEngineRegistry::new().with_engine(Arc::new(SnapshotRecordingEngine {
             payloads: Arc::clone(&payloads),

@@ -585,8 +585,10 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
 
 #[tokio::test]
 async fn processes_cancel_cancels_visible_process() -> Result<()> {
-    let runtime_host =
-        RuntimeHostConfig::in_memory(lash_core::CommitBudget::bounded(1024 * 1024, 512));
+    let runtime_host = RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -649,6 +651,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .advanced()
         .runtime_host_config(RuntimeHostConfig::in_memory(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
         ))
         .build()?;
     let session = core.session("host-filter-bypass").open().await?;
@@ -717,8 +720,10 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
 
 #[tokio::test]
 async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
-    let runtime_host =
-        RuntimeHostConfig::in_memory(lash_core::CommitBudget::bounded(1024 * 1024, 512));
+    let runtime_host = RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
     let driver = lash_core::facade_support::ProcessWorkDriver::new(

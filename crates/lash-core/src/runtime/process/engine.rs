@@ -158,7 +158,6 @@ pub struct ProcessEngineProcessContext {
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     queued_work_driver: Option<crate::QueuedWorkDriver>,
     clock: Arc<dyn crate::Clock>,
-    wake_turn_policy: crate::WakeTurnPolicy,
 }
 
 impl ProcessEngineProcessContext {
@@ -172,7 +171,6 @@ impl ProcessEngineProcessContext {
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
         clock: Arc<dyn crate::Clock>,
-        wake_turn_policy: crate::WakeTurnPolicy,
     ) -> Self {
         Self {
             process_id,
@@ -183,7 +181,6 @@ impl ProcessEngineProcessContext {
             session_store_factory,
             queued_work_driver,
             clock,
-            wake_turn_policy,
         }
     }
 
@@ -216,7 +213,6 @@ impl ProcessEngineProcessContext {
             None,
             self.queued_work_driver.as_ref(),
             Arc::clone(&self.clock),
-            &self.wake_turn_policy,
         )
         .await?;
         Ok(result.event)
@@ -279,7 +275,6 @@ impl<'run> ProcessEngineRunContext<'run> {
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
         clock: Arc<dyn crate::Clock>,
-        wake_turn_policy: crate::WakeTurnPolicy,
         process_registry_available: bool,
         cancellation: CancellationToken,
         turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -300,7 +295,6 @@ impl<'run> ProcessEngineRunContext<'run> {
             session_store_factory.clone(),
             queued_work_driver.clone(),
             clock,
-            wake_turn_policy,
         );
         Self {
             registration,

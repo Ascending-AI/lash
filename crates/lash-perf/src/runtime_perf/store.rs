@@ -122,7 +122,7 @@ enum RuntimePerfQueuedWorkClaimKind {
     LeadingSessionCommand,
     TurnWork {
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
     },
 }
 
@@ -164,7 +164,8 @@ impl RuntimePerfStore {
             enqueue_seq,
             source_key: batch.source_key,
             delivery_policy: batch.delivery_policy,
-            slot_policy: batch.slot_policy,
+            kind: batch.kind,
+            authority: batch.authority,
             merge_key: batch.merge_key,
             available_at_ms: batch.available_at_ms,
             enqueued_at_ms: current_epoch_ms(),
@@ -276,7 +277,7 @@ impl RuntimePerfStore {
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let max_batches = match kind {
             RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand => 1,
-            RuntimePerfQueuedWorkClaimKind::TurnWork { max_batches, .. } => max_batches,
+            RuntimePerfQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
         if max_batches == 0 {
             return Ok(None);
@@ -310,28 +311,25 @@ impl RuntimePerfStore {
             .iter()
             .map(|index| {
                 let batch = &queued[*index].batch;
-                Ok(store::queued_work::ClaimCandidate {
-                    enqueue_seq: batch.enqueue_seq,
-                    claim_fencing_token: queued[*index].claim_fencing_token,
-                    work_class: Self::queued_batch_work_class(batch)?,
-                    delivery_policy: batch.delivery_policy,
-                    slot_policy: batch.slot_policy,
-                    merge_key: batch.merge_key.clone(),
-                })
+                Self::queued_batch_work_class(batch)?;
+                Ok(store::queued_work::ClaimCandidate::from_batch(
+                    batch,
+                    queued[*index].claim_fencing_token,
+                ))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         let selected_len = match kind {
             RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand => {
                 store::queued_work::select_leading_session_command(&candidates)
             }
-            RuntimePerfQueuedWorkClaimKind::TurnWork {
-                boundary,
-                max_batches,
-            } => store::queued_work::select_turn_work_claim_prefix(
-                &candidates,
-                boundary,
-                max_batches,
-            ),
+            RuntimePerfQueuedWorkClaimKind::TurnWork { boundary, policy } => {
+                store::queued_work::select_turn_work_claim_prefix(
+                    &candidates,
+                    boundary,
+                    policy,
+                    now,
+                )?
+            }
         };
         if selected_len == 0 {
             return Ok(None);
@@ -1243,16 +1241,13 @@ impl QueuedWorkStore for RuntimePerfStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         self.claim_ready_queued_work_perf(
             session_id,
             session_execution_lease,
             owner,
-            RuntimePerfQueuedWorkClaimKind::TurnWork {
-                boundary,
-                max_batches,
-            },
+            RuntimePerfQueuedWorkClaimKind::TurnWork { boundary, policy },
         )
     }
 
@@ -1264,7 +1259,7 @@ impl QueuedWorkStore for RuntimePerfStore {
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<(Option<lash_core::TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         let turn_input_claim = TurnInputStore::claim_active_turn_inputs(
             self,
@@ -1282,7 +1277,7 @@ impl QueuedWorkStore for RuntimePerfStore {
             owner,
             RuntimePerfQueuedWorkClaimKind::TurnWork {
                 boundary: QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                max_batches,
+                policy,
             },
         )?;
         Ok((turn_input_claim, queued_work_claim))
@@ -1295,6 +1290,7 @@ impl QueuedWorkStore for RuntimePerfStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
+        policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         if batch_ids.is_empty() {
             return Ok(None);
@@ -1325,21 +1321,14 @@ impl QueuedWorkStore for RuntimePerfStore {
             .iter()
             .map(|index| {
                 let entry = &queued[*index];
-                store::queued_work::ClaimCandidate {
-                    enqueue_seq: entry.batch.enqueue_seq,
-                    claim_fencing_token: entry.claim_fencing_token,
-                    work_class: lash_core::store::QueuedWorkClass::TurnWork,
-                    delivery_policy: entry.batch.delivery_policy,
-                    slot_policy: entry.batch.slot_policy,
-                    merge_key: entry.batch.merge_key.clone(),
-                }
+                store::queued_work::ClaimCandidate::from_batch(
+                    &entry.batch,
+                    entry.claim_fencing_token,
+                )
             })
             .collect::<Vec<_>>();
-        if store::queued_work::select_turn_work_claim_prefix(
-            &candidates,
-            boundary,
-            candidates.len(),
-        ) != candidates.len()
+        if store::queued_work::select_turn_work_claim_prefix(&candidates, boundary, policy, now)?
+            != candidates.len()
         {
             return Ok(None);
         }

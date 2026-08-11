@@ -11,7 +11,6 @@ pub(crate) async fn enqueue_wake_delivery(
     trace_host: Option<&dyn crate::plugin::SessionGraphService>,
     queued_work_driver: Option<&crate::QueuedWorkDriver>,
     clock: std::sync::Arc<dyn crate::Clock>,
-    wake_turn_policy: &crate::WakeTurnPolicy,
 ) -> Result<(), PluginError> {
     let Some(wake_delivery) = wake_delivery else {
         return Ok(());
@@ -22,12 +21,11 @@ pub(crate) async fn enqueue_wake_delivery(
         // runbook lever once that resolver is available.
         return Ok(());
     };
-    if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once_with_policy(
+    if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once(
         registry,
         std::sync::Arc::clone(factory),
         queued_work_driver.cloned(),
         clock,
-        wake_turn_policy,
         32,
     )
     .await
@@ -58,7 +56,9 @@ pub(crate) async fn enqueue_wake_delivery(
                                 "batch_id": enqueued.batch_id,
                                 "source_key": enqueued.source_key,
                                 "delivery_policy": enqueued.delivery_policy,
-                                "slot_policy": enqueued.slot_policy,
+                                "work_kind": enqueued.kind,
+                                "authority": enqueued.authority,
+                                "merge_key": enqueued.merge_key,
                                 "payload_types": ["process_wake"],
                             }),
                         },
@@ -128,7 +128,6 @@ impl ToolProcessEventClient {
             Some(process.session_graph.as_ref()),
             process.queued_work_driver.as_ref(),
             std::sync::Arc::clone(&process.clock),
-            &process.wake_turn_policy,
         )
         .await?;
         Ok(result.event)

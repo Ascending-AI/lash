@@ -354,8 +354,10 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         relation: crate::SessionRelation::Root,
     });
     let bytes = Arc::new(crate::InMemoryAttachmentStore::new());
-    let mut host_config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
+    let mut host_config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host_config.durability.attachment_store =
         Arc::new(crate::SessionAttachmentStore::ephemeral(bytes.clone()));
     let host = crate::EmbeddedRuntimeHost::new(host_config)
@@ -469,6 +471,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let embedded = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
         crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
     ))
     .with_session_store_factory(Arc::new(child_factory.clone()));
     let host = crate::ProcessRuntimeHost::new(embedded, registry);

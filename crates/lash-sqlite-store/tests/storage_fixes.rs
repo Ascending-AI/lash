@@ -286,7 +286,7 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            1,
+            lash_core::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim queued work")
@@ -332,7 +332,7 @@ async fn second_claim_on_held_batch_is_not_won() {
             &session_fence,
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            lash_core::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim a")
@@ -345,7 +345,7 @@ async fn second_claim_on_held_batch_is_not_won() {
             &session_fence,
             &lease_owner("owner-b"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            lash_core::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim b");
@@ -406,7 +406,7 @@ fn concurrent_claims_never_double_own_a_batch() {
                         &session_fence,
                         &lease_owner(owner),
                         QueuedWorkClaimBoundary::Idle,
-                        10,
+                        lash_core::testing::queued_work_claim_policy(10),
                     )
                     .await
             })
@@ -473,8 +473,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 33"),
-        "error must report the real expected version 33: {message}"
+        message.contains("schema version 35"),
+        "error must report the real expected version 35: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -510,7 +510,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 33);
+    assert_eq!(user_version, 35);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')

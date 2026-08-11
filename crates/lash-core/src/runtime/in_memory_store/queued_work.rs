@@ -60,7 +60,8 @@ impl InMemorySessionStore {
             enqueue_seq: *next_seq,
             source_key: batch.source_key,
             delivery_policy: batch.delivery_policy,
-            slot_policy: batch.slot_policy,
+            kind: batch.kind,
+            authority: batch.authority,
             merge_key: batch.merge_key,
             available_at_ms: batch.available_at_ms,
             enqueued_at_ms,
@@ -140,16 +141,13 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
         self.claim_ready_queued_work_in_memory(
             session_id,
             session_execution_lease,
             owner,
-            InMemoryQueuedWorkClaimKind::TurnWork {
-                boundary,
-                max_batches,
-            },
+            InMemoryQueuedWorkClaimKind::TurnWork { boundary, policy },
         )
     }
 
@@ -161,7 +159,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<
         (
             Option<crate::TurnInputClaim>,
@@ -178,7 +176,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             turn_id,
             checkpoint,
             max_inputs,
-            max_batches,
+            policy.max_rows,
         )? {
             return Ok((None, None));
         }
@@ -208,7 +206,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             owner,
             super::InMemoryQueuedWorkClaimKind::TurnWork {
                 boundary: crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                max_batches,
+                policy,
             },
             now,
         )?;
@@ -222,6 +220,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         owner: &crate::LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: &[String],
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
         if batch_ids.is_empty() {
             return Ok(None);
@@ -262,21 +261,18 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .iter()
             .map(|index| {
                 let entry = &queued[*index];
-                crate::store::queued_work::ClaimCandidate {
-                    enqueue_seq: entry.batch.enqueue_seq,
-                    claim_fencing_token: entry.claim_fencing_token,
-                    work_class: crate::store::QueuedWorkClass::TurnWork,
-                    delivery_policy: entry.batch.delivery_policy,
-                    slot_policy: entry.batch.slot_policy,
-                    merge_key: entry.batch.merge_key.clone(),
-                }
+                crate::store::queued_work::ClaimCandidate::from_batch(
+                    &entry.batch,
+                    entry.claim_fencing_token,
+                )
             })
             .collect::<Vec<_>>();
         if crate::store::queued_work::select_turn_work_claim_prefix(
             &candidates,
             boundary,
-            candidates.len(),
-        ) != candidates.len()
+            policy,
+            now,
+        )? != candidates.len()
         {
             return Ok(None);
         }

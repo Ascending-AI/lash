@@ -35,6 +35,7 @@ where
                 &stale_owner,
                 QueuedWorkClaimBoundary::Idle,
                 std::slice::from_ref(&batch.batch_id),
+                crate::testing::queued_work_claim_policy(64),
             )
             .await
             .map_err(|error| error.to_string())?
@@ -134,6 +135,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
             &predecessor_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -157,6 +159,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?

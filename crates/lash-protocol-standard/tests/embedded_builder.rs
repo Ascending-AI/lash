@@ -56,12 +56,15 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         .expect("commit session state");
 
     let runtime = Box::pin(
-        LashRuntime::builder(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-            .with_store(store.clone() as Arc<dyn RuntimePersistence>)
-            .with_plugin_factories(vec![Arc::new(
-                lash_protocol_standard::StandardProtocolPluginFactory,
-            )])
-            .build(),
+        LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_store(store.clone() as Arc<dyn RuntimePersistence>)
+        .with_plugin_factories(vec![Arc::new(
+            lash_protocol_standard::StandardProtocolPluginFactory,
+        )])
+        .build(),
     )
     .await
     .expect("runtime");
@@ -100,13 +103,16 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         .expect("commit session state");
 
     let err = match Box::pin(
-        LashRuntime::builder(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-            .with_store(store as Arc<dyn RuntimePersistence>)
-            .with_session_id("beta")
-            .with_plugin_factories(vec![Arc::new(
-                lash_protocol_standard::StandardProtocolPluginFactory,
-            )])
-            .build(),
+        LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_store(store as Arc<dyn RuntimePersistence>)
+        .with_session_id("beta")
+        .with_plugin_factories(vec![Arc::new(
+            lash_protocol_standard::StandardProtocolPluginFactory,
+        )])
+        .build(),
     )
     .await
     {

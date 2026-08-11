@@ -83,7 +83,7 @@ fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) ->
     format!(
         "WITH {head_candidate}
          SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                 claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                 claim_owner_liveness_json, claim_token, claim_session_lease_generation
          FROM queued_work_batches
@@ -1385,23 +1385,7 @@ impl QueuedWorkStore for Store {
                     let candidates = candidate_rows
                         .iter()
                         .zip(candidate_batches.iter())
-                        .map(|(row, batch)| {
-                            Ok(ClaimCandidate {
-                                enqueue_seq: row.enqueue_seq,
-                                claim_fencing_token: row.claim_fencing_token,
-                                work_class: batch.work_class().ok_or_else(|| {
-                                    StoreError::Backend(format!(
-                                        "queued-work batch `{}` has mixed or empty payload classes",
-                                        batch.batch_id
-                                    ))
-                                })?,
-                                delivery_policy: decode_delivery_policy(
-                                    row.delivery_policy.clone(),
-                                )?,
-                                slot_policy: decode_slot_policy(row.slot_policy.clone())?,
-                                merge_key: decode_merge_key(row.merge_key_json.clone())?,
-                            })
-                        })
+                        .map(|(row, batch)| claim_candidate_from_row(row, batch))
                         .collect::<Result<Vec<_>, StoreError>>()?;
                     let selected_len = select_leading_session_command(&candidates);
                     if selected_len == 0 {
@@ -1491,9 +1475,9 @@ impl QueuedWorkStore for Store {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        if max_batches == 0 {
+        if policy.max_rows == 0 {
             return Ok(None);
         }
         let session_id = session_id.to_string();
@@ -1520,7 +1504,7 @@ impl QueuedWorkStore for Store {
                                     session_id,
                                     now as i64,
                                     sql_session_lease_generation(generation)?,
-                                    claim_scan_limit(max_batches)
+                                    claim_scan_limit(policy.max_rows)
                                 ],
                                 queued_batch_row_from_sql,
                             )
@@ -1538,26 +1522,10 @@ impl QueuedWorkStore for Store {
                     let candidates = candidate_rows
                         .iter()
                         .zip(candidate_batches.iter())
-                        .map(|(row, batch)| {
-                            Ok(ClaimCandidate {
-                                enqueue_seq: row.enqueue_seq,
-                                claim_fencing_token: row.claim_fencing_token,
-                                work_class: batch.work_class().ok_or_else(|| {
-                                    StoreError::Backend(format!(
-                                        "queued-work batch `{}` has mixed or empty payload classes",
-                                        batch.batch_id
-                                    ))
-                                })?,
-                                delivery_policy: decode_delivery_policy(
-                                    row.delivery_policy.clone(),
-                                )?,
-                                slot_policy: decode_slot_policy(row.slot_policy.clone())?,
-                                merge_key: decode_merge_key(row.merge_key_json.clone())?,
-                            })
-                        })
+                        .map(|(row, batch)| claim_candidate_from_row(row, batch))
                         .collect::<Result<Vec<_>, StoreError>>()?;
                     let selected_len =
-                        select_turn_work_claim_prefix(&candidates, boundary, max_batches);
+                        select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
                     if selected_len == 0 {
                         return Ok(TxOutcome::Commit(None));
                     }
@@ -1661,7 +1629,7 @@ impl QueuedWorkStore for Store {
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: QueuedWorkClaimPolicy,
     ) -> Result<(Option<lash_core::TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         #[cfg(test)]
         self.checkpoint_probe_count
@@ -1675,7 +1643,7 @@ impl QueuedWorkStore for Store {
             turn_id,
             checkpoint,
             max_inputs,
-            max_batches,
+            policy.max_rows,
         )
         .await?
         {
@@ -1726,7 +1694,7 @@ impl QueuedWorkStore for Store {
                         &session_execution_lease,
                         &owner,
                         QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                        max_batches,
+                        policy,
                     )?;
                     match queued {
                         TxOutcome::Commit(queued) => Ok(TxOutcome::Commit((input, queued))),
@@ -1750,6 +1718,7 @@ impl QueuedWorkStore for Store {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
+        policy: QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         if batch_ids.is_empty() {
             return Ok(None);
@@ -1770,7 +1739,7 @@ impl QueuedWorkStore for Store {
                         let row = tx
                             .query_row(
                                 "SELECT enqueue_seq, batch_id, session_id, source_key,
-                                        delivery_policy, slot_policy, merge_key_json,
+                                        delivery_policy, work_kind, authority_json, merge_key,
                                         available_at_ms, enqueued_at_ms, claim_fencing_token,
                                         claim_owner_id, claim_owner_incarnation_id,
                                         claim_owner_liveness_json, claim_token,
@@ -1802,20 +1771,10 @@ impl QueuedWorkStore for Store {
                     }
                     let candidates = rows
                         .iter()
-                        .map(|row| {
-                            Ok(ClaimCandidate {
-                                enqueue_seq: row.enqueue_seq,
-                                claim_fencing_token: row.claim_fencing_token,
-                                work_class: lash_core::store::QueuedWorkClass::TurnWork,
-                                delivery_policy: decode_delivery_policy(
-                                    row.delivery_policy.clone(),
-                                )?,
-                                slot_policy: decode_slot_policy(row.slot_policy.clone())?,
-                                merge_key: decode_merge_key(row.merge_key_json.clone())?,
-                            })
-                        })
+                        .zip(batches.iter())
+                        .map(|(row, batch)| claim_candidate_from_row(row, batch))
                         .collect::<Result<Vec<_>, StoreError>>()?;
-                    if select_turn_work_claim_prefix(&candidates, boundary, candidates.len())
+                    if select_turn_work_claim_prefix(&candidates, boundary, policy, now)?
                         != candidates.len()
                     {
                         return Ok(None);
@@ -1956,7 +1915,7 @@ impl QueuedWorkStore for Store {
                     let row = tx
                         .query_row(
                             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                                    slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                                     claim_owner_liveness_json, claim_token, claim_session_lease_generation
                              FROM queued_work_batches
@@ -2014,7 +1973,7 @@ impl QueuedWorkStore for Store {
                         let mut stmt = conn
                             .prepare(
                                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                                        slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                                        work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                                         claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                                         claim_owner_liveness_json, claim_token, claim_session_lease_generation
                                  FROM queued_work_batches
@@ -2050,7 +2009,7 @@ impl QueuedWorkStore for Store {
                         let mut stmt = conn
                             .prepare(
                                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                                        slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                                        work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                                         claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                                         claim_owner_liveness_json, claim_token, claim_session_lease_generation
                                  FROM queued_work_batches
@@ -2758,9 +2717,9 @@ fn claim_ready_queued_work_sqlite_conn(
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
-    max_batches: usize,
+    policy: QueuedWorkClaimPolicy,
 ) -> Result<TxOutcome<Option<QueuedWorkClaim>>, StoreError> {
-    if max_batches == 0 {
+    if policy.max_rows == 0 {
         return Ok(TxOutcome::Commit(None));
     }
     let generation = session_execution_lease.fencing_token;
@@ -2774,7 +2733,7 @@ fn claim_ready_queued_work_sqlite_conn(
                     session_id,
                     now as i64,
                     sql_session_lease_generation(generation)?,
-                    claim_scan_limit(max_batches)
+                    claim_scan_limit(policy.max_rows)
                 ],
                 queued_batch_row_from_sql,
             )
@@ -2792,23 +2751,9 @@ fn claim_ready_queued_work_sqlite_conn(
     let candidates = candidate_rows
         .iter()
         .zip(candidate_batches.iter())
-        .map(|(row, batch)| {
-            Ok(ClaimCandidate {
-                enqueue_seq: row.enqueue_seq,
-                claim_fencing_token: row.claim_fencing_token,
-                work_class: batch.work_class().ok_or_else(|| {
-                    StoreError::Backend(format!(
-                        "queued-work batch `{}` has mixed or empty payload classes",
-                        batch.batch_id
-                    ))
-                })?,
-                delivery_policy: decode_delivery_policy(row.delivery_policy.clone())?,
-                slot_policy: decode_slot_policy(row.slot_policy.clone())?,
-                merge_key: decode_merge_key(row.merge_key_json.clone())?,
-            })
-        })
+        .map(|(row, batch)| claim_candidate_from_row(row, batch))
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, max_batches);
+    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
     if selected_len == 0 {
         return Ok(TxOutcome::Commit(None));
     }

@@ -9,7 +9,7 @@
 //! Three embedder patterns this enables:
 //!
 //! * **CLI interactive (single runtime, default):**
-//!   `RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512)).build()`. The builder seeds an explicit
+//!   `RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512), crate::QueuedWorkBatchingConfig::new(1)).build()`. The builder seeds an explicit
 //!   in-memory core (`RuntimeHostConfig::in_memory`); override it with
 //!   `with_runtime_host_config` for durable stores.
 //! * **Long autonomous agent:** reuse the environment and let the durable
@@ -69,8 +69,11 @@ impl RuntimeEnvironment {
     /// `commit_budget`. A later
     /// [`with_runtime_host_config`](RuntimeEnvironmentBuilder::with_runtime_host_config)
     /// call replaces that host config wholesale, including its commit budget.
-    pub fn builder(commit_budget: crate::CommitBudget) -> RuntimeEnvironmentBuilder {
-        RuntimeEnvironmentBuilder::new(commit_budget)
+    pub fn builder(
+        commit_budget: crate::CommitBudget,
+        queued_work_batching: crate::QueuedWorkBatchingConfig,
+    ) -> RuntimeEnvironmentBuilder {
+        RuntimeEnvironmentBuilder::new(commit_budget, queued_work_batching)
     }
 }
 
@@ -97,7 +100,10 @@ pub struct RuntimeEnvironmentBuilder {
 
 impl RuntimeEnvironmentBuilder {
     /// Construct an environment builder with an explicit commit budget.
-    fn new(commit_budget: crate::CommitBudget) -> Self {
+    fn new(
+        commit_budget: crate::CommitBudget,
+        queued_work_batching: crate::QueuedWorkBatchingConfig,
+    ) -> Self {
         // `RuntimeHostConfig` has no `Default`; the builder starts from an
         // explicitly named in-memory core so the choice is visible in source.
         // The `lash` facade always overrides this via `with_runtime_host_config`
@@ -110,7 +116,7 @@ impl RuntimeEnvironmentBuilder {
                 session_store_factory: None,
                 process_work_driver: None,
                 queued_work_driver: None,
-                core: RuntimeHostConfig::in_memory(commit_budget),
+                core: RuntimeHostConfig::in_memory(commit_budget, queued_work_batching),
             },
         }
     }
@@ -146,11 +152,6 @@ impl RuntimeEnvironmentBuilder {
 
     pub fn with_queued_work_driver(mut self, driver: super::QueuedWorkDriver) -> Self {
         self.env.queued_work_driver = Some(driver);
-        self
-    }
-
-    pub fn with_wake_turn_policy(mut self, policy: crate::WakeTurnPolicy) -> Self {
-        self.env.core.control.wake_turn_policy = policy;
         self
     }
 
@@ -258,17 +259,20 @@ mod tests {
             treat_missing_done_as_failure: false,
         };
 
-        let env = RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_attachment_store(Arc::clone(&attachment_store))
-            .with_prompt_template(crate::default_prompt_template())
-            .with_trace_sink(Some(Arc::new(lash_trace::JsonlTraceSink::new(
-                std::env::temp_dir().join("lash-runtime-environment-builder-test.jsonl"),
-            ))))
-            .with_trace_level(TraceLevel::Extended)
-            .with_trace_context(trace_context.clone())
-            .with_termination(termination.clone())
-            .with_effect_host(Arc::clone(&effect_host))
-            .build();
+        let env = RuntimeEnvironment::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_attachment_store(Arc::clone(&attachment_store))
+        .with_prompt_template(crate::default_prompt_template())
+        .with_trace_sink(Some(Arc::new(lash_trace::JsonlTraceSink::new(
+            std::env::temp_dir().join("lash-runtime-environment-builder-test.jsonl"),
+        ))))
+        .with_trace_level(TraceLevel::Extended)
+        .with_trace_context(trace_context.clone())
+        .with_termination(termination.clone())
+        .with_effect_host(Arc::clone(&effect_host))
+        .build();
 
         assert!(Arc::ptr_eq(
             env.core.durability.attachment_store.backend(),
@@ -287,16 +291,22 @@ mod tests {
 
     #[test]
     fn runtime_host_config_replaces_core_config() {
-        let mut core = RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
+        let mut core = RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
         core.tracing.trace_level = TraceLevel::Extended;
         core.control.termination = TerminationPolicy {
             treat_missing_done_as_failure: false,
         };
 
-        let env = RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_trace_level(TraceLevel::Standard)
-            .with_runtime_host_config(core)
-            .build();
+        let env = RuntimeEnvironment::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_trace_level(TraceLevel::Standard)
+        .with_runtime_host_config(core)
+        .build();
 
         assert_eq!(env.core.tracing.trace_level, TraceLevel::Extended);
         assert!(!env.core.control.termination.treat_missing_done_as_failure);

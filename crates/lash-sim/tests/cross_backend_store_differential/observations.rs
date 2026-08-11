@@ -258,8 +258,9 @@ pub(super) struct QueuedWorkObservation {
     ordinal: usize,
     source_key: Option<String>,
     delivery_policy: DeliveryPolicy,
-    slot_policy: SlotPolicy,
-    merge_key: MergeKey,
+    kind: QueuedWorkKind,
+    authority: QueuedWorkAuthority,
+    merge_key: Option<String>,
     available_at_ms: u64,
     payloads: Vec<serde_json::Value>,
     claim_id_present: bool,
@@ -310,7 +311,8 @@ pub(super) fn queued_work_observation(
         ordinal,
         source_key: batch.source_key,
         delivery_policy: batch.delivery_policy,
-        slot_policy: batch.slot_policy,
+        kind: batch.kind,
+        authority: batch.authority,
         merge_key: batch.merge_key,
         available_at_ms: batch.available_at_ms,
         payloads: batch
@@ -349,8 +351,9 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     batch_id,
                     source_key,
                     delivery_policy,
-                    slot_policy,
-                    merge_key_json,
+                    work_kind,
+                    authority_json,
+                    merge_key,
                     available_at_ms,
                     claim_id,
                     claim_owner_id,
@@ -374,10 +377,11 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     source_key,
                     delivery_policy: DeliveryPolicy::from_wire_str(&delivery_policy)
                         .expect("decode queued-work delivery policy"),
-                    slot_policy: SlotPolicy::from_wire_str(&slot_policy)
-                        .expect("decode queued-work slot policy"),
-                    merge_key: serde_json::from_str(&merge_key_json)
-                        .expect("decode queued-work merge key"),
+                    kind: QueuedWorkKind::from_wire_str(&work_kind)
+                        .expect("decode queued-work kind"),
+                    authority: serde_json::from_str(&authority_json)
+                        .expect("decode queued-work authority"),
+                    merge_key,
                     available_at_ms: available_at_ms as u64,
                     payloads: payloads
                         .into_iter()

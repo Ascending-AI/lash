@@ -58,124 +58,163 @@ impl DeliveryPolicy {
     }
 }
 
+/// Constant producer-selected merge key for process wakes.
+///
+/// The key says only that wake rows are eligible to share a turn. Work kind,
+/// delivery boundary, authority, elevation, row count, age, and rendered size
+/// remain independent claim gates.
+pub const PROCESS_WAKE_MERGE_KEY: &str = "lash.process_wake";
+
+/// Semantic kind of one queued-work row.
+///
+/// Control and cancellation rows are always claimed alone even when a
+/// producer assigns a merge key accidentally.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SlotPolicy {
-    Join,
-    Exclusive,
+pub enum QueuedWorkKind {
+    Turn,
+    Control,
+    Cancel,
 }
 
-impl SlotPolicy {
-    /// Exposes the stable snake-case slot value for queued-work store implementors.
+impl QueuedWorkKind {
+    pub fn is_batchable(self) -> bool {
+        matches!(self, Self::Turn)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Join => "join",
-            Self::Exclusive => "exclusive",
+            Self::Turn => "turn",
+            Self::Control => "control",
+            Self::Cancel => "cancel",
         }
     }
 
-    /// Parses the stable slot value for queued-work store implementors, returning `None` for an
-    /// unknown value.
     pub fn from_wire_str(value: &str) -> Option<Self> {
         match value {
-            "join" => Some(Self::Join),
-            "exclusive" => Some(Self::Exclusive),
+            "turn" => Some(Self::Turn),
+            "control" => Some(Self::Control),
+            "cancel" => Some(Self::Cancel),
             _ => None,
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MergeKey {
-    Never,
-    PayloadDefault,
-    Group(String),
-}
-
-/// A non-empty receiver-side key used only when wake coalescing is enabled.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum WakeCoalescingKey {
-    /// Use the queued payload's default merge identity.
-    PayloadDefault,
-    /// Join wakes assigned to one host-defined group.
-    Group(String),
-}
-
-impl WakeCoalescingKey {
-    fn as_queue_merge_key(&self) -> MergeKey {
-        match self {
-            Self::PayloadDefault => MergeKey::PayloadDefault,
-            Self::Group(group) => MergeKey::Group(group.clone()),
-        }
-    }
-}
-
-/// Whether receiver-side wake claims stay separate or coalesce.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum WakeTurnMode {
-    /// Deliver every durable wake as its own turn claim.
-    EachWake { slot: SlotPolicy },
-    /// Coalesce adjacent wakes that share the selected merge key.
-    Coalesce { key: WakeCoalescingKey },
-}
-
-/// Factory-scoped policy for turning durable process wakes into queued turns.
+/// Producer-stamped execution authority for queued work.
 ///
-/// Producer-side wake deduplication remains keyed by process event identity.
-/// This policy controls only receiver-side delivery and drain coalescing.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WakeTurnPolicy {
-    delivery: DeliveryPolicy,
-    mode: WakeTurnMode,
+/// Both fields are opaque to Lash. Equality is the batching contract: rows
+/// with different principals or different elevation overrides never share a
+/// turn. Keeping this separate from `merge_key` prevents a grouping label from
+/// becoming an authorization encoding.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueuedWorkAuthority {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elevation: Option<String>,
 }
 
-impl WakeTurnPolicy {
-    /// Build a policy from an independently selected delivery boundary and a
-    /// coherent receiver claim mode.
-    pub fn new(delivery: DeliveryPolicy, mode: WakeTurnMode) -> Self {
-        Self { delivery, mode }
-    }
-
-    /// Deliver every wake as a separate claim.
-    pub fn each_wake(delivery: DeliveryPolicy, slot: SlotPolicy) -> Self {
-        Self::new(delivery, WakeTurnMode::EachWake { slot })
-    }
-
-    /// Coalesce adjacent wakes that share `key`.
-    pub fn coalesce(delivery: DeliveryPolicy, key: WakeCoalescingKey) -> Self {
-        Self::new(delivery, WakeTurnMode::Coalesce { key })
-    }
-
-    /// The turn boundary at which a queued wake becomes eligible.
-    pub fn delivery(&self) -> DeliveryPolicy {
-        self.delivery
-    }
-
-    /// The receiver claim mode.
-    pub fn mode(&self) -> &WakeTurnMode {
-        &self.mode
-    }
-
-    pub(crate) fn queue_slot_policy(&self) -> SlotPolicy {
-        match self.mode {
-            WakeTurnMode::EachWake { slot } => slot,
-            WakeTurnMode::Coalesce { .. } => SlotPolicy::Join,
+impl QueuedWorkAuthority {
+    pub fn new(principal: impl Into<String>) -> Self {
+        Self {
+            principal: Some(principal.into()),
+            elevation: None,
         }
     }
 
-    pub(crate) fn queue_merge_key(&self) -> MergeKey {
-        match &self.mode {
-            WakeTurnMode::EachWake { .. } => MergeKey::Never,
-            WakeTurnMode::Coalesce { key } => key.as_queue_merge_key(),
+    pub fn with_elevation(mut self, elevation: impl Into<String>) -> Self {
+        self.elevation = Some(elevation.into());
+        self
+    }
+}
+
+/// Host policy bounding one automatically selected queued-work claim.
+///
+/// The action reserve is required and has no Lash default. Row count and
+/// maximum pending age retain Lash defaults because a poor choice affects
+/// batching efficiency rather than context-window correctness.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QueuedWorkBatchingConfig {
+    action_token_reserve: std::num::NonZeroUsize,
+    max_rows: std::num::NonZeroUsize,
+    max_pending_age: std::time::Duration,
+}
+
+impl QueuedWorkBatchingConfig {
+    pub const DEFAULT_MAX_ROWS: usize = 64;
+    pub const DEFAULT_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(30);
+
+    /// Construct batching policy with an explicit non-zero model-action
+    /// reserve and defaulted row-count and pending-age bounds.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `action_token_reserve` is zero.
+    pub const fn new(action_token_reserve: usize) -> Self {
+        let Some(action_token_reserve) = std::num::NonZeroUsize::new(action_token_reserve) else {
+            panic!("queued-work action token reserve must be non-zero");
+        };
+        Self {
+            action_token_reserve,
+            max_rows: std::num::NonZeroUsize::new(Self::DEFAULT_MAX_ROWS)
+                .expect("default queued-work row bound is non-zero"),
+            max_pending_age: Self::DEFAULT_MAX_PENDING_AGE,
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics when `max_rows` is zero.
+    pub const fn with_max_rows(mut self, max_rows: usize) -> Self {
+        let Some(max_rows) = std::num::NonZeroUsize::new(max_rows) else {
+            panic!("queued-work max rows must be non-zero");
+        };
+        self.max_rows = max_rows;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics when `max_pending_age` is zero.
+    pub const fn with_max_pending_age(mut self, max_pending_age: std::time::Duration) -> Self {
+        assert!(
+            !max_pending_age.is_zero(),
+            "queued-work max pending age must be non-zero"
+        );
+        self.max_pending_age = max_pending_age;
+        self
+    }
+
+    pub const fn action_token_reserve(self) -> usize {
+        self.action_token_reserve.get()
+    }
+
+    pub const fn max_rows(self) -> usize {
+        self.max_rows.get()
+    }
+
+    pub const fn max_pending_age(self) -> std::time::Duration {
+        self.max_pending_age
+    }
+
+    pub(crate) fn claim_policy(self, max_context_tokens: usize) -> QueuedWorkClaimPolicy {
+        QueuedWorkClaimPolicy {
+            max_context_tokens,
+            action_token_reserve: self.action_token_reserve(),
+            max_rows: self.max_rows(),
+            max_pending_age_ms: u64::try_from(self.max_pending_age.as_millis()).unwrap_or(u64::MAX),
         }
     }
 }
 
-impl Default for WakeTurnPolicy {
-    fn default() -> Self {
-        Self::each_wake(DeliveryPolicy::EarliestSafeBoundary, SlotPolicy::Exclusive)
-    }
+/// Complete claim-time bounds passed to durable store implementations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QueuedWorkClaimPolicy {
+    pub max_context_tokens: usize,
+    pub action_token_reserve: usize,
+    pub max_rows: usize,
+    pub max_pending_age_ms: u64,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -242,8 +281,10 @@ pub struct QueuedWorkBatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
     pub delivery_policy: DeliveryPolicy,
-    pub slot_policy: SlotPolicy,
-    pub merge_key: MergeKey,
+    pub kind: QueuedWorkKind,
+    pub authority: QueuedWorkAuthority,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_key: Option<String>,
     pub available_at_ms: u64,
     pub enqueued_at_ms: u64,
     pub items: Vec<QueuedWorkItem>,
@@ -301,8 +342,10 @@ pub struct QueuedWorkBatchDraft {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_wake_source: Option<ProcessWakeSource>,
     pub delivery_policy: DeliveryPolicy,
-    pub slot_policy: SlotPolicy,
-    pub merge_key: MergeKey,
+    pub kind: QueuedWorkKind,
+    pub authority: QueuedWorkAuthority,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_key: Option<String>,
     pub available_at_ms: u64,
     pub payloads: Vec<QueuedWorkPayload>,
 }
@@ -311,18 +354,25 @@ impl QueuedWorkBatchDraft {
     pub fn new(
         session_id: impl Into<String>,
         delivery_policy: DeliveryPolicy,
-        slot_policy: SlotPolicy,
         payloads: impl Into<Vec<QueuedWorkPayload>>,
     ) -> Self {
+        let payloads = payloads.into();
+        let kind =
+            if work_class_for_payloads(payloads.iter()) == Some(QueuedWorkClass::SessionCommand) {
+                QueuedWorkKind::Control
+            } else {
+                QueuedWorkKind::Turn
+            };
         Self {
             session_id: session_id.into(),
             source_key: None,
             process_wake_source: None,
             delivery_policy,
-            slot_policy,
-            merge_key: MergeKey::Never,
+            kind,
+            authority: QueuedWorkAuthority::default(),
+            merge_key: None,
             available_at_ms: 0,
-            payloads: payloads.into(),
+            payloads,
         }
     }
 
@@ -348,8 +398,28 @@ impl QueuedWorkBatchDraft {
         self
     }
 
-    pub fn with_merge_key(mut self, merge_key: MergeKey) -> Self {
-        self.merge_key = merge_key;
+    pub fn with_kind(mut self, kind: QueuedWorkKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    pub fn with_authority(mut self, authority: QueuedWorkAuthority) -> Self {
+        self.authority = authority;
+        self
+    }
+
+    /// Assign a non-empty producer-selected merge key.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the supplied key is empty.
+    pub fn with_merge_key(mut self, merge_key: impl Into<String>) -> Self {
+        let merge_key = merge_key.into();
+        assert!(
+            !merge_key.is_empty(),
+            "queued-work merge key must be non-empty"
+        );
+        self.merge_key = Some(merge_key);
         self
     }
 
@@ -508,7 +578,7 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
             return None;
         }
         let batch = self.batches.first()?;
-        if batch.slot_policy != SlotPolicy::Exclusive || batch.items.len() != 1 {
+        if batch.kind != QueuedWorkKind::Control || batch.items.len() != 1 {
             return None;
         }
         let item = batch.items.first()?;
@@ -521,20 +591,26 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
     /// Materializes turn-producing input from a claim for queued-work driver implementors.
     pub fn materialize_queued_turn_work(&self) -> QueuedTurnWork {
         let checkpoint = self.materialize_queued_checkpoint_work();
-        let mut input = TurnInput::empty();
+        let mut input_items = Vec::new();
+        let mut selected_turn_options = None;
         for batch in &self.batches {
             for item in &batch.items {
                 if let QueuedWorkPayload::AgentFrameTask {
                     task,
-                    protocol_turn_options,
+                    protocol_turn_options: task_options,
                     ..
                 } = &item.payload
                 {
-                    input = TurnInput::text(task.clone());
-                    input.protocol_turn_options = protocol_turn_options.clone();
+                    input_items.push(crate::InputItem::text(task.clone()));
+                    // A producer choosing one merge key asserts that these
+                    // events may share a turn. Preserve every task in order;
+                    // the last event retains the former option precedence.
+                    selected_turn_options = task_options.clone();
                 }
             }
         }
+        let mut input = TurnInput::items(input_items);
+        input.protocol_turn_options = selected_turn_options;
         QueuedTurnWork {
             input,
             messages: checkpoint.messages,
@@ -558,25 +634,23 @@ pub struct QueuedTurnWork {
 }
 
 pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
-    process_wake_batch_draft_with_policy(wake, &WakeTurnPolicy::default())
-}
-
-pub(crate) fn process_wake_batch_draft_with_policy(
-    wake: ProcessWakeDelivery,
-    policy: &WakeTurnPolicy,
-) -> QueuedWorkBatchDraft {
     let source_key = process_wake_source_key(&wake.process_id, wake.sequence);
     let process_id = wake.process_id.clone();
     let sequence = wake.sequence;
+    let authority = QueuedWorkAuthority {
+        principal: (!wake.event_invocation.scope.session_id.is_empty())
+            .then(|| wake.event_invocation.scope.session_id.clone()),
+        elevation: None,
+    };
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
-        policy.delivery(),
-        policy.queue_slot_policy(),
+        DeliveryPolicy::EarliestSafeBoundary,
         vec![QueuedWorkPayload::process_wake(wake)],
     )
     .with_source_key(source_key)
     .with_process_wake_source(process_id, sequence)
-    .with_merge_key(policy.queue_merge_key())
+    .with_authority(authority)
+    .with_merge_key(PROCESS_WAKE_MERGE_KEY)
 }
 
 pub fn process_wake_source_key(process_id: &str, sequence: u64) -> String {

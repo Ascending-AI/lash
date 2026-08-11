@@ -407,7 +407,6 @@ async fn measure_store_hardening_backend_turn(
             QueuedWorkBatchDraft::new(
                 session_id,
                 DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
                 vec![QueuedWorkPayload::agent_frame_task(
                     "perf-frame",
                     format!("hardening task {turn_index}"),
@@ -424,7 +423,7 @@ async fn measure_store_hardening_backend_turn(
                 &lease.fence(),
                 owner,
                 QueuedWorkClaimBoundary::Idle,
-                1,
+                lash_core::testing::queued_work_claim_policy(1),
             )
             .await?
             .ok_or_else(|| anyhow::anyhow!("store-hardening expected queued-work claim"))

@@ -71,7 +71,7 @@ fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) 
     format!(
         "WITH {head_candidate}
          SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                 claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                 claim_owner_liveness_json, claim_token, claim_session_lease_generation
          FROM lash_queued_work_batches
@@ -233,18 +233,19 @@ async fn enqueue_queued_work_with_outcome_tx(
     );
     sqlx::query(
         "INSERT INTO lash_queued_work_batches (
-            enqueue_seq, batch_id, session_id, source_key, delivery_policy, slot_policy,
-            merge_key_json, available_at_ms, enqueued_at_ms
+            enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
+            authority_json, merge_key, available_at_ms, enqueued_at_ms
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(enqueue_seq)
     .bind(&batch_id)
     .bind(&batch.session_id)
     .bind(&batch.source_key)
     .bind(batch.delivery_policy.as_str())
-    .bind(batch.slot_policy.as_str())
-    .bind(encode_json(&batch.merge_key)?)
+    .bind(batch.kind.as_str())
+    .bind(encode_json(&batch.authority)?)
+    .bind(&batch.merge_key)
     .bind(sql_available_at_ms)
     .bind(now as i64)
     .execute(&mut **tx)
@@ -1447,21 +1448,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let candidates = selected
             .iter()
             .zip(selected_batches.iter())
-            .map(|(row, batch)| {
-                Ok(ClaimCandidate {
-                    enqueue_seq: row.enqueue_seq,
-                    claim_fencing_token: row.claim_fencing_token,
-                    work_class: batch.work_class().ok_or_else(|| {
-                        StoreError::Backend(format!(
-                            "queued-work batch `{}` has mixed or empty payload classes",
-                            batch.batch_id
-                        ))
-                    })?,
-                    delivery_policy: row.delivery_policy,
-                    slot_policy: row.slot_policy,
-                    merge_key: row.merge_key.clone(),
-                })
-            })
+            .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
         let selected_len = select_leading_session_command(&candidates);
         if selected_len == 0 {
@@ -1537,9 +1524,9 @@ impl QueuedWorkStore for PostgresSessionStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        if max_batches == 0 {
+        if policy.max_rows == 0 {
             return Ok(None);
         }
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
@@ -1549,7 +1536,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
             .bind(session_id)
             .bind(sql_session_lease_generation(generation)?)
-            .bind(claim_scan_limit(max_batches))
+            .bind(claim_scan_limit(policy.max_rows))
             .fetch_all(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1567,23 +1554,9 @@ impl QueuedWorkStore for PostgresSessionStore {
         let candidates = selected
             .iter()
             .zip(selected_batches.iter())
-            .map(|(row, batch)| {
-                Ok(ClaimCandidate {
-                    enqueue_seq: row.enqueue_seq,
-                    claim_fencing_token: row.claim_fencing_token,
-                    work_class: batch.work_class().ok_or_else(|| {
-                        StoreError::Backend(format!(
-                            "queued-work batch `{}` has mixed or empty payload classes",
-                            batch.batch_id
-                        ))
-                    })?,
-                    delivery_policy: row.delivery_policy,
-                    slot_policy: row.slot_policy,
-                    merge_key: row.merge_key.clone(),
-                })
-            })
+            .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, max_batches);
+        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
         if selected_len == 0 {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
@@ -1659,7 +1632,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: QueuedWorkClaimPolicy,
     ) -> Result<(Option<lash_core::TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         #[cfg(test)]
         self.checkpoint_probe_count
@@ -1671,7 +1644,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             turn_id,
             checkpoint,
             max_inputs,
-            max_batches,
+            policy.max_rows,
         )
         .await?
         {
@@ -1708,7 +1681,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             session_execution_lease,
             owner,
             QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-            max_batches,
+            policy,
         )
         .await?;
         match queued {
@@ -1730,6 +1703,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
+        policy: QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         if batch_ids.is_empty() {
             return Ok(None);
@@ -1743,7 +1717,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         for batch_id in batch_ids {
             let row = sqlx::query(
                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                        slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                        work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                         claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                         claim_owner_liveness_json, claim_token, claim_session_lease_generation
                  FROM lash_queued_work_batches
@@ -1773,18 +1747,10 @@ impl QueuedWorkStore for PostgresSessionStore {
         }
         let candidates = selected
             .iter()
-            .map(|row| ClaimCandidate {
-                enqueue_seq: row.enqueue_seq,
-                claim_fencing_token: row.claim_fencing_token,
-                work_class: lash_core::store::QueuedWorkClass::TurnWork,
-                delivery_policy: row.delivery_policy,
-                slot_policy: row.slot_policy,
-                merge_key: row.merge_key.clone(),
-            })
-            .collect::<Vec<_>>();
-        if select_turn_work_claim_prefix(&candidates, boundary, candidates.len())
-            != candidates.len()
-        {
+            .zip(selected_batches.iter())
+            .map(|(row, batch)| claim_candidate_from_row(row, batch))
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        if select_turn_work_claim_prefix(&candidates, boundary, policy, now)? != candidates.len() {
             tx.rollback().await.map_err(store_sqlx_error)?;
             return Ok(None);
         }
@@ -1898,7 +1864,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let row = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                     claim_owner_liveness_json, claim_token, claim_session_lease_generation
              FROM lash_queued_work_batches
@@ -1938,7 +1904,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         let rows = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                     claim_owner_liveness_json, claim_token, claim_session_lease_generation
              FROM lash_queued_work_batches
@@ -1965,7 +1931,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                     claim_owner_liveness_json, claim_token, claim_session_lease_generation
              FROM lash_queued_work_batches
@@ -2571,9 +2537,9 @@ async fn claim_ready_queued_work_postgres_tx(
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
-    max_batches: usize,
+    policy: QueuedWorkClaimPolicy,
 ) -> Result<ClaimTransactionOutcome<Option<QueuedWorkClaim>>, StoreError> {
-    if max_batches == 0 {
+    if policy.max_rows == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
     }
     let generation = session_execution_lease.fencing_token;
@@ -2581,7 +2547,7 @@ async fn claim_ready_queued_work_postgres_tx(
     let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
         .bind(session_id)
         .bind(sql_session_lease_generation(generation)?)
-        .bind(claim_scan_limit(max_batches))
+        .bind(claim_scan_limit(policy.max_rows))
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -2599,23 +2565,9 @@ async fn claim_ready_queued_work_postgres_tx(
     let candidates = selected
         .iter()
         .zip(selected_batches.iter())
-        .map(|(row, batch)| {
-            Ok(ClaimCandidate {
-                enqueue_seq: row.enqueue_seq,
-                claim_fencing_token: row.claim_fencing_token,
-                work_class: batch.work_class().ok_or_else(|| {
-                    StoreError::Backend(format!(
-                        "queued-work batch `{}` has mixed or empty payload classes",
-                        batch.batch_id
-                    ))
-                })?,
-                delivery_policy: row.delivery_policy,
-                slot_policy: row.slot_policy,
-                merge_key: row.merge_key.clone(),
-            })
-        })
+        .map(|(row, batch)| claim_candidate_from_row(row, batch))
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, max_batches);
+    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
     if selected_len == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
     }

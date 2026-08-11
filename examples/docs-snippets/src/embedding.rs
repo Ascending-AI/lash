@@ -100,6 +100,7 @@ async fn full_core(provider: ProviderHandle, data_dir: std::path::PathBuf) -> an
         .process_env_store(artifact_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
 
     let session = core.session("chat-123").open().await?;
@@ -152,6 +153,7 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .configure_plugins(|plugins| {
             plugins.push(Arc::new(AppPluginFactory) as Arc<dyn PluginFactory>);
         })
@@ -187,6 +189,7 @@ async fn custom_stack(root_spec: SessionSpec) -> anyhow::Result<()> {
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
     // docs:end:custom-stack
     let _ = core;

@@ -327,6 +327,7 @@ finish "registered"
         );
         LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory)
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
             .provider(rebuild_provider())
             .model(rebuild_model())
             .plugin(Arc::new(TriggerResourcePluginFactory))

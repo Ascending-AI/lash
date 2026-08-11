@@ -6,14 +6,14 @@ pub(crate) fn decode_delivery_policy(value: String) -> Result<DeliveryPolicy, St
     })
 }
 
-pub(crate) fn decode_slot_policy(value: String) -> Result<SlotPolicy, StoreError> {
-    SlotPolicy::from_wire_str(&value)
-        .ok_or_else(|| StoreError::Backend(format!("unknown queued-work slot policy `{value}`")))
+pub(crate) fn decode_work_kind(value: String) -> Result<QueuedWorkKind, StoreError> {
+    QueuedWorkKind::from_wire_str(&value)
+        .ok_or_else(|| StoreError::Backend(format!("unknown queued-work kind `{value}`")))
 }
 
-pub(crate) fn decode_merge_key(value: String) -> Result<MergeKey, StoreError> {
+pub(crate) fn decode_authority(value: String) -> Result<QueuedWorkAuthority, StoreError> {
     serde_json::from_str(&value).map_err(|err| {
-        StoreError::Backend(format!("failed to decode queued-work merge key: {err}"))
+        StoreError::Backend(format!("failed to decode queued-work authority: {err}"))
     })
 }
 
@@ -53,8 +53,9 @@ pub(crate) fn queued_work_batch_from_conn(
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
         delivery_policy: decode_delivery_policy(row.delivery_policy)?,
-        slot_policy: decode_slot_policy(row.slot_policy)?,
-        merge_key: decode_merge_key(row.merge_key_json)?,
+        kind: decode_work_kind(row.work_kind)?,
+        authority: decode_authority(row.authority_json)?,
+        merge_key: row.merge_key,
         available_at_ms: row.available_at_ms,
         enqueued_at_ms: row.enqueued_at_ms,
         items,
@@ -113,8 +114,9 @@ pub(crate) fn queued_work_batches_from_conn(
                 enqueue_seq: row.enqueue_seq,
                 source_key: row.source_key,
                 delivery_policy: decode_delivery_policy(row.delivery_policy)?,
-                slot_policy: decode_slot_policy(row.slot_policy)?,
-                merge_key: decode_merge_key(row.merge_key_json)?,
+                kind: decode_work_kind(row.work_kind)?,
+                authority: decode_authority(row.authority_json)?,
+                merge_key: row.merge_key,
                 available_at_ms: row.available_at_ms,
                 enqueued_at_ms: row.enqueued_at_ms,
                 items,
@@ -130,13 +132,27 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) session_id: String,
     pub(crate) source_key: Option<String>,
     pub(crate) delivery_policy: String,
-    pub(crate) slot_policy: String,
-    pub(crate) merge_key_json: String,
+    pub(crate) work_kind: String,
+    pub(crate) authority_json: String,
+    pub(crate) merge_key: Option<String>,
     pub(crate) available_at_ms: u64,
     pub(crate) enqueued_at_ms: u64,
     pub(crate) claim_fencing_token: u64,
     pub(crate) claim_token: Option<String>,
     pub(crate) claim_session_lease_generation: u64,
+}
+
+pub(crate) fn claim_candidate_from_row(
+    row: &QueuedBatchRow,
+    batch: &QueuedWorkBatch,
+) -> Result<ClaimCandidate, StoreError> {
+    batch.work_class().ok_or_else(|| {
+        StoreError::Backend(format!(
+            "queued-work batch `{}` has mixed or empty payload classes",
+            batch.batch_id
+        ))
+    })?;
+    Ok(ClaimCandidate::from_batch(batch, row.claim_fencing_token))
 }
 
 pub(crate) fn queued_batch_row_from_sql(
@@ -148,16 +164,17 @@ pub(crate) fn queued_batch_row_from_sql(
         session_id: row.get(2)?,
         source_key: row.get(3)?,
         delivery_policy: row.get(4)?,
-        slot_policy: row.get(5)?,
-        merge_key_json: row.get(6)?,
-        available_at_ms: u64_from_sql("QueuedWorkBatch", "available_at_ms", row.get(7)?)?,
-        enqueued_at_ms: u64_from_sql("QueuedWorkBatch", "enqueued_at_ms", row.get(8)?)?,
-        claim_fencing_token: u64_from_sql("QueuedWorkBatch", "claim_fencing_token", row.get(9)?)?,
-        claim_token: row.get(13)?,
+        work_kind: row.get(5)?,
+        authority_json: row.get(6)?,
+        merge_key: row.get(7)?,
+        available_at_ms: u64_from_sql("QueuedWorkBatch", "available_at_ms", row.get(8)?)?,
+        enqueued_at_ms: u64_from_sql("QueuedWorkBatch", "enqueued_at_ms", row.get(9)?)?,
+        claim_fencing_token: u64_from_sql("QueuedWorkBatch", "claim_fencing_token", row.get(10)?)?,
+        claim_token: row.get(14)?,
         claim_session_lease_generation: u64_from_sql(
             "QueuedWorkBatch",
             "claim_session_lease_generation",
-            row.get(14)?,
+            row.get(15)?,
         )?,
     })
 }
@@ -169,7 +186,7 @@ pub(crate) fn load_queued_batch_by_id_conn(
     let row = conn
         .query_row(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                     claim_owner_liveness_json, claim_token, claim_session_lease_generation
              FROM queued_work_batches
@@ -259,17 +276,18 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     );
     conn.execute(
         "INSERT INTO queued_work_batches (
-            batch_id, session_id, source_key, delivery_policy, slot_policy,
-            merge_key_json, available_at_ms, enqueued_at_ms
+            batch_id, session_id, source_key, delivery_policy, work_kind,
+            authority_json, merge_key, available_at_ms, enqueued_at_ms
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             batch_id,
             batch.session_id,
             batch.source_key.as_deref(),
             batch.delivery_policy.as_str(),
-            batch.slot_policy.as_str(),
-            encode_json(&batch.merge_key)?,
+            batch.kind.as_str(),
+            encode_json(&batch.authority)?,
+            batch.merge_key.as_deref(),
             sql_available_at_ms,
             now as i64,
         ],

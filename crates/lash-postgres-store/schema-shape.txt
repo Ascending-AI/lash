@@ -177,6 +177,7 @@ table lash_processes
   column wake_session_id text nullable
   primary-key (process_id)
 table lash_queued_work_batches
+  column authority_json text not-null
   column available_at_ms bigint not-null
   column batch_id text not-null
   column claim_fencing_token bigint not-null default
@@ -189,10 +190,10 @@ table lash_queued_work_batches
   column delivery_policy text not-null
   column enqueue_seq bigint not-null default
   column enqueued_at_ms bigint not-null
-  column merge_key_json text not-null
+  column merge_key text nullable
   column session_id text not-null
-  column slot_policy text not-null
   column source_key text nullable
+  column work_kind text not-null
   unique (batch_id)
   unique (session_id, source_key)
   primary-key (enqueue_seq)

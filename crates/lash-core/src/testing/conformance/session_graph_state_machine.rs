@@ -1339,6 +1339,7 @@ async fn property_runtime(
         request.policy.clone(),
         crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
             crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
         )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(store)),
         state,

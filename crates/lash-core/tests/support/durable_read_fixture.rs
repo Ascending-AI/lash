@@ -21,7 +21,7 @@ use lash_core::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence,
     RuntimeScope, RuntimeSessionState, SegmentHandover, SessionAppendNode, SessionNodePayload,
     SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
-    SlotPolicy, StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
+    StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
     TriggerDeliveryReservationStatus, TriggerInputBinding, TriggerMutationDisposition,
     TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
     TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 12;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 13;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -193,7 +193,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             QueuedWorkBatchDraft::new(
                 SESSION_ID,
                 DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
                 vec![QueuedWorkPayload::agent_frame_task(
                     "durable-read-frame",
                     "durable read queued task",
@@ -447,6 +446,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             &queue_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&wake_batch.batch_id),
+            lash_core::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim fixture receiver wake")

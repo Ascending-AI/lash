@@ -214,18 +214,13 @@ pub async fn wake_delivery_crash_matrix(
                 .sequence,
         );
     }
-    let coalesce_policy = crate::WakeTurnPolicy::coalesce(
-        crate::DeliveryPolicy::EarliestSafeBoundary,
-        crate::WakeCoalescingKey::Group("conformance-wakes".to_string()),
-    );
     let mut coalesced_enqueued = 0;
     for _ in 0..2 {
-        coalesced_enqueued += crate::WakeDeliveryDriver::drive_pending_once_with_policy(
+        coalesced_enqueued += crate::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
             Arc::clone(&factory),
             None,
             Arc::clone(&clock) as Arc<dyn crate::Clock>,
-            &coalesce_policy,
             32,
         )
         .await
@@ -268,8 +263,8 @@ pub async fn wake_delivery_crash_matrix(
         .collect::<Vec<_>>();
     assert_eq!(coalesced_receiver_rows.len(), 2);
     assert!(coalesced_receiver_rows.iter().all(|batch| {
-        batch.slot_policy == crate::SlotPolicy::Join
-            && batch.merge_key == crate::MergeKey::Group("conformance-wakes".to_string())
+        batch.kind == crate::QueuedWorkKind::Turn
+            && batch.merge_key.as_deref() == Some(crate::PROCESS_WAKE_MERGE_KEY)
     }));
 
     let retarget_process_id = "wake-retarget-in-flight";
@@ -773,6 +768,7 @@ async fn settle_queued_batch(
             &owner,
             crate::QueuedWorkClaimBoundary::Idle,
             &[batch_id.to_string()],
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim target wake batch")

@@ -1037,6 +1037,7 @@ fn runtime_core_for_scripts(
             attachment_root.to_path_buf(),
         )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .process_env_store(process_env_store)
         .store_factory(store_factory)
         .lease_timings(crate::lease::sim_runtime_lease_timings())

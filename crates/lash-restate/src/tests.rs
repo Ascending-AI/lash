@@ -3849,16 +3849,10 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<Option<lash_core::runtime::QueuedWorkClaim>, lash_core::StoreError> {
         self.inner
-            .claim_ready_queued_work(
-                session_id,
-                session_execution_lease,
-                owner,
-                boundary,
-                max_batches,
-            )
+            .claim_ready_queued_work(session_id, session_execution_lease, owner, boundary, policy)
             .await
     }
 
@@ -3870,7 +3864,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<
         (
             Option<lash_core::runtime::TurnInputClaim>,
@@ -3886,7 +3880,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
                 turn_id,
                 checkpoint,
                 max_inputs,
-                max_batches,
+                policy,
             )
             .await
     }
@@ -3898,6 +3892,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
         owner: &lash_core::LeaseOwnerIdentity,
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         batch_ids: &[String],
+        policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<Option<lash_core::runtime::QueuedWorkClaim>, lash_core::StoreError> {
         self.inner
             .claim_ready_queued_work_by_batch_ids(
@@ -3906,6 +3901,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
                 owner,
                 boundary,
                 batch_ids,
+                policy,
             )
             .await
     }
@@ -5600,6 +5596,7 @@ async fn restate_enqueue_never_errors_after_commit() {
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(DurableMemoryAttachmentStore::default()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()))
         .queued_work_driver(lash_core::facade_support::QueuedWorkDriver::new(
             queued_work.clone(),
@@ -5747,6 +5744,7 @@ async fn replay_test_runtime_with_plugins_and_registry(
 ) -> lash_core::facade_support::LashRuntime {
     let mut builder = lash_core::facade_support::LashRuntime::builder(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_session_id(session_id)
     .with_policy(policy)
@@ -5818,6 +5816,7 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         .into_handle();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
@@ -5940,6 +5939,7 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         .into_handle();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
@@ -6201,6 +6201,7 @@ finish (await handle)?
         .into_handle();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
@@ -8364,6 +8365,7 @@ fn recovery_worker_with_plugins(
         RECOVERY_PROCESS_ENV_STORE.clone();
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_env_store(process_env_store)
     .with_process_engine(Arc::new(
@@ -9252,6 +9254,7 @@ async fn process_deployment_driver_and_workflow_share_registry() {
             Arc::new(lash_core::facade_support::PluginHost::empty()),
             lash_core::facade_support::RuntimeHostConfig::in_memory(
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&driver_registry),

@@ -1388,7 +1388,7 @@ pub trait QueuedWorkStore: Send + Sync {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
 
     /// Claim both ingress families admitted at an active-turn checkpoint.
@@ -1405,7 +1405,7 @@ pub trait QueuedWorkStore: Send + Sync {
         turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<
         (
             Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>,
@@ -1431,6 +1431,7 @@ pub trait QueuedWorkStore: Send + Sync {
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: &[String],
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
 
     /// Release a held queued-work claim without completing it.

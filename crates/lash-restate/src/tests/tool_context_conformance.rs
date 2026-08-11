@@ -140,6 +140,7 @@ impl ProductionToolCell {
             .into_handle();
         let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
         );
         host.providers.provider_resolver = Arc::new(
             lash_core::facade_support::SingleProviderResolver::new(provider),

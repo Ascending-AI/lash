@@ -95,7 +95,6 @@ async fn session_store_factory_claimable_queued_work_peek(
             crate::QueuedWorkBatchDraft::new(
                 &request.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                crate::SlotPolicy::Exclusive,
                 vec![crate::QueuedWorkPayload::session_command(
                     crate::SessionCommand::RefreshToolCatalog {
                         reason: "future".to_string(),
@@ -120,7 +119,6 @@ async fn session_store_factory_claimable_queued_work_peek(
             crate::QueuedWorkBatchDraft::new(
                 &request.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                crate::SlotPolicy::Exclusive,
                 vec![crate::QueuedWorkPayload::session_command(
                     crate::SessionCommand::RefreshToolCatalog {
                         reason: "ready".to_string(),
@@ -183,7 +181,6 @@ async fn session_store_factory_claimable_queued_work_peek(
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
             &fenced_request.session_id,
             crate::DeliveryPolicy::EarliestSafeBoundary,
-            crate::SlotPolicy::Exclusive,
             vec![crate::QueuedWorkPayload::agent_frame_task(
                 "claim-fence-frame",
                 "claim fence",
@@ -213,7 +210,7 @@ async fn session_store_factory_claimable_queued_work_peek(
             &first_lease.fence(),
             &first_owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim queued work under first generation")
@@ -235,7 +232,7 @@ async fn session_store_factory_claimable_queued_work_peek(
                 &first_lease.fence(),
                 &first_owner,
                 crate::QueuedWorkClaimBoundary::Idle,
-                1,
+                crate::testing::queued_work_claim_policy(1),
             )
             .await
             .expect("re-scan live queued-work claim")
@@ -294,7 +291,7 @@ async fn session_store_factory_claimable_queued_work_peek(
                 &successor_lease.fence(),
                 &successor,
                 crate::QueuedWorkClaimBoundary::Idle,
-                1,
+                crate::testing::queued_work_claim_policy(1),
             )
             .await
             .expect("reclaim queued work under successor generation")
@@ -364,7 +361,6 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
             &request.session_id,
             crate::DeliveryPolicy::EarliestSafeBoundary,
-            crate::SlotPolicy::Exclusive,
             vec![crate::QueuedWorkPayload::session_command(
                 crate::SessionCommand::RefreshToolCatalog {
                     reason: "queued work on the handle that will go stale".to_string(),
@@ -1009,7 +1005,6 @@ async fn session_store_factory_rejects_writes_after_delete(
             .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
                 &request.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                crate::SlotPolicy::Exclusive,
                 vec![crate::QueuedWorkPayload::session_command(
                     crate::SessionCommand::RefreshToolCatalog {
                         reason: "must not persist".to_string(),

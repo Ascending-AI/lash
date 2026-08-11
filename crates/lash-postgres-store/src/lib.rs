@@ -33,8 +33,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::runtime::{
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
+    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
+    QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
+    QueuedWorkItem, QueuedWorkKind,
 };
 use lash_core::store::queued_work::{
     ClaimCandidate, WorkClaimLease, claim_scan_limit, derive_batch_id,
@@ -57,9 +58,9 @@ use lash_core::{
     ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord,
-    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
-    TokenLedgerEntry, TurnInputStore, VacuumReport, facade_support::MergeKey,
-    facade_support::ProcessStartPlan, facade_support::registry_transitions,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry,
+    TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
+    facade_support::registry_transitions,
 };
 use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,

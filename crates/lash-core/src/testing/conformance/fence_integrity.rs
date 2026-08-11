@@ -113,7 +113,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
             &crate::TurnId::from("signed-write-generation-turn"),
             crate::CheckpointKind::AfterWork,
             1,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect_err("unrepresentable session generation must refuse before query");
@@ -130,14 +130,13 @@ fn queued_draft(session_id: &str, label: &str) -> crate::QueuedWorkBatchDraft {
     crate::QueuedWorkBatchDraft::new(
         session_id,
         crate::DeliveryPolicy::EarliestSafeBoundary,
-        crate::SlotPolicy::Join,
         vec![crate::QueuedWorkPayload::agent_frame_task(
             format!("frame:{label}"),
             label,
             None,
         )],
     )
-    .with_merge_key(crate::MergeKey::Group("fence-integrity".to_string()))
+    .with_merge_key("fence-integrity")
 }
 
 async fn claim_lease(
@@ -281,7 +280,7 @@ async fn divergent_claim_fences_advance_per_row(handles: FenceIntegrityHandles) 
             &lease.fence(),
             &owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            2,
+            crate::testing::queued_work_claim_policy(2),
         )
         .await
         .expect("claim divergent fence rows")
@@ -345,7 +344,7 @@ async fn exhausted_claim_fence(handles: FenceIntegrityHandles, exhausted_head: b
             &lease.fence(),
             &owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            2,
+            crate::testing::queued_work_claim_policy(2),
         )
         .await
         .expect_err("any exhausted selected row must refuse the whole claim");

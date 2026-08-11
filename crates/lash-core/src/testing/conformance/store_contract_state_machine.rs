@@ -4,16 +4,6 @@
 //! language through the public trait-object contracts. Backend crates only
 //! provide fresh handles; they do not carry a `proptest` dependency.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::future::Future;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
-
-use proptest::prelude::*;
-use proptest::strategy::ValueTree;
-use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
-
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
 use crate::{
@@ -24,8 +14,15 @@ use crate::{
     process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
+use proptest::prelude::*;
+use proptest::strategy::ValueTree;
+use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 use run_shape::{RunShape, RunShapeTotals};
-
+use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 const PROCESS_COUNT: u8 = 3;
 const SESSION_COUNT: u8 = 2;
 const DEFAULT_CASES: u32 = 32;
@@ -33,16 +30,13 @@ const DEFAULT_RUNNER_SEED: u64 = 830;
 const MAX_OPS: usize = 48;
 const GENERATED_PREFIX_OPS: usize = 11;
 const DEDICATED_LAW_SEED: u64 = 0xded1_ca7e;
-
 mod generated_prefix;
 mod run_shape;
-
 /// Fresh process-registry and runtime-persistence handles for one generated case.
 pub struct StoreContractHandles {
     pub registry: Arc<dyn ProcessRegistry>,
     pub runtime: Arc<dyn RuntimePersistence>,
 }
-
 /// The generated operation alphabet shared by every durable store backend.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -179,8 +173,9 @@ struct ModelProcess {
 struct ExpectedQueuedWake {
     wake: crate::ProcessWakeDelivery,
     delivery_policy: DeliveryPolicy,
-    slot_policy: SlotPolicy,
-    merge_key: MergeKey,
+    kind: crate::QueuedWorkKind,
+    authority: crate::QueuedWorkAuthority,
+    merge_key: Option<String>,
     available_at_ms: u64,
 }
 
@@ -999,7 +994,8 @@ async fn apply_operation(
                 ExpectedQueuedWake {
                     wake,
                     delivery_policy: draft.delivery_policy,
-                    slot_policy: draft.slot_policy,
+                    kind: draft.kind,
+                    authority: draft.authority,
                     merge_key: draft.merge_key,
                     available_at_ms: draft.available_at_ms,
                 },
@@ -1443,7 +1439,8 @@ async fn assert_model_agreement(
                         ExpectedQueuedWake {
                             wake: *wake,
                             delivery_policy: batch.delivery_policy,
-                            slot_policy: batch.slot_policy,
+                            kind: batch.kind,
+                            authority: batch.authority.clone(),
                             merge_key: batch.merge_key.clone(),
                             available_at_ms: batch.available_at_ms,
                         },
@@ -1772,6 +1769,7 @@ async fn assert_enqueued_wake_high_water_safety(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&later.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1887,6 +1885,7 @@ async fn assert_enqueued_wake_high_water_safety(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&earlier.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1987,6 +1986,7 @@ async fn assert_prune_reregister_wake_fence(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&queued.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2380,6 +2380,7 @@ async fn consume_wake(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| error.to_string())?

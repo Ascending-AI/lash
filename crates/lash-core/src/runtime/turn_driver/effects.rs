@@ -298,6 +298,15 @@ impl RuntimeTurnDriver<'_> {
         let mut turn_causes = Vec::new();
         let (turn_input_claim, queue_claim) = if let Some(store) = self.session.history_store() {
             if let Some(session_execution_lease) = self.session_execution_lease.as_ref() {
+                let mut claim_policy = self
+                    .host
+                    .core
+                    .durability
+                    .queued_work_batching
+                    .claim_policy(self.policy.context_window_tokens());
+                claim_policy.max_rows = self
+                    .turn_context
+                    .checkpoint_queued_work_limit(claim_policy.max_rows);
                 match store
                     .claim_checkpoint_work(
                         &self.session_id,
@@ -306,7 +315,7 @@ impl RuntimeTurnDriver<'_> {
                         &self.turn_id,
                         checkpoint,
                         64,
-                        self.turn_context.checkpoint_queued_work_limit(64),
+                        claim_policy,
                     )
                     .await
                 {
@@ -572,18 +581,15 @@ mod claim_authority_tests {
     use super::*;
 
     fn coalesced_batch(batch_id: &str, enqueue_seq: u64) -> crate::QueuedWorkBatch {
-        let policy = crate::WakeTurnPolicy::coalesce(
-            crate::DeliveryPolicy::EarliestSafeBoundary,
-            crate::WakeCoalescingKey::Group("fig905".to_string()),
-        );
         crate::QueuedWorkBatch {
             batch_id: batch_id.to_string(),
             session_id: "fig905".to_string(),
             enqueue_seq,
             source_key: Some(format!("fig905:{batch_id}")),
-            delivery_policy: policy.delivery(),
-            slot_policy: policy.queue_slot_policy(),
-            merge_key: policy.queue_merge_key(),
+            delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
+            kind: crate::QueuedWorkKind::Turn,
+            authority: crate::QueuedWorkAuthority::new("fig905"),
+            merge_key: Some("fig905".to_string()),
             available_at_ms: 0,
             enqueued_at_ms: 0,
             items: Vec::new(),
@@ -688,7 +694,7 @@ mod claim_authority_tests {
             &mut pending,
             claim("successor", 2, 2, &[("a", 1), ("b", 2)]),
         )
-        .expect("merge the WakeTurnPolicy::coalesce claim shape");
+        .expect("merge the coalesced claim shape");
 
         assert_eq!(
             authorities(&pending),

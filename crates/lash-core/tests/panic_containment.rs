@@ -498,6 +498,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
     .into_handle();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
     let plugin = Arc::new(StaticPluginFactory::new(
@@ -505,12 +506,15 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         PluginSpec::new().with_tool_provider(Arc::new(PanicTool)),
     ));
     let mut runtime = Box::pin(
-        LashRuntime::builder(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-            .with_session_id("tool-panic-session")
-            .with_policy(policy("scripted-panic-containment"))
-            .with_plugin_factories(vec![protocol_factory(), plugin])
-            .with_runtime_host(host)
-            .build(),
+        LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_session_id("tool-panic-session")
+        .with_policy(policy("scripted-panic-containment"))
+        .with_plugin_factories(vec![protocol_factory(), plugin])
+        .with_runtime_host(host)
+        .build(),
     )
     .await
     .expect("runtime");
@@ -550,6 +554,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let provider = ScriptedProvider::new(vec![text_response("parent still alive")]).into_handle();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
     let panic_once = Arc::new(AtomicBool::new(true));
@@ -566,13 +571,16 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
         })),
     ));
     let mut runtime = Box::pin(
-        LashRuntime::builder(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-            .with_session_id("parent-session")
-            .with_policy(policy("scripted-panic-containment"))
-            .with_plugin_factories(vec![protocol_factory(), plugin])
-            .with_runtime_host(host)
-            .with_session_store_factory(Arc::new(InMemorySessionStoreFactory::new()))
-            .build(),
+        LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_session_id("parent-session")
+        .with_policy(policy("scripted-panic-containment"))
+        .with_plugin_factories(vec![protocol_factory(), plugin])
+        .with_runtime_host(host)
+        .with_session_store_factory(Arc::new(InMemorySessionStoreFactory::new()))
+        .build(),
     )
     .await
     .expect("runtime");
@@ -629,15 +637,19 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
     })));
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
     let mut runtime = Box::pin(
-        LashRuntime::builder(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-            .with_session_id("provider-panic-session")
-            .with_policy(policy("panic-once-provider"))
-            .with_plugin_factories(vec![protocol_factory()])
-            .with_runtime_host(host)
-            .build(),
+        LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_session_id("provider-panic-session")
+        .with_policy(policy("panic-once-provider"))
+        .with_plugin_factories(vec![protocol_factory()])
+        .with_runtime_host(host)
+        .build(),
     )
     .await
     .expect("runtime");
@@ -690,15 +702,19 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
     let quiet_provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let mut quiet_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     quiet_host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(quiet_provider));
     let mut quiet_runtime = Box::pin(
-        LashRuntime::builder(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-            .with_session_id("quiet-provider-record-session")
-            .with_policy(policy("panic-provider"))
-            .with_plugin_factories(vec![protocol_factory()])
-            .with_runtime_host(quiet_host)
-            .build(),
+        LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_session_id("quiet-provider-record-session")
+        .with_policy(policy("panic-provider"))
+        .with_plugin_factories(vec![protocol_factory()])
+        .with_runtime_host(quiet_host)
+        .build(),
     )
     .await
     .expect("quiet runtime");
@@ -722,15 +738,19 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
     let loud_provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let mut loud_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     loud_host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(loud_provider));
     let mut loud_runtime = Box::pin(
-        LashRuntime::builder(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-            .with_session_id("loud-provider-record-session")
-            .with_policy(policy("panic-provider"))
-            .with_plugin_factories(vec![protocol_factory()])
-            .with_runtime_host(loud_host)
-            .build(),
+        LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_session_id("loud-provider-record-session")
+        .with_policy(policy("panic-provider"))
+        .with_plugin_factories(vec![protocol_factory()])
+        .with_runtime_host(loud_host)
+        .build(),
     )
     .await
     .expect("loud runtime");
@@ -766,15 +786,19 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
     let provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
     let mut runtime = Box::pin(
-        LashRuntime::builder(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-            .with_session_id("loud-provider-panic-session")
-            .with_policy(policy("panic-provider"))
-            .with_plugin_factories(vec![protocol_factory()])
-            .with_runtime_host(host)
-            .build(),
+        LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_session_id("loud-provider-panic-session")
+        .with_policy(policy("panic-provider"))
+        .with_plugin_factories(vec![protocol_factory()])
+        .with_runtime_host(host)
+        .build(),
     )
     .await
     .expect("runtime");

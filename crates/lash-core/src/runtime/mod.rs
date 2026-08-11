@@ -391,14 +391,13 @@ pub use turn_input_ingress::{
     TurnInputState,
 };
 pub use turn_loop::ensure_durable_effect_input;
-pub(crate) use turn_queue::process_wake_batch_draft_with_policy;
 pub use turn_queue::{
-    DeliveryPolicy, MergeKey, ProcessWakeSource, QueuedCheckpointWork, QueuedTurnWork,
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome,
-    QueuedWorkItem, QueuedWorkPayload, SessionCommand, SessionCommandReceipt, SlotPolicy,
-    WakeCoalescingKey, WakeTurnMode, WakeTurnPolicy, process_wake_batch_draft,
-    process_wake_source_key,
+    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
+    QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
+    QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
+    SessionCommandReceipt, process_wake_batch_draft, process_wake_source_key,
 };
 pub use usage::{
     SessionUsageReport, TokenLedgerEntry, UsageReportRow, UsageTotals, diff_token_ledger,

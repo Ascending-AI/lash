@@ -60,7 +60,7 @@
       </div>
       <aside class="contract">
         <strong>Start fresh when the version moves</strong>
-        <p>This release uses SQLite durable-core version 33, process-registry version 23, effect version 8, and trigger version 5, plus Postgres component version 46. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
+        <p>This release uses SQLite durable-core version 35, process-registry version 23, effect version 8, and trigger version 5, plus Postgres component version 47. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
       </aside>
       <aside class="contract">
         <strong>Provisioning Postgres yourself</strong>
@@ -105,6 +105,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .process_env_store(artifact_store)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .build()?;</code></pre>
     </div>
 
@@ -186,6 +187,7 @@ lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .process_env_store(process_env_store)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .build()
 }</code></pre>
       <p><code>PostgresStorage::connect</code> creates the exact supported schema on an empty database and rejects mismatched component versions. Runtime checkpoints, pending turn inputs, queued work, process rows, triggers, attachment manifests, and Lashlang artifacts live in Postgres. Attachment bytes live in S3-compatible object storage under content-addressed keys; MinIO uses the same implementation with an endpoint URL and path-style mode.</p>
@@ -434,6 +436,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .process_env_store(artifact_store)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .build()?;
 
 // Per request: open a session keyed by the app's chat id.

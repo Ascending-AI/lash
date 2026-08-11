@@ -67,7 +67,6 @@ pub(super) struct RuntimeExecutionProcessEventContext {
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     pub queued_work_driver: Option<crate::QueuedWorkDriver>,
     pub clock: Arc<dyn crate::Clock>,
-    pub wake_turn_policy: crate::WakeTurnPolicy,
 }
 
 /// Trace-sink handle threaded into tool execution so per-tool trace events are
@@ -382,7 +381,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
         clock: Arc<dyn crate::Clock>,
-        wake_turn_policy: crate::WakeTurnPolicy,
     ) -> Self {
         self.process_event_context = Some(RuntimeExecutionProcessEventContext {
             process_id: process_id.into(),
@@ -393,7 +391,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             session_store_factory,
             queued_work_driver,
             clock,
-            wake_turn_policy,
         });
         self
     }
@@ -557,7 +554,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             Some(self.session_graph_service()),
             context.queued_work_driver.as_ref(),
             Arc::clone(&context.clock),
-            &context.wake_turn_policy,
         )
         .await?;
         Ok(result.event)

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use lash::persistence::{
-    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, QueuedWorkStore as _, SlotPolicy,
+    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, QueuedWorkBatchDraft, QueuedWorkPayload,
+    QueuedWorkStore as _,
 };
 use lash::process::{WakeDeliveryDriver, process_wake_source_key};
 use lash_core::{
@@ -64,9 +65,9 @@ fn wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         DeliveryPolicy::EarliestSafeBoundary,
-        SlotPolicy::Exclusive,
         vec![QueuedWorkPayload::process_wake(wake)],
     )
+    .with_merge_key(PROCESS_WAKE_MERGE_KEY)
     .with_source_key(process_wake_source_key(&process_id, sequence))
     .with_process_wake_source(process_id, sequence)
 }

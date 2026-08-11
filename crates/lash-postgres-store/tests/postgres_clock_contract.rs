@@ -10,8 +10,7 @@ use lash_core::{
     ProcessAwaitOutput, ProcessCompletionOutcome, ProcessInput, ProcessLeaseClaimOutcome,
     ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryDisposition, RuntimeCommit,
     RuntimeSessionState, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory,
-    SlotPolicy, TurnInput, TurnInputCheckpointBoundary, TurnInputIngress,
-    facade_support::SessionCommand,
+    TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 use sqlx::Connection as _;
@@ -287,7 +286,6 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
             vec![QueuedWorkPayload::session_command(
                 SessionCommand::RefreshToolCatalog {
                     reason: "clock-contract command".to_string(),
@@ -300,7 +298,6 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
             vec![QueuedWorkPayload::agent_frame_task(
                 "clock-contract-frame",
                 "clock-contract queued work",
@@ -372,7 +369,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            1,
+            lash_core::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("queue claim must validate against PostgreSQL time")

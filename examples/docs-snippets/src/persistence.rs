@@ -44,6 +44,7 @@ async fn sqlite_core(
         .process_env_store(artifact_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
     // docs:end:sqlite-core
     Ok(())
@@ -128,6 +129,7 @@ fn build_persistent_core(
         .process_env_store(process_env_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()
 }
 // docs:end:postgres-core
@@ -265,6 +267,7 @@ async fn shared_factory(
         .process_env_store(artifact_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
 
     // Per request: open a session keyed by the app's chat id.

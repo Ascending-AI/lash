@@ -1,14 +1,6 @@
 //! Model-based [`RuntimePersistence`] laws for leases, queues, inputs, commit
 //! CAS, and checkpoint components; process-scoped laws live in the sibling harness.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::future::Future;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-use proptest::prelude::*;
-use proptest::test_runner::{Config, RngSeed, TestRunner};
-
 use super::*;
 use crate::StoreError::SessionExecutionLeaseRenewalRefused as RenewalRefused;
 use crate::store::{
@@ -23,7 +15,12 @@ use crate::{
     SessionExecutionLease, SessionExecutionLeaseClaimOutcome, StoreError, ToolState, TurnInput,
     TurnInputClaim, TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
-
+use proptest::prelude::*;
+use proptest::test_runner::{Config, RngSeed, TestRunner};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 mod attachment_conservation;
 mod claim_honesty;
 mod counterexample;
@@ -562,6 +559,7 @@ async fn apply_operation(
                         &lease.owner,
                         QueuedWorkClaimBoundary::Idle,
                         std::slice::from_ref(&batch_id),
+                        crate::testing::queued_work_claim_policy(64),
                     )
                     .await
                     .map_err(|error| error.to_string())?
@@ -573,7 +571,7 @@ async fn apply_operation(
                         &lease.fence(),
                         &lease.owner,
                         QueuedWorkClaimBoundary::Idle,
-                        4,
+                        crate::testing::queued_work_claim_policy(4),
                     )
                     .await
                     .map_err(|error| error.to_string())?
@@ -789,6 +787,7 @@ async fn claim_work_with_stale_lease(
             &stale.owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await;
     if !matches!(result, Err(StoreError::SessionExecutionLeaseExpired { .. })) {
@@ -1432,26 +1431,21 @@ fn owner(index: u8) -> LeaseOwnerIdentity {
 }
 
 fn queued_draft(slot: u8, value: u8, coalesce: bool) -> QueuedWorkBatchDraft {
-    QueuedWorkBatchDraft::new(
+    let draft = QueuedWorkBatchDraft::new(
         SESSION_ID,
         DeliveryPolicy::EarliestSafeBoundary,
-        if coalesce {
-            SlotPolicy::Join
-        } else {
-            SlotPolicy::Exclusive
-        },
         vec![QueuedWorkPayload::agent_frame_task(
             format!("property-frame-{value}"),
             format!("property-work-{value}"),
             None,
         )],
     )
-    .with_source_key(format!("runtime-property-work-{slot}"))
-    .with_merge_key(if coalesce {
-        MergeKey::Group("runtime-property-coalesced".to_string())
+    .with_source_key(format!("runtime-property-work-{slot}"));
+    if coalesce {
+        draft.with_merge_key("runtime-property-coalesced")
     } else {
-        MergeKey::Never
-    })
+        draft
+    }
 }
 
 fn turn_input_draft(slot: u8, value: u8) -> PendingTurnInputDraft {
@@ -1848,6 +1842,7 @@ async fn law_claimed_work_settles_exactly_once(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1931,7 +1926,7 @@ async fn law_reclaim_mediates_supersession(
             &stale_lease.fence(),
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
-            4,
+            crate::testing::queued_work_claim_policy(4),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1956,6 +1951,7 @@ async fn law_reclaim_mediates_supersession(
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&first.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2009,6 +2005,7 @@ async fn law_reclaim_mediates_supersession(
                 &successor_owner,
                 QueuedWorkClaimBoundary::Idle,
                 std::slice::from_ref(&first.batch_id),
+                crate::testing::queued_work_claim_policy(64),
             )
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2061,6 +2058,7 @@ async fn law_head_cas_serializes_competing_commits(
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2160,7 +2158,7 @@ async fn law_stale_settlement_cannot_damage_successor(
             &stale_lease.fence(),
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
-            4,
+            crate::testing::queued_work_claim_policy(4),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2183,6 +2181,7 @@ async fn law_stale_settlement_cannot_damage_successor(
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&first.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2273,6 +2272,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&later.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2306,6 +2306,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&earlier.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?

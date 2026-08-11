@@ -54,11 +54,11 @@ pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, EffectReplayOwnership,
     InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder,
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
-    PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, Resolution, ResolveOutcome,
-    SessionCreateRequest, SessionError, SessionStartPoint, TurnActivity, TurnActivityId,
-    TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent, TurnInput, TurnInputApplication,
-    facade_support::ExecutionSummary, facade_support::GenerationOverlay,
-    facade_support::PluginStack, facade_support::SessionCommand,
+    PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatchingConfig,
+    Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionStartPoint,
+    TurnActivity, TurnActivityId, TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent,
+    TurnInput, TurnInputApplication, facade_support::ExecutionSummary,
+    facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
     facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
     facade_support::TurnAttach, facade_support::TurnCancelOutcome,
@@ -217,13 +217,14 @@ pub mod persistence {
     pub use lash_core::facade_support::FileAttachmentStore;
     pub use lash_core::runtime::{
         DeliveryPolicy, ForkPoint, ForkSessionRequest, ForkSessionResult, InMemorySessionStore,
-        InMemorySessionStoreFactory, MergeKey, PendingTurnInputClaimDiagnostics,
-        PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-        QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkCompletion,
-        QueuedWorkCompletionData, QueuedWorkItem, QueuedWorkPayload, RuntimeCheckpointComponents,
-        RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
-        TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputCompletion,
-        TurnInputCompletionData, TurnInputIngress, TurnInputState,
+        InMemorySessionStoreFactory, PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics,
+        PendingTurnInputDraft, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+        QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy,
+        QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkItem, QueuedWorkKind,
+        QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
+        SessionStoreCreateRequest, SessionStoreFactory, TurnInputCheckpointBoundary,
+        TurnInputClaim, TurnInputClaimData, TurnInputCompletion, TurnInputCompletionData,
+        TurnInputIngress, TurnInputState,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     pub mod queued_work {
@@ -499,9 +500,7 @@ pub mod process {
         facade_support::ProcessWake, facade_support::ProcessWorkDriver,
         facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
         facade_support::SessionScopeId, facade_support::ToolSessionProcessAdmin,
-        facade_support::WakeCoalescingKey, facade_support::WakeTurnMode,
-        facade_support::WakeTurnPolicy, facade_support::watch_process_registry,
-        facade_support::watch_process_registry_with_sink,
+        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
     };
     /// Event semantics a registration declares for its extra event types: which
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is

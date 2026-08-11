@@ -31,6 +31,7 @@ async fn inmemory_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
     // docs:end:inmemory-core
     Ok(())
@@ -68,6 +69,7 @@ async fn sqlite_core(
         .process_env_store(artifact_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
     // docs:end:sqlite-core
     Ok(())
@@ -174,6 +176,7 @@ async fn process_registry_core(
         .process_env_store(process_env_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
     // docs:end:process-registry-core
     Ok(())
@@ -218,6 +221,7 @@ async fn subagents_core(
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .plugin(Arc::new(subagents) as Arc<dyn PluginFactory>)
         .build()?;
     // docs:end:subagents-core
@@ -302,6 +306,7 @@ fn configured_mcp_core(
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .plugin(std::sync::Arc::new(mcp))
         .build()
 }
@@ -358,6 +363,7 @@ async fn durable_stores_core(
         .process_env_store(artifact_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .turn_budget(lash::TurnBudget::bounded(50))
         .build()?;
     // docs:end:durable-stores-core

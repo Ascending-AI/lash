@@ -1503,19 +1503,21 @@ impl DurableProcessWorker {
                 ProcessWorkDriver::inline(Arc::clone(&self.config.process_registry), self.clone())
             }
         });
-        let mut builder =
-            EmbeddedRuntimeBuilder::new(self.config.runtime_host.durability.commit_budget)
-                .with_session_id(session_id.to_string())
-                .with_plugin_host(self.config.plugin_host.as_ref().clone())
-                .with_runtime_host(self.config.runtime_host.clone())
-                .with_policy(policy)
-                .with_plugin_options(plugin_options)
-                .with_session_store_factory(Arc::clone(&self.config.session_store_factory))
-                .with_trigger_store(Arc::clone(&self.config.trigger_store))
-                .with_process_registry(Arc::clone(&self.config.process_registry))
-                .with_process_work_driver(process_work_driver)
-                .with_attachment_manifest_store(attachment_manifest_store)
-                .with_store(store);
+        let mut builder = EmbeddedRuntimeBuilder::new(
+            self.config.runtime_host.durability.commit_budget,
+            self.config.runtime_host.durability.queued_work_batching,
+        )
+        .with_session_id(session_id.to_string())
+        .with_plugin_host(self.config.plugin_host.as_ref().clone())
+        .with_runtime_host(self.config.runtime_host.clone())
+        .with_policy(policy)
+        .with_plugin_options(plugin_options)
+        .with_session_store_factory(Arc::clone(&self.config.session_store_factory))
+        .with_trigger_store(Arc::clone(&self.config.trigger_store))
+        .with_process_registry(Arc::clone(&self.config.process_registry))
+        .with_process_work_driver(process_work_driver)
+        .with_attachment_manifest_store(attachment_manifest_store)
+        .with_store(store);
         if let Some(driver) = self.config.queued_work_driver.clone() {
             builder = builder.with_queued_work_driver(driver);
         }

@@ -851,6 +851,7 @@ async fn durable_configured_effect_host_requires_explicit_handler_effects() -> R
             dir.path().join("attachments"),
         )))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
         .effect_host(Arc::new(DurableNoopEffectHost))
         .provider(mock_provider())
@@ -6029,6 +6030,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
             lash_core::facade_support::InlineEffectHost::default(),
         ))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
         .build()?;
     let session = core.session(session_id).open().await?;

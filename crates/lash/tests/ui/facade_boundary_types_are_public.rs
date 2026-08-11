@@ -12,8 +12,9 @@ use lash::persistence::{
     CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity, OperationId,
     PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch,
     QueuedWorkBatchDraft,
-    QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
-    RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
+    QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkStore,
+    RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult, RuntimePersistence,
+    RuntimeSessionState, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore,
     SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseStore,
@@ -237,7 +238,7 @@ impl QueuedWorkStore for FacadeStore {
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
-        _max_batches: usize,
+        _policy: QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         Ok(None)
     }
@@ -250,7 +251,7 @@ impl QueuedWorkStore for FacadeStore {
         _turn_id: &TurnId,
         _checkpoint: CheckpointKind,
         _max_inputs: usize,
-        _max_batches: usize,
+        _policy: QueuedWorkClaimPolicy,
     ) -> Result<(Option<TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         Ok((None, None))
     }
@@ -262,6 +263,7 @@ impl QueuedWorkStore for FacadeStore {
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
         _batch_ids: &[String],
+        _policy: QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         Ok(None)
     }

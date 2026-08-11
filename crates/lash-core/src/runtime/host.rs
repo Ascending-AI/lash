@@ -40,6 +40,8 @@ pub struct RuntimeDurabilityConfig {
     /// Operational limits stamped onto every runtime commit assembled by this
     /// host and revalidated by the shared facade and concrete backend.
     pub commit_budget: crate::CommitBudget,
+    /// Host-owned bounds for automatically grouping durable queued work.
+    pub queued_work_batching: crate::QueuedWorkBatchingConfig,
     /// The session-bound attachment facade every runtime consumer sees. Hosts
     /// supply a flat [`AttachmentStore`](crate::AttachmentStore) backend
     /// (`RuntimeHostConfig::new`, the builder); the runtime wraps it here in a
@@ -64,8 +66,6 @@ pub struct RuntimePromptConfig {
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
     pub termination: TerminationPolicy,
-    /// Factory-scoped policy for drafting process wakes into queued turns.
-    pub wake_turn_policy: crate::WakeTurnPolicy,
     /// Optional narrow-only policy for the model-facing session process tools.
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
     /// Per-runtime registry cap on concurrently running managed child turns.
@@ -103,10 +103,12 @@ impl RuntimeHostConfig {
         attachment_store: Arc<dyn crate::AttachmentStore>,
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
         commit_budget: crate::CommitBudget,
+        queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> Self {
         Self {
             durability: RuntimeDurabilityConfig {
                 commit_budget,
+                queued_work_batching,
                 attachment_store: Arc::new(crate::SessionAttachmentStore::ephemeral(
                     attachment_store,
                 )),
@@ -123,7 +125,6 @@ impl RuntimeHostConfig {
                 termination: TerminationPolicy::default(),
                 effect_host,
                 lease_timings: crate::LeaseTimings::default(),
-                wake_turn_policy: crate::WakeTurnPolicy::default(),
                 process_tool_visibility_filter: None,
                 managed_turn_concurrency_limit: std::num::NonZeroUsize::new(
                     DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT,
@@ -162,12 +163,16 @@ impl RuntimeHostConfig {
     /// Convenient for tests and local experiments; not durable. The commit
     /// budget remains required because backend latency policy is independent
     /// of whether persistence is in-memory.
-    pub fn in_memory(commit_budget: crate::CommitBudget) -> Self {
+    pub fn in_memory(
+        commit_budget: crate::CommitBudget,
+        queued_work_batching: crate::QueuedWorkBatchingConfig,
+    ) -> Self {
         Self::new(
             Arc::new(InlineEffectHost::default()),
             Arc::new(crate::InMemoryAttachmentStore::new()),
             Arc::new(InMemoryProcessExecutionEnvStore::new()),
             commit_budget,
+            queued_work_batching,
         )
     }
 
@@ -188,12 +193,6 @@ impl RuntimeHostConfig {
     /// claim this runtime takes.
     pub fn with_lease_timings(mut self, lease_timings: crate::LeaseTimings) -> Self {
         self.control.lease_timings = lease_timings;
-        self
-    }
-
-    /// Configure how this runtime factory turns process wakes into queued work.
-    pub fn with_wake_turn_policy(mut self, policy: crate::WakeTurnPolicy) -> Self {
-        self.control.wake_turn_policy = policy;
         self
     }
 
@@ -356,7 +355,10 @@ mod tests {
 
     #[test]
     fn managed_turn_concurrency_limit_defaults_to_event_channel_bound() {
-        let config = RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
+        let config = RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
 
         assert_eq!(
             config.control.managed_turn_concurrency_limit.get(),

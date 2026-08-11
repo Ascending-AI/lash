@@ -399,8 +399,8 @@ impl RawDurableReader {
                     )
                     .collect();
                 let queued_work_batches: Vec<QueuedWorkBatchRow> = sqlx::query_as(
-                    "SELECT enqueue_seq, batch_id, source_key, delivery_policy, slot_policy,
-                            merge_key_json, available_at_ms, claim_id, claim_owner_id,
+                    "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
+                            authority_json, merge_key, available_at_ms, claim_id, claim_owner_id,
                             claim_owner_incarnation_id, claim_owner_liveness_json, claim_token,
                             claim_fencing_token, claim_session_lease_generation
                      FROM lash_queued_work_batches

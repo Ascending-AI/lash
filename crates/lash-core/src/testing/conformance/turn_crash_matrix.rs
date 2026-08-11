@@ -676,7 +676,7 @@ impl crate::QueuedWorkStore for SeamStore {
         fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimReadyQueuedWork {
             boundary: format!("{boundary:?}").to_ascii_lowercase(),
@@ -685,7 +685,7 @@ impl crate::QueuedWorkStore for SeamStore {
             .around(
                 operation,
                 self.inner
-                    .claim_ready_queued_work(session_id, fence, owner, boundary, max_batches),
+                    .claim_ready_queued_work(session_id, fence, owner, boundary, policy),
             )
             .await
     }
@@ -698,7 +698,7 @@ impl crate::QueuedWorkStore for SeamStore {
         turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<(Option<TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimCheckpointWork {
             checkpoint: format!("{checkpoint:?}").to_ascii_lowercase(),
@@ -707,13 +707,7 @@ impl crate::QueuedWorkStore for SeamStore {
             .around(
                 operation,
                 self.inner.claim_checkpoint_work(
-                    session_id,
-                    fence,
-                    owner,
-                    turn_id,
-                    checkpoint,
-                    max_inputs,
-                    max_batches,
+                    session_id, fence, owner, turn_id, checkpoint, max_inputs, policy,
                 ),
             )
             .await
@@ -726,6 +720,7 @@ impl crate::QueuedWorkStore for SeamStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         ids: &[String],
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimSelectedQueuedWork {
             boundary: format!("{boundary:?}").to_ascii_lowercase(),
@@ -733,8 +728,9 @@ impl crate::QueuedWorkStore for SeamStore {
         self.control
             .around(
                 operation,
-                self.inner
-                    .claim_ready_queued_work_by_batch_ids(session_id, fence, owner, boundary, ids),
+                self.inner.claim_ready_queued_work_by_batch_ids(
+                    session_id, fence, owner, boundary, ids, policy,
+                ),
             )
             .await
     }
@@ -1264,6 +1260,7 @@ async fn build_runtime(
         Arc::new(crate::InMemoryAttachmentStore::new()),
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
     )
     .with_lease_timings(recovery_timings());
     trace_tool.control = control.clone();
@@ -1275,13 +1272,16 @@ async fn build_runtime(
         PluginSpec::new().with_tool_provider(Arc::new(trace_tool)),
     )));
     Box::pin(
-        crate::LashRuntime::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_session_id(&identity.session_id)
-            .with_policy(runtime_policy())
-            .with_runtime_host(host)
-            .with_store(store)
-            .with_plugin_factories(plugin_factories)
-            .build(),
+        crate::LashRuntime::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_session_id(&identity.session_id)
+        .with_policy(runtime_policy())
+        .with_runtime_host(host)
+        .with_store(store)
+        .with_plugin_factories(plugin_factories)
+        .build(),
     )
     .await
     .expect("build reference runtime")
@@ -1313,7 +1313,6 @@ async fn seed_reference_ingress(store: &Arc<dyn RuntimePersistence>, identity: &
             QueuedWorkBatchDraft::new(
                 &identity.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                crate::SlotPolicy::Exclusive,
                 vec![crate::QueuedWorkPayload::agent_frame_task(
                     "trace-frame",
                     "trace-source",
@@ -1768,7 +1767,7 @@ pub async fn cold_process_real_turn_driver(
                 &lease.fence(),
                 &owner,
                 crate::QueuedWorkClaimBoundary::Idle,
-                64,
+                crate::testing::queued_work_claim_policy(64),
             )
             .await
             .expect("peer reclaims queued-work row")

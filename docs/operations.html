@@ -89,7 +89,7 @@ let session = core
       <aside class="contract">
         <strong>Forward only</strong>
         <p>lash maintains no migration chain, by policy. A version whose schema changed is adopted by recreating the store from empty, and that step is one-way: the previous binary refuses the recreated store on the same exact-match gate. There is no downgrade path, no rollback, and no restore procedure. Recovery from a failed bump is fix-forward.</p>
-        <p>This release uses SQLite durable-core version 33, process-registry version 23, effect version 8, and trigger version 5, plus Postgres component version 46. Persistent deployments must start with fresh stores.</p>
+        <p>This release uses SQLite durable-core version 35, process-registry version 23, effect version 8, and trigger version 5, plus Postgres component version 47. Persistent deployments must start with fresh stores.</p>
       </aside>
       <aside class="gotcha">
         <strong>Version 25 host migration</strong>
@@ -214,6 +214,7 @@ let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .process_env_store(process_env_store)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .lease_timings(lease_timings) // omit to keep the 30s ttl / 10s renew default
     .build()?;</code></pre>
     </div>

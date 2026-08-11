@@ -55,6 +55,21 @@ pub enum StoreError {
         max_bytes: usize,
     },
     #[error(
+        "queued-work action reserve {action_token_reserve} exhausts model context window {max_context_tokens}"
+    )]
+    QueuedWorkActionReserveExhaustsContext {
+        max_context_tokens: usize,
+        action_token_reserve: usize,
+    },
+    #[error(
+        "queued-work row at enqueue sequence {batch_enqueue_seq} renders to at least {rendered_tokens} tokens, exceeding model context window {max_context_tokens}; the row remains pending for host review"
+    )]
+    QueuedWorkRowExceedsContextWindow {
+        batch_enqueue_seq: u64,
+        rendered_tokens: usize,
+        max_context_tokens: usize,
+    },
+    #[error(
         "store is already bound to session `{bound_session_id}` and cannot be reused for `{attempted_session_id}`"
     )]
     SessionBindingMismatch {
@@ -416,6 +431,10 @@ impl StoreError {
             Self::Contended => "Contended",
             Self::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
             Self::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",
+            Self::QueuedWorkActionReserveExhaustsContext { .. } => {
+                "QueuedWorkActionReserveExhaustsContext"
+            }
+            Self::QueuedWorkRowExceedsContextWindow { .. } => "QueuedWorkRowExceedsContextWindow",
             Self::SessionBindingMismatch { .. } => "SessionBindingMismatch",
             Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",

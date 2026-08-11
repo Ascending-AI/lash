@@ -115,14 +115,20 @@ cleanup, prune, or admin/host reads. Structured decision traces record the
 candidate set, returned set, policy, and outcome; ordinary tool results persist
 the model-visible outcome in turn history.
 
-`WakeTurnPolicy::new(delivery, mode)` is the single factory-level knob for
-drafting process wakes into queued turns. `WakeTurnMode::EachWake { slot }`
-always gives every wake a separate claim; `WakeTurnMode::Coalesce { key }`
-requires a non-never `WakeCoalescingKey` and joins matching adjacent wakes.
-The default exactly preserves the former
-`EarliestSafeBoundary / Exclusive / never-merge` behavior. Structured claim
-traces record candidates, wake keys, policy, and selection. Producer-side
-event-identity deduplication remains independent of receiver-side turn merging.
+Every queued-work producer stamps an independent optional `merge_key` when it
+is safe for adjacent events to share a turn. An absent key is an explicit
+never-merge decision; the key is not derived from provenance or event identity.
+Process wakes use the constant `PROCESS_WAKE_MERGE_KEY` and therefore batch by
+default. Candidate wakes still have to match work class, delivery policy,
+authority principal, and elevation. Control and cancellation work never batch.
+
+At claim time the store renders the exact model-facing wake causes and admits
+only work that leaves the host-required action-token reserve inside the active
+model's context window. The same host policy bounds a claim to 64 rows and a
+30-second maximum pending age by default. There is no quiet-window timer.
+Producer-side event-identity deduplication remains independent of receiver-side
+turn merging, and structured claim traces record the candidate metadata,
+rendered size, applicable bounds, and selection.
 
 Retention likewise requires an explicit choice. Both terminal-process pruning
 and tombstone compaction take `ProjectionWatermark::{UpTo(cursor),NoProjector}`;

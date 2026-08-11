@@ -552,7 +552,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        _max_batches: usize,
+        _policy: lash_core::QueuedWorkClaimPolicy,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkClaim>,
         lash_core::store::StoreError,
@@ -568,7 +568,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
         _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
         _max_inputs: usize,
-        _max_batches: usize,
+        _policy: lash_core::QueuedWorkClaimPolicy,
     ) -> std::result::Result<
         (
             Option<lash_core::runtime::TurnInputClaim>,
@@ -586,6 +586,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _batch_ids: &[String],
+        _policy: lash_core::QueuedWorkClaimPolicy,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkClaim>,
         lash_core::store::StoreError,
@@ -991,7 +992,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        _max_batches: usize,
+        _policy: lash_core::QueuedWorkClaimPolicy,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkClaim>,
         lash_core::store::StoreError,
@@ -1007,7 +1008,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
         _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
         _max_inputs: usize,
-        _max_batches: usize,
+        _policy: lash_core::QueuedWorkClaimPolicy,
     ) -> std::result::Result<
         (
             Option<lash_core::runtime::TurnInputClaim>,
@@ -1025,6 +1026,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _batch_ids: &[String],
+        _policy: lash_core::QueuedWorkClaimPolicy,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkClaim>,
         lash_core::store::StoreError,
@@ -2126,6 +2128,7 @@ fn explicit_ephemeral_facets_with_budget(
 ) -> crate::core::LashCoreBuilder {
     builder
         .commit_budget(commit_budget)
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .effect_host(Arc::new(
             crate::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
