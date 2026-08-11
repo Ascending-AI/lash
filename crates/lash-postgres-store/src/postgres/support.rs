@@ -440,17 +440,26 @@ pub(crate) async fn load_session_head_meta_tx(
     decode_session_head_meta_row(row)
 }
 
-pub(crate) async fn load_first_session_head_meta_tx(
+pub(crate) async fn load_unbound_session_head_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = sqlx::query(
-        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref, COUNT(*) OVER ()
          FROM lash_sessions ORDER BY session_id ASC LIMIT 1",
     )
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    decode_session_head_meta_row(row)
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let session_count = u64::try_from(row.get::<i64, _>(4)).map_err(|_| {
+        StoreError::Backend("PostgreSQL returned a negative session count".to_string())
+    })?;
+    if session_count > 1 {
+        return Err(StoreError::SessionResolutionAmbiguous { session_count });
+    }
+    decode_session_head_meta_row(Some(row))
 }
 
 fn decode_session_head_meta_row(

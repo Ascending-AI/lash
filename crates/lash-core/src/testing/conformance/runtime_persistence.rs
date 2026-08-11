@@ -109,6 +109,25 @@ where
     runtime_persistence_survives_reopen(make()).await;
 }
 
+fn assert_matching_session_resolution_errors(full: StoreError, head: StoreError, expected: &str) {
+    match (full, head) {
+        (
+            StoreError::SessionResolutionAmbiguous {
+                session_count: full_count,
+            },
+            StoreError::SessionResolutionAmbiguous {
+                session_count: head_count,
+            },
+        ) => assert_eq!(
+            head_count, full_count,
+            "{expected}: full and head reads must report the same candidate count"
+        ),
+        (full, head) => panic!(
+            "{expected}: full and head reads returned different typed errors: full={full:?}, head={head:?}"
+        ),
+    }
+}
+
 /// Prove that an unbound handle resolves the same session for both shared
 /// session-read projections as durable storage moves from zero to one to two
 /// persisted sessions.
@@ -126,12 +145,12 @@ where
         Indeterminate,
     }
 
-    async fn assert_reads_agree(
-        store: Arc<dyn RuntimePersistence>,
-        expected: &str,
-    ) -> ReadResolution {
-        let head = store.load_session_head_meta().await;
-        let full = store.load_session().await;
+    async fn assert_reads_agree<F>(open: &F, expected: &str) -> ReadResolution
+    where
+        F: Fn() -> Arc<dyn RuntimePersistence>,
+    {
+        let head = open().load_session_head_meta().await;
+        let full = open().load_session().await;
         match (full, head) {
             (Ok(None), Ok(None)) => ReadResolution::Absent,
             (Ok(Some(full)), Ok(Some(head))) => {
@@ -151,11 +170,7 @@ where
                 ReadResolution::Present
             }
             (Err(full), Err(head)) => {
-                assert_eq!(
-                    head.to_string(),
-                    full.to_string(),
-                    "{expected}: full and head reads must report the same indeterminacy"
-                );
+                assert_matching_session_resolution_errors(full, head, expected);
                 ReadResolution::Indeterminate
             }
             (full, head) => panic!(
@@ -165,7 +180,7 @@ where
     }
 
     assert_eq!(
-        assert_reads_agree(open(), "zero persisted sessions").await,
+        assert_reads_agree(&open, "zero persisted sessions").await,
         ReadResolution::Absent,
         "an empty store must resolve as absent"
     );
@@ -183,7 +198,7 @@ where
     .await
     .expect("seed first session through an unbound handle");
     assert_eq!(
-        assert_reads_agree(open(), "one persisted session").await,
+        assert_reads_agree(&open, "one persisted session").await,
         ReadResolution::Present,
         "a sole persisted session must resolve through an unbound reopened handle"
     );
@@ -200,12 +215,10 @@ where
     )
     .await
     .expect("seed second session through an unbound handle");
-    assert!(
-        matches!(
-            assert_reads_agree(open(), "two persisted sessions").await,
-            ReadResolution::Present | ReadResolution::Indeterminate
-        ),
-        "two persisted sessions must resolve consistently or report indeterminacy"
+    assert_eq!(
+        assert_reads_agree(&open, "two persisted sessions").await,
+        ReadResolution::Indeterminate,
+        "two persisted sessions must report indeterminacy"
     );
 }
 

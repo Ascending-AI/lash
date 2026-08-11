@@ -121,6 +121,7 @@ impl TurnSeamOperation {
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum StoreOperation {
     LoadSession,
+    LoadSessionHeadMeta,
     ClaimSessionExecutionLease,
     RenewSessionExecutionLease,
     ReleaseSessionExecutionLease,
@@ -449,7 +450,7 @@ impl SessionCommitStore for SeamStore {
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
         self.control
             .around(
-                TurnSeamOperation::Store(StoreOperation::LoadSession),
+                TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
                 self.inner.load_session_head_meta(),
             )
             .await
@@ -2141,7 +2142,7 @@ mod tests {
             .position(|entry| {
                 entry.point
                     == TurnCrashPoint {
-                        operation: TurnSeamOperation::Store(StoreOperation::LoadSession),
+                        operation: TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
                         placement: CrashPlacement::Boundary,
                     }
             })

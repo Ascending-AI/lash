@@ -1,7 +1,7 @@
 [
   { "seam": "store", "operation": { "kind": "claim_session_execution_lease" } },
   { "seam": "store", "operation": { "kind": "claim_next_turn_inputs" } },
-  { "seam": "store", "operation": { "kind": "load_session" } },
+  { "seam": "store", "operation": { "kind": "load_session_head_meta" } },
   { "seam": "provider", "operation": { "kind": "initial_request" } },
   { "seam": "provider", "operation": { "kind": "initial_mid_stream" } },
   { "seam": "store", "operation": { "kind": "renew_session_execution_lease" } },

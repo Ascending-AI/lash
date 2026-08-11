@@ -348,33 +348,34 @@ impl Store {
         if let Some(session_id) = self.session_id.get() {
             return Ok(Some(session_id.clone()));
         }
-        let session_ids = self
+        let (session_count, session_id) = self
             .conn
             .call(|conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT session_id FROM (
+                conn.query_row(
+                    "SELECT COUNT(*), MIN(session_id) FROM (
                          SELECT session_id FROM session_head
                          UNION
                          SELECT session_id FROM session_meta
-                     )
-                     ORDER BY session_id ASC
-                     LIMIT 2",
-                )?;
-                stmt.query_map([], |row| row.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()
+                     )",
+                    [],
+                    |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
             })
             .await
             .map_err(sqlite_error)?;
-        match session_ids.len() {
+        match session_count {
             0 => return Ok(None),
             1 => {}
-            count => {
-                return Err(StoreError::Backend(format!(
-                    "SQLite durable-core store is unbound and found {count} sessions; bind an explicit session through SqliteSessionStoreFactory"
-                )));
+            session_count => {
+                return Err(StoreError::SessionResolutionAmbiguous { session_count });
             }
         }
-        self.bind_session(&session_ids[0])?;
+        let session_id = session_id.ok_or_else(|| {
+            StoreError::Backend(
+                "SQLite durable-core store counted one session without a session id".to_string(),
+            )
+        })?;
+        self.bind_session(&session_id)?;
         Ok(self.session_id.get().cloned())
     }
 }

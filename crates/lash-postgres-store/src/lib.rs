@@ -728,10 +728,26 @@ impl PostgresSessionStore {
         if let Some(session_id) = &self.session_id {
             return Ok(Some(session_id.clone()));
         }
-        sqlx::query_scalar("SELECT session_id FROM lash_sessions ORDER BY session_id ASC LIMIT 1")
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)
+        if let Some(session_id) = self.bound_session.get() {
+            return Ok(Some(session_id.clone()));
+        }
+        let (session_count, session_id): (i64, Option<String>) =
+            sqlx::query_as("SELECT COUNT(*), MIN(session_id) FROM lash_sessions")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(store_sqlx_error)?;
+        let session_count = u64::try_from(session_count).map_err(|_| {
+            StoreError::Backend("PostgreSQL returned a negative session count".to_string())
+        })?;
+        match session_count {
+            0 => Ok(None),
+            1 => session_id.map(Some).ok_or_else(|| {
+                StoreError::Backend(
+                    "PostgreSQL counted one session without a session id".to_string(),
+                )
+            }),
+            session_count => Err(StoreError::SessionResolutionAmbiguous { session_count }),
+        }
     }
 }
 
