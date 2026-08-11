@@ -416,6 +416,7 @@ jobs:
     services:
       postgres:
         image: postgres:${{ matrix.postgres }}-alpine
+        command: -c shared_preload_libraries=pg_stat_statements
         env:
           POSTGRES_USER: lash
           POSTGRES_PASSWORD: lash

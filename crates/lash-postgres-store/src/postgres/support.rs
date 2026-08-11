@@ -237,27 +237,82 @@ async fn get_blob_tx(
         .map_err(store_sqlx_error)
 }
 
-async fn get_checkpoint_component_tx(
+// One array bind avoids PostgreSQL's scalar-parameter ceiling. A 16,384-ref
+// chunk is four times the largest required depth while bounding each encoded
+// request to roughly one MiB of SHA-256 text plus array framing.
+const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
+
+async fn existing_checkpoint_component_refs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    key: &str,
-    descriptor: &lash_core::CheckpointComponentDescriptor,
-) -> Result<lash_core::HydratedCheckpointComponent, StoreError> {
-    lash_core::store::ensure_checkpoint_component_encoding_version(
-        key,
-        descriptor.encoding_version,
-    )?;
-    let blob_ref = &descriptor.blob_ref;
-    let bytes =
-        get_blob_tx(tx, blob_ref)
-            .await?
-            .ok_or_else(|| StoreError::CheckpointComponentMissing {
-                key: key.to_string(),
+    blob_refs: &std::collections::BTreeSet<String>,
+) -> Result<std::collections::HashSet<String>, StoreError> {
+    let mut existing = std::collections::HashSet::with_capacity(blob_refs.len());
+    let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
+    for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+        let rows = sqlx::query_scalar::<_, String>(
+            "SELECT hash FROM lash_blobs WHERE hash = ANY($1::text[])",
+        )
+        .bind(chunk)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        existing.extend(rows);
+    }
+    Ok(existing)
+}
+
+async fn checkpoint_component_bodies_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    manifest: &SessionCheckpoint,
+) -> Result<std::collections::HashMap<String, Vec<u8>>, StoreError> {
+    let blob_refs = manifest
+        .components
+        .values()
+        .map(|descriptor| descriptor.blob_ref.as_str().to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
+    let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
+    for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+        let rows = sqlx::query("SELECT hash, content FROM lash_blobs WHERE hash = ANY($1::text[])")
+            .bind(chunk)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        for row in rows {
+            bodies.insert(row.get::<String, _>(0), row.get::<Vec<u8>, _>(1));
+        }
+    }
+    Ok(bodies)
+}
+
+async fn validate_checkpoint_component_refs_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    checkpoint: &HydratedSessionCheckpoint,
+) -> Result<(), StoreError> {
+    let mut referenced = std::collections::BTreeSet::new();
+    for (key, component) in &checkpoint.components {
+        lash_core::store::ensure_checkpoint_component_encoding_version(
+            key,
+            component.encoding_version(),
+        )?;
+        let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
+            continue;
+        };
+        referenced.insert(blob_ref.as_str().to_string());
+    }
+    let existing = existing_checkpoint_component_refs_tx(tx, &referenced).await?;
+    for (key, component) in &checkpoint.components {
+        let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
+            continue;
+        };
+        if !existing.contains(blob_ref.as_str()) {
+            return Err(StoreError::CheckpointComponentMissing {
+                key: key.clone(),
                 blob_ref: blob_ref.clone(),
-            })?;
-    Ok(lash_core::HydratedCheckpointComponent::hydrated(
-        descriptor.clone(),
-        bytes,
-    ))
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Persist the complete checkpoint root and every changed leaf inside the
@@ -269,6 +324,7 @@ pub(crate) async fn put_checkpoint_tx(
     checkpoint: &HydratedSessionCheckpoint,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
     let manifest = checkpoint.manifest()?;
+    validate_checkpoint_component_refs_tx(tx, checkpoint).await?;
     for (key, descriptor) in &manifest.components {
         let component =
             checkpoint
@@ -285,11 +341,6 @@ pub(crate) async fn put_checkpoint_tx(
                 &stored_ref,
                 &descriptor.blob_ref,
             )?;
-        } else if get_blob_tx(tx, &descriptor.blob_ref).await?.is_none() {
-            return Err(StoreError::CheckpointComponentMissing {
-                key: key.clone(),
-                blob_ref: descriptor.blob_ref.clone(),
-            });
         }
     }
     let bytes = encode_msgpack(&manifest, "checkpoint root")?;
@@ -311,11 +362,19 @@ pub(crate) async fn get_checkpoint_tx(
         lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
     )?;
     manifest.validate_component_encoding_versions()?;
+    let bodies = checkpoint_component_bodies_tx(tx, &manifest).await?;
     let mut components = std::collections::BTreeMap::new();
     for (key, descriptor) in &manifest.components {
+        let bytes = bodies
+            .get(descriptor.blob_ref.as_str())
+            .cloned()
+            .ok_or_else(|| StoreError::CheckpointComponentMissing {
+                key: key.clone(),
+                blob_ref: descriptor.blob_ref.clone(),
+            })?;
         components.insert(
             key.clone(),
-            get_checkpoint_component_tx(tx, key, descriptor).await?,
+            lash_core::HydratedCheckpointComponent::hydrated(descriptor.clone(), bytes),
         );
     }
     Ok(Some(HydratedSessionCheckpoint {
@@ -323,6 +382,39 @@ pub(crate) async fn get_checkpoint_tx(
         components,
         plugin_snapshot_revision: manifest.plugin_snapshot_revision,
     }))
+}
+
+#[cfg(test)]
+pub(crate) async fn count_checkpoint_data_statements<F: std::future::Future>(
+    stats_pool: &sqlx::postgres::PgPool,
+    future: F,
+) -> (F::Output, usize) {
+    sqlx::query("SELECT pg_stat_statements_reset()")
+        .execute(stats_pool)
+        .await
+        .expect("reset PostgreSQL statement statistics");
+
+    let output = future.await;
+    let calls = sqlx::query_scalar::<_, i64>(
+        "SELECT calls
+         FROM pg_stat_statements
+         WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+           AND query NOT LIKE '%pg_stat_statements%'",
+    )
+    .fetch_all(stats_pool)
+    .await
+    .expect("read PostgreSQL statement statistics");
+    let count = calls
+        .into_iter()
+        .try_fold(0usize, |total, calls| {
+            let calls =
+                usize::try_from(calls).expect("PostgreSQL statement calls are non-negative");
+            total
+                .checked_add(calls)
+                .ok_or("PostgreSQL statement count fits usize")
+        })
+        .expect("PostgreSQL statement count fits usize");
+    (output, count)
 }
 
 pub(crate) async fn load_session_head_meta_tx(

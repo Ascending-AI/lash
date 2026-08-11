@@ -1455,6 +1455,10 @@ where
             crate::HydratedCheckpointComponent::changed(b"stable-body".to_vec()),
         ),
         (
+            "arbitrary/duplicate-ref".to_string(),
+            crate::HydratedCheckpointComponent::changed(b"stable-body".to_vec()),
+        ),
+        (
             "arbitrary/deleted".to_string(),
             crate::HydratedCheckpointComponent::changed(b"delete-me".to_vec()),
         ),
@@ -1587,6 +1591,16 @@ where
         "hydrate -> ordinary commit -> hydrate must preserve unknown bytes exactly"
     );
     assert_eq!(
+        checkpoint.component_body("arbitrary/duplicate-ref"),
+        Some(&b"stable-body"[..]),
+        "two component keys may resolve the same deduplicated body"
+    );
+    assert_eq!(
+        checkpoint.components["arbitrary/duplicate-ref"].blob_ref(),
+        checkpoint.components["arbitrary/unchanged"].blob_ref(),
+        "duplicate refs must resolve once and hydrate every owning key"
+    );
+    assert_eq!(
         checkpoint.components["arbitrary/unchanged"].blob_ref(),
         Some(&unchanged_descriptor.blob_ref),
         "round-trip must preserve the unknown component's content hash"
@@ -1684,6 +1698,12 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePers
     let error = commit_runtime_state_for_test(&store, commit, "checkpoint-unknown-ref")
         .await
         .expect_err("a checkpoint must reject a ref whose body is absent");
+    assert!(matches!(
+        &error,
+        StoreError::CheckpointComponentMissing { key, blob_ref }
+            if key == "arbitrary/unknown-ref"
+                && blob_ref.as_str() == "checkpoint-component-that-was-never-stored"
+    ));
     assert!(
         error
             .to_string()
