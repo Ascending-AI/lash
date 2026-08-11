@@ -44,6 +44,8 @@ use sqlx::{Connection, PgConnection, PgPool};
 mod checkpoint_cases;
 #[path = "cross_backend_store_differential/coalesced_batch_oracles.rs"]
 mod coalesced_batch_oracles;
+#[path = "cross_backend_store_differential/fork_cases.rs"]
+mod fork_cases;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
 mod generated_surface;
 #[path = "cross_backend_store_differential/observations.rs"]
@@ -72,7 +74,10 @@ enum CaseName {
     CheckpointBodiesThenRefOnly,
     CheckpointBodiesThenCleared,
     MissingCheckpointComponentRef,
+    ForkFencePrecedence,
     PinForkUnpin,
+    ForeignLineageFork,
+    Rewind,
     AttachmentAdoption,
     QueuedWorkClaimAndAbandon,
     DeleteThenAttemptAdmission,
@@ -94,7 +99,10 @@ impl CaseName {
             Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
             Self::CheckpointBodiesThenCleared => "checkpoint_bodies_then_cleared",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
+            Self::ForkFencePrecedence => "fork_fence_exists_precedes_other_fences",
             Self::PinForkUnpin => "pin_fork_unpin_moves_node_anchor",
+            Self::ForeignLineageFork => "fork_accepts_foreign_lineage",
+            Self::Rewind => "rewind_fork_delete_source_refork",
             Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
             Self::QueuedWorkClaimAndAbandon => "queued_work_claim_abandon_preserves_fencing_token",
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
@@ -123,6 +131,9 @@ enum StoreOperation {
     RecordAttachmentIntent,
     PinLeaf,
     ForkAtLeaf,
+    ForkAtExistingTarget,
+    ForkAtForeignLineage,
+    Rewind,
     UnpinLeaf,
     EnqueueNextTurnInput,
     EnqueueQueuedWork,
@@ -178,6 +189,9 @@ impl StoreOperation {
             Self::RecordAttachmentIntent => "record_attachment_intent",
             Self::PinLeaf => "pin_leaf",
             Self::ForkAtLeaf => "fork_at_leaf",
+            Self::ForkAtExistingTarget => "fork_existing_target_precedes_point_fences",
+            Self::ForkAtForeignLineage => "fork_at_foreign_lineage",
+            Self::Rewind => "rewind_fork_delete_source_refork",
             Self::UnpinLeaf => "unpin_leaf",
             Self::EnqueueNextTurnInput => "enqueue_next_turn_input",
             Self::EnqueueQueuedWork => "enqueue_queued_work",
@@ -503,6 +517,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 adopt_attachment: false,
             }],
         },
+        fork_cases::fence_precedence_case(),
         GeneratedCase {
             name: CaseName::PinForkUnpin,
             operations: vec![
@@ -525,6 +540,8 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 StoreOperation::UnpinLeaf,
             ],
         },
+        fork_cases::foreign_lineage_case(),
+        fork_cases::rewind_case(),
         GeneratedCase {
             name: CaseName::AttachmentAdoption,
             operations: vec![
@@ -1521,6 +1538,9 @@ impl BackendRunner {
                     .await?;
                 Ok(None)
             }
+            StoreOperation::ForkAtExistingTarget
+            | StoreOperation::ForkAtForeignLineage
+            | StoreOperation::Rewind => self.apply_fork_operation(operation).await,
             StoreOperation::UnpinLeaf => {
                 self.factory()
                     .unpin(
@@ -2324,7 +2344,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 15);
+    assert_eq!(cases.len(), 18);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2342,7 +2362,10 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "checkpoint_bodies_then_ref_only",
             "checkpoint_bodies_then_cleared",
             "missing_checkpoint_component_ref",
+            "fork_fence_exists_precedes_other_fences",
             "pin_fork_unpin_moves_node_anchor",
+            "fork_accepts_foreign_lineage",
+            "rewind_fork_delete_source_refork",
             "attachment_intent_adopted_by_commit",
             "queued_work_claim_abandon_preserves_fencing_token",
             "delete_then_attempt_admission",

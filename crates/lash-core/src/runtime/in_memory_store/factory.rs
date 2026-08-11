@@ -312,6 +312,8 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         request: &crate::ForkSessionRequest,
     ) -> Result<crate::ForkSessionResult, crate::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
+        // Keep the fork fences in the shared order: exists -> deleted ->
+        // retained -> live -> frame.
         if self.stores.lock_recover().contains_key(&request.session_id) {
             return Err(crate::StoreError::ForkSessionAlreadyExists {
                 session_id: request.session_id.clone(),
