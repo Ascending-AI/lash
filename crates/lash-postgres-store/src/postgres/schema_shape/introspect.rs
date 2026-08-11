@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use sqlx::{PgConnection, Row};
 
+use super::payload_shape::registered_payload_shapes;
 use super::{
     ANCHOR_TABLE, AWAIT_EVENT_SIGNING_SECRET_BYTES, ColumnShape, ColumnValueSource,
     ForeignKeyAction, ForeignKeyShape, SEED_ROWS, SchemaFinding, SchemaReport, SchemaShape,
@@ -519,6 +520,13 @@ pub(crate) async fn read_live_shape(
             .expect("every resolved table was seeded")
             .foreign_keys
             .insert(key);
+    }
+    for ((table, column), payload) in registered_payload_shapes() {
+        if let Some(table) = shape.tables.get_mut(&table)
+            && table.columns.contains_key(&column)
+        {
+            table.payload_shapes.insert(column, payload);
+        }
     }
     Ok(shape)
 }

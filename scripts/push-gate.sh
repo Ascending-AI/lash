@@ -42,6 +42,8 @@ configure_bindgen_headers() {
 run_release_script_tests() {
   step "Repository script tests"
   python3 scripts/test_check_durable_read_fixture_version.py
+  python3 scripts/test_check_postgres_json_carrier_coverage.py
+  python3 scripts/test_check_postgres_payload_shape_version.py
   python3 scripts/test_check_transcript_diff.py
   python3 scripts/test_release_version.py
   python3 scripts/test_publish_workspace.py
@@ -221,6 +223,10 @@ cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
 
 step "Restate handler panic boundary"
 python3 scripts/check-restate-handler-panics.py
+
+step "PostgreSQL payload-shape component version"
+python3 scripts/check-postgres-json-carrier-coverage.py
+python3 scripts/check-postgres-payload-shape-version.py
 
 step "Core/UI boundary guard"
 bash scripts/check-core-ui-boundary.sh

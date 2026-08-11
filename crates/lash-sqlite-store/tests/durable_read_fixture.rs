@@ -51,6 +51,50 @@ async fn sqlite_durable_fixture_reads_with_identical_semantics() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_v30_session_relation_is_refused_before_row_decode() {
+    let fixture_dir = fixture_dir();
+    let temp = tempfile::tempdir().expect("SQLite fixture tempdir");
+    copy_sqlite_fixture(&fixture_dir, temp.path());
+    let durable_core = temp.path().join("durable-core.db");
+    let connection = rusqlite::Connection::open(&durable_core).expect("open copied v30 fixture");
+    let updated = connection
+        .execute(
+            "UPDATE session_meta
+             SET relation_json = ?1
+             WHERE session_id = 'durable-read-fixture'",
+            [r#"{"kind":"child","parent_session_id":"parent","legacy":true}"#],
+        )
+        .expect("inject the previously tolerated nested field");
+    assert_eq!(updated, 1, "the v30 proof must mutate its fixture row");
+    connection
+        .pragma_update(None, "user_version", 30)
+        .expect("stamp the reviewer's v30 fixture");
+    drop(connection);
+
+    let open_error = match Store::open(&durable_core).await {
+        Err(error) => error,
+        Ok(store) => {
+            let decode_error = store
+                .load_session_meta()
+                .await
+                .expect_err("the injected nested field must fail strict row decoding");
+            panic!(
+                "SQLite v30 opened before failing later as stored-data corruption: {decode_error}"
+            );
+        }
+    };
+    let message = open_error.to_string();
+    assert!(
+        message.contains("supports schema version 32"),
+        "open refusal must name the current reject-and-recreate boundary: {message}"
+    );
+    assert!(
+        message.contains("reports version 30"),
+        "open refusal must name the stale v30 fixture: {message}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "writes the committed golden fixture; set LASH_REGENERATE_DURABLE_READ_FIXTURES=1"]
 async fn regenerate_sqlite_durable_fixture() {
     assert_eq!(

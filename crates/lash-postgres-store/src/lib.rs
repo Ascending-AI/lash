@@ -164,7 +164,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 43 removes the CLI-era session name, creation timestamp, model, and
 // working-directory keys from the session metadata JSON payload. Older stores
 // are rejected and recreated; there is no compatibility read path.
-const SCHEMA_VERSION: i32 = 43;
+// Version 45 makes nested session metadata strict and includes enum/tag values
+// in its registered payload shape. Version 44 is already selected by an
+// unmerged sibling lane, so this lane advances past it.
+const SCHEMA_VERSION: i32 = 45;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

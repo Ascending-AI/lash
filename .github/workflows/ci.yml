@@ -83,6 +83,8 @@ jobs:
           python3 scripts/test_check_api_example_coverage.py
           python3 scripts/test_check_core_public_member_docs.py
           python3 scripts/test_check_durable_read_fixture_version.py
+          python3 scripts/test_check_postgres_json_carrier_coverage.py
+          python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
@@ -277,6 +279,11 @@ jobs:
 
       - name: Check durable-read fixture schema declaration
         run: python3 scripts/check-durable-read-fixture-version.py
+
+      - name: Check PostgreSQL payload-shape component version
+        run: |
+          python3 scripts/check-postgres-json-carrier-coverage.py
+          python3 scripts/check-postgres-payload-shape-version.py
 
       # Exercise every database-free runtime and Lashlang measurement path and
       # enforce the cheap budget/phase inventory before release.

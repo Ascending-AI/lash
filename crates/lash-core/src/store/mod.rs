@@ -147,9 +147,101 @@ mod persisted_state_tests {
             } if actual == unsupported
         ));
     }
+
+    #[test]
+    fn session_meta_rejects_unknown_durable_fields() {
+        let error = serde_json::from_str::<SessionMeta>(
+            r#"{
+                "session_id":"stored",
+                "session_name":"stored",
+                "created_at":"2026-08-01T00:00:00Z",
+                "model":"example",
+                "cwd":"/tmp",
+                "relation":{"kind":"root"}
+            }"#,
+        )
+        .expect_err("pre-cutover session metadata must not decode by omission");
+
+        assert!(
+            error.to_string().contains("unknown field `session_name`"),
+            "strict decode must name the first obsolete field: {error}"
+        );
+    }
+
+    #[test]
+    fn session_meta_rejects_unknown_fields_in_nested_relation() {
+        let error = serde_json::from_str::<SessionMeta>(
+            r#"{
+                "session_id":"stored",
+                "relation":{
+                    "kind":"child",
+                    "parent_session_id":"parent",
+                    "legacy":true
+                }
+            }"#,
+        )
+        .expect_err("nested durable relation fields must not decode by omission");
+
+        assert!(
+            error.to_string().contains("unknown field `legacy`"),
+            "strict nested decode must name the obsolete relation field: {error}"
+        );
+    }
+
+    #[test]
+    fn session_meta_rejects_unknown_fields_in_nested_causal_ref() {
+        let error = serde_json::from_str::<SessionMeta>(
+            r#"{
+                "session_id":"stored",
+                "relation":{
+                    "kind":"child",
+                    "parent_session_id":"parent",
+                    "caused_by":{
+                        "type":"turn",
+                        "session_id":"source",
+                        "turn_id":"turn",
+                        "legacy":true
+                    }
+                }
+            }"#,
+        )
+        .expect_err("nested durable causal fields must not decode by omission");
+
+        assert!(
+            error.to_string().contains("unknown field `legacy`"),
+            "strict nested decode must name the obsolete causal field: {error}"
+        );
+    }
+
+    #[test]
+    fn session_meta_rejects_extra_observer_inheritance_variants() {
+        let error = serde_json::from_str::<SessionMeta>(
+            r#"{
+                "session_id":"stored",
+                "relation":{
+                    "kind":"fork",
+                    "source_session_id":"source",
+                    "source_node_id":"node",
+                    "observer_inheritance":{
+                        "only":["process"],
+                        "legacy":true
+                    }
+                }
+            }"#,
+        )
+        .expect_err("externally tagged nested enums must reject extra variants");
+
+        assert!(
+            error.to_string().contains("expected map with a single key"),
+            "externally tagged enum must reject the second variant key: {error}"
+        );
+    }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
 pub struct SessionMeta {
     pub session_id: String,
     pub relation: crate::SessionRelation,
