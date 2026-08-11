@@ -39,6 +39,7 @@ protocol = os.environ.get('PROTOCOL', '2025-11-25')
 log_path = os.environ['LOG_PATH']
 starts_path = os.environ['STARTS_PATH']
 pid_path = os.environ.get('PID_PATH')
+eof_path = os.environ.get('EOF_PATH')
 if pid_path:
     with open(pid_path, 'w', encoding='utf-8') as f:
         f.write(str(os.getpid()))
@@ -120,6 +121,10 @@ for line in sys.stdin:
                   'result': {'_meta': {'alive': True}}})
         elif behavior in ('silent_ping', 'success', 'progress', 'continuous_progress', 'sequence', 'fail_twice_then_success'):
             send({'jsonrpc': '2.0', 'id': message['id'], 'result': {}})
+if behavior == 'ignore_eof':
+    with open(eof_path, 'w', encoding='utf-8') as f:
+        f.write('closed')
+    time.sleep(30)
 "#;
 
 #[derive(Clone, Copy)]
@@ -175,6 +180,10 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
             (
                 "PID_PATH".to_string(),
                 root.join("pid").display().to_string(),
+            ),
+            (
+                "EOF_PATH".to_string(),
+                root.join("eof").display().to_string(),
             ),
         ]),
         cwd: None,
@@ -760,6 +769,47 @@ fn dropping_connected_pool_and_runtime_reaps_stdio_child() {
             .status();
         panic!("stdio child PID {pid} remained alive after pool and runtime drop");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_drop_does_not_wait_for_in_flight_graceful_child_reap() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let pool = runtime.block_on(connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "ignore_eof",
+            ..MockOptions::default()
+        },
+    ));
+    let shutdown_pool = Arc::clone(&pool);
+    runtime.spawn(async move {
+        shutdown_pool.shutdown_all().await;
+    });
+    drop(pool);
+
+    let eof_path = root.path().join("eof");
+    let marker_deadline = Instant::now() + Duration::from_secs(2);
+    while !eof_path.exists() && Instant::now() < marker_deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        eof_path.exists(),
+        "graceful shutdown did not close child stdin"
+    );
+
+    let started = Instant::now();
+    drop(runtime);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "runtime teardown waited for in-flight shutdown's graceful child reaper: {elapsed:?}"
+    );
 }
 
 #[derive(Clone, Default)]
