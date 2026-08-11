@@ -467,12 +467,7 @@ impl ActiveTurnControl {
                 RuntimeEffectLocalExecutor::unavailable(),
             )
             .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    crate::RuntimeErrorCode::from_wire_code(&err.code),
-                    err.message,
-                )
-            })?;
+            .map_err(|err| RuntimeError::new(err.code, err.message))?;
         let RuntimeEffectOutcome::PeekAwaitEvent { resolution } = outcome else {
             return Err(RuntimeError::new(
                 crate::RuntimeErrorCode::TurnControlPeekOutcome,

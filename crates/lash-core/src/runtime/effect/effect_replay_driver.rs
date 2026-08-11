@@ -45,7 +45,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-use crate::RuntimeError;
+use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::await_event_coordinator::{AwaitEventBackend, AwaitEventCoordinator};
 use super::envelope::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome};
@@ -69,30 +69,115 @@ static EFFECT_OWNER_COUNTER: AtomicU64 = AtomicU64::new(1);
 /// failures stay in the backend, which owns its own `_store` mapping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectReplayVocabulary {
-    /// Error-code prefix, e.g. `"sqlite"` or `"postgres"`.
-    pub code_prefix: &'static str,
+    backend: EffectReplayBackend,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EffectReplayBackend {
+    Sqlite,
+    Postgres,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EffectReplayFailure {
+    CorruptRow,
+    Decode,
+    Encode,
+    HashConflict,
+    KeyMissing,
+    LeaseLost,
+    Missing,
+    Store,
 }
 
 impl EffectReplayVocabulary {
-    /// Build the backend-qualified error code for an effect-replay failure.
-    pub fn code(&self, suffix: &str) -> String {
-        format!("{}_effect_replay_{suffix}", self.code_prefix)
+    pub const fn sqlite() -> Self {
+        Self {
+            backend: EffectReplayBackend::Sqlite,
+        }
     }
 
-    fn error(&self, suffix: &str, message: impl Into<String>) -> RuntimeEffectControllerError {
-        RuntimeEffectControllerError::new(self.code(suffix), message)
+    pub const fn postgres() -> Self {
+        Self {
+            backend: EffectReplayBackend::Postgres,
+        }
+    }
+
+    pub fn store_code(&self) -> RuntimeErrorCode {
+        self.code(EffectReplayFailure::Store)
+    }
+
+    fn code(&self, failure: EffectReplayFailure) -> RuntimeErrorCode {
+        match (self.backend, failure) {
+            (EffectReplayBackend::Sqlite, EffectReplayFailure::CorruptRow) => {
+                RuntimeErrorCode::SqliteEffectReplayCorruptRow
+            }
+            (EffectReplayBackend::Sqlite, EffectReplayFailure::Decode) => {
+                RuntimeErrorCode::SqliteEffectReplayDecode
+            }
+            (EffectReplayBackend::Sqlite, EffectReplayFailure::Encode) => {
+                RuntimeErrorCode::SqliteEffectReplayEncode
+            }
+            (EffectReplayBackend::Sqlite, EffectReplayFailure::HashConflict) => {
+                RuntimeErrorCode::SqliteEffectReplayHashConflict
+            }
+            (EffectReplayBackend::Sqlite, EffectReplayFailure::KeyMissing) => {
+                RuntimeErrorCode::SqliteEffectReplayKeyMissing
+            }
+            (EffectReplayBackend::Sqlite, EffectReplayFailure::LeaseLost) => {
+                RuntimeErrorCode::SqliteEffectReplayLeaseLost
+            }
+            (EffectReplayBackend::Sqlite, EffectReplayFailure::Missing) => {
+                RuntimeErrorCode::SqliteEffectReplayMissing
+            }
+            (EffectReplayBackend::Sqlite, EffectReplayFailure::Store) => {
+                RuntimeErrorCode::SqliteEffectReplayStore
+            }
+            (EffectReplayBackend::Postgres, EffectReplayFailure::CorruptRow) => {
+                RuntimeErrorCode::PostgresEffectReplayCorruptRow
+            }
+            (EffectReplayBackend::Postgres, EffectReplayFailure::Decode) => {
+                RuntimeErrorCode::PostgresEffectReplayDecode
+            }
+            (EffectReplayBackend::Postgres, EffectReplayFailure::Encode) => {
+                RuntimeErrorCode::PostgresEffectReplayEncode
+            }
+            (EffectReplayBackend::Postgres, EffectReplayFailure::HashConflict) => {
+                RuntimeErrorCode::PostgresEffectReplayHashConflict
+            }
+            (EffectReplayBackend::Postgres, EffectReplayFailure::KeyMissing) => {
+                RuntimeErrorCode::PostgresEffectReplayKeyMissing
+            }
+            (EffectReplayBackend::Postgres, EffectReplayFailure::LeaseLost) => {
+                RuntimeErrorCode::PostgresEffectReplayLeaseLost
+            }
+            (EffectReplayBackend::Postgres, EffectReplayFailure::Missing) => {
+                RuntimeErrorCode::PostgresEffectReplayMissing
+            }
+            (EffectReplayBackend::Postgres, EffectReplayFailure::Store) => {
+                RuntimeErrorCode::PostgresEffectReplayStore
+            }
+        }
+    }
+
+    fn error(
+        &self,
+        failure: EffectReplayFailure,
+        message: impl Into<String>,
+    ) -> RuntimeEffectControllerError {
+        RuntimeEffectControllerError::new(self.code(failure), message)
     }
 
     fn encode_error(&self, err: serde_json::Error) -> RuntimeEffectControllerError {
         self.error(
-            "encode",
+            EffectReplayFailure::Encode,
             format!("failed to encode runtime effect replay row: {err}"),
         )
     }
 
     fn decode_error(&self, err: serde_json::Error) -> RuntimeEffectControllerError {
         self.error(
-            "decode",
+            EffectReplayFailure::Decode,
             format!("failed to decode runtime effect replay row: {err}"),
         )
     }
@@ -688,11 +773,11 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
                     validate_replayed_effect_envelope(
                         recorded_envelope.as_ref(),
                         &reconstructed_envelope,
-                        &self.vocabulary().code("hash_conflict"),
+                        self.vocabulary().code(EffectReplayFailure::HashConflict),
                         replay_trace.as_ref(),
                     )?;
                     return Err(RuntimeEffectControllerError::new(
-                        "runtime_effect_envelope_canonical_hash_invariant",
+                        RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
                         format!(
                             "stored envelope_hash {stored_envelope_hash} did not match the persisted canonical envelope hash {}",
                             recorded_envelope.hash()
@@ -733,7 +818,10 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             .invocation
             .replay_key()
             .ok_or_else(|| {
-                vocabulary.error("key_missing", "runtime effect envelope requires replay.key")
+                vocabulary.error(
+                    EffectReplayFailure::KeyMissing,
+                    "runtime effect envelope requires replay.key",
+                )
             })?
             .to_string();
         let envelope_json = serde_json::to_string(reconstructed_envelope)
@@ -798,14 +886,14 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
                 Ok(PreparedEffect::Busy { retry_at_ms })
             }
             EffectClaimObservation::StrictReplayMiss => Err(vocabulary.error(
-                "missing",
+                EffectReplayFailure::Missing,
                 format!(
                     "no recorded runtime effect for scope `{}` and replay key `{}`",
                     request.scope_id, request.replay_key
                 ),
             )),
             EffectClaimObservation::CorruptRow { defect } => {
-                Err(vocabulary.error("corrupt_row", defect.message()))
+                Err(vocabulary.error(EffectReplayFailure::CorruptRow, defect.message()))
             }
         }
     }
@@ -830,7 +918,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             return Ok(());
         }
         Err(vocabulary.error(
-            "lease_lost",
+            EffectReplayFailure::LeaseLost,
             format!(
                 "runtime effect replay lease was lost before finalizing scope `{}` replay key `{}`",
                 fence.scope_id, fence.replay_key
@@ -850,7 +938,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             return Ok(());
         }
         Err(self.vocabulary().error(
-            "lease_lost",
+            EffectReplayFailure::LeaseLost,
             format!(
                 "runtime effect replay lease was lost while executing scope `{}` replay key `{}`",
                 fence.scope_id, fence.replay_key
@@ -1248,35 +1336,48 @@ mod tests {
 
     #[test]
     fn vocabularies_reproduce_each_backends_shipped_codes() {
-        let sqlite = EffectReplayVocabulary {
-            code_prefix: "sqlite",
-        };
-        let postgres = EffectReplayVocabulary {
-            code_prefix: "postgres",
-        };
-        assert_eq!(sqlite.code("lease_lost"), "sqlite_effect_replay_lease_lost");
+        let sqlite = EffectReplayVocabulary::sqlite();
+        let postgres = EffectReplayVocabulary::postgres();
         assert_eq!(
-            sqlite.code("hash_conflict"),
-            "sqlite_effect_replay_hash_conflict"
+            sqlite.code(EffectReplayFailure::LeaseLost),
+            RuntimeErrorCode::SqliteEffectReplayLeaseLost
         );
         assert_eq!(
-            sqlite.code("key_missing"),
-            "sqlite_effect_replay_key_missing"
-        );
-        assert_eq!(sqlite.code("missing"), "sqlite_effect_replay_missing");
-        assert_eq!(
-            sqlite.code("corrupt_row"),
-            "sqlite_effect_replay_corrupt_row"
-        );
-        assert_eq!(sqlite.code("store"), "sqlite_effect_replay_store");
-        assert_eq!(sqlite.code("encode"), "sqlite_effect_replay_encode");
-        assert_eq!(sqlite.code("decode"), "sqlite_effect_replay_decode");
-        assert_eq!(
-            postgres.code("lease_lost"),
-            "postgres_effect_replay_lease_lost"
+            sqlite.code(EffectReplayFailure::HashConflict),
+            RuntimeErrorCode::SqliteEffectReplayHashConflict
         );
         assert_eq!(
-            postgres.error("corrupt_row", "boom").message,
+            sqlite.code(EffectReplayFailure::KeyMissing),
+            RuntimeErrorCode::SqliteEffectReplayKeyMissing
+        );
+        assert_eq!(
+            sqlite.code(EffectReplayFailure::Missing),
+            RuntimeErrorCode::SqliteEffectReplayMissing
+        );
+        assert_eq!(
+            sqlite.code(EffectReplayFailure::CorruptRow),
+            RuntimeErrorCode::SqliteEffectReplayCorruptRow
+        );
+        assert_eq!(
+            sqlite.code(EffectReplayFailure::Store),
+            RuntimeErrorCode::SqliteEffectReplayStore
+        );
+        assert_eq!(
+            sqlite.code(EffectReplayFailure::Encode),
+            RuntimeErrorCode::SqliteEffectReplayEncode
+        );
+        assert_eq!(
+            sqlite.code(EffectReplayFailure::Decode),
+            RuntimeErrorCode::SqliteEffectReplayDecode
+        );
+        assert_eq!(
+            postgres.code(EffectReplayFailure::LeaseLost),
+            RuntimeErrorCode::PostgresEffectReplayLeaseLost
+        );
+        assert_eq!(
+            postgres
+                .error(EffectReplayFailure::CorruptRow, "boom")
+                .message,
             "boom".to_string()
         );
     }

@@ -21,9 +21,9 @@ use lash_core::{
     ProcessRecord, ProcessRegistry, Resolution, ResolveOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeInvocation, ScopedEffectController, facade_support::CanonicalRuntimeEffectEnvelope,
-    facade_support::RuntimeAwaitEventOptions, facade_support::RuntimeSleepOptions,
-    facade_support::validate_replayed_effect_envelope,
+    RuntimeErrorCode, RuntimeInvocation, ScopedEffectController,
+    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
+    facade_support::RuntimeSleepOptions, facade_support::validate_replayed_effect_envelope,
 };
 use restate_sdk::context::RunRetryPolicy;
 use restate_sdk::errors::TerminalError;
@@ -164,7 +164,7 @@ fn restate_turn_cancel_wait_request(
     };
     let Some(scope) = turn_cancel_scope else {
         return Err(RuntimeEffectControllerError::new(
-            "restate_turn_cancel_scope_missing",
+            RuntimeErrorCode::RestateTurnCancelScopeMissing,
             "turn effects that observe cancellation require a durable turn-cancel scope",
         ));
     };
@@ -173,7 +173,7 @@ fn restate_turn_cancel_wait_request(
     }
     let scope @ ExecutionScope::Turn { .. } = scope else {
         return Err(RuntimeEffectControllerError::new(
-            "restate_turn_cancel_scope_mismatch",
+            RuntimeErrorCode::RestateTurnCancelScopeMismatch,
             "turn-cancel scope must be a matching turn scope or an explicit process scope",
         ));
     };
@@ -184,7 +184,7 @@ fn restate_turn_cancel_wait_request(
         || scope.turn_id() != Some(turn_id)
     {
         return Err(RuntimeEffectControllerError::new(
-            "restate_turn_cancel_scope_mismatch",
+            RuntimeErrorCode::RestateTurnCancelScopeMismatch,
             "turn-cancel scope must match the runtime effect invocation",
         ));
     }
@@ -636,7 +636,7 @@ where
                         });
                         cancellation.cancel();
                         return Err(RuntimeEffectControllerError::new(
-                            "runtime_effect_sleep_cancelled",
+                            RuntimeErrorCode::RuntimeEffectSleepCancelled,
                             "runtime effect sleep was cancelled",
                         ));
                     }
@@ -649,7 +649,7 @@ where
                         });
                         tracing_sleep_error(&invocation, &err);
                         return Err(RuntimeEffectControllerError::new(
-                            "restate_effect_controller",
+                            RuntimeErrorCode::RestateEffectController,
                             err.to_string(),
                         ));
                     }
@@ -730,7 +730,7 @@ where
                             }
                         });
                         Err(RuntimeEffectControllerError::new(
-                            "restate_effect_controller",
+                            RuntimeErrorCode::RestateEffectController,
                             err.to_string(),
                         ))
                     }
@@ -776,7 +776,7 @@ where
                             }
                         });
                         return Err(RuntimeEffectControllerError::new(
-                            "restate_effect_controller",
+                            RuntimeErrorCode::RestateEffectController,
                             error.to_string(),
                         ));
                     }
@@ -959,7 +959,7 @@ where
                 Err(err) => {
                     trace_resolve("process", "failed");
                     return Err(RuntimeEffectControllerError::new(
-                        "restate_process_await",
+                        RuntimeErrorCode::RestateProcessAwait,
                         err.to_string(),
                     ));
                 }
@@ -973,7 +973,7 @@ where
                     trace_resolve("process", "turn_cancelled");
                     let Some(turn_cancellation) = turn_cancellation.as_ref() else {
                         return Err(RuntimeEffectControllerError::new(
-                            "restate_process_turn_cancel_context_missing",
+                            RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
                             "process-await cancellation won without turn-cancellation context",
                         ));
                     };
@@ -997,7 +997,7 @@ where
                         Err(err) => {
                             trace_resolve("process_after_turn_cancel", "failed");
                             return Err(RuntimeEffectControllerError::new(
-                                "restate_process_await_after_turn_cancel",
+                                RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
                                 err.to_string(),
                             ));
                         }
@@ -1238,7 +1238,7 @@ pub(crate) fn validate_recorded_effect_envelope(
     validate_replayed_effect_envelope(
         recorded.envelope.as_ref(),
         reconstructed,
-        "restate_effect_hash_mismatch",
+        RuntimeErrorCode::RestateEffectHashMismatch,
         trace,
     )?;
     Ok(recorded.outcome)

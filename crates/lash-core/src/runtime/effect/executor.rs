@@ -673,7 +673,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             } => execute_local_sleep(envelope, cancellation, clock.as_ref()).await,
             RuntimeEffectLocalExecutorState::ExternalWaitOptions { .. } => {
                 Err(RuntimeEffectControllerError::new(
-                    "runtime_effect_local_executor_mismatch",
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                     format!(
                         "local await-event options cannot execute {} command directly",
                         envelope.command.kind().as_str()
@@ -681,21 +681,21 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 ))
             }
             RuntimeEffectLocalExecutorState::Unavailable => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_unavailable",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                 format!(
                     "no local executor is available for {}",
                     envelope.command.kind().as_str()
                 ),
             )),
             RuntimeEffectLocalExecutorState::Process(_) => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_mismatch",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
                     "process executor cannot execute {} command directly",
                     envelope.command.kind().as_str()
                 ),
             )),
             RuntimeEffectLocalExecutorState::Trigger(_) => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_mismatch",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
                     "trigger executor cannot execute {} command directly",
                     envelope.command.kind().as_str()
@@ -710,7 +710,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         match self.state {
             RuntimeEffectLocalExecutorState::Process(execution) => Ok(execution),
             _ => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_unavailable",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                 "no process executor is available for process command",
             )),
         }
@@ -842,7 +842,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         match self.state {
             RuntimeEffectLocalExecutorState::Trigger(execution) => Ok(execution),
             _ => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_unavailable",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                 "no trigger executor is available for trigger command",
             )),
         }
@@ -859,7 +859,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             .effect_id()
             .ok_or_else(|| {
                 RuntimeEffectControllerError::new(
-                    "runtime_effect_invocation_subject",
+                    crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
                     "trigger effect requires an effect id",
                 )
             })?
@@ -883,7 +883,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     .await
             }
             _ => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_unavailable",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                 "no trigger executor is available for trigger command",
             )),
         }
@@ -1001,7 +1001,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                 })
             }
             command => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_mismatch",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
                     "local tool executor cannot execute {} command",
                     command.kind().as_str()
@@ -1029,7 +1029,7 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         } = envelope.command
         else {
             return Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_mismatch",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 "prepared tool attempt executor requires a tool_attempt command",
             ));
         };
@@ -1148,7 +1148,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 Ok(RuntimeEffectOutcome::Sleep)
             }
             command => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_mismatch",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
                     "local turn executor cannot execute {} command",
                     command.kind().as_str()
@@ -1200,7 +1200,7 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                 Ok(RuntimeEffectOutcome::Sleep)
             }
             command => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_local_executor_mismatch",
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
                     "local direct executor cannot execute {} command",
                     command.kind().as_str()
@@ -1221,13 +1221,13 @@ impl RuntimeEffectLocalRunner for RemoteEffectRunner {
             .send(RemoteLocalExecutionRequest { envelope, response })
             .map_err(|_| {
                 RuntimeEffectControllerError::new(
-                    "runtime_effect_local_task_closed",
+                    crate::RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
                     "spawned effect local executor is no longer running",
                 )
             })?;
         response_rx.await.map_err(|_| {
             RuntimeEffectControllerError::new(
-                "runtime_effect_local_task_closed",
+                crate::RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
                 "spawned effect local executor response was dropped",
             )
         })?
@@ -1280,7 +1280,7 @@ async fn execute_local_sleep(
             Ok(RuntimeEffectOutcome::Sleep)
         }
         command => Err(RuntimeEffectControllerError::new(
-            "runtime_effect_local_executor_mismatch",
+            crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
             format!(
                 "local sleep executor cannot execute {} command",
                 command.kind().as_str()
@@ -1298,7 +1298,7 @@ async fn sleep_with_cancellation(
     tokio::pin!(sleep);
     tokio::select! {
         _ = cancellation.cancelled() => Err(RuntimeEffectControllerError::new(
-            "runtime_effect_sleep_cancelled",
+            crate::RuntimeErrorCode::RuntimeEffectSleepCancelled,
             "runtime effect sleep was cancelled",
         )),
         _ = &mut sleep => Ok(()),

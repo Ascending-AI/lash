@@ -209,6 +209,20 @@ fn runtime_shape_uses_the_shared_terminal_classifier() {
 }
 
 #[test]
+fn foreign_effect_controller_codes_remain_explicit_extensions() {
+    let error = lash::runtime::RuntimeEffectControllerError::foreign(
+        "workbench_extension_abort",
+        "extension refused the effect",
+    );
+
+    assert_eq!(
+        error.code,
+        lash::runtime::RuntimeErrorCode::from_wire_code("workbench_extension_abort")
+    );
+    assert_eq!(error.code.as_str(), "workbench_extension_abort");
+}
+
+#[test]
 fn nested_deleted_session_details_preserve_controller_store_context() {
     let source = lash::persistence::StoreError::SessionDeleted {
         session_id: "retired-nested-context".to_string(),
@@ -560,34 +574,71 @@ async fn effect_replay_ownership_decides_who_may_drive_a_foreground_turn() {
     session.close().await.expect("close the executed session");
 }
 
-#[test]
-fn restate_runtime_codes_strengthen_handler_settlement() {
-    let retryable = classified_embed_handler_error(lash::EmbedError::Runtime(
-        lash::runtime::RuntimeError::new(
-            lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,
-            "temporary Restate ingress failure",
-        ),
-    ));
-    let retryable_rendered =
-        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&retryable)
-            .to_string();
-    assert!(
-        !retryable_rendered.starts_with("Terminal error"),
-        "retryable Restate effects must remain retryable, got {retryable_rendered}"
-    );
+async fn counted_settlement_attempts(
+    state: &crate::AppState,
+    session_id: &str,
+    code: lash::runtime::RuntimeErrorCode,
+) -> usize {
+    for attempt in 1..=2 {
+        let error = super::terminalize_turn_execution(
+            state,
+            session_id,
+            "fig1058-settlement-turn",
+            "fig1058.settlement",
+            Ok(Err(AppError::runtime(lash::EmbedError::Runtime(
+                lash::runtime::RuntimeError::new(code.clone(), "injected settlement failure"),
+            )))),
+        )
+        .await
+        .expect_err("the injected handler attempt must fail");
+        let rendered =
+            <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
+                .to_string();
+        if rendered.starts_with("Terminal error") {
+            return attempt;
+        }
+    }
+    2
+}
 
-    let terminal = classified_embed_handler_error(lash::EmbedError::Runtime(
-        lash::runtime::RuntimeError::new(
+#[tokio::test]
+async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::new(lash::triggers::InMemoryTriggerStore::default()),
+    )
+    .await;
+
+    assert_eq!(
+        counted_settlement_attempts(
+            &state,
+            "fig1058-terminal-settlement",
+            lash::runtime::RuntimeErrorCode::PostgresEffectReplayLeaseLost,
+        )
+        .await,
+        1,
+        "unsafe post-effect lease loss must settle on its first handler attempt"
+    );
+    assert_eq!(
+        counted_settlement_attempts(
+            &state,
+            "fig1058-retryable-settlement",
+            lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,
+        )
+        .await,
+        2,
+        "a retryable Restate ingress failure must reach a second handler attempt"
+    );
+    assert_eq!(
+        counted_settlement_attempts(
+            &state,
+            "fig1058-decode-settlement",
             lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode,
-            "persisted terminal shape is invalid",
-        ),
-    ));
-    let terminal_rendered =
-        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&terminal)
-            .to_string();
-    assert!(
-        terminal_rendered.starts_with("Terminal error"),
-        "deterministic Restate decode failures must settle terminally, got {terminal_rendered}"
+        )
+        .await,
+        1,
+        "a deterministic Restate decode failure must settle on its first handler attempt"
     );
 }
 

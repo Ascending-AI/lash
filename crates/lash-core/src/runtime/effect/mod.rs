@@ -383,7 +383,10 @@ mod tests {
         .into_tool_batch_effect()
         .expect_err("tool attempt is not a tool batch outcome");
 
-        assert_eq!(error.code, "runtime_effect_wrong_outcome");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::RuntimeEffectWrongOutcome
+        );
         assert!(error.message.contains("expected tool_batch outcome"));
         assert!(error.message.contains("got tool_attempt"));
     }

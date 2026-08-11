@@ -342,7 +342,7 @@ async fn sleep_before_retry(
     match outcome {
         crate::RuntimeEffectOutcome::Sleep => Ok(()),
         other => Err(crate::RuntimeEffectControllerError::new(
-            "runtime_effect_wrong_outcome",
+            crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
             format!("expected sleep outcome, got {}", other.kind().as_str()),
         )),
     }

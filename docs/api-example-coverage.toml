@@ -469,8 +469,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectReplayOwnership"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:470#lash::EffectReplayOwnership::Runtime,"
-assertion = "examples/agent-workbench/src/restate_tests.rs:470#lash::EffectReplayOwnership::Runtime,"
+usage = "examples/agent-workbench/src/restate_tests.rs:484#lash::EffectReplayOwnership::Runtime,"
+assertion = "examples/agent-workbench/src/restate_tests.rs:484#lash::EffectReplayOwnership::Runtime,"
 
 [[api]]
 symbol = "lash::EffectReplayOwnership::Controller"
@@ -479,8 +479,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectReplayOwnership::Controller"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:475#lash::EffectReplayOwnership::Controller,"
-assertion = "examples/agent-workbench/src/restate_tests.rs:476#\"the Restate host hands effect replay to the controller\""
+usage = "examples/agent-workbench/src/restate_tests.rs:489#lash::EffectReplayOwnership::Controller,"
+assertion = "examples/agent-workbench/src/restate_tests.rs:490#\"the Restate host hands effect replay to the controller\""
 
 [[api]]
 symbol = "lash::EffectReplayOwnership::Runtime"
@@ -489,8 +489,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectReplayOwnership::Runtime"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:470#lash::EffectReplayOwnership::Runtime,"
-assertion = "examples/agent-workbench/src/restate_tests.rs:470#lash::EffectReplayOwnership::Runtime,"
+usage = "examples/agent-workbench/src/restate_tests.rs:484#lash::EffectReplayOwnership::Runtime,"
+assertion = "examples/agent-workbench/src/restate_tests.rs:484#lash::EffectReplayOwnership::Runtime,"
 
 [[api]]
 symbol = "lash::EmbedError"
@@ -499,8 +499,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:216#let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController("
-assertion = "examples/agent-workbench/src/restate_tests.rs:221#crate::deleted_session_details(&error),"
+usage = "examples/agent-workbench/src/restate_tests.rs:230#let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController("
+assertion = "examples/agent-workbench/src/restate_tests.rs:235#crate::deleted_session_details(&error),"
 
 [[api]]
 symbol = "lash::EmbedError::Control"
@@ -545,7 +545,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::DurableEffectHostRequiresHandlerContext"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:525#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
+usage = "examples/agent-workbench/src/restate_tests.rs:539#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
 assertion = "examples/agent-workbench/src/restate_tests.rs:175#deleted_rendered.starts_with(\"Terminal error\"),"
 
 [[api]]
@@ -555,8 +555,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::DurableEffectHostRequiresHandlerContext::operation"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:525#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
-assertion = "examples/agent-workbench/src/restate_tests.rs:525#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
+usage = "examples/agent-workbench/src/restate_tests.rs:539#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
+assertion = "examples/agent-workbench/src/restate_tests.rs:539#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
 
 [[api]]
 symbol = "lash::EmbedError::EphemeralSessionIdReused"
@@ -692,8 +692,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Plugin"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:216#let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController("
-assertion = "examples/agent-workbench/src/restate_tests.rs:221#crate::deleted_session_details(&error),"
+usage = "examples/agent-workbench/src/restate_tests.rs:230#let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController("
+assertion = "examples/agent-workbench/src/restate_tests.rs:235#crate::deleted_session_details(&error),"
 
 [[api]]
 symbol = "lash::EmbedError::Plugin::0"
@@ -1277,7 +1277,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::effect_host"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:327#let effect_host = state.core.effect_host();"
+usage = "examples/agent-workbench/src/restate_tests.rs:341#let effect_host = state.core.effect_host();"
 assertion = "examples/agent-workbench/src/restate_tests.rs:175#deleted_rendered.starts_with(\"Terminal error\"),"
 
 [[api]]
@@ -9230,7 +9230,7 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectHost"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:329#.scoped(lash::runtime::ExecutionScope::runtime_operation("
+usage = "examples/agent-workbench/src/restate_tests.rs:343#.scoped(lash::runtime::ExecutionScope::runtime_operation("
 assertion = "examples/agent-workbench/src/restate_tests.rs:175#deleted_rendered.starts_with(\"Terminal error\"),"
 
 [[api]]
@@ -9249,7 +9249,7 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectHost::scoped"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:329#.scoped(lash::runtime::ExecutionScope::runtime_operation("
+usage = "examples/agent-workbench/src/restate_tests.rs:343#.scoped(lash::runtime::ExecutionScope::runtime_operation("
 assertion = "examples/agent-workbench/src/restate_tests.rs:175#deleted_rendered.starts_with(\"Terminal error\"),"
 
 [[api]]
@@ -16090,8 +16090,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStoreCreateRequest"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:238#policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:262#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/restate_tests.rs:252#policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:276#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::SessionStoreCreateRequest::parent_session_id"
@@ -16109,8 +16109,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStoreCreateRequest::policy"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:238#policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:262#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/restate_tests.rs:252#policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:276#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::SessionStoreCreateRequest::relation"
@@ -16119,8 +16119,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStoreCreateRequest::relation"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:237#relation: lash::persistence::SessionRelation::default(),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:262#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/restate_tests.rs:251#relation: lash::persistence::SessionRelation::default(),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:276#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::SessionStoreCreateRequest::session_id"
@@ -16129,8 +16129,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStoreCreateRequest::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:236#session_id: session_id.to_string(),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:262#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/restate_tests.rs:250#session_id: session_id.to_string(),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:276#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::SessionStoreFactory"
@@ -19695,8 +19695,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginError::RuntimeEffectController"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:216#let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController("
-assertion = "examples/agent-workbench/src/restate_tests.rs:221#crate::deleted_session_details(&error),"
+usage = "examples/agent-workbench/src/restate_tests.rs:230#let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController("
+assertion = "examples/agent-workbench/src/restate_tests.rs:235#crate::deleted_session_details(&error),"
 
 [[api]]
 symbol = "lash::plugins::PluginError::RuntimeEffectController::0"
@@ -19714,8 +19714,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginError::Session"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:283#let ambiguous = super::classified_plugin_handler_error(lash::plugins::PluginError::Session("
-assertion = "examples/agent-workbench/src/restate_tests.rs:276#\"the retired-session refusal must be terminal: {rendered}\""
+usage = "examples/agent-workbench/src/restate_tests.rs:297#let ambiguous = super::classified_plugin_handler_error(lash::plugins::PluginError::Session("
+assertion = "examples/agent-workbench/src/restate_tests.rs:290#\"the retired-session refusal must be terminal: {rendered}\""
 
 [[api]]
 symbol = "lash::plugins::PluginError::Session::0"
@@ -24414,8 +24414,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessInput::Engine::kind"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:393#kind: \"fig806-cron-engine\".to_string(),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:407#kind: \"fig806-cron-engine\".to_string(),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::process::ProcessInput::Engine::payload"
@@ -24424,8 +24424,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessInput::Engine::payload"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:394#payload: serde_json::json!({}),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:408#payload: serde_json::json!({}),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::process::ProcessInput::External"
@@ -43345,7 +43345,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:329#.scoped(lash::runtime::ExecutionScope::runtime_operation("
+usage = "examples/agent-workbench/src/restate_tests.rs:343#.scoped(lash::runtime::ExecutionScope::runtime_operation("
 assertion = "examples/agent-workbench/src/restate_tests.rs:175#deleted_rendered.starts_with(\"Terminal error\"),"
 
 [[api]]
@@ -43499,7 +43499,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::runtime_operation"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:329#.scoped(lash::runtime::ExecutionScope::runtime_operation("
+usage = "examples/agent-workbench/src/restate_tests.rs:343#.scoped(lash::runtime::ExecutionScope::runtime_operation("
 assertion = "examples/agent-workbench/src/restate_tests.rs:175#deleted_rendered.starts_with(\"Terminal error\"),"
 
 [[api]]
@@ -44770,8 +44770,8 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::queued_work_driver::QueuedWorkDriver"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:257#.claim_and_run_pending(Some(session_id), \"retired_session_regression\")"
-assertion = "examples/agent-workbench/src/restate_tests.rs:262#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/restate_tests.rs:271#.claim_and_run_pending(Some(session_id), \"retired_session_regression\")"
+assertion = "examples/agent-workbench/src/restate_tests.rs:276#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkDriver::claim_and_run_pending"
@@ -44780,8 +44780,8 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::queued_work_driver::QueuedWorkDriver::claim_and_run_pending"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:257#.claim_and_run_pending(Some(session_id), \"retired_session_regression\")"
-assertion = "examples/agent-workbench/src/restate_tests.rs:262#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/restate_tests.rs:271#.claim_and_run_pending(Some(session_id), \"retired_session_regression\")"
+assertion = "examples/agent-workbench/src/restate_tests.rs:276#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkDriver::new"
@@ -44790,8 +44790,8 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::queued_work_driver::QueuedWorkDriver::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:248#lash::runtime::QueuedWorkDriver::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {"
-assertion = "examples/agent-workbench/src/restate_tests.rs:262#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/restate_tests.rs:262#lash::runtime::QueuedWorkDriver::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {"
+assertion = "examples/agent-workbench/src/restate_tests.rs:276#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkDriver::notify_pending_work"
@@ -45570,6 +45570,16 @@ aliases = ["lash_core::RuntimeEffectControllerError::code"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectControllerError::code. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectControllerError::foreign"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectControllerError::foreign"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/restate_tests.rs:213#let error = lash::runtime::RuntimeEffectControllerError::foreign("
+assertion = "examples/agent-workbench/src/restate_tests.rs:220#lash::runtime::RuntimeErrorCode::from_wire_code(\"workbench_extension_abort\")"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectControllerError::message"
@@ -46575,6 +46585,492 @@ disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/persistence.rs:198#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
 
 [[api]]
+symbol = "lash::runtime::RuntimeErrorCode::AttachmentSourcePolicyDenied"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::AttachmentSourcePolicyDenied"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::EffectPanicked"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::EffectPanicked"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::Plugin"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::Plugin"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::PostgresEffectReplayCorruptRow"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::PostgresEffectReplayCorruptRow"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::PostgresEffectReplayDecode"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::PostgresEffectReplayDecode"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::PostgresEffectReplayEncode"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::PostgresEffectReplayEncode"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::PostgresEffectReplayHashConflict"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::PostgresEffectReplayHashConflict"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::PostgresEffectReplayKeyMissing"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::PostgresEffectReplayKeyMissing"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::PostgresEffectReplayLeaseLost"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::PostgresEffectReplayLeaseLost"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::PostgresEffectReplayMissing"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::PostgresEffectReplayMissing"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::PostgresEffectReplayStore"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::PostgresEffectReplayStore"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ProcessPanicked"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ProcessPanicked"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ProcessRegistryUnavailable"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ProcessRegistryUnavailable"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ProcessSignalWaitCancelled"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ProcessSignalWaitCancelled"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ProcessSignalWaitTimeout"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ProcessSignalWaitTimeout"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateEffectHashMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateEffectHashMismatch"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateProcessAwait"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateProcessAwait"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateProcessTurnCancelContextMissing"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateProcessTurnCancelContextMissing"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateTurnCancelScopeMismatch"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMissing"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateTurnCancelScopeMissing"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectAttachmentStore"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectAttachmentStore"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectEnvelopeHash"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectEnvelopeHash"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectInvocationKind"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectInvocationKind"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectInvocationSubject"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectInvocationSubject"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectLocalTaskClosed"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectLocalTaskClosed"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectProcessTaskJoin"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectProcessTaskJoin"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectReplayRequired"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectReplayRequired"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectSleepCancelled"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectTaskJoin"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectTaskJoin"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectToolAttemptCallId"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectToolAttemptCallId"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectToolAttemptIndex"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectToolAttemptIndex"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchCallId"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectToolBatchCallId"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchCallReplay"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectToolBatchCallReplay"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchEmpty"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectToolBatchEmpty"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchId"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectToolBatchId"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectWrongOutcome"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectWrongOutcome"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SqliteEffectReplayCorruptRow"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SqliteEffectReplayCorruptRow"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SqliteEffectReplayDecode"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SqliteEffectReplayDecode"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SqliteEffectReplayEncode"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SqliteEffectReplayEncode"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SqliteEffectReplayHashConflict"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SqliteEffectReplayKeyMissing"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SqliteEffectReplayKeyMissing"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SqliteEffectReplayLeaseLost"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SqliteEffectReplayLeaseLost"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SqliteEffectReplayMissing"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SqliteEffectReplayMissing"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SqliteEffectReplayStore"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SqliteEffectReplayStore"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ToolBatchMissingResult"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ToolBatchMissingResult"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ToolBatchResultCountMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ToolBatchResultCountMismatch"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ToolCatalogResolutionFailed"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::TriggerStoreUnavailable"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::TriggerStoreUnavailable"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
 symbol = "lash::runtime::RuntimeErrorCode::AwaitEventCancelUnsupported"
 kind = "variant"
 availability = "default+all-features"
@@ -46969,8 +47465,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::RestateAwaitEventResolve"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:567#lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,"
-assertion = "examples/agent-workbench/src/restate_tests.rs:575#!retryable_rendered.starts_with(\"Terminal error\"),"
+usage = "examples/agent-workbench/src/restate_tests.rs:627#lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,"
+assertion = "examples/agent-workbench/src/restate_tests.rs:631#\"a retryable Restate ingress failure must reach a second handler attempt\""
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::RestateAwaitEventRevocationRead"
@@ -47051,8 +47547,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::RestateTurnTerminalDecode"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:581#lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode,"
-assertion = "examples/agent-workbench/src/restate_tests.rs:589#terminal_rendered.starts_with(\"Terminal error\"),"
+usage = "examples/agent-workbench/src/restate_tests.rs:637#lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode,"
+assertion = "examples/agent-workbench/src/restate_tests.rs:641#\"a deterministic Restate decode failure must settle on its first handler attempt\""
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::RestateTurnTerminalInvalidResolution"
@@ -48020,8 +48516,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::borrowed"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:419#let scoped = lash::runtime::ScopedEffectController::borrowed("
-assertion = "examples/agent-workbench/src/restate_tests.rs:432#.unwrap_or_else(|error| panic!(\"cron attempt {attempt} failed: {error:?}\"));"
+usage = "examples/agent-workbench/src/restate_tests.rs:433#let scoped = lash::runtime::ScopedEffectController::borrowed("
+assertion = "examples/agent-workbench/src/restate_tests.rs:446#.unwrap_or_else(|error| panic!(\"cron attempt {attempt} failed: {error:?}\"));"
 
 [[api]]
 symbol = "lash::runtime::ScopedEffectController::controller"
@@ -59798,8 +60294,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Register"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:382#lash::triggers::TriggerCommand::Register {"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:396#lash::triggers::TriggerCommand::Register {"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Register::actor"
@@ -59818,8 +60314,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Register::draft"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:387#draft: lash::triggers::TriggerSubscriptionDraft::for_process("
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:401#draft: lash::triggers::TriggerSubscriptionDraft::for_process("
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Register::owner_scope"
@@ -59828,8 +60324,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Register::owner_scope"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:383#owner_scope: lash::triggers::TriggerOwnerScope::session(\"fig806-cron-session\"),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:397#owner_scope: lash::triggers::TriggerOwnerScope::session(\"fig806-cron-session\"),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Revive"
@@ -59973,8 +60469,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommandOutcome"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommandOutcome::List"
@@ -60001,8 +60497,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommandOutcome::Mutation"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommandOutcome::Mutation::receipt"
@@ -60971,8 +61467,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOwnerScope"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:383#owner_scope: lash::triggers::TriggerOwnerScope::session(\"fig806-cron-session\"),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:397#owner_scope: lash::triggers::TriggerOwnerScope::session(\"fig806-cron-session\"),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerOwnerScope::Host"
@@ -61044,8 +61540,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOwnerScope::session"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:383#owner_scope: lash::triggers::TriggerOwnerScope::session(\"fig806-cron-session\"),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:397#owner_scope: lash::triggers::TriggerOwnerScope::session(\"fig806-cron-session\"),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerOwnerScope::session_id"
@@ -61195,8 +61691,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerStore::execute_command"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:379#let outcome = lash::triggers::TriggerStore::execute_command("
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:393#let outcome = lash::triggers::TriggerStore::execute_command("
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerStore::ingest_occurrence"
@@ -61214,8 +61710,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerStore::list_deliveries"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:441#lash::triggers::TriggerStore::list_deliveries(trigger_store.as_ref())"
-assertion = "examples/agent-workbench/src/restate_tests.rs:441#lash::triggers::TriggerStore::list_deliveries(trigger_store.as_ref())"
+usage = "examples/agent-workbench/src/restate_tests.rs:455#lash::triggers::TriggerStore::list_deliveries(trigger_store.as_ref())"
+assertion = "examples/agent-workbench/src/restate_tests.rs:455#lash::triggers::TriggerStore::list_deliveries(trigger_store.as_ref())"
 
 [[api]]
 symbol = "lash::triggers::TriggerStore::list_deliveries_by_occurrence_id"
@@ -61298,8 +61794,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:387#draft: lash::triggers::TriggerSubscriptionDraft::for_process("
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:401#draft: lash::triggers::TriggerSubscriptionDraft::for_process("
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::env_ref"
@@ -61326,8 +61822,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::for_process"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:387#draft: lash::triggers::TriggerSubscriptionDraft::for_process("
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:401#draft: lash::triggers::TriggerSubscriptionDraft::for_process("
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::input_template"
@@ -61471,8 +61967,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::with_payload_schema"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:398#.with_payload_schema(lash::triggers::LashSchema::any()),"
-assertion = "examples/agent-workbench/src/restate_tests.rs:406#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
+usage = "examples/agent-workbench/src/restate_tests.rs:412#.with_payload_schema(lash::triggers::LashSchema::any()),"
+assertion = "examples/agent-workbench/src/restate_tests.rs:420#lash::triggers::TriggerCommandOutcome::Mutation { .. }"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::with_source"

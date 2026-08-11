@@ -29,7 +29,10 @@ impl RuntimeTurnDriver<'_> {
                 Arc::new(crate::ChronologicalProjection::default()),
             )
             .map_err(|err| {
-                RuntimeEffectControllerError::new("tool_catalog_resolution_failed", err.to_string())
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
+                    err.to_string(),
+                )
             })?
             .with_tracing(self.execution_tracing(machine.protocol_iteration()));
         let call_count = calls.len();
@@ -82,7 +85,7 @@ impl RuntimeTurnDriver<'_> {
                 .await?;
             if outcome.launches.len() != prepared_entries.len() {
                 return Err(RuntimeEffectControllerError::new(
-                    "tool_batch_result_count_mismatch",
+                    crate::RuntimeErrorCode::ToolBatchResultCountMismatch,
                     format!(
                         "tool batch returned {} launches for {} prepared calls",
                         outcome.launches.len(),
@@ -156,7 +159,7 @@ impl RuntimeTurnDriver<'_> {
             .map(|(index, result)| {
                 result.ok_or_else(|| {
                     RuntimeEffectControllerError::new(
-                        "tool_batch_missing_result",
+                        crate::RuntimeErrorCode::ToolBatchMissingResult,
                         format!("tool batch did not fill result slot {index}"),
                     )
                 })
@@ -201,7 +204,7 @@ impl RuntimeTurnDriver<'_> {
                 let _ = tool_event_forwarder.await;
                 let _ = turn_event_forwarder.await;
                 return Err(crate::RuntimeEffectControllerError::new(
-                    "tool_catalog_resolution_failed",
+                    crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
                     err.to_string(),
                 ));
             }

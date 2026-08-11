@@ -6,7 +6,7 @@ pub(super) fn map_effect_task_join(
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
     if !err.is_panic() {
         return Err(RuntimeEffectControllerError::new(
-            "runtime_effect_task_join",
+            crate::RuntimeErrorCode::RuntimeEffectTaskJoin,
             format!("spawned local effect task failed: {err}"),
         ));
     }
@@ -31,7 +31,7 @@ pub(super) fn map_effect_task_join(
             triggers: Vec::new(),
         }),
         None => Err(RuntimeEffectControllerError::new(
-            "effect_panicked",
+            crate::RuntimeErrorCode::EffectPanicked,
             message,
         )),
     };
@@ -51,14 +51,14 @@ pub(super) fn map_process_task_join(
             let payload = err.into_panic();
             let message = crate::panic_containment::payload_message(payload.as_ref());
             let result = Err(RuntimeEffectControllerError::new(
-                "process_panicked",
+                crate::RuntimeErrorCode::ProcessPanicked,
                 message,
             ));
             crate::panic_containment::enforce_loudness(payload);
             result
         }
         Err(err) => Err(RuntimeEffectControllerError::new(
-            "runtime_effect_process_task_join",
+            crate::RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
             format!("inline process effect task failed: {err}"),
         )),
     }
