@@ -646,6 +646,11 @@ impl RlmExecutionState {
         }
     }
 
+    #[cfg(feature = "testing")]
+    pub(super) fn absorb_pending_assignments_for_perf(&mut self) {
+        self.absorb_pending_assignments();
+    }
+
     /// Build a capture. Reads state; mutates none of it.
     fn build_capture(&self, mode: CaptureMode) -> Result<PreparedCapture, SessionError> {
         let complete = mode == CaptureMode::Complete;

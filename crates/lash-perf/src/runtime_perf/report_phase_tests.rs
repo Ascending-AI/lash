@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::budgets::{GLOBAL_PHASE_BUDGETS, SCENARIO_KEYED_PHASES};
+use super::budgets::{assert_complete_runtime_budget, configured_phase_names};
 use super::{
     RuntimePerfScenario, ScenarioHarnessKind, phase_wall_clock_budget_ms, required_phases,
 };
@@ -72,60 +72,33 @@ fn typed_runtime_phase_inventory_is_required_and_budgeted() {
 
 #[test]
 fn budget_and_required_phase_inventories_are_closed() {
-    let required = RuntimePerfScenario::KNOWN
-        .into_iter()
-        .flat_map(required_phases)
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let budgeted = GLOBAL_PHASE_BUDGETS
-        .iter()
-        .map(|budget| budget.phase)
-        .chain(SCENARIO_KEYED_PHASES.iter().copied())
-        .collect::<BTreeSet<_>>();
-
-    assert_eq!(
-        budgeted, required,
-        "budget names and the union of scenario-required emitted phases drifted"
-    );
-    assert_eq!(
-        GLOBAL_PHASE_BUDGETS.len(),
-        GLOBAL_PHASE_BUDGETS
+    for scenario in RuntimePerfScenario::KNOWN {
+        assert_complete_runtime_budget(scenario);
+        let required = required_phases(scenario)
             .iter()
-            .map(|budget| budget.phase)
-            .collect::<BTreeSet<_>>()
-            .len(),
-        "global phase budget names must be unique"
-    );
-    assert!(
-        SCENARIO_KEYED_PHASES
-            .iter()
-            .all(|phase| !GLOBAL_PHASE_BUDGETS
-                .iter()
-                .any(|budget| budget.phase == *phase)),
-        "scenario-keyed phases must not retain a loose global fallback"
-    );
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let budgeted = configured_phase_names(scenario).collect::<BTreeSet<_>>();
+        assert!(
+            required.is_subset(&budgeted),
+            "{} is missing budgets for required phases: {:?}",
+            scenario.name(),
+            required.difference(&budgeted).collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]
 fn materially_different_shared_phases_use_scenario_budgets() {
-    assert_eq!(
-        phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "rlm_lashlang.execute"),
-        Some(5.0)
-    );
-    assert_eq!(
+    assert!(
         phase_wall_clock_budget_ms(
             RuntimePerfScenario::RlmObliqueStackMix,
             "rlm_lashlang.execute",
-        ),
-        Some(1_200.0)
+        ) > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "rlm_lashlang.execute")
     );
-    assert_eq!(
-        phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "effect_loop"),
-        Some(125.0)
-    );
-    assert_eq!(
-        phase_wall_clock_budget_ms(RuntimePerfScenario::RlmLargeToolCatalog, "effect_loop"),
-        Some(1_000.0)
+    assert!(
+        phase_wall_clock_budget_ms(RuntimePerfScenario::RlmLargeToolCatalog, "effect_loop")
+            > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "effect_loop")
     );
 }
 

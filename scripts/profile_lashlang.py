@@ -334,6 +334,7 @@ def budget_value(
     section: str,
     scenario: str,
     metric: str,
+    mode: str | None = None,
 ) -> float | None:
     section_budgets = budgets.get("lashlang", {}).get(section, {})
     if not isinstance(section_budgets, dict):
@@ -341,6 +342,10 @@ def budget_value(
     scenario_budgets = section_budgets.get(scenario)
     if not isinstance(scenario_budgets, dict):
         scenario_budgets = section_budgets.get("default", {})
+    if mode is not None and isinstance(scenario_budgets, dict):
+        mode_budgets = scenario_budgets.get(mode)
+        if isinstance(mode_budgets, dict):
+            scenario_budgets = mode_budgets
     value = scenario_budgets.get(metric) if isinstance(scenario_budgets, dict) else None
     if isinstance(value, int | float):
         return float(value)
@@ -357,7 +362,9 @@ def budget_result(
     budget: float | None,
     reason: str | None = None,
 ) -> dict[str, Any]:
-    passed = actual is not None and (budget is None or actual <= budget)
+    passed = actual is not None and budget is not None and actual <= budget
+    if budget is None and reason is None:
+        reason = "missing budget"
     if reason:
         passed = False
     return {
@@ -414,7 +421,13 @@ def evaluate_lashlang_budgets(report: dict[str, Any], budgets: dict[str, Any]) -
                     mode=mode,
                     metric=metric,
                     actual=actual,
-                    budget=budget_value(budgets, "perf", scenario, f"{metric}_max"),
+                    budget=budget_value(
+                        budgets,
+                        "perf",
+                        scenario,
+                        f"{metric}_max",
+                        mode,
+                    ),
                     reason=None if actual is not None else f"missing {metric}",
                 )
             )

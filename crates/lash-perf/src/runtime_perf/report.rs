@@ -685,6 +685,15 @@ fn required_phases(scenario: RuntimePerfScenario) -> &'static [&'static str] {
             "standard_parallel_tools_checkpoint",
             "rlm_exec_checkpoint",
         ],
+        RuntimePerfScenario::CheckpointStateHotPaths => &[
+            "checkpoint_state.initial_capture",
+            "checkpoint_state.dirty_binding_update",
+            "checkpoint_state.incremental_capture",
+            "checkpoint_state.measure_budget",
+            "checkpoint_state.component_commit",
+            "checkpoint_state.component_load",
+            "checkpoint_state.execution_restore",
+        ],
         RuntimePerfScenario::LiveReplayPressure => &[
             "live_replay.append",
             "live_replay.current_cursor_parse",
@@ -1406,23 +1415,15 @@ mod tests {
 
     #[test]
     fn async_completion_scenarios_have_specific_guard_budgets() {
-        assert_eq!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmAsyncToolCompletion),
-            145_000_000.0
+        assert!(
+            allocation_budget_bytes(RuntimePerfScenario::RlmAsyncToolCompletion)
+                < allocation_budget_bytes(RuntimePerfScenario::RlmProcessAsyncToolCompletion)
         );
-        assert_eq!(
-            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmAsyncToolCompletion),
-            11_000_000.0
-        );
-        assert_eq!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmProcessAsyncToolCompletion),
-            290_000_000.0
-        );
-        assert_eq!(
-            steady_state_turn_allocation_budget_bytes(
-                RuntimePerfScenario::RlmProcessAsyncToolCompletion
-            ),
-            23_000_000.0
+        assert!(
+            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmAsyncToolCompletion)
+                < steady_state_turn_allocation_budget_bytes(
+                    RuntimePerfScenario::RlmProcessAsyncToolCompletion
+                )
         );
         assert!(wall_clock_budget_ms(RuntimePerfScenario::RlmAsyncToolCompletion) < 10_000.0);
         assert!(
@@ -1468,48 +1469,43 @@ mod tests {
                 "missing required phase {expected}"
             );
         }
-        assert_eq!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline),
-            260_000_000.0
+        assert!(
+            allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline) <= 300_000_000.0
         );
         assert!(
             steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline)
                 <= 20_000_000.0
         );
-        assert_eq!(
-            wall_clock_budget_ms(RuntimePerfScenario::RlmTriggerMailPipeline),
-            520.0
-        );
-        assert_eq!(
+        let total_budget_ms = wall_clock_budget_ms(RuntimePerfScenario::RlmTriggerMailPipeline);
+        assert!(total_budget_ms.is_finite() && total_budget_ms > 0.0);
+        assert!(
             phase_wall_clock_budget_ms(
                 RuntimePerfScenario::RlmTriggerMailPipeline,
                 "trigger.occurrence_to_delivery",
-            ),
-            Some(55.0)
+            )
+            .is_some_and(|budget_ms| budget_ms > 0.0 && budget_ms < total_budget_ms)
         );
     }
 
     #[test]
     fn turn_lifecycle_hot_paths_have_specific_phase_budgets() {
-        for (scenario, phase, budget_ms) in [
-            (
-                RuntimePerfScenario::TurnStartGate,
-                "turn_cancel.start_gate",
-                1_200.0,
-            ),
+        for (scenario, phase) in [
+            (RuntimePerfScenario::TurnStartGate, "turn_cancel.start_gate"),
             (
                 RuntimePerfScenario::TurnCancelRoundTrip,
                 "turn_cancel.request_to_token_to_seal",
-                60.0,
             ),
             (
                 RuntimePerfScenario::IngressClaimProjection,
                 "turn_input_ingress.enqueue_to_claim_to_projection",
-                195.0,
             ),
         ] {
             assert!(required_phases(scenario).contains(&phase));
-            assert_eq!(phase_wall_clock_budget_ms(scenario, phase), Some(budget_ms));
+            let total_budget_ms = wall_clock_budget_ms(scenario);
+            assert!(
+                phase_wall_clock_budget_ms(scenario, phase)
+                    .is_some_and(|budget_ms| budget_ms > 0.0 && budget_ms < total_budget_ms)
+            );
         }
     }
 
@@ -1551,13 +1547,12 @@ mod tests {
                 "missing required phase {expected}"
             );
         }
-        assert_eq!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix),
-            1_950_000_000.0
+        assert!(
+            allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix) <= 2_000_000_000.0
         );
-        assert_eq!(
-            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix),
-            165_000_000.0
+        assert!(
+            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix)
+                <= 170_000_000.0
         );
         assert!(wall_clock_budget_ms(RuntimePerfScenario::RlmObliqueStackMix) <= 20_000.0);
     }

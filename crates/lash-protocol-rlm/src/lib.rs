@@ -18,6 +18,8 @@ mod tool_catalog;
 
 pub use control_tools::continue_as_tool_definition;
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
+#[cfg(feature = "testing")]
+pub use executor::RlmCheckpointPerfFixture;
 pub use lash_lashlang_runtime::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
 };
