@@ -12,6 +12,11 @@ pub const DEFAULT_THROTTLE_WAIT_BUDGET_MS: u64 = 90_000;
 /// [`retry_after_cap_ms`]: ProviderRetryPolicy::retry_after_cap_ms
 pub(crate) const MIN_FREE_THROTTLE_WAIT: Duration = Duration::from_secs(1);
 
+/// Maximum provider calls that may honor a throttle without consuming an
+/// ordinary retry attempt. Together with `max_attempts`, this bounds total
+/// provider calls independently of the server's `Retry-After` duration.
+pub(crate) const MAX_COURTESY_THROTTLE_CALLS: usize = 8;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlmTimeouts {
     pub request_timeout: Option<Duration>,
@@ -333,9 +338,11 @@ pub struct ProviderRetryPolicy {
     /// provider throttle waits — a retryable [`ProviderFailureKind::Quota`]
     /// failure carrying `Retry-After` — without consuming retry attempts.
     /// Only waits of at least one second qualify, and each deferred wait
-    /// charges what it actually waits. Once the budget is spent, throttled
-    /// failures consume attempts like any other retryable failure. `0`
-    /// disables the deference entirely.
+    /// charges what it actually waits. No more than eight calls are deferred;
+    /// total provider calls are therefore bounded by eight plus
+    /// `max_attempts`, independently of `Retry-After`. Once either bound is
+    /// spent, throttled failures consume attempts like any other retryable
+    /// failure. `0` disables the deference entirely.
     #[serde(
         default = "default_throttle_wait_budget_ms",
         skip_serializing_if = "is_default_throttle_wait_budget_ms"

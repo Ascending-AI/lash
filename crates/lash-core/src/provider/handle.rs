@@ -139,10 +139,11 @@ impl ProviderHandle {
         let mut attempt = 0;
         let call_id = LlmCallId(uuid::Uuid::new_v4().to_string());
         let mut records = Vec::new();
-        // Cumulative time already spent deferring to provider throttles
-        // without consuming attempts, bounded by the policy's budget.
+        // Cumulative time and calls already spent deferring to provider
+        // throttles without consuming attempts. Both dimensions are bounded.
         let throttle_budget = Duration::from_millis(reliability.retry.throttle_wait_budget_ms);
         let mut throttle_waited = Duration::ZERO;
+        let mut courtesy_throttle_calls = 0;
         loop {
             let _permit = self.components.rate_limiter.admit(&request).await;
             let clock = self.components.rate_limiter.clock();
@@ -216,6 +217,7 @@ impl ProviderHandle {
                         let wait = reliability.retry.cap_retry_after(retry_after);
                         let charge = wait;
                         (wait >= MIN_FREE_THROTTLE_WAIT
+                            && courtesy_throttle_calls < MAX_COURTESY_THROTTLE_CALLS
                             && throttle_waited.saturating_add(charge) <= throttle_budget)
                             .then_some((wait, charge))
                     } else {
@@ -308,13 +310,15 @@ impl ProviderHandle {
                     // retry attempt — the provider is asking us to come back,
                     // not failing. The courtesy is bounded: each deferred wait
                     // requires at least `MIN_FREE_THROTTLE_WAIT`, charges the
-                    // actual delay against `throttle_wait_budget_ms`, and once
-                    // the budget is spent a throttle counts as an ordinary
+                    // actual delay against `throttle_wait_budget_ms`, and is
+                    // capped at `MAX_COURTESY_THROTTLE_CALLS`. Once either
+                    // bound is spent, a throttle counts as an ordinary
                     // retryable failure. A missing or shorter `Retry-After`
                     // never defers: there is no meaningful server-stated wait
                     // to honor, so the normal backoff-and-count ladder applies.
                     if let Some((wait, charge)) = throttle_wait {
                         throttle_waited += charge;
+                        courtesy_throttle_calls += 1;
                         records.push(failure_attempt_record(
                             records.len() as u32 + 1,
                             started_at,
@@ -567,23 +571,12 @@ fn retryable_http_rejection(failure: &LlmTransportError) -> bool {
         && failure.retry_after.is_some()
 }
 
-fn provider_usage_has_quantities(usage: &serde_json::Value) -> bool {
-    match usage {
-        serde_json::Value::Number(_) => true,
-        serde_json::Value::Array(values) => values.iter().any(provider_usage_has_quantities),
-        serde_json::Value::Object(fields) => fields.values().any(provider_usage_has_quantities),
-        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {
-            false
-        }
-    }
-}
-
 pub(super) fn response_has_output_evidence(response: &LlmResponse) -> bool {
     !response.full_text.is_empty()
         || response
             .provider_usage
             .as_ref()
-            .is_some_and(provider_usage_has_quantities)
+            .is_some_and(crate::llm::types::provider_usage_has_quantities)
         || response.usage != crate::llm::types::LlmUsage::default()
         || response.parts.iter().any(|part| match part {
             crate::llm::types::LlmOutputPart::Text { text, .. } => !text.is_empty(),

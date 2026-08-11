@@ -1482,10 +1482,11 @@ pub fn process_sse_event(
     if crate::responses_output_evidence::handle_evidence_only_event(event_type, &event, state) {
         return Ok(());
     }
-
     match event_type {
         "response.output_item.added" => {
             if let Some(item) = event.get("item") {
+                state.streamed_item_content_received |=
+                    crate::responses_output_evidence::output_item_has_output_evidence(item);
                 match item.get("type").and_then(|v| v.as_str()) {
                     Some("message") => state.begin_message(Some(item), output_index),
                     Some("function_call") => {

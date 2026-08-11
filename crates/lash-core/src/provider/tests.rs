@@ -1289,6 +1289,48 @@ async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting
 }
 
 #[tokio::test]
+async fn provider_handle_one_second_throttle_storm_has_a_total_call_bound() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::new(RecordingClock::default());
+    let provider = StatusFailingProvider {
+        options: ProviderOptions::default(),
+        attempts: Arc::clone(&attempts),
+        fail_until: 100,
+        status: 429,
+        retry_after: Some(Duration::from_secs(1)),
+        retry_after_header: None,
+    };
+    let mut handle =
+        ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
+
+    let failure = handle
+        .complete(empty_request())
+        .await
+        .expect_err("throttle storm must hit the total provider-call bound");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 12);
+    assert_eq!(failure.call_record.attempts.len(), 12);
+    assert_eq!(
+        failure
+            .call_record
+            .attempts
+            .iter()
+            .filter(|attempt| !attempt.retry_budget_consumed)
+            .count(),
+        8
+    );
+    assert_eq!(
+        failure
+            .call_record
+            .attempts
+            .iter()
+            .filter(|attempt| attempt.retry_budget_consumed)
+            .count(),
+        4
+    );
+}
+
+#[tokio::test]
 async fn provider_handle_throttle_without_retry_after_is_not_retried() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = StatusFailingProvider {

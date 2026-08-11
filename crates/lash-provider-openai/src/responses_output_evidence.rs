@@ -40,6 +40,17 @@ fn output_content_has_evidence(part: &Value) -> bool {
     }
 }
 
+pub(super) fn output_item_has_output_evidence(item: &Value) -> bool {
+    match item.get("type").and_then(Value::as_str) {
+        Some("message") => item
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|content| content.iter().any(output_content_has_evidence)),
+        Some("reasoning") => reasoning_item_has_output_evidence(item),
+        _ => false,
+    }
+}
+
 /// Classify official Responses events whose content Lash does not project into
 /// a first-class stream part. Returns `true` when the event type was handled.
 pub(super) fn handle_evidence_only_event(
@@ -48,9 +59,34 @@ pub(super) fn handle_evidence_only_event(
     state: &mut ResponsesStreamState,
 ) -> bool {
     match event_type {
+        // A named SSE ping loses its `event:` name in the shared framers. A
+        // JSON object without a Responses type is benign unless it carries a
+        // field that can hold generated output.
+        "" => {
+            state.streamed_item_content_received |= untyped_event_has_output_evidence(event);
+        }
+        // OpenRouter request-debug metadata describes the upstream request;
+        // it is never model-generated response output.
+        "response.debug" => {}
         "response.content_part.added" | "response.content_part.done" => {
             state.streamed_item_content_received |=
                 event.get("part").is_some_and(output_content_has_evidence);
+        }
+        // These events still need structural handling in `responses_shared`,
+        // so classify their required payload here and then return `false`.
+        "response.reasoning_summary_part.added" | "response.reasoning_summary_part.done" => {
+            state.streamed_item_content_received |= event
+                .get("part")
+                .is_some_and(|part| has_nonempty_string(part, &["text"]));
+            return false;
+        }
+        "response.reasoning_summary_text.delta" => {
+            state.streamed_item_content_received |= has_nonempty_string(event, &["delta"]);
+            return false;
+        }
+        "response.reasoning_summary_text.done" => {
+            state.streamed_item_content_received |= has_nonempty_string(event, &["text"]);
+            return false;
         }
         "response.reasoning_text.delta" | "response.refusal.delta" => {
             state.streamed_item_content_received |= has_nonempty_string(event, &["delta"]);
@@ -106,6 +142,32 @@ pub(super) fn handle_evidence_only_event(
         _ => return false,
     }
     true
+}
+
+fn untyped_event_has_output_evidence(event: &Value) -> bool {
+    has_nonempty_string(
+        event,
+        &[
+            "delta",
+            "text",
+            "refusal",
+            "code",
+            "arguments",
+            "input",
+            "content",
+            "output_text",
+            "encrypted_content",
+        ],
+    ) || event.get("part").is_some_and(output_content_has_evidence)
+        || event
+            .get("response")
+            .is_some_and(response_value_has_output_evidence)
+        || event
+            .get("output")
+            .is_some_and(|output| !output.as_array().is_some_and(Vec::is_empty))
+        || event
+            .get("usage")
+            .is_some_and(lash_core::llm::types::provider_usage_has_quantities)
 }
 
 pub(super) fn reasoning_item_has_output_evidence(item: &Value) -> bool {
@@ -164,15 +226,6 @@ fn response_value_has_output_evidence(response: &Value) -> bool {
             .is_some_and(|text| !text.is_empty())
 }
 
-fn provider_usage_has_quantities(usage: &Value) -> bool {
-    match usage {
-        Value::Number(_) => true,
-        Value::Array(values) => values.iter().any(provider_usage_has_quantities),
-        Value::Object(fields) => fields.values().any(provider_usage_has_quantities),
-        Value::Null | Value::Bool(_) | Value::String(_) => false,
-    }
-}
-
 impl ResponsesStreamState {
     /// Whether the provider generated billable output, even when the
     /// accumulator cannot yet project it into a complete response part.
@@ -189,7 +242,7 @@ impl ResponsesStreamState {
             || self
                 .provider_usage
                 .as_ref()
-                .is_some_and(provider_usage_has_quantities)
+                .is_some_and(lash_core::llm::types::provider_usage_has_quantities)
             || self.usage != LlmUsage::default()
             || self.parts.iter().any(part_has_output_evidence)
             || self
