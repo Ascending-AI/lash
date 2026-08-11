@@ -87,6 +87,11 @@ struct McpEntry {
     /// `None` while disconnected. Once connected this retains the peer and
     /// exact-service teardown controls while a watcher owns rmcp's join handle.
     service: tokio::sync::Mutex<Option<McpService>>,
+    /// Completion signal for the latest installed service watcher. Unlike the
+    /// ownership slot above, this remains present while the watcher has taken
+    /// the service and is reaping its stdio child. `None` therefore means no
+    /// service was ever installed rather than ambiguously meaning mid-reap.
+    watcher_quit: RwLock<Option<Arc<ServiceQuit>>>,
     /// Cached, prefixed tool definitions for this server, refreshed on every
     /// successful (re)connect and kept across a disconnect so the tool
     /// surface stays stable. Keys are the prefixed names
@@ -705,6 +710,7 @@ impl McpEntry {
             config,
             host_services,
             service: tokio::sync::Mutex::new(None),
+            watcher_quit: RwLock::new(None),
             imported_tools: RwLock::new(BTreeMap::new()),
             connected: AtomicBool::new(false),
             last_error: RwLock::new(None),
@@ -903,6 +909,7 @@ impl McpEntry {
             self.service_generation
                 .store(next_generation, Ordering::SeqCst);
             self.connected.store(true, Ordering::SeqCst);
+            *self.watcher_quit.write_recover() = Some(Arc::clone(&quit));
             service_guard.replace(McpService {
                 peer,
                 request_tasks: Arc::clone(&request_tasks),
@@ -1347,6 +1354,10 @@ impl McpEntry {
         // Cover the race where a reconnect passed its cancellation check just
         // before shutdown set the flag and installed while teardown waited.
         self.cancel_service().await;
+        let watcher_quit = self.watcher_quit.read_recover().clone();
+        if let Some(watcher_quit) = watcher_quit {
+            watcher_quit.wait().await;
+        }
     }
 
     async fn cancel_service(&self) {

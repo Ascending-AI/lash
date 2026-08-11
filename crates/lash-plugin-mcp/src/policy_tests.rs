@@ -105,6 +105,10 @@ for line in sys.stdin:
             'inputSchema': {'type': 'object', 'properties': {}}}]}})
         if behavior == 'exit_after_list':
             sys.exit(0)
+        if behavior == 'close_streams_after_list':
+            os.close(sys.stdin.fileno())
+            os.close(sys.stdout.fileno())
+            time.sleep(30)
     elif method == 'tools/call':
         call_index += 1
         if behavior == 'crash_after_call':
@@ -834,6 +838,52 @@ fn shutdown_all_fully_reaps_stdio_child() {
     );
     drop(pool);
     drop(runtime);
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_all_joins_watcher_reaping_stdio_child() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "close_streams_after_list",
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("stdio child must publish its pid")
+        .parse()
+        .expect("numeric child pid");
+    let entry = Arc::clone(pool.entries.read_recover().get("mock").expect("mock entry"));
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if entry.service.lock().await.is_none() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("watcher must take the service during graceful reap");
+    assert_eq!(
+        process_state(pid),
+        Some('S'),
+        "watcher must own a still-running child during graceful reap"
+    );
+
+    let started = Instant::now();
+    pool.shutdown_all().await;
+    let elapsed = started.elapsed();
+    eprintln!("watcher-handoff shutdown elapsed: {elapsed:?}");
+
+    assert_eq!(
+        process_state(pid),
+        None,
+        "shutdown_all must join the watcher and fully reap stdio child PID {pid}"
+    );
 }
 
 #[cfg(unix)]
