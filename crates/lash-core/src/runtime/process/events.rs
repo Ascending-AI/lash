@@ -647,8 +647,16 @@ pub struct ProcessWakeDelivery {
     pub event_invocation: crate::RuntimeInvocation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_caused_by: Option<crate::CausalRef>,
+    /// Authority captured from the durable process originator at event append.
+    /// The delivery driver must forward this unchanged into queued work.
+    #[serde(default, skip_serializing_if = "process_wake_authority_is_empty")]
+    pub authority: crate::QueuedWorkAuthority,
     pub input: String,
     pub created_at_ms: u64,
+}
+
+fn process_wake_authority_is_empty(authority: &crate::QueuedWorkAuthority) -> bool {
+    authority.principal.is_none() && authority.elevation.is_none()
 }
 
 fn default_process_wake_event_type() -> String {

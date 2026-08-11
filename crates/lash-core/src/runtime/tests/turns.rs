@@ -6823,6 +6823,110 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
 }
 
 #[tokio::test]
+async fn queued_wake_reserve_refuses_the_complete_projected_request_with_retained_history() {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let captured_provider_calls = Arc::clone(&provider_calls);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let provider_calls = Arc::clone(&captured_provider_calls);
+            async move {
+                let call = provider_calls.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(
+                    call, 0,
+                    "the refused queued turn must not reach the provider"
+                );
+                Ok(LlmResponse {
+                    full_text: "retained answer".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "retained answer".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    runtime.host.core.durability.queued_work_batching = crate::QueuedWorkBatchingConfig::new(100);
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            model: Some(
+                crate::ModelSpec::builder("mock-model")
+                    .context_window_tokens(1_000)
+                    .build()
+                    .expect("valid constrained model"),
+            ),
+            ..Default::default()
+        })
+        .await
+        .expect("constrain context window");
+
+    runtime
+        .run_turn_assembled(
+            TurnInput::text("r".repeat(900)),
+            CancellationToken::new(),
+            named_turn_scope("root", "seed-retained-history"),
+        )
+        .await
+        .expect("seed retained history without queued work");
+
+    let registry = runtime
+        .host
+        .process_registry
+        .as_ref()
+        .expect("process registry")
+        .clone();
+    registry
+        .register_process(
+            crate::ProcessRegistration::new(
+                "reserve-proc",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::session(crate::SessionScope::new("root")),
+            )
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some("root".to_string())),
+        )
+        .await
+        .expect("register wake process");
+    let wake = append_process_wake_to_queue(
+        registry.as_ref(),
+        store.as_ref(),
+        "reserve-proc",
+        crate::ProcessEventAppendRequest::new(
+            "process.wake",
+            json!({"text": "short wake", "value": {"status": "done"}}),
+        ),
+    )
+    .await;
+
+    let err = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "full-projection-reserve"),
+        ))
+        .await
+        .expect_err("retained history plus wake and reserve must be refused");
+    assert_eq!(err.code, crate::RuntimeErrorCode::QueuedWork);
+    assert!(err.message.contains("complete projected request"));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list refused wake");
+    assert_eq!(pending.len(), 1);
+    assert!(matches!(
+        &pending[0].items[0].payload,
+        crate::QueuedWorkPayload::ProcessWake { wake: pending_wake }
+            if pending_wake.wake_id == wake.wake_id
+    ));
+}
+
+#[tokio::test]
 async fn external_invoke_can_create_session_from_current_snapshot() {
     let plugin = Arc::new(RuntimeTestPluginFactory {
         build: Arc::new(|_| {

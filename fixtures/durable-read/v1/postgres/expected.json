@@ -518,6 +518,9 @@
         "process_id": "durable-read-wake-process"
       }
     },
+    "authority": {
+      "principal": "host"
+    },
     "input": "durable read wake",
     "created_at_ms": 1700000000000
   }

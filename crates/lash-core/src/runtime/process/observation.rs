@@ -337,7 +337,7 @@ fn child_session_id(input: &ProcessInput) -> Option<String> {
 fn originator_matches(originator: &ProcessOriginator, scope: &SessionScope) -> bool {
     match originator {
         ProcessOriginator::Host { .. } => false,
-        ProcessOriginator::Session { session_id } => session_id == &scope.session_id,
+        ProcessOriginator::Session { session_id, .. } => session_id == &scope.session_id,
     }
 }
 

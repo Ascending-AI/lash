@@ -66,6 +66,7 @@ pub(super) struct RuntimeExecutionProcessEventContext {
     pub store: Option<Arc<dyn crate::RuntimePersistence>>,
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     pub queued_work_driver: Option<crate::QueuedWorkDriver>,
+    pub process_wake_delivery_policy: crate::DeliveryPolicy,
     pub clock: Arc<dyn crate::Clock>,
 }
 
@@ -380,6 +381,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         self.process_event_context = Some(RuntimeExecutionProcessEventContext {
@@ -390,6 +392,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             store,
             session_store_factory,
             queued_work_driver,
+            process_wake_delivery_policy,
             clock,
         });
         self
@@ -553,6 +556,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             result.wake_delivery,
             Some(self.session_graph_service()),
             context.queued_work_driver.as_ref(),
+            context.process_wake_delivery_policy,
             Arc::clone(&context.clock),
         )
         .await?;
@@ -903,7 +907,7 @@ fn resolve_trigger_owner_scope(
             "bare host authority cannot own user trigger subscriptions; use an explicit host binding"
                 .to_string(),
         )),
-        Some(crate::ProcessOriginator::Session { session_id }) => {
+        Some(crate::ProcessOriginator::Session { session_id, .. }) => {
             Ok(crate::TriggerOwnerScope::session(session_id.clone()))
         }
         None => Ok(crate::TriggerOwnerScope::session(root_session_id)),

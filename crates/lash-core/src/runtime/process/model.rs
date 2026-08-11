@@ -605,6 +605,8 @@ pub enum ProcessOriginator {
     },
     Session {
         session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_frame_id: Option<crate::AgentFrameId>,
     },
 }
 
@@ -628,6 +630,7 @@ impl ProcessOriginator {
     pub fn session(scope: SessionScope) -> Self {
         Self::Session {
             session_id: scope.session_id,
+            agent_frame_id: scope.agent_frame_id,
         }
     }
 
@@ -637,7 +640,7 @@ impl ProcessOriginator {
                 .as_ref()
                 .map(|scope| format!("host:{scope}"))
                 .unwrap_or_else(|| "host".to_string()),
-            Self::Session { session_id } => session_id.clone(),
+            Self::Session { session_id, .. } => session_id.clone(),
         }
     }
 }

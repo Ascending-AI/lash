@@ -189,7 +189,16 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
         #[cfg(test)]
         self.run_claim_after_lease_validation_hook();
-        let turn_input_claim = self.claim_pending_turn_inputs_after_lease_validation(
+        // Prepare both claim families against private state and publish them
+        // together only after every selector, budget, and fencing check has
+        // succeeded. This is the in-memory equivalent of the SQL transaction:
+        // a queued-work refusal cannot make an active-turn input disappear.
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        let mut queued = self.queued_work.lock_recover();
+        let mut staged_pending = pending.clone();
+        let mut staged_queued = queued.clone();
+        let turn_input_claim = Self::claim_pending_turn_inputs_for_state(
+            &mut staged_pending,
             session_id,
             session_execution_lease,
             owner,
@@ -200,7 +209,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             },
             now,
         )?;
-        let queued_work_claim = self.claim_ready_queued_work_after_lease_validation(
+        let queued_work_claim = Self::claim_ready_queued_work_for_state(
+            &mut staged_queued,
             session_id,
             session_execution_lease,
             owner,
@@ -210,6 +220,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             },
             now,
         )?;
+        *pending = staged_pending;
+        *queued = staged_queued;
         Ok((turn_input_claim, queued_work_claim))
     }
 

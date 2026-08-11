@@ -1095,6 +1095,60 @@ async fn a_stale_version_stamp_is_fatal_in_every_mode() {
     scratch.cleanup().await;
 }
 
+/// A pre-cutover queued-work table stamped with the old component version must
+/// be refused before creation-only DDL or `WarnOnly` can admit it. This models
+/// an existing installation crossing the queued-work shape cutover, rather
+/// than merely proving that a fresh schema matches this build.
+#[tokio::test]
+async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping queued-work version crossing: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "ALTER TABLE lash_queued_work_batches
+                 DROP COLUMN work_kind,
+                 DROP COLUMN authority_json,
+                 DROP COLUMN merge_key;
+             ALTER TABLE lash_queued_work_batches
+                 ADD COLUMN slot_policy TEXT NOT NULL DEFAULT 'join',
+                 ADD COLUMN merge_key_json TEXT NOT NULL DEFAULT '\"never\"';
+             UPDATE lash_schema_versions
+                SET version = 43
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    for provisioning in [
+        SchemaProvisioning::HostProvisioned,
+        SchemaProvisioning::LashManaged,
+    ] {
+        let error = PostgresStorage::from_pool_with(
+            scratch.pool.clone(),
+            PostgresStoreConfig {
+                schema_provisioning: provisioning,
+                schema_check: SchemaCheck::WarnOnly,
+                ..PostgresStoreConfig::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| {
+            panic!("{provisioning:?} + WarnOnly must refuse the pre-cutover install")
+        });
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("has version 43")
+                && rendered.contains("expected 47")
+                && rendered.contains("does not relax it"),
+            "the version boundary must dominate the incompatible queued-work shape: {rendered}"
+        );
+    }
+    scratch.cleanup().await;
+}
+
 /// The seed check must query the row lash actually reads. `CHECK (singleton)` is
 /// deliberately unverified, so a host port that omits it can hold a
 /// `singleton = FALSE` row — which satisfies "the table has rows" but leaves
@@ -1329,7 +1383,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 46 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 47 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -1460,7 +1514,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(46)", "finding_total=0"],
+        &["found_version=Some(47)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1632,7 +1686,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=46"]
+    for field in ["component=lash-postgres-store", "expected_version=47"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)

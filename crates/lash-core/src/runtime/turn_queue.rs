@@ -634,17 +634,24 @@ pub struct QueuedTurnWork {
 }
 
 pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
+    process_wake_batch_draft_with_delivery_policy(wake, DeliveryPolicy::EarliestSafeBoundary)
+}
+
+/// Draft a process wake using the host-selected delivery boundary.
+///
+/// Delivery timing is independent of merge eligibility: it remains a selector
+/// compatibility gate and is never encoded into the merge key.
+pub fn process_wake_batch_draft_with_delivery_policy(
+    wake: ProcessWakeDelivery,
+    delivery_policy: DeliveryPolicy,
+) -> QueuedWorkBatchDraft {
     let source_key = process_wake_source_key(&wake.process_id, wake.sequence);
     let process_id = wake.process_id.clone();
     let sequence = wake.sequence;
-    let authority = QueuedWorkAuthority {
-        principal: (!wake.event_invocation.scope.session_id.is_empty())
-            .then(|| wake.event_invocation.scope.session_id.clone()),
-        elevation: None,
-    };
+    let authority = wake.authority.clone();
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
-        DeliveryPolicy::EarliestSafeBoundary,
+        delivery_policy,
         vec![QueuedWorkPayload::process_wake(wake)],
     )
     .with_source_key(source_key)

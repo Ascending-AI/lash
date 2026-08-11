@@ -56,6 +56,9 @@ impl LashCoreBuilder {
         if let Some(queued_work_batching) = self.queued_work_batching.take() {
             core.durability.queued_work_batching = queued_work_batching;
         }
+        if let Some(process_wake_delivery_policy) = self.process_wake_delivery_policy.take() {
+            core.control.process_wake_delivery_policy = process_wake_delivery_policy;
+        }
         if let Some(prompt) = self.prompt.take() {
             core.prompt.prompt = prompt;
         }

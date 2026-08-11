@@ -96,7 +96,7 @@ pub(super) fn project_trigger_actor(
             identity.tag(1);
             identity.optional(scope.as_deref(), |identity, scope| identity.string(scope));
         }
-        crate::ProcessOriginator::Session { session_id } => {
+        crate::ProcessOriginator::Session { session_id, .. } => {
             identity.tag(2);
             identity.string(session_id);
         }

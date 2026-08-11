@@ -397,7 +397,8 @@ pub use turn_queue::{
     QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
     QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
-    SessionCommandReceipt, process_wake_batch_draft, process_wake_source_key,
+    SessionCommandReceipt, process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
+    process_wake_source_key,
 };
 pub use usage::{
     SessionUsageReport, TokenLedgerEntry, UsageReportRow, UsageTotals, diff_token_ledger,

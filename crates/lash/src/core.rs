@@ -130,6 +130,7 @@ pub(crate) struct WakeDeliveryDriverSetup {
     registry: Arc<dyn ProcessRegistry>,
     factory: Arc<dyn SessionStoreFactory>,
     clock: Arc<dyn lash_core::Clock>,
+    delivery_policy: lash_core::DeliveryPolicy,
 }
 
 pub(crate) struct InlineWorkDriverSetup {
@@ -229,6 +230,7 @@ impl InlineWorkDriverSlot {
                         Arc::clone(&setup.factory),
                         queued.clone(),
                         Arc::clone(&setup.clock),
+                        setup.delivery_policy,
                     )
                 });
                 ResolvedWorkDrivers {
@@ -898,6 +900,7 @@ pub struct LashCoreBuilder {
     process_env_store: Option<Arc<dyn ProcessExecutionEnvStore>>,
     commit_budget: Option<facade_support::CommitBudget>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
+    process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
     // Benign core overrides applied on top of the resolved core.
     prompt: Option<PromptLayer>,
@@ -942,6 +945,7 @@ impl LashCoreBuilder {
             process_env_store: None,
             commit_budget: None,
             queued_work_batching: None,
+            process_wake_delivery_policy: None,
             trigger_store: None,
             prompt: None,
             trace_sink: None,
@@ -1059,6 +1063,12 @@ impl LashCoreBuilder {
         policy: facade_support::QueuedWorkBatchingConfig,
     ) -> Self {
         self.queued_work_batching = Some(policy);
+        self
+    }
+
+    /// Select when process wakes may enter an active target session.
+    pub fn process_wake_delivery_policy(mut self, policy: lash_core::DeliveryPolicy) -> Self {
+        self.process_wake_delivery_policy = Some(policy);
         self
     }
 
@@ -1321,6 +1331,7 @@ impl LashCoreBuilder {
                     registry,
                     factory,
                     clock: Arc::clone(&env.core.clock),
+                    delivery_policy: env.core.control.process_wake_delivery_policy,
                 }),
         };
 

@@ -558,6 +558,7 @@ impl RuntimeQueueIngress {
                     replay: None,
                 },
                 process_caused_by: None,
+                authority: crate::QueuedWorkAuthority::default(),
                 input: (*text).to_string(),
                 created_at_ms: 1,
             }),

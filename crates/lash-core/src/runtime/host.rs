@@ -66,6 +66,8 @@ pub struct RuntimePromptConfig {
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
     pub termination: TerminationPolicy,
+    /// Host-selected boundary for process wakes entering the target session.
+    pub process_wake_delivery_policy: crate::DeliveryPolicy,
     /// Optional narrow-only policy for the model-facing session process tools.
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
     /// Per-runtime registry cap on concurrently running managed child turns.
@@ -124,6 +126,7 @@ impl RuntimeHostConfig {
             control: RuntimeControlConfig {
                 termination: TerminationPolicy::default(),
                 effect_host,
+                process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
                 lease_timings: crate::LeaseTimings::default(),
                 process_tool_visibility_filter: None,
                 managed_turn_concurrency_limit: std::num::NonZeroUsize::new(
@@ -201,6 +204,13 @@ impl RuntimeHostConfig {
         filter: Arc<dyn crate::ProcessToolVisibilityFilter>,
     ) -> Self {
         self.control.process_tool_visibility_filter = Some(filter);
+        self
+    }
+
+    /// Select when process wakes may enter a target session. This remains
+    /// independent from the wake merge key and all batching safety gates.
+    pub fn with_process_wake_delivery_policy(mut self, policy: crate::DeliveryPolicy) -> Self {
+        self.control.process_wake_delivery_policy = policy;
         self
     }
 

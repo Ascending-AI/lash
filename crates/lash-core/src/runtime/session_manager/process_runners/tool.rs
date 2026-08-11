@@ -64,6 +64,7 @@ impl RuntimeSessionServices {
                 self.current.store.clone(),
                 self.current.host.session_store_factory.clone(),
                 self.current.host.queued_work_driver.clone(),
+                self.current.host.core.control.process_wake_delivery_policy,
                 Arc::clone(&self.current.host.core.clock),
             )
             .build();

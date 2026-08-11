@@ -564,7 +564,7 @@ impl DurableProcessWorker {
                 .attachment_store
                 .bind_process_scoped(registration.id.clone())
         });
-        let originator_scope = if let crate::ProcessOriginator::Session { session_id } =
+        let originator_scope = if let crate::ProcessOriginator::Session { session_id, .. } =
             &registration.provenance.originator
         {
             Some(crate::SessionScope::new(session_id))

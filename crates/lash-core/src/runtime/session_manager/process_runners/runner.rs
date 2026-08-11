@@ -139,6 +139,12 @@ impl RuntimeSessionServices {
                 services.current.store.clone(),
                 services.current.host.session_store_factory.clone(),
                 services.current.host.queued_work_driver.clone(),
+                services
+                    .current
+                    .host
+                    .core
+                    .control
+                    .process_wake_delivery_policy,
                 Arc::clone(&services.current.host.core.clock),
             )
             .with_cancellation_token(cancellation_for_runtime.clone())
@@ -164,6 +170,7 @@ impl RuntimeSessionServices {
             store,
             session_store_factory,
             queued_work_driver,
+            self.current.host.core.control.process_wake_delivery_policy,
             Arc::clone(&self.current.host.core.clock),
             process_registry_available,
             cancellation,

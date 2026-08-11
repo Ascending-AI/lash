@@ -9,7 +9,7 @@
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET client_encoding = 'SQL_ASCII';
+SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -799,7 +799,7 @@ INSERT INTO lash_durable_read_fixture.lash_process_tombstones VALUES ('durable-r
 -- Data for Name: lash_process_wake_deliveries; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_process_wake_deliveries VALUES ('wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228', 'durable-read-wake-process', 'durable-read-fixture', 1, 'pending', NULL, 0, NULL, 1700000000000, 1700604800000, NULL, '{"wake_id":"wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228","target_session_id":"durable-read-fixture","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake","event_invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake"},"caused_by":{"type":"process","process_id":"durable-read-wake-process"}},"input":"durable read wake","created_at_ms":1700000000000}');
+INSERT INTO lash_durable_read_fixture.lash_process_wake_deliveries VALUES ('wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228', 'durable-read-wake-process', 'durable-read-fixture', 1, 'pending', NULL, 0, NULL, 1700000000000, 1700604800000, NULL, '{"wake_id":"wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228","target_session_id":"durable-read-fixture","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake","event_invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake"},"caused_by":{"type":"process","process_id":"durable-read-wake-process"}},"authority":{"principal":"host"},"input":"durable read wake","created_at_ms":1700000000000}');
 
 
 --
@@ -844,7 +844,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 46);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 47);
 
 
 --

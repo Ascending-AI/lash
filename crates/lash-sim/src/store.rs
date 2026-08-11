@@ -947,6 +947,7 @@ impl ModelStore {
                             replay: Some(lash_core::runtime::RuntimeReplay { key: replay_key }),
                         },
                         process_caused_by: None,
+                        authority: lash_core::QueuedWorkAuthority::default(),
                         wake: lash_core::facade_support::ProcessWake {
                             input: format!("wake for {session}"),
                         },

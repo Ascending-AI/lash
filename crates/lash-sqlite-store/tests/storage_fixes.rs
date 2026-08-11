@@ -248,6 +248,7 @@ fn exclusive_draft(session_id: &str, text: &str) -> QueuedWorkBatchDraft {
             replay: None,
         },
         process_caused_by: None,
+        authority: lash_core::QueuedWorkAuthority::default(),
         input: text.to_string(),
         created_at_ms: 0,
     };

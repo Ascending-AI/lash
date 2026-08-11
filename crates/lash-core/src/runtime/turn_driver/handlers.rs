@@ -1,6 +1,97 @@
 use super::*;
 
 impl RuntimeTurnDriver<'_> {
+    async fn ensure_queued_work_fits_projected_request(
+        &self,
+        request: &LlmRequest,
+    ) -> Result<(), RuntimeError> {
+        if self.pending_queue_claims.is_empty() {
+            return Ok(());
+        }
+        let request = crate::attachments::resolve_llm_request_attachments(
+            request.clone(),
+            self.host.core.durability.attachment_store.as_ref(),
+        )
+        .await
+        .map_err(|err| {
+            RuntimeError::new(
+                RuntimeErrorCode::QueuedWork,
+                format!(
+                    "cannot measure the complete projected queued-work request because an \
+                     attachment could not be resolved: {err}"
+                ),
+            )
+        })?;
+        if request.attachments.iter().any(|source| {
+            matches!(
+                source,
+                crate::AttachmentSource::ExternalUrl { .. }
+                    | crate::AttachmentSource::ProviderFile { .. }
+            )
+        }) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::QueuedWork,
+                "cannot safely admit queued work with an external or provider-file attachment: \
+                 its model-context cost is not bounded by the projected request",
+            ));
+        }
+
+        // The claim-time store can only see queued rows. This is the first seam
+        // where retained history, system prompt, tools, attachments, generation
+        // controls, and the request envelope have all been projected together.
+        // One serialized UTF-8 byte is charged as one token, matching the
+        // conservative tokenizer-independent upper bound used by queue claims.
+        let serialized_bytes = serde_json::to_vec(&request).map_err(|err| {
+            RuntimeError::new(
+                RuntimeErrorCode::QueuedWork,
+                format!("failed to measure the complete projected queued-work request: {err}"),
+            )
+        })?;
+        let stored_attachment_bytes = request
+            .resolved_stored
+            .values()
+            .fold(0usize, |total, bytes| total.saturating_add(bytes.len()));
+        let projected_tokens = serialized_bytes
+            .len()
+            .saturating_add(stored_attachment_bytes);
+        let max_context_tokens = self.policy.context_window_tokens();
+        let action_token_reserve = self
+            .host
+            .core
+            .durability
+            .queued_work_batching
+            .action_token_reserve();
+        let admitted = projected_tokens.saturating_add(action_token_reserve) <= max_context_tokens;
+        let claim_ids = self
+            .pending_queue_claims
+            .iter()
+            .map(|claim| claim.claim_id.as_str())
+            .collect::<Vec<_>>();
+        tracing::info!(
+            target: "lash::queued_work_batching",
+            session_id = %self.session_id,
+            turn_id = %self.turn_id,
+            ?claim_ids,
+            projected_tokens,
+            action_token_reserve,
+            max_context_tokens,
+            outcome = if admitted { "admitted_full_projection" } else { "refused_full_projection" },
+            "full projected queued-work request admission decision"
+        );
+        if admitted {
+            return Ok(());
+        }
+
+        Err(RuntimeError::new(
+            RuntimeErrorCode::QueuedWork,
+            format!(
+                "complete projected request requires at most {projected_tokens} conservative \
+                 tokens plus queued-work action reserve {action_token_reserve}, exceeding model \
+                 context window {max_context_tokens}; queued rows remain pending"
+            ),
+        ))
+    }
+
     fn handle_machine_response(
         &self,
         machine: &mut TurnMachine,
@@ -58,6 +149,8 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         }
+        self.ensure_queued_work_fits_projected_request(&request)
+            .await?;
         let (result, text_streamed, call_record) = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx, cancel)
             .await

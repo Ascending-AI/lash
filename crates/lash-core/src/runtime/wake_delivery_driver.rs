@@ -5,10 +5,11 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use super::process_wake_batch_draft_with_delivery_policy;
 use crate::{
     Clock, PluginError, ProcessRegistry, QueuedWorkDriver, SessionPolicy, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, StoreError, WakeDeliveryClaimOutcome,
-    WakeDiscardReason, process_wake_batch_draft,
+    WakeDiscardReason,
 };
 
 const DELIVERY_BATCH_SIZE: usize = 32;
@@ -46,6 +47,7 @@ struct WakeDeliveryDriverInner {
     session_store_factory: Arc<dyn SessionStoreFactory>,
     queued_work_driver: Option<QueuedWorkDriver>,
     clock: Arc<dyn Clock>,
+    delivery_policy: crate::DeliveryPolicy,
     notify: Notify,
 }
 
@@ -68,6 +70,7 @@ impl WakeDeliveryDriver {
         session_store_factory: Arc<dyn SessionStoreFactory>,
         queued_work_driver: Option<QueuedWorkDriver>,
         clock: Arc<dyn Clock>,
+        delivery_policy: crate::DeliveryPolicy,
     ) -> Self {
         let driver = Self {
             inner: Arc::new(WakeDeliveryDriverInner {
@@ -75,6 +78,7 @@ impl WakeDeliveryDriver {
                 session_store_factory,
                 queued_work_driver,
                 clock,
+                delivery_policy,
                 notify: Notify::new(),
             }),
             lifetime: Arc::new(WakeDeliveryDriverLifetime {
@@ -111,11 +115,12 @@ impl WakeDeliveryDriver {
 
     /// Host/runbook lever: synchronously run one bounded delivery scan.
     pub async fn drive_pending(&self) -> Result<WakeDeliveryDriveReport, PluginError> {
-        Self::drive_pending_once(
+        Self::drive_pending_once_with_delivery_policy(
             Arc::clone(&self.inner.registry),
             Arc::clone(&self.inner.session_store_factory),
             self.inner.queued_work_driver.clone(),
             Arc::clone(&self.inner.clock),
+            self.inner.delivery_policy,
             DELIVERY_BATCH_SIZE,
         )
         .await
@@ -128,6 +133,26 @@ impl WakeDeliveryDriver {
         session_store_factory: Arc<dyn SessionStoreFactory>,
         queued_work_driver: Option<QueuedWorkDriver>,
         clock: Arc<dyn Clock>,
+        limit: usize,
+    ) -> Result<WakeDeliveryDriveReport, PluginError> {
+        Self::drive_pending_once_with_delivery_policy(
+            registry,
+            session_store_factory,
+            queued_work_driver,
+            clock,
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            limit,
+        )
+        .await
+    }
+
+    /// One bounded delivery pass using the host-selected wake boundary.
+    pub async fn drive_pending_once_with_delivery_policy(
+        registry: Arc<dyn ProcessRegistry>,
+        session_store_factory: Arc<dyn SessionStoreFactory>,
+        queued_work_driver: Option<QueuedWorkDriver>,
+        clock: Arc<dyn Clock>,
+        delivery_policy: crate::DeliveryPolicy,
         limit: usize,
     ) -> Result<WakeDeliveryDriveReport, PluginError> {
         let mut report = WakeDeliveryDriveReport::default();
@@ -259,7 +284,10 @@ impl WakeDeliveryDriver {
             };
 
             match store
-                .enqueue_queued_work_with_outcome(process_wake_batch_draft(delivery.wake.clone()))
+                .enqueue_queued_work_with_outcome(process_wake_batch_draft_with_delivery_policy(
+                    delivery.wake.clone(),
+                    delivery_policy,
+                ))
                 .await
             {
                 Ok(enqueue_outcome) => {
@@ -408,11 +436,12 @@ impl WakeDeliveryDriver {
     async fn run_loop(inner: Arc<WakeDeliveryDriverInner>, shutdown: CancellationToken) {
         let mut poll = POLL_INITIAL;
         loop {
-            let report = match Self::drive_pending_once(
+            let report = match Self::drive_pending_once_with_delivery_policy(
                 Arc::clone(&inner.registry),
                 Arc::clone(&inner.session_store_factory),
                 inner.queued_work_driver.clone(),
                 Arc::clone(&inner.clock),
+                inner.delivery_policy,
                 DELIVERY_BATCH_SIZE,
             )
             .await

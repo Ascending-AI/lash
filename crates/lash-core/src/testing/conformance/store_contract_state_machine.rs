@@ -2326,7 +2326,6 @@ async fn assert_prune_reregister_registry_state_is_fresh(
 fn runtime_wake(process_id: &str, sequence: u64) -> ProcessWakeDelivery {
     runtime_wake_for("prop-runtime-session", process_id, sequence)
 }
-
 fn runtime_wake_for(session_id: &str, process_id: &str, sequence: u64) -> ProcessWakeDelivery {
     ProcessWakeDelivery {
         wake_id: format!("wake:{process_id}:{sequence}"),
@@ -2345,6 +2344,7 @@ fn runtime_wake_for(session_id: &str, process_id: &str, sequence: u64) -> Proces
             replay: None,
         },
         process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
         input: format!("wake-{sequence}"),
         created_at_ms: 1,
     }

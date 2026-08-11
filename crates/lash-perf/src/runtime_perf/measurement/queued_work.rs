@@ -435,6 +435,7 @@ fn queued_work_stress_wake(
             replay: None,
         },
         process_caused_by: None,
+        authority: lash_core::QueuedWorkAuthority::default(),
         input: input.to_string(),
         created_at_ms: sequence,
     }

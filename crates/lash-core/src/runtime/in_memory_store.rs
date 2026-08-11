@@ -442,6 +442,25 @@ impl InMemorySessionStore {
         kind: InMemoryQueuedWorkClaimKind,
         now: u64,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
+        let mut queued = self.queued_work.lock_recover();
+        Self::claim_ready_queued_work_for_state(
+            &mut queued,
+            session_id,
+            session_execution_lease,
+            owner,
+            kind,
+            now,
+        )
+    }
+
+    fn claim_ready_queued_work_for_state(
+        queued: &mut [InMemoryQueuedBatch],
+        session_id: &str,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        owner: &crate::LeaseOwnerIdentity,
+        kind: InMemoryQueuedWorkClaimKind,
+        now: u64,
+    ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
         let max_batches = match kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => 1,
             InMemoryQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
@@ -454,7 +473,6 @@ impl InMemorySessionStore {
         // pinned generation differs from ours; same-generation self-steal is
         // therefore unrepresentable (ADR 0029).
         let generation = session_execution_lease.fencing_token;
-        let mut queued = self.queued_work.lock_recover();
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         let claim_available = |entry: &InMemoryQueuedBatch| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
@@ -577,6 +595,27 @@ impl InMemorySessionStore {
         mode: crate::TurnInputClaimMode,
         now: u64,
     ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        Self::claim_pending_turn_inputs_for_state(
+            &mut pending,
+            session_id,
+            session_execution_lease,
+            owner,
+            max_inputs,
+            mode,
+            now,
+        )
+    }
+
+    fn claim_pending_turn_inputs_for_state(
+        pending: &mut [InMemoryPendingTurnInput],
+        session_id: &str,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        owner: &crate::LeaseOwnerIdentity,
+        max_inputs: usize,
+        mode: crate::TurnInputClaimMode,
+        now: u64,
+    ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
         if max_inputs == 0 {
             return Ok(None);
         }
@@ -585,7 +624,6 @@ impl InMemorySessionStore {
         // rows pinned to any other generation (or unheld) are claimable
         // (ADR 0029).
         let generation = session_execution_lease.fencing_token;
-        let mut pending = self.pending_turn_inputs.lock_recover();
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
         let claim_available = |entry: &InMemoryPendingTurnInput| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation

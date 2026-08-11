@@ -170,7 +170,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 46 replaces that JSON carrier with structural columns and narrow
 // ordered child tables. Older databases are rejected and recreated; there is
 // no JSON or compatibility read path.
-const SCHEMA_VERSION: i32 = 46;
+// Version 47 cuts queued-work storage over from slot_policy/merge_key_json to
+// work_kind/authority_json/nullable merge_key.
+const SCHEMA_VERSION: i32 = 47;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

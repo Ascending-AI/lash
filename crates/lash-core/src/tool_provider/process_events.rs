@@ -10,6 +10,7 @@ pub(crate) async fn enqueue_wake_delivery(
     wake_delivery: Option<crate::ProcessWakeDelivery>,
     trace_host: Option<&dyn crate::plugin::SessionGraphService>,
     queued_work_driver: Option<&crate::QueuedWorkDriver>,
+    process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: std::sync::Arc<dyn crate::Clock>,
 ) -> Result<(), PluginError> {
     let Some(wake_delivery) = wake_delivery else {
@@ -21,11 +22,12 @@ pub(crate) async fn enqueue_wake_delivery(
         // runbook lever once that resolver is available.
         return Ok(());
     };
-    if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once(
+    if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once_with_delivery_policy(
         registry,
         std::sync::Arc::clone(factory),
         queued_work_driver.cloned(),
         clock,
+        process_wake_delivery_policy,
         32,
     )
     .await
@@ -127,6 +129,7 @@ impl ToolProcessEventClient {
             result.wake_delivery,
             Some(process.session_graph.as_ref()),
             process.queued_work_driver.as_ref(),
+            process.process_wake_delivery_policy,
             std::sync::Arc::clone(&process.clock),
         )
         .await?;

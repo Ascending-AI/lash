@@ -3,6 +3,12 @@ use std::collections::BTreeSet;
 const SQLITE_SCHEMA_SOURCE: &str = include_str!("../../lash-sqlite-store/src/schema.rs");
 const POSTGRES_SCHEMA_SHAPE: &str = include_str!("../../lash-postgres-store/schema-shape.txt");
 
+// Tables whose durable column shape changed in this cutover. Registering them
+// here makes cross-backend column parity executable instead of relying only on
+// each backend's fresh-schema tests.
+const SHAPE_CHANGED_TABLES: &[(&str, &str)] =
+    &[("queued_work_batches", "lash_queued_work_batches")];
+
 fn consume_keyword<'a>(source: &'a str, keyword: &str) -> Option<&'a str> {
     let source = source.trim_start();
     let candidate = source.get(..keyword.len())?;
@@ -59,6 +65,44 @@ fn postgres_table_names() -> BTreeSet<String> {
         .collect()
 }
 
+fn sqlite_table_columns(table: &str) -> BTreeSet<String> {
+    let declaration = format!("CREATE TABLE IF NOT EXISTS {table} (");
+    let body = SQLITE_SCHEMA_SOURCE
+        .split_once(&declaration)
+        .unwrap_or_else(|| panic!("SQLite schema is missing registered table `{table}`"))
+        .1
+        .split_once("\n);")
+        .unwrap_or_else(|| panic!("SQLite table `{table}` has no closing declaration"))
+        .0;
+    body.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let name = line.split_whitespace().next()?.trim_matches('"');
+            (!matches!(
+                name.to_ascii_uppercase().as_str(),
+                "UNIQUE" | "PRIMARY" | "FOREIGN" | "CHECK" | "CONSTRAINT" | "ON"
+            ))
+            .then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn postgres_table_columns(table: &str) -> BTreeSet<String> {
+    let declaration = format!("table {table}\n");
+    POSTGRES_SCHEMA_SHAPE
+        .split_once(&declaration)
+        .unwrap_or_else(|| panic!("Postgres schema shape is missing registered table `{table}`"))
+        .1
+        .lines()
+        .take_while(|line| !line.starts_with("table "))
+        .filter_map(|line| {
+            line.strip_prefix("  column ")
+                .and_then(|line| line.split_whitespace().next())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
 fn normalize_postgres_table(name: &str) -> Option<String> {
     let name = name.strip_prefix("lash_").unwrap_or(name);
     match name {
@@ -100,4 +144,16 @@ fn sqlite_and_postgres_table_sets_are_congruent() {
         sqlite_only.is_empty() && postgres_only.is_empty(),
         "SQLite/Postgres table-set drift: sqlite_only={sqlite_only:?}, postgres_only={postgres_only:?}"
     );
+}
+
+#[test]
+fn changed_table_column_sets_are_congruent() {
+    for (sqlite_table, postgres_table) in SHAPE_CHANGED_TABLES {
+        assert_eq!(
+            sqlite_table_columns(sqlite_table),
+            postgres_table_columns(postgres_table),
+            "registered cross-backend column drift for SQLite `{sqlite_table}` / Postgres \
+             `{postgres_table}`"
+        );
+    }
 }

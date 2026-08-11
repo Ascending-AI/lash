@@ -908,6 +908,7 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
         match &observed.originator {
             lash_core::ProcessOriginator::Session {
                 session_id: originator_session_id,
+                ..
             } => {
                 assert_eq!(originator_session_id, session_id)
             }

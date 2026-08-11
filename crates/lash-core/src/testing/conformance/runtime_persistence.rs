@@ -507,6 +507,7 @@ where
     queued_work_source_keys_are_idempotent_and_list_ordered(make("queued-work-source-keys")).await;
     concurrent_queue_and_turn_input_claims_have_one_owner(make("concurrent-queue-input")).await;
     checkpoint_work_claims_both_families_once(make("checkpoint-work")).await;
+    checkpoint_budget_refusal_preserves_active_turn_input(make("checkpoint-budget-refusal")).await;
     queued_work_cancel_removes_only_unclaimed_batches(make("queued-work-cancel")).await;
     queued_work_exact_claim_uses_selected_batch_ids(make("root")).await;
     queued_work_classes_gate_command_and_turn_claims(make("root")).await;
@@ -2122,6 +2123,74 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
     );
 }
 
+/// A checkpoint claim spans pending inputs and queued work atomically. If the
+/// queued head cannot fit the context window, the active-turn input must remain
+/// pending and visible rather than being left accepted under a discarded claim.
+async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn RuntimePersistence>) {
+    let session_id = "checkpoint-budget-atomicity";
+    let turn_id = crate::TurnId::from("checkpoint-budget-atomicity:turn");
+    let owner = lease_owner("checkpoint-budget-atomicity-owner");
+    let input = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            session_id,
+            turn_id.as_str(),
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "input that must survive a queue budget refusal",
+        ))
+        .await
+        .expect("enqueue active-turn input for atomic checkpoint claim");
+    let oversized_text = "oversized queued work".repeat(64);
+    store
+        .enqueue_queued_work(queued_draft(
+            session_id,
+            &oversized_text,
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue oversized checkpoint queued work");
+    let lease = store
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("claim checkpoint atomicity session lease")
+        .acquired()
+        .expect("checkpoint atomicity session lease acquired");
+    let error = store
+        .claim_checkpoint_work(
+            session_id,
+            &lease.fence(),
+            &owner,
+            &turn_id,
+            crate::CheckpointKind::AfterWork,
+            10,
+            crate::QueuedWorkClaimPolicy {
+                max_context_tokens: 64,
+                action_token_reserve: 1,
+                max_rows: 10,
+                max_pending_age_ms: 30_000,
+            },
+        )
+        .await
+        .expect_err("oversized queued row must refuse the combined checkpoint claim");
+    assert!(matches!(
+        error,
+        StoreError::QueuedWorkRowExceedsContextWindow { .. }
+    ));
+
+    let pending = store
+        .list_pending_turn_inputs(session_id)
+        .await
+        .expect("list active input after checkpoint budget refusal");
+    assert_eq!(
+        pending
+            .iter()
+            .map(|row| row.input_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![input.input_id.as_str()],
+        "the input claim must roll back with the refused queued-work claim"
+    );
+    assert_eq!(pending[0].state, crate::TurnInputState::PendingActive);
+}
+
 /// Prove checkpoint admission probes stay read-only for empty queues and for
 /// deferred queue heads, while real checkpoint work still shares one write
 /// transaction and deferred work remains claimable at the idle boundary.
@@ -2255,6 +2324,7 @@ pub fn queued_process_wake_draft(
             replay: None,
         },
         process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
         input: text.to_string(),
         created_at_ms: 1,
     };
@@ -5383,6 +5453,7 @@ fn policy_test_wake(session_id: &str, process_id: &str, sequence: u64) -> Proces
             replay: None,
         },
         process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
         input: process_id.to_string(),
         created_at_ms: 1,
     }
@@ -7018,6 +7089,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
             replay: None,
         },
         process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
         input: "wake payload".to_string(),
         created_at_ms: 1,
     };

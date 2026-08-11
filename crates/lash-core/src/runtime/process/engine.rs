@@ -157,6 +157,7 @@ pub struct ProcessEngineProcessContext {
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     queued_work_driver: Option<crate::QueuedWorkDriver>,
+    process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: Arc<dyn crate::Clock>,
 }
 
@@ -170,6 +171,7 @@ impl ProcessEngineProcessContext {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
@@ -180,6 +182,7 @@ impl ProcessEngineProcessContext {
             store,
             session_store_factory,
             queued_work_driver,
+            process_wake_delivery_policy,
             clock,
         }
     }
@@ -212,6 +215,7 @@ impl ProcessEngineProcessContext {
             result.wake_delivery,
             None,
             self.queued_work_driver.as_ref(),
+            self.process_wake_delivery_policy,
             Arc::clone(&self.clock),
         )
         .await?;
@@ -274,6 +278,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
         process_registry_available: bool,
         cancellation: CancellationToken,
@@ -294,6 +299,7 @@ impl<'run> ProcessEngineRunContext<'run> {
             store.clone(),
             session_store_factory.clone(),
             queued_work_driver.clone(),
+            process_wake_delivery_policy,
             clock,
         );
         Self {

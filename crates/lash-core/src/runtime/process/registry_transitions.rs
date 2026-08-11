@@ -1088,6 +1088,7 @@ mod tests {
                 "replay",
             ),
             process_caused_by: None,
+            authority: crate::QueuedWorkAuthority::default(),
             input: "wake".to_string(),
             created_at_ms: 10,
         };

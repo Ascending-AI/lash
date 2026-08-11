@@ -511,6 +511,21 @@ fn prepare_wake_delivery(
         event_type,
         event_invocation,
         process_caused_by: record.provenance.caused_by.clone(),
+        authority: match &record.provenance.originator {
+            super::model::ProcessOriginator::Host { .. } => {
+                crate::QueuedWorkAuthority::new(record.originator_id())
+            }
+            super::model::ProcessOriginator::Session {
+                session_id,
+                agent_frame_id,
+            } => {
+                let authority = crate::QueuedWorkAuthority::new(session_id.clone());
+                match agent_frame_id {
+                    Some(frame_id) => authority.with_elevation(frame_id.clone()),
+                    None => authority,
+                }
+            }
+        },
         wake,
         occurred_at,
     })
@@ -628,9 +643,18 @@ fn process_registration_fingerprint_preimage(
             fingerprint.tag(1);
             fingerprint.optional(scope.as_deref(), |identity, scope| identity.string(scope));
         }
-        super::model::ProcessOriginator::Session { session_id } => {
+        super::model::ProcessOriginator::Session {
+            session_id,
+            agent_frame_id,
+        } => {
             fingerprint.tag(2);
             fingerprint.string(session_id);
+            if let Some(agent_frame_id) = agent_frame_id {
+                // Preserve the v2 preimage for historical unframed session
+                // originators while making a real elevation change conflict.
+                fingerprint.tag(3);
+                fingerprint.string(agent_frame_id);
+            }
         }
     }
     fingerprint.optional(caused_by.as_ref(), project_registration_causal_ref);
@@ -1144,9 +1168,8 @@ mod tests {
             .with_definition(Some(serde_json::json!([
                 null, false, true, -1, 0, u64::MAX, 1.5, "a:b", [], {"x": 0}
             ])));
-        enriched.provenance.originator = crate::ProcessOriginator::session(
-            crate::SessionScope::for_agent_frame("session", "frame"),
-        );
+        enriched.provenance.originator =
+            crate::ProcessOriginator::session(crate::SessionScope::new("session"));
         enriched.env_ref = Some(crate::ProcessExecutionEnvRef::new("env"));
         enriched.wake_session_id = Some("wake".to_string());
         let mut selector_fields = std::collections::BTreeMap::new();
@@ -1421,6 +1444,25 @@ mod tests {
             process_registration_fingerprint(&reordered_events, &[]),
             process_registration_fingerprint(&opposite_order, &[]),
             "source order is not executable definition"
+        );
+    }
+
+    #[test]
+    fn session_originator_elevation_changes_registration_fingerprint() {
+        let mut first = registration_for_input(ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        });
+        first.provenance = crate::ProcessProvenance::session(crate::SessionScope::for_agent_frame(
+            "session", "frame-a",
+        ));
+        let mut second = first.clone();
+        second.provenance = crate::ProcessProvenance::session(
+            crate::SessionScope::for_agent_frame("session", "frame-b"),
+        );
+        assert_ne!(
+            process_registration_fingerprint(&first, &[]),
+            process_registration_fingerprint(&second, &[]),
+            "elevation is executable wake authority and cannot replay as the same process definition"
         );
     }
 

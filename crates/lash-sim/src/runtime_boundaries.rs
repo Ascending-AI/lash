@@ -513,6 +513,7 @@ impl RuntimeBoundaryHarness {
                     replay: Some(RuntimeReplay { key: replay_key }),
                 },
                 process_caused_by: None,
+                authority: lash_core::QueuedWorkAuthority::default(),
                 wake: lash_core::facade_support::ProcessWake {
                     input: format!("wake for {session}"),
                 },
@@ -1437,6 +1438,7 @@ fn worker_failover_work(
                 }),
             },
             process_caused_by: None,
+            authority: lash_core::QueuedWorkAuthority::default(),
             wake: lash_core::facade_support::ProcessWake {
                 input: format!("worker-owned work for {session}"),
             },

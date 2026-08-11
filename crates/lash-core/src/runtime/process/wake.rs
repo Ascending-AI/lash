@@ -92,6 +92,7 @@ pub struct ProcessWakeDeliveryRequest {
     pub event_type: String,
     pub event_invocation: crate::RuntimeInvocation,
     pub process_caused_by: Option<crate::CausalRef>,
+    pub authority: crate::QueuedWorkAuthority,
     pub wake: ProcessWake,
     pub occurred_at: SystemTime,
 }
@@ -106,6 +107,7 @@ pub fn process_wake_delivery(
         event_type,
         event_invocation,
         process_caused_by,
+        authority,
         wake,
         occurred_at,
     } = request;
@@ -118,6 +120,7 @@ pub fn process_wake_delivery(
         event_type,
         event_invocation,
         process_caused_by,
+        authority,
         input: wake.input,
         created_at_ms: epoch_ms_from_system_time(occurred_at),
     })
