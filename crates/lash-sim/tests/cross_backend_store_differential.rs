@@ -2011,90 +2011,96 @@ impl BackendRunner {
     }
 }
 
-fn normalized_store_error(backend: &str, error: &StoreError) -> String {
+fn normalized_store_error(_backend: &str, error: &StoreError) -> String {
     match error {
         StoreError::ExecutionStateCaptureFailed { message } => {
             format!("ExecutionStateCaptureFailed:{message}")
         }
-        StoreError::Contended => "Contended".to_string(),
-        StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
-        StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),
-        StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
-        StoreError::SessionBindingNotMaterialized { .. } => {
-            "SessionBindingNotMaterialized".to_string()
-        }
-        StoreError::InvalidSessionId { .. } => "InvalidSessionId".to_string(),
-        StoreError::SessionDeleted { .. } => "SessionDeleted".to_string(),
-        StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation".to_string(),
-        StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
-        StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict".to_string(),
-        StoreError::AppendOperationIdentityConflict { .. } => {
-            "AppendOperationIdentityConflict".to_string()
-        }
-        StoreError::AppendReceiptRequestedNodeCountCorrupt { .. } => {
-            "AppendReceiptRequestedNodeCountCorrupt".to_string()
-        }
-        error @ StoreError::TokenUsageAccountingOverflow { .. } => error.variant_name().to_string(),
-        error @ StoreError::CheckpointTurnIndexOutOfRange { .. } => error.variant_name().into(),
-        error @ StoreError::CheckpointTokenUsageOutOfRange { .. } => error.variant_name().into(),
-        StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive".to_string(),
-        StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),
-        StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded".to_string(),
-        StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim".to_string(),
-        StoreError::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim".to_string(),
-        error @ StoreError::PendingTurnInputSourceKeyConflict { .. } => error.variant_name().into(),
-        StoreError::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired".into(),
-        StoreError::SessionExecutionLeaseRenewalRefused { .. } => {
-            "SessionExecutionLeaseRenewalRefused".into()
-        }
-        StoreError::SessionExecutionLeaseReleaseRefused { .. } => {
-            "SessionExecutionLeaseReleaseRefused".into()
-        }
-        error @ StoreError::UnsupportedRecordSchemaVersion { .. } => error.variant_name().into(),
-        StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion".to_string(),
-        StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion".to_string(),
-        StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing".to_string(),
-        StoreError::StoredDataCorrupt { .. } => "StoredDataCorrupt".to_string(),
-        StoreError::StorageFailure { .. } => "StorageFailure".to_string(),
-        StoreError::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound".to_string(),
-        StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
-        StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
-        StoreError::GraphGenerationCollision { .. } => "GraphGenerationCollision".to_string(),
-        StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),
-        StoreError::ForkPointNotRetained { .. } => "ForkPointNotRetained".to_string(),
-        StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists".to_string(),
-        StoreError::InvalidGraphParent { .. } => "InvalidGraphParent".to_string(),
-        StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
-        StoreError::Backend(message) => normalized_backend_error(backend, message),
-        other => unmapped_store_error_key(other),
+        _ => error.variant_name().to_string(),
     }
 }
 
-fn unmapped_store_error_key(error: &StoreError) -> String {
-    format!("Unmapped:{}", error.variant_name())
-}
+async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &PostgresStorage) {
+    let create_request = SessionStoreCreateRequest {
+        session_id: format!("fig-1242-storage-failure:{}", run_nonce()),
+        relation: SessionRelation::Root,
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
 
-#[test]
-fn unmapped_store_error_keys_remain_variant_distinct() {
+    let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(
+        sqlite_root.join("storage-failure-mapping"),
+    );
+    let sqlite_store = sqlite_factory
+        .create_store(&create_request)
+        .await
+        .expect("create SQLite storage-failure differential store");
+    let sqlite_connection = rusqlite::Connection::open(sqlite_factory.catalog_path())
+        .expect("open SQLite storage-failure fixture");
+    sqlite_connection
+        .execute("DROP TABLE session_meta", [])
+        .expect("break SQLite storage-failure fixture");
+    let sqlite_error = sqlite_store
+        .load_session_meta()
+        .await
+        .expect_err("broken SQLite catalog must fail");
+
+    let postgres_factory = postgres.session_store_factory();
+    postgres.pool().close().await;
+    let postgres_error = match postgres_factory.create_store(&create_request).await {
+        Ok(_) => panic!("closed PostgreSQL pool must fail"),
+        Err(error) => error,
+    };
+
     assert_eq!(
-        (
-            unmapped_store_error_key(&StoreError::Contended),
-            unmapped_store_error_key(&StoreError::Backend("failure".to_string())),
-        ),
-        (
-            "Unmapped:Contended".to_string(),
-            "Unmapped:Backend".to_string(),
-        )
+        normalized_store_error("sqlite", &sqlite_error),
+        normalized_store_error("postgres", &postgres_error),
+        "the same substrate-failure class must retain one typed error surface; \
+         sqlite={sqlite_error:?}, postgres={postgres_error:?}"
     );
 }
 
-fn normalized_backend_error(backend: &str, message: &str) -> String {
-    match backend {
-        "postgres" if message.contains("duplicate key value violates unique constraint") => {
-            "Backend(postgres:23505:unique_violation)".to_string()
-        }
-        _ => format!("Backend({backend}:unclassified:{message})"),
-    }
+#[test]
+fn normalized_store_errors_compare_typedness_and_variant_not_prose() {
+    let sqlite_storage_failure = StoreError::StorageFailure {
+        backend: "sqlite",
+        message: "disk I/O error".to_string(),
+    };
+    let postgres_storage_failure = StoreError::StorageFailure {
+        backend: "postgres",
+        message: "connection closed".to_string(),
+    };
+    let postgres_untyped = StoreError::Backend("connection closed".to_string());
+    let postgres_corrupt = StoreError::StoredDataCorrupt {
+        record_kind: "session metadata",
+        message: "invalid JSON".to_string(),
+    };
+    let first_capture_failure = StoreError::ExecutionStateCaptureFailed {
+        message: "checkpoint encoder failed".to_string(),
+    };
+    let second_capture_failure = StoreError::ExecutionStateCaptureFailed {
+        message: "plugin snapshot failed".to_string(),
+    };
+
+    assert_eq!(
+        normalized_store_error("sqlite", &sqlite_storage_failure),
+        normalized_store_error("postgres", &postgres_storage_failure),
+        "backend-specific prose inside one typed variant is not contract-visible"
+    );
+    assert_ne!(
+        normalized_store_error("postgres", &postgres_storage_failure),
+        normalized_store_error("postgres", &postgres_untyped),
+        "typed and untyped failures must remain distinct"
+    );
+    assert_ne!(
+        normalized_store_error("postgres", &postgres_storage_failure),
+        normalized_store_error("postgres", &postgres_corrupt),
+        "different typed variants must remain distinct"
+    );
+    assert_ne!(
+        normalized_store_error("in-memory", &first_capture_failure),
+        normalized_store_error("in-memory", &second_capture_failure),
+        "the existing execution-state capture diagnostic comparison remains exact"
+    );
 }
 
 #[derive(Debug)]
@@ -2442,6 +2448,7 @@ async fn cross_backend_store_differential_agrees() {
         divergences.is_empty(),
         "cross-backend durable state diverged:{divergences}"
     );
+    assert_storage_failure_mappings_agree(sqlite_root.path(), &postgres).await;
     eprintln!(
         "PASSED cross-backend store differential; \
          compared_backends=[in-memory,sqlite,postgres]"
