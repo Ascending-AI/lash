@@ -16,7 +16,9 @@
 //! implementations; adapters put the real streaming path under test by
 //! implementing [`ProviderNormalizer::assemble_stream`].
 
-use lash_sansio::llm::types::{LlmMessage, LlmOutputPart, LlmTerminalReason, LlmUsage};
+use lash_sansio::llm::types::{
+    LlmMessage, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
+};
 use lash_sansio::session_model::{Message, MessageRole, Part, render_prompt, shared_parts};
 use serde_json::Value;
 
@@ -41,6 +43,11 @@ pub enum Scenario {
     /// A streamed response whose tool-call arguments arrive split across
     /// multiple chunks and must reassemble into one valid `input_json`.
     StreamingToolArgumentMerge,
+    /// A stream prefix that ends immediately after the adapter parses a
+    /// complete tool call, before provider terminal evidence. Core synthesizes
+    /// a plugin-aborted turn entirely from the events emitted for this prefix;
+    /// its tool-call parts must equal the adapter's parsed partial state.
+    StreamingToolCallAbortEquivalence,
     /// A turn stopped by the provider's content filter. Terminal reason:
     /// `ContentFilter`.
     ContentFilter,
@@ -73,6 +80,7 @@ impl Scenario {
         Scenario::NonStreamingToolUse,
         Scenario::StreamingTextAssembly,
         Scenario::StreamingToolArgumentMerge,
+        Scenario::StreamingToolCallAbortEquivalence,
         Scenario::ContentFilter,
         Scenario::UsageCacheHit,
         Scenario::UsageReasoning,
@@ -181,6 +189,10 @@ pub struct ProviderWire {
     /// the call's arguments arrive across >=2 chunks. `None` for non-streaming
     /// scenarios.
     pub tool_call_sse: Option<Vec<String>>,
+    /// For `Scenario::StreamingToolCallAbortEquivalence`: the provider-native
+    /// stream prefix through the event that makes one tool call complete, with
+    /// no provider terminal event after it.
+    pub abort_tool_call_sse: Option<Vec<String>>,
     /// For `Scenario::StreamingTextAssembly`: the SSE event strings
     /// (provider's own format) that stream assistant text across >=2 chunks.
     pub text_sse: Option<Vec<String>>,
@@ -216,6 +228,7 @@ impl ProviderWire {
         Self {
             body,
             tool_call_sse: None,
+            abort_tool_call_sse: None,
             text_sse: None,
             expected_stream_text: None,
             expected_tool_input_json: None,
@@ -235,6 +248,18 @@ impl ProviderWire {
         expected_input_json: Value,
     ) -> Self {
         self.tool_call_sse = Some(sse);
+        self.expected_tool_name = Some(tool_name.into());
+        self.expected_tool_input_json = Some(expected_input_json);
+        self
+    }
+
+    pub fn with_aborted_tool_call_stream(
+        mut self,
+        sse: Vec<String>,
+        tool_name: impl Into<String>,
+        expected_input_json: Value,
+    ) -> Self {
+        self.abort_tool_call_sse = Some(sse);
         self.expected_tool_name = Some(tool_name.into());
         self.expected_tool_input_json = Some(expected_input_json);
         self
@@ -280,6 +305,9 @@ impl ProviderWire {
 pub struct StreamAssembly {
     pub parts: Vec<LlmOutputPart>,
     pub usage: LlmUsage,
+    /// Core-internal stream events emitted by the real adapter path while
+    /// parsing the supplied provider-native events.
+    pub stream_events: Vec<LlmStreamEvent>,
 }
 
 /// A provider's adapter into the conformance suite. Implementations wrap the
@@ -543,6 +571,57 @@ fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: Provider
                 &got_json, expected_json,
                 "[{who}] {scenario:?}: tool-call arguments must reassemble identically across \
                  chunk boundaries"
+            );
+        }
+        Scenario::StreamingToolCallAbortEquivalence => {
+            let sse = wire
+                .abort_tool_call_sse
+                .as_ref()
+                .unwrap_or_else(|| panic!("[{who}] {scenario:?}: must supply abort_tool_call_sse"));
+            assert!(
+                !sse.is_empty(),
+                "[{who}] {scenario:?}: abort prefix must contain provider-native events"
+            );
+            let assembled = n.assemble_stream(scenario, sse);
+            let parsed_tool_calls = assembled
+                .parts
+                .iter()
+                .filter(|part| is_tool_call(part))
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                parsed_tool_calls.len(),
+                1,
+                "[{who}] {scenario:?}: fixture must end after exactly one parsed tool call, got {:?}",
+                assembled.parts
+            );
+
+            let aborted = lash_core::testing::response_synthesized_from_aborted_stream(
+                &assembled.stream_events,
+            );
+            let aborted_tool_calls = aborted
+                .parts
+                .iter()
+                .filter(|part| is_tool_call(part))
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                aborted_tool_calls, parsed_tool_calls,
+                "[{who}] {scenario:?}: a turn aborted after the adapter parsed its tool call must preserve exactly the same tool-call parts from core's accumulator; emitted events were {:?}",
+                assembled.stream_events
+            );
+
+            let (tool_name, input_json) = as_tool_call(&aborted_tool_calls[0])
+                .expect("aborted response contains one tool call");
+            if let Some(expected_name) = &wire.expected_tool_name {
+                assert_eq!(&tool_name, expected_name);
+            }
+            let got_json: Value = serde_json::from_str(&input_json)
+                .unwrap_or_else(|err| panic!("[{who}] abort-path tool input is invalid: {err}"));
+            assert_eq!(
+                Some(&got_json),
+                wire.expected_tool_input_json.as_ref(),
+                "[{who}] {scenario:?}: abort-path tool input changed"
             );
         }
         Scenario::UsageCacheHit => {

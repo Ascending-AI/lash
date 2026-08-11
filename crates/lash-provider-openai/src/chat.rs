@@ -698,6 +698,7 @@ pub(crate) struct ChatStreamState {
     pub(crate) usage: LlmUsage,
     pub(crate) provider_usage: Option<Value>,
     pub(crate) tool_calls: HashMap<usize, ChatStreamingToolCall>,
+    emitted_tool_call_indices: std::collections::HashSet<usize>,
     pub(crate) final_response_raw: Option<String>,
     pub(crate) terminal_reason: LlmTerminalReason,
     pub(crate) provider_response_id: Option<String>,
@@ -825,6 +826,59 @@ impl ChatStreamState {
 
     pub(crate) fn take_text_deltas(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_text_deltas)
+    }
+
+    fn take_tool_call_parts(&mut self, require_complete_json: bool) -> Vec<LlmOutputPart> {
+        let mut indices = self.tool_calls.keys().copied().collect::<Vec<_>>();
+        indices.sort_unstable();
+        let mut parts = Vec::new();
+        for index in indices {
+            if self.emitted_tool_call_indices.contains(&index) {
+                continue;
+            }
+            let Some(tool_call) = self.tool_calls.get_mut(&index) else {
+                continue;
+            };
+            if tool_call.tool_name.is_empty()
+                || (require_complete_json
+                    && (tool_call.input_json.is_empty()
+                        || !matches!(
+                            serde_json::from_str::<Value>(&tool_call.input_json),
+                            Ok(Value::Object(_))
+                        )))
+            {
+                continue;
+            }
+            if tool_call.call_id.is_empty() {
+                tool_call.call_id = uuid::Uuid::new_v4().to_string();
+            }
+            parts.push(LlmOutputPart::ToolCall {
+                call_id: tool_call.call_id.clone(),
+                tool_name: tool_call.tool_name.clone(),
+                input_json: if tool_call.input_json.is_empty() {
+                    "{}".to_string()
+                } else {
+                    tool_call.input_json.clone()
+                },
+                replay: tool_call
+                    .signature
+                    .clone()
+                    .map(|opaque| ProviderReplayMeta {
+                        item_id: None,
+                        opaque: Some(opaque),
+                    }),
+            });
+            self.emitted_tool_call_indices.insert(index);
+        }
+        parts
+    }
+
+    pub(crate) fn take_completed_tool_call_parts(&mut self) -> Vec<LlmOutputPart> {
+        self.take_tool_call_parts(true)
+    }
+
+    pub(crate) fn take_remaining_tool_call_parts(&mut self) -> Vec<LlmOutputPart> {
+        self.take_tool_call_parts(false)
     }
 
     pub(crate) fn parts(&self) -> Vec<LlmOutputPart> {

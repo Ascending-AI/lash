@@ -317,8 +317,9 @@ impl GoogleOAuthProvider {
                 });
             }
         }
+        let tool_calls = Self::tool_call_parts_from_event(&event);
         if let Some(parts) = tool_call_parts {
-            parts.extend(Self::tool_call_parts_from_event(&event));
+            parts.extend(tool_calls);
         }
         // Capture the last event carrying a non-empty `finishReason` so the
         // streaming finalizer can derive the terminal reason exactly like the

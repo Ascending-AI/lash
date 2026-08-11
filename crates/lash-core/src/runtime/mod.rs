@@ -252,8 +252,29 @@ pub use lash_sansio::PromptUsage;
 pub use crate::store::QueuedWorkClass;
 use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
-    LlmStreamState, LlmStreamSummary, TurnAssembler,
+    LlmStreamState, LlmStreamSummary, TurnAssembler, fold_llm_stream_event,
 };
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn response_synthesized_from_aborted_stream(
+    events: &[crate::llm::types::LlmStreamEvent],
+) -> crate::llm::types::LlmResponse {
+    use crate::llm::types::LlmUsage;
+
+    let mut accumulator = LlmStreamAccumulator::default();
+    let mut usage = LlmUsage::default();
+    for event in events {
+        fold_llm_stream_event(&mut accumulator, &mut usage, event);
+    }
+
+    let mut response = crate::llm::types::LlmResponse {
+        usage,
+        terminal_reason: crate::llm::types::LlmTerminalReason::Stop,
+        ..crate::llm::types::LlmResponse::default()
+    };
+    accumulator.apply_to_response(&mut response);
+    response
+}
 #[cfg(test)]
 #[allow(unused_imports)]
 use assembly::{classify_output_state, sanitize_assistant_output};

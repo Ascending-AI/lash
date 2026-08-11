@@ -10,7 +10,9 @@ use super::request;
 use crate::chat::ChatStreamState;
 use crate::responses_shared as shared;
 use crate::{OpenAiCompatibleProvider, OpenAiProvider};
-use lash_core::llm::types::{LlmMessage, LlmOutputPart, LlmTerminalReason, LlmUsage};
+use lash_core::llm::types::{
+    LlmMessage, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
+};
 use lash_llm_transport::conformance::{
     CanonicalUsage as U, ProviderNormalizer, ProviderWire, Scenario, StreamAssembly,
     provider_conformance, strong_replay_payload,
@@ -79,6 +81,13 @@ impl ProviderNormalizer for OpenAiNormalizer {
                     "lookup",
                     json!({ "q": "x" }),
                 ),
+            Scenario::StreamingToolCallAbortEquivalence => {
+                ProviderWire::body(json!({})).with_aborted_tool_call_stream(
+                    vec![r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abort","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"x\"}"}}]}}]}"#.to_string()],
+                    "lookup",
+                    json!({ "q": "x" }),
+                )
+            }
             Scenario::UsageCacheHit => ProviderWire::body(json!({
                 "choices": [{
                     "message": { "role": "assistant", "content": "ok" },
@@ -164,16 +173,25 @@ impl ProviderNormalizer for OpenAiNormalizer {
             return StreamAssembly {
                 parts: state.response_parts(),
                 usage: state.usage.clone(),
+                stream_events: Vec::new(),
             };
         }
         let mut state = ChatStreamState::default();
+        let mut stream_events = Vec::new();
         for raw in sse_events {
             OpenAiCompatibleProvider::process_chat_sse_event(raw, &mut state)
                 .expect("chat sse event parses");
+            stream_events.extend(
+                state
+                    .take_completed_tool_call_parts()
+                    .into_iter()
+                    .map(LlmStreamEvent::Part),
+            );
         }
         StreamAssembly {
             parts: state.parts(),
             usage: state.usage.clone(),
+            stream_events,
         }
     }
 

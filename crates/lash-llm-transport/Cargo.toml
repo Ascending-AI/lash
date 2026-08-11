@@ -16,7 +16,7 @@ categories = ["asynchronous", "network-programming"]
 [features]
 # Exposes the cross-provider response-normalization conformance suite
 # (`conformance`). Provider crates enable it as a dev-dependency feature.
-testing = []
+testing = ["lash-core/testing"]
 # Exposes reusable proptest strategies and scripted stream fakes
 # (`proptest_support`). Provider crates enable it as a dev-dependency feature.
 proptest-support = ["dep:proptest"]

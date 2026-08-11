@@ -166,6 +166,7 @@ impl GoogleOAuthProvider {
                 let mut text_deltas = Vec::new();
                 let mut reasoning_deltas = Vec::new();
                 let prev_usage = usage.clone();
+                let first_new_tool_call = tool_call_parts.len();
                 Self::process_sse_event_with_text_parts(
                     raw,
                     SseTextPartSink {
@@ -187,7 +188,17 @@ impl GoogleOAuthProvider {
                         tx.send(LlmStreamEvent::ReasoningDelta(delta));
                     }
                 }
-                emit_stream_progress(stream_events.as_ref(), text_deltas, &usage, &prev_usage);
+                if let Some(tx) = stream_events.as_ref() {
+                    if usage != prev_usage && usage != LlmUsage::default() {
+                        tx.send(LlmStreamEvent::Usage(usage.clone()));
+                    }
+                    for delta in text_deltas {
+                        tx.send(LlmStreamEvent::Delta(delta));
+                    }
+                    for part in &tool_call_parts[first_new_tool_call..] {
+                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    }
+                }
                 Ok(())
             },
         )

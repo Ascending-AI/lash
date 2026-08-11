@@ -107,6 +107,28 @@ fn stream_accumulator_preserves_reasoning_when_final_response_has_tool_call() {
 }
 
 #[test]
+fn stream_accumulator_dedupes_tool_calls_by_call_id() {
+    let mut accumulator = LlmStreamAccumulator::default();
+    for _ in 0..2 {
+        accumulator.push_tool_call(
+            "call_1".to_string(),
+            "lookup".to_string(),
+            "{\"q\":\"x\"}".to_string(),
+            None,
+        );
+    }
+
+    assert_eq!(
+        accumulator
+            .parts
+            .iter()
+            .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn stream_accumulator_does_not_duplicate_complete_final_response() {
     let mut accumulator = LlmStreamAccumulator::default();
     accumulator.push_reasoning("I'll answer.".to_string(), None, Vec::new(), None);
