@@ -136,9 +136,11 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
     }
 }
 
-/// Select the prefix of turn-work `candidates` that a single claim may take.
+/// Select the turn-work `candidates` that a single claim may take.
 ///
-/// Returns the number of leading candidates to claim (`0` means no claim):
+/// Fresh claims return a leading prefix. Interrupted claims return every
+/// candidate carrying the head row's prior claim identity, including rows
+/// separated by newly ready unrelated work.
 ///
 /// * The queue head must be [`QueuedWorkClass::TurnWork`]. Earlier ready
 ///   session commands are never skipped or materialized as turn input.
@@ -149,14 +151,14 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
 /// * A batchable head extends through immediately following rows with the same
 ///   delivery policy, merge key, and authority/elevation, within the host's
 ///   row, age, and rendered-token bounds.
-pub fn select_turn_work_claim_prefix(
+pub fn select_turn_work_claim_indices(
     candidates: &[ClaimCandidate],
     boundary: QueuedWorkClaimBoundary,
     policy: QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
-) -> Result<usize, StoreError> {
+) -> Result<Vec<usize>, StoreError> {
     if policy.max_rows == 0 {
-        return Ok(record_turn_claim_decision(
+        record_turn_claim_decision(
             candidates,
             boundary,
             policy,
@@ -164,36 +166,15 @@ pub fn select_turn_work_claim_prefix(
             0,
             0,
             "zero_limit",
-        ));
+        );
+        return Ok(Vec::new());
     }
     let Some(first) = candidates.first() else {
-        return Ok(record_turn_claim_decision(
-            candidates,
-            boundary,
-            policy,
-            now_epoch_ms,
-            0,
-            0,
-            "empty",
-        ));
+        record_turn_claim_decision(candidates, boundary, policy, now_epoch_ms, 0, 0, "empty");
+        return Ok(Vec::new());
     };
-    if let Some(prior_claim_id) = first.prior_claim_id.as_deref() {
-        let selected = candidates
-            .iter()
-            .take_while(|candidate| candidate.prior_claim_id.as_deref() == Some(prior_claim_id))
-            .count();
-        return Ok(record_turn_claim_decision(
-            candidates,
-            boundary,
-            policy,
-            now_epoch_ms,
-            selected,
-            rendered_token_upper_bound(&candidates[..selected]),
-            "interrupted_claim_redrive",
-        ));
-    }
     if first.work_class != QueuedWorkClass::TurnWork {
-        return Ok(record_turn_claim_decision(
+        record_turn_claim_decision(
             candidates,
             boundary,
             policy,
@@ -201,12 +182,13 @@ pub fn select_turn_work_claim_prefix(
             0,
             0,
             "command_at_head",
-        ));
+        );
+        return Ok(Vec::new());
     }
     if boundary == QueuedWorkClaimBoundary::ActiveTurnCheckpoint
         && first.delivery_policy != DeliveryPolicy::EarliestSafeBoundary
     {
-        return Ok(record_turn_claim_decision(
+        record_turn_claim_decision(
             candidates,
             boundary,
             policy,
@@ -214,7 +196,32 @@ pub fn select_turn_work_claim_prefix(
             0,
             0,
             "delivery_boundary_blocked",
-        ));
+        );
+        return Ok(Vec::new());
+    }
+    if let Some(prior_claim_id) = first.prior_claim_id.as_deref() {
+        let selected = candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(index, candidate)| {
+                (candidate.prior_claim_id.as_deref() == Some(prior_claim_id)).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let rendered_tokens = selected.iter().fold(0usize, |total, index| {
+            total.saturating_add(rendered_token_upper_bound(std::slice::from_ref(
+                &candidates[*index],
+            )))
+        });
+        record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            selected.len(),
+            rendered_tokens,
+            "interrupted_claim_redrive",
+        );
+        return Ok(selected);
     }
 
     if policy.action_token_reserve >= policy.max_context_tokens {
@@ -235,7 +242,7 @@ pub fn select_turn_work_claim_prefix(
         });
     }
     if !first.kind.is_batchable() || first.merge_key.is_none() {
-        return Ok(record_turn_claim_decision(
+        let selected = record_turn_claim_decision(
             candidates,
             boundary,
             policy,
@@ -243,10 +250,11 @@ pub fn select_turn_work_claim_prefix(
             1,
             first_tokens,
             "single_row",
-        ));
+        );
+        return Ok((0..selected).collect());
     }
     if first_tokens > available_tokens {
-        return Ok(record_turn_claim_decision(
+        let selected = record_turn_claim_decision(
             candidates,
             boundary,
             policy,
@@ -254,10 +262,11 @@ pub fn select_turn_work_claim_prefix(
             1,
             first_tokens,
             "oversized_for_reserve_attempt_alone",
-        ));
+        );
+        return Ok((0..selected).collect());
     }
     if now_epoch_ms.saturating_sub(first.enqueued_at_ms) >= policy.max_pending_age_ms {
-        return Ok(record_turn_claim_decision(
+        let selected = record_turn_claim_decision(
             candidates,
             boundary,
             policy,
@@ -265,7 +274,8 @@ pub fn select_turn_work_claim_prefix(
             1,
             first_tokens,
             "max_pending_age_reached",
-        ));
+        );
+        return Ok((0..selected).collect());
     }
 
     let mut selected = 1;
@@ -287,7 +297,7 @@ pub fn select_turn_work_claim_prefix(
         selected += 1;
         rendered_tokens = candidate_tokens;
     }
-    Ok(record_turn_claim_decision(
+    let selected = record_turn_claim_decision(
         candidates,
         boundary,
         policy,
@@ -295,7 +305,29 @@ pub fn select_turn_work_claim_prefix(
         selected,
         rendered_tokens,
         "coalesced_prefix",
-    ))
+    );
+    Ok((0..selected).collect())
+}
+
+/// Select the number of rows from a physically contiguous candidate set.
+///
+/// SQL automatic claims pre-filter interrupted rows by the head claim ID, and
+/// exact-ID claims construct a contiguous candidate slice. In-memory automatic
+/// claims use [`select_turn_work_claim_indices`] directly so identity gaps are
+/// retained.
+pub fn select_turn_work_claim_prefix(
+    candidates: &[ClaimCandidate],
+    boundary: QueuedWorkClaimBoundary,
+    policy: QueuedWorkClaimPolicy,
+    now_epoch_ms: u64,
+) -> Result<usize, StoreError> {
+    let selected = select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms)?;
+    Ok(selected
+        .iter()
+        .copied()
+        .enumerate()
+        .take_while(|(prefix_index, selected_index)| prefix_index == selected_index)
+        .count())
 }
 
 /// Conservative upper bound for the exact model-visible queued-work render.

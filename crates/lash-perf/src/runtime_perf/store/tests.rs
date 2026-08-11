@@ -148,3 +148,11 @@ async fn perf_store_pins_durable_claim_id_dialects() {
         Some(input_claim.claim_id.as_str())
     );
 }
+
+#[tokio::test]
+async fn perf_store_exact_claim_preserves_physical_order_and_key_breaks() {
+    lash_core::testing::conformance::queued_work_exact_claim_preserves_physical_order_and_key_breaks(
+        Arc::new(RuntimePerfStore::default()),
+    )
+    .await;
+}

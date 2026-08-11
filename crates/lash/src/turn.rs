@@ -838,7 +838,19 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
     let turn = if batch_ids.is_empty() {
         writer.stream_next_queued_work(opts).await?
     } else {
-        writer.stream_selected_queued_work(opts, batch_ids).await?
+        match writer.stream_selected_queued_work(opts, batch_ids).await {
+            Ok(turn) => turn,
+            Err(lash_core::SelectedQueuedWorkDrainError::Runtime(error)) => {
+                return Err(error.into());
+            }
+            Err(lash_core::SelectedQueuedWorkDrainError::Refused {
+                unclaimed_batch_ids,
+            }) => {
+                return Err(EmbedError::SelectedQueuedWorkDrainRefused {
+                    unclaimed_batch_ids,
+                });
+            }
+        }
     };
     runtime.publish_from(&writer);
     Ok(turn)

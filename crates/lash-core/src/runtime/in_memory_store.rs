@@ -502,26 +502,31 @@ impl InMemorySessionStore {
                 ))
             })
             .collect::<Result<Vec<_>, crate::store::StoreError>>()?;
-        let selected_len = match kind {
+        let selected_indices: Vec<usize> = match kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
-                crate::store::queued_work::select_leading_session_command(&candidates)
+                let selected_len =
+                    crate::store::queued_work::select_leading_session_command(&candidates);
+                claimable_indices
+                    .iter()
+                    .copied()
+                    .take(selected_len)
+                    .collect()
             }
             InMemoryQueuedWorkClaimKind::TurnWork { boundary, policy } => {
-                crate::store::queued_work::select_turn_work_claim_prefix(
+                crate::store::queued_work::select_turn_work_claim_indices(
                     &candidates,
                     boundary,
                     policy,
                     now,
                 )?
+                .into_iter()
+                .map(|candidate_index| claimable_indices[candidate_index])
+                .collect()
             }
         };
-        if selected_len == 0 {
+        if selected_indices.is_empty() {
             return Ok(None);
         }
-        let selected_indices = claimable_indices
-            .into_iter()
-            .take(selected_len)
-            .collect::<Vec<_>>();
         let next_fencing_tokens = selected_indices
             .iter()
             .map(|index| {

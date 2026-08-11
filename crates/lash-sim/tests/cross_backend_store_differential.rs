@@ -2125,8 +2125,26 @@ async fn runners_for_case(
     postgres_database_url: &str,
     run_nonce: &str,
 ) -> Vec<BackendRunner> {
+    runners_for_case_with_clock(
+        case,
+        sqlite_root,
+        postgres,
+        postgres_database_url,
+        run_nonce,
+        Arc::new(DifferentialClock),
+    )
+    .await
+}
+
+async fn runners_for_case_with_clock(
+    case: CaseName,
+    sqlite_root: &Path,
+    postgres: &PostgresStorage,
+    postgres_database_url: &str,
+    run_nonce: &str,
+    clock: Arc<dyn Clock>,
+) -> Vec<BackendRunner> {
     let session_id = format!("fig-778-{run_nonce}-{}", case.as_str());
-    let clock = Arc::new(DifferentialClock) as Arc<dyn Clock>;
     let create_request = SessionStoreCreateRequest {
         session_id: session_id.clone(),
         relation: SessionRelation::Root,

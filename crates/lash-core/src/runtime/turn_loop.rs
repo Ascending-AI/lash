@@ -11,6 +11,15 @@ use crate::facade_support::{
 use lash_sansio::core_support::*;
 use std::pin::Pin;
 
+/// Typed outcome of a host-selected queued-work drain before turn execution.
+#[derive(Debug, thiserror::Error)]
+pub enum SelectedQueuedWorkDrainError {
+    #[error(transparent)]
+    Runtime(#[from] RuntimeError),
+    #[error("selected queued-work batches could not be claimed together: {unclaimed_batch_ids:?}")]
+    Refused { unclaimed_batch_ids: Vec<String> },
+}
+
 fn trace_fields_from_outcome(
     outcome: &TurnOutcome,
 ) -> (
@@ -1426,14 +1435,20 @@ impl LashRuntime {
         &mut self,
         opts: TurnOptions<'_>,
     ) -> Result<Option<AssembledTurn>, RuntimeError> {
-        self.stream_queued_work(opts, None).await
+        match self.stream_queued_work(opts, None).await {
+            Ok(turn) => Ok(turn),
+            Err(SelectedQueuedWorkDrainError::Runtime(error)) => Err(error),
+            Err(SelectedQueuedWorkDrainError::Refused { .. }) => {
+                unreachable!("automatic queued-work claims cannot be refused as selected drains")
+            }
+        }
     }
 
     pub async fn stream_selected_queued_work(
         &mut self,
         opts: TurnOptions<'_>,
         batch_ids: &[String],
-    ) -> Result<Option<AssembledTurn>, RuntimeError> {
+    ) -> Result<Option<AssembledTurn>, SelectedQueuedWorkDrainError> {
         self.stream_queued_work(opts, Some(batch_ids)).await
     }
 
@@ -1441,7 +1456,7 @@ impl LashRuntime {
         &mut self,
         opts: TurnOptions<'_>,
         selected_batch_ids: Option<&[String]>,
-    ) -> Result<Option<AssembledTurn>, RuntimeError> {
+    ) -> Result<Option<AssembledTurn>, SelectedQueuedWorkDrainError> {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
         let Some(session_execution_lease) = self.claim_session_execution_lease().await? else {
@@ -1480,7 +1495,7 @@ impl LashRuntime {
                     Ok(None) => break,
                     Err(err) => {
                         let _ = session_execution_lease.release_if_live().await;
-                        return Err(err);
+                        return Err(err.into());
                     }
                 }
             }
@@ -1546,7 +1561,8 @@ impl LashRuntime {
                 }
                 return self
                     .settle_session_execution_lease(session_execution_lease.as_ref(), result)
-                    .await;
+                    .await
+                    .map_err(Into::into);
             }
         }
         let claim = if let Some(batch_ids) = selected_batch_ids {
@@ -1591,8 +1607,41 @@ impl LashRuntime {
                 .map_err(|err| {
                     RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
                 })?;
-            return Ok(None);
+            return if let Some(batch_ids) = selected_batch_ids {
+                Err(SelectedQueuedWorkDrainError::Refused {
+                    unclaimed_batch_ids: batch_ids.to_vec(),
+                })
+            } else {
+                Ok(None)
+            };
         };
+        if let Some(batch_ids) = selected_batch_ids {
+            let claimed_ids = claim
+                .batches
+                .iter()
+                .map(|batch| batch.batch_id.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            let unclaimed_batch_ids = batch_ids
+                .iter()
+                .filter(|batch_id| !claimed_ids.contains(batch_id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            if !unclaimed_batch_ids.is_empty() {
+                store
+                    .abandon_queued_work_claim(&claim)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+                session_execution_lease
+                    .release_if_live()
+                    .await
+                    .map_err(|err| {
+                        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
+                    })?;
+                return Err(SelectedQueuedWorkDrainError::Refused {
+                    unclaimed_batch_ids,
+                });
+            }
+        }
         let mut work = claim.materialize_queued_turn_work();
         if selected_batch_ids.is_some() {
             // A host-selected drain is closed over the rendered batch set. Without this guard,
@@ -1660,6 +1709,7 @@ impl LashRuntime {
         }
         self.settle_session_execution_lease(session_execution_lease.as_ref(), result)
             .await
+            .map_err(Into::into)
     }
 
     async fn session_commands_precede_pending_turn_input(

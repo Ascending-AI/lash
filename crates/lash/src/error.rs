@@ -78,6 +78,8 @@ pub enum EmbedError {
     StaticTurnStreamRequiresStaticEffectHost,
     #[error("runtime session error: {0}")]
     Session(#[from] SessionError),
+    #[error("selected queued-work batches could not be claimed together: {unclaimed_batch_ids:?}")]
+    SelectedQueuedWorkDrainRefused { unclaimed_batch_ids: Vec<String> },
     #[error("runtime turn error: {0}")]
     Runtime(#[from] lash_core::RuntimeError),
     #[error("runtime plugin/control error: {0}")]

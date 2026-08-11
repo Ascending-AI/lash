@@ -230,7 +230,8 @@ pub mod persistence {
     pub mod queued_work {
         pub use lash_core::store::queued_work::{
             ClaimCandidate, QueuedWorkClass, claim_scan_limit, derive_batch_id,
-            select_leading_session_command, select_turn_work_claim_prefix,
+            select_leading_session_command, select_turn_work_claim_indices,
+            select_turn_work_claim_prefix,
         };
     }
     pub use lash_core::store::{

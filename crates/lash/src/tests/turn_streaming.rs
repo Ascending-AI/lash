@@ -2,6 +2,7 @@ use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
+use lash_core::QueuedWorkStore as _;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 #[cfg(feature = "rlm")]
 use sha2::Digest as _;
@@ -979,6 +980,87 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
         );
     }
     assert!(session.queued_turn().run().await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_refuses_partial_key_break_without_settling_rows() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-queued-turn-refusal")
+        .complete(move |_request| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("selected queued turn must not execute"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-queued-turn-key-break-refusal";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    let enqueue = |source_key: &'static str, merge_key: &'static str| {
+        let store = Arc::clone(&store);
+        async move {
+            store
+                .enqueue_queued_work(
+                    crate::persistence::QueuedWorkBatchDraft::new(
+                        session_id,
+                        lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                        vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                            "selected-refusal-frame",
+                            source_key,
+                            None,
+                        )],
+                    )
+                    .with_source_key(source_key)
+                    .with_merge_key(merge_key),
+                )
+                .await
+                .expect("enqueue selected-refusal row")
+        }
+    };
+    let a1 = enqueue("selected-a1", "a").await;
+    let _b1 = enqueue("selected-b1", "b").await;
+    let a2 = enqueue("selected-a2", "a").await;
+
+    let error = session
+        .queued_turn()
+        .batch_ids([a1.batch_id.clone(), a2.batch_id.clone()])
+        .run()
+        .await
+        .expect_err("A1,B1,A2 cannot satisfy selected [A1,A2] atomically");
+    match error {
+        EmbedError::SelectedQueuedWorkDrainRefused {
+            unclaimed_batch_ids,
+        } => assert_eq!(unclaimed_batch_ids, vec![a2.batch_id]),
+        other => panic!("expected typed selected-drain refusal, got {other:?}"),
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        session
+            .queued_work()
+            .await?
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("selected-a1"), 1),
+            (Some("selected-b1"), 2),
+            (Some("selected-a2"), 3),
+        ]
+    );
     Ok(())
 }
 

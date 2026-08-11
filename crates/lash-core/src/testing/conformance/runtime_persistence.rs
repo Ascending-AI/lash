@@ -62,6 +62,26 @@ impl RuntimePersistenceLeaseTiming {
             Self::Controlled(advance) => advance(CONTROLLED_LEASE_TTL_MS),
         }
     }
+
+    fn delayed_queue_row_available_at_ms(&self) -> u64 {
+        match self {
+            Self::Realtime => {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock is after Unix epoch")
+                    .as_millis() as u64
+                    + 100
+            }
+            Self::Controlled(_) => 4_102_444_800_000,
+        }
+    }
+
+    async fn cross_delayed_queue_row_boundary(&self) {
+        match self {
+            Self::Realtime => tokio::time::sleep(std::time::Duration::from_millis(150)).await,
+            Self::Controlled(advance) => advance(4_102_444_800_000),
+        }
+    }
 }
 
 /// Run the [`RuntimePersistence`] durability conformance suite against the
@@ -529,6 +549,13 @@ where
     .await;
     queued_work_join_groups_by_delivery_policy_and_merge_key(make("queued-join")).await;
     queued_work_redrive_preserves_interrupted_batch_composition(make("redrive-composition")).await;
+    queued_work_redrive_selects_claim_identity_across_ready_gap(
+        make("redrive-ready-gap"),
+        lease_timing,
+    )
+    .await;
+    queued_work_redrive_obeys_delivery_boundary_before_identity(make("redrive-boundary")).await;
+    queued_work_redrive_ignores_successor_row_limit(make("redrive-row-limit")).await;
     queued_work_exact_claim_preserves_physical_order_and_key_breaks(make("physical-order")).await;
     wake_turn_policy_controls_coalescing(make("wake-policy-merge")).await;
     process_wakes_batch_by_default(make("process-wakes-batch")).await;
@@ -4372,7 +4399,7 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
     release_session_execution_lease_for_test(&store, &accepted_session_lease).await;
 }
 
-async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
+pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let a1 = store
@@ -5549,12 +5576,43 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
         vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)],
         "redrive must retain the literal predecessor batch composition"
     );
+    assert_ne!(first_claim.claim_id, redriven.claim_id);
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+
+    let third_owner = lease_owner("redrive-owner-c");
+    let third_lease = claim_session_execution_lease_for_test(
+        &store,
+        "interrupted-batch-redrive",
+        &third_owner.owner_id,
+    )
+    .await;
+    let twice_redriven = store
+        .claim_ready_queued_work(
+            "interrupted-batch-redrive",
+            &third_lease.fence(),
+            &third_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("redrive second interrupted generation")
+        .expect("second interrupted generation remains reclaimable");
+    assert_eq!(
+        twice_redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)],
+        "a third generation must recover the second generation's literal composition"
+    );
+    assert_ne!(redriven.claim_id, twice_redriven.claim_id);
 
     let subsequent = store
         .claim_ready_queued_work(
             "interrupted-batch-redrive",
-            &successor_lease.fence(),
-            &successor_owner,
+            &third_lease.fence(),
+            &third_owner,
             QueuedWorkClaimBoundary::Idle,
             crate::testing::queued_work_claim_policy(64),
         )
@@ -5569,6 +5627,262 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
             .collect::<Vec<_>>(),
         vec![(Some("redrive-w3"), 3)],
         "new compatible work must wait for a separate successor claim"
+    );
+    release_session_execution_lease_for_test(&store, &third_lease).await;
+}
+
+async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
+    store: Arc<dyn RuntimePersistence>,
+    lease_timing: &RuntimePersistenceLeaseTiming,
+) {
+    let session_id = "interrupted-batch-ready-gap";
+    store
+        .enqueue_queued_work(
+            queued_draft(session_id, "w1", DeliveryPolicy::EarliestSafeBoundary)
+                .with_source_key("gap-w1")
+                .with_merge_key("gap-key"),
+        )
+        .await
+        .expect("enqueue ready gap W1");
+    store
+        .enqueue_queued_work(
+            queued_draft(session_id, "w2", DeliveryPolicy::EarliestSafeBoundary)
+                .with_source_key("gap-w2")
+                .with_merge_key("gap-key")
+                .with_available_at_ms(lease_timing.delayed_queue_row_available_at_ms()),
+        )
+        .await
+        .expect("enqueue delayed gap W2");
+    store
+        .enqueue_queued_work(
+            queued_draft(session_id, "w3", DeliveryPolicy::EarliestSafeBoundary)
+                .with_source_key("gap-w3")
+                .with_merge_key("gap-key"),
+        )
+        .await
+        .expect("enqueue ready gap W3");
+
+    let first_owner = lease_owner("gap-owner-a");
+    let first_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &first_owner.owner_id).await;
+    let first_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim ready rows across delayed gap")
+        .expect("ready W1 and W3 form the original claim");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gap-w1"), 1), (Some("gap-w3"), 3)]
+    );
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+    lease_timing.cross_delayed_queue_row_boundary().await;
+
+    let successor = lease_owner("gap-owner-b");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor.owner_id).await;
+    let redriven = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("redrive ready-gap claim")
+        .expect("interrupted identity remains reclaimable across gap");
+    assert_eq!(
+        redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gap-w1"), 1), (Some("gap-w3"), 3)]
+    );
+    let delayed = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim newly ready gap row")
+        .expect("W2 remains a separate claim");
+    assert_eq!(
+        delayed
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gap-w2"), 2)]
+    );
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+}
+
+async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "interrupted-batch-delivery-gate";
+    for (source_key, label) in [("gate-w1", "w1"), ("gate-w2", "w2")] {
+        store
+            .enqueue_queued_work(
+                queued_draft(session_id, label, DeliveryPolicy::AfterCurrentTurnCommit)
+                    .with_source_key(source_key)
+                    .with_merge_key("gate-key"),
+            )
+            .await
+            .expect("enqueue delivery-gated redrive row");
+    }
+    let first_owner = lease_owner("gate-owner-a");
+    let first_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &first_owner.owner_id).await;
+    let first_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim delivery-gated work while idle")
+        .expect("idle boundary admits after-commit work");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
+    );
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+
+    let successor = lease_owner("gate-owner-b");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor.owner_id).await;
+    assert!(
+        store
+            .claim_ready_queued_work(
+                session_id,
+                &successor_lease.fence(),
+                &successor,
+                QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+                crate::testing::queued_work_claim_policy(64),
+            )
+            .await
+            .expect("apply active checkpoint gate before identity redrive")
+            .is_none(),
+        "the active checkpoint boundary must produce a literal empty claim"
+    );
+    let after_boundary = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("redrive after delivery boundary clears")
+        .expect("original composition remains intact");
+    assert_eq!(
+        after_boundary
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
+    );
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+}
+
+async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn RuntimePersistence>) {
+    let session_id = "interrupted-batch-row-limit";
+    for (source_key, label) in [
+        ("limit-w1", "w1"),
+        ("limit-w2", "w2"),
+        ("limit-w3", "w3"),
+        ("limit-w4", "w4"),
+        ("limit-w5", "w5"),
+    ] {
+        store
+            .enqueue_queued_work(
+                queued_draft(session_id, label, DeliveryPolicy::EarliestSafeBoundary)
+                    .with_source_key(source_key)
+                    .with_merge_key("limit-key"),
+            )
+            .await
+            .expect("enqueue row-limit redrive row");
+    }
+    let first_owner = lease_owner("limit-owner-a");
+    let first_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &first_owner.owner_id).await;
+    let first_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim five-row predecessor")
+        .expect("five-row predecessor exists");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("limit-w1"), 1),
+            (Some("limit-w2"), 2),
+            (Some("limit-w3"), 3),
+            (Some("limit-w4"), 4),
+            (Some("limit-w5"), 5),
+        ]
+    );
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+
+    let successor = lease_owner("limit-owner-b");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor.owner_id).await;
+    let redriven = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("redrive under smaller successor row limit")
+        .expect("predecessor composition ignores successor row limit");
+    assert_eq!(
+        redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("limit-w1"), 1),
+            (Some("limit-w2"), 2),
+            (Some("limit-w3"), 3),
+            (Some("limit-w4"), 4),
+            (Some("limit-w5"), 5),
+        ]
     );
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
