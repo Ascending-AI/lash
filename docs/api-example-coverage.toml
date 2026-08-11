@@ -17422,6 +17422,24 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers identify the session whose token-guarded renewal was refused."
 
 [[api]]
+symbol = "lash::persistence::StoreError::SessionResolutionAmbiguous"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::SessionResolutionAmbiguous"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers and unbound-session embedders match this typed refusal; bundled examples bind their sessions explicitly and never resolve ambiguously."
+
+[[api]]
+symbol = "lash::persistence::StoreError::SessionResolutionAmbiguous::session_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::SessionResolutionAmbiguous::session_count"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers and unbound-session embedders match this typed refusal; bundled examples bind their sessions explicitly and never resolve ambiguously."
+
+[[api]]
 symbol = "lash::persistence::StoreError::StorageFailure"
 kind = "variant"
 availability = "default+all-features"
@@ -51409,6 +51427,62 @@ disposition = "unused-justify"
 reason = "Backend conformance hook removes the implementation-specific zero-row renewal control after the law runs."
 
 [[api]]
+symbol = "lash::testing::conformance::UnboundSessionAdmissionState"
+kind = "enum"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionAdmissionState::AdmittedOnly"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionAdmissionState::Committed"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionResolutionHandles"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::backend_name"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::factory"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::open_unbound"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
 symbol = "lash::testing::conformance::session_execution_lease_zero_row_renewal_is_refused"
 kind = "function"
 availability = "all-features"
@@ -52767,6 +52841,14 @@ availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::turn_work_driver to the docs-snippets embedding/turns example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::unbound_session_reads_resolve_the_same_session"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law is executed by the in-memory, SQLite, and PostgreSQL store test suites."
 
 [[api]]
 symbol = "lash::testing::conformance::wake_delivery_crash_matrix"
