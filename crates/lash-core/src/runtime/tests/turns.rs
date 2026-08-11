@@ -5511,6 +5511,160 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
 }
 
 #[tokio::test]
+async fn counted_provider_regeneration_emits_one_host_visible_attempt_reset() {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let transport = TestProvider::builder()
+        .kind("openai-compatible")
+        .requires_streaming(true)
+        .options(crate::ProviderOptions {
+            reliability: crate::provider::ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..crate::ProviderOptions::default()
+        })
+        .complete({
+            let provider_calls = Arc::clone(&provider_calls);
+            move |request| {
+                let call = provider_calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if call == 0 {
+                        return Err(LlmTransportError::new("connection failed before response")
+                            .with_kind(crate::ProviderFailureKind::Transport)
+                            .retryable(true));
+                    }
+
+                    request
+                        .stream_events
+                        .expect("stream events")
+                        .send(LlmStreamEvent::Delta("success".to_string()));
+                    Ok(LlmResponse {
+                        full_text: "success".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "success".to_string(),
+                            response_meta: None,
+                        }],
+                        terminal_reason: crate::LlmTerminalReason::Stop,
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build();
+    let mut runtime = standard_runtime_with_transport(transport).await;
+    let turn_events = RecordingTurnEvents::default();
+
+    let assembled = runtime
+        .stream_turn(
+            TurnInput::text("retry a pre-response transport failure"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "counted-regeneration-reset"),
+            )
+            .with_turn_events(&turn_events),
+        )
+        .await
+        .expect("counted retry succeeds");
+
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(assembled.llm_calls[0].attempts.len(), 2);
+    assert_eq!(
+        assembled.llm_calls[0]
+            .attempts
+            .iter()
+            .filter(|attempt| attempt.retry_budget_consumed)
+            .count(),
+        2
+    );
+    assert_eq!(
+        turn_events
+            .snapshot()
+            .iter()
+            .filter(|activity| { matches!(activity.event, TurnEvent::ModelAttemptReset { .. }) })
+            .count(),
+        1
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset() {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let transport = TestProvider::builder()
+        .kind("openai-compatible")
+        .requires_streaming(true)
+        .options(crate::ProviderOptions {
+            reliability: crate::provider::ProviderReliability::default()
+                .max_attempts(1)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..crate::ProviderOptions::default()
+        })
+        .complete({
+            let provider_calls = Arc::clone(&provider_calls);
+            move |request| {
+                let call = provider_calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if call == 0 {
+                        return Err(LlmTransportError::new("provider requested a retry delay")
+                            .with_status(429)
+                            .with_retry_after(std::time::Duration::from_secs(1)));
+                    }
+
+                    request
+                        .stream_events
+                        .expect("stream events")
+                        .send(LlmStreamEvent::Delta("success".to_string()));
+                    Ok(LlmResponse {
+                        full_text: "success".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "success".to_string(),
+                            response_meta: None,
+                        }],
+                        terminal_reason: crate::LlmTerminalReason::Stop,
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build();
+    let mut runtime = standard_runtime_with_transport(transport).await;
+    let turn_events = RecordingTurnEvents::default();
+
+    let assembled = runtime
+        .stream_turn(
+            TurnInput::text("defer to a provider retry-after"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "courtesy-regeneration-reset"),
+            )
+            .with_turn_events(&turn_events),
+        )
+        .await
+        .expect("courtesy retry succeeds");
+
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(assembled.llm_calls[0].attempts.len(), 2);
+    assert_eq!(
+        assembled.llm_calls[0]
+            .attempts
+            .iter()
+            .filter(|attempt| attempt.retry_budget_consumed)
+            .count(),
+        1
+    );
+    assert_eq!(
+        turn_events
+            .snapshot()
+            .iter()
+            .filter(|activity| { matches!(activity.event, TurnEvent::ModelAttemptReset { .. }) })
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let lost_text = std::iter::repeat_n("discarded", 256)
