@@ -16,6 +16,11 @@ fn blob_content_hash(content: &[u8]) -> String {
 }
 
 impl Store {
+    // One JSON-array bind avoids SQLite's scalar-parameter ceiling. A
+    // 16,384-ref chunk is four times the largest required depth while bounding
+    // each encoded request to roughly one MiB of SHA-256 text plus JSON framing.
+    const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
+
     /// Decode a checkpoint from a fresh durable connection without calling
     /// the `RuntimePersistence` session read path.
     #[doc(hidden)]
@@ -114,6 +119,7 @@ impl Store {
         conn: &Connection,
         checkpoint: &HydratedSessionCheckpoint,
     ) -> Result<(), StoreError> {
+        let mut referenced = std::collections::BTreeSet::new();
         for (key, component) in &checkpoint.components {
             lash_core::store::ensure_checkpoint_component_encoding_version(
                 key,
@@ -122,14 +128,14 @@ impl Store {
             let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
                 continue;
             };
-            let exists: bool = conn
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)",
-                    params![blob_ref.as_str()],
-                    |row| row.get(0),
-                )
-                .map_err(sqlite_error)?;
-            if !exists {
+            referenced.insert(blob_ref.as_str().to_string());
+        }
+        let existing = Self::existing_checkpoint_component_refs_conn(conn, &referenced)?;
+        for (key, component) in &checkpoint.components {
+            let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
+                continue;
+            };
+            if !existing.contains(blob_ref.as_str()) {
                 return Err(StoreError::CheckpointComponentMissing {
                     key: key.clone(),
                     blob_ref: blob_ref.clone(),
@@ -137,6 +143,65 @@ impl Store {
             }
         }
         Ok(())
+    }
+
+    fn existing_checkpoint_component_refs_conn(
+        conn: &Connection,
+        blob_refs: &std::collections::BTreeSet<String>,
+    ) -> Result<std::collections::HashSet<String>, StoreError> {
+        let mut existing = std::collections::HashSet::with_capacity(blob_refs.len());
+        let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
+        for chunk in blob_refs.chunks(Self::CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+            let encoded = serde_json::to_string(chunk).map_err(|error| {
+                StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
+            })?;
+            let mut statement = conn
+                .prepare(
+                    "SELECT hash FROM blobs
+                     WHERE hash IN (SELECT value FROM json_each(?1))",
+                )
+                .map_err(sqlite_error)?;
+            let rows = statement
+                .query_map(params![encoded], |row| row.get::<_, String>(0))
+                .map_err(sqlite_error)?;
+            existing.extend(rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?);
+        }
+        Ok(existing)
+    }
+
+    fn checkpoint_component_bodies_conn(
+        conn: &Connection,
+        checkpoint: &SessionCheckpoint,
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, StoreError> {
+        let blob_refs = checkpoint
+            .components
+            .values()
+            .map(|descriptor| descriptor.blob_ref.as_str().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
+        let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
+        for chunk in blob_refs.chunks(Self::CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+            let encoded = serde_json::to_string(chunk).map_err(|error| {
+                StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
+            })?;
+            let mut statement = conn
+                .prepare(
+                    "SELECT hash, content FROM blobs
+                     WHERE hash IN (SELECT value FROM json_each(?1))",
+                )
+                .map_err(sqlite_error)?;
+            let rows = statement
+                .query_map(params![encoded], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })
+                .map_err(sqlite_error)?;
+            for row in rows {
+                let (hash, bytes) = row.map_err(sqlite_error)?;
+                let body = decode_artifact_blob(&bytes)?.unwrap_or(bytes);
+                bodies.insert(hash, body);
+            }
+        }
+        Ok(bodies)
     }
 
     pub(crate) fn get_blob_conn(
@@ -156,28 +221,6 @@ impl Store {
             .transpose()
     }
 
-    fn get_checkpoint_component_conn(
-        conn: &Connection,
-        key: &str,
-        descriptor: &lash_core::CheckpointComponentDescriptor,
-    ) -> Result<lash_core::HydratedCheckpointComponent, StoreError> {
-        lash_core::store::ensure_checkpoint_component_encoding_version(
-            key,
-            descriptor.encoding_version,
-        )?;
-        let blob_ref = &descriptor.blob_ref;
-        let bytes = Self::get_blob_conn(conn, blob_ref)?.ok_or_else(|| {
-            StoreError::CheckpointComponentMissing {
-                key: key.to_string(),
-                blob_ref: blob_ref.clone(),
-            }
-        })?;
-        Ok(lash_core::HydratedCheckpointComponent::hydrated(
-            descriptor.clone(),
-            bytes,
-        ))
-    }
-
     pub(crate) fn get_checkpoint_conn(
         conn: &Connection,
         blob_ref: &BlobRef,
@@ -187,11 +230,19 @@ impl Store {
         };
         let record = decode_checkpoint(&bytes)?;
         record.validate_component_encoding_versions()?;
+        let bodies = Self::checkpoint_component_bodies_conn(conn, &record)?;
         let mut components = std::collections::BTreeMap::new();
         for (key, descriptor) in &record.components {
+            let bytes = bodies
+                .get(descriptor.blob_ref.as_str())
+                .cloned()
+                .ok_or_else(|| StoreError::CheckpointComponentMissing {
+                    key: key.clone(),
+                    blob_ref: descriptor.blob_ref.clone(),
+                })?;
             components.insert(
                 key.clone(),
-                Self::get_checkpoint_component_conn(conn, key, descriptor)?,
+                lash_core::HydratedCheckpointComponent::hydrated(descriptor.clone(), bytes),
             );
         }
         Ok(Some(HydratedSessionCheckpoint {

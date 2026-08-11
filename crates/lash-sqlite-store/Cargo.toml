@@ -42,6 +42,6 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

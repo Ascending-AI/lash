@@ -1,6 +1,75 @@
 use super::*;
+use std::sync::atomic::Ordering;
+
 use lash_core::ProcessInput;
 use lashlang::LashlangArtifactStore;
+
+static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+fn count_checkpoint_data_statement(event: rusqlite::trace::TraceEvent<'_>) {
+    if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event {
+        let sql = sql.trim_start();
+        if ["SELECT", "INSERT", "UPDATE", "DELETE", "WITH"]
+            .iter()
+            .any(|prefix| sql.starts_with(prefix))
+        {
+            CHECKPOINT_DATA_STATEMENT_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+async fn set_checkpoint_statement_trace(store: &Store, enabled: bool) {
+    store
+        .conn
+        .call(move |conn| {
+            conn.trace_v2(
+                if enabled {
+                    rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT
+                } else {
+                    rusqlite::trace::TraceEventCodes::empty()
+                },
+                enabled.then_some(
+                    count_checkpoint_data_statement as fn(rusqlite::trace::TraceEvent<'_>),
+                ),
+            );
+            Ok(())
+        })
+        .await
+        .expect("configure SQLite checkpoint statement trace");
+}
+
+fn checkpoint_with_changed_components(depth: usize) -> HydratedSessionCheckpoint {
+    HydratedSessionCheckpoint {
+        components: (0..depth)
+            .map(|index| {
+                (
+                    format!("arbitrary/depth-invariance/{index:05}"),
+                    lash_core::HydratedCheckpointComponent::changed(
+                        format!("depth-invariance-body-{index:05}").into_bytes(),
+                    ),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
+fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> HydratedSessionCheckpoint {
+    HydratedSessionCheckpoint {
+        turn_state: manifest.turn_state.clone(),
+        components: manifest
+            .components
+            .iter()
+            .map(|(key, descriptor)| {
+                (
+                    key.clone(),
+                    lash_core::HydratedCheckpointComponent::unchanged(descriptor),
+                )
+            })
+            .collect(),
+        plugin_snapshot_revision: manifest.plugin_snapshot_revision,
+    }
+}
 
 async fn durable_state(store: &Store, session_id: &str) -> lash_core::RuntimeSessionState {
     let state = lash_core::RuntimeSessionState {
@@ -25,6 +94,76 @@ async fn checkpoint_probe_skips_writes_for_deferred_head() {
         || store.checkpoint_claim_counts(),
     )
     .await;
+}
+
+#[tokio::test]
+async fn checkpoint_component_statement_count_is_depth_invariant() {
+    let mut observed = Vec::new();
+    for depth in [10, 100, 1_000, 4_000] {
+        let store = Arc::new(Store::memory().await.expect("open depth-invariance store"));
+        let mut state = durable_state(&store, &format!("sqlite-checkpoint-depth-{depth}")).await;
+        let mut seed = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        seed.checkpoint = checkpoint_with_changed_components(depth);
+        let seeded = store
+            .commit_runtime_state(seed)
+            .await
+            .expect("seed checkpoint component bodies");
+        state.head_revision = seeded.head_revision;
+        let mut unchanged = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        unchanged.checkpoint = checkpoint_with_unchanged_components(&seeded.manifest);
+        assert!(
+            unchanged
+                .checkpoint
+                .components
+                .values()
+                .all(|component| component.body().is_none()),
+            "measured commit must carry zero changed component bodies"
+        );
+
+        CHECKPOINT_DATA_STATEMENT_COUNT.store(0, Ordering::Relaxed);
+        set_checkpoint_statement_trace(&store, true).await;
+        let commit_started = std::time::Instant::now();
+        store
+            .commit_runtime_state(unchanged)
+            .await
+            .expect("commit unchanged checkpoint component refs");
+        let commit_elapsed = commit_started.elapsed();
+        set_checkpoint_statement_trace(&store, false).await;
+        let commit_statements = CHECKPOINT_DATA_STATEMENT_COUNT.load(Ordering::Relaxed);
+
+        CHECKPOINT_DATA_STATEMENT_COUNT.store(0, Ordering::Relaxed);
+        set_checkpoint_statement_trace(&store, true).await;
+        let load_started = std::time::Instant::now();
+        let loaded = store
+            .load_session()
+            .await
+            .expect("load checkpoint component bodies")
+            .expect("stored checkpoint session");
+        let load_elapsed = load_started.elapsed();
+        set_checkpoint_statement_trace(&store, false).await;
+        let load_statements = CHECKPOINT_DATA_STATEMENT_COUNT.load(Ordering::Relaxed);
+
+        assert_eq!(
+            loaded
+                .checkpoint
+                .expect("loaded checkpoint")
+                .components
+                .len(),
+            depth
+        );
+        observed.push((depth, commit_statements, load_statements));
+        eprintln!(
+            "sqlite checkpoint depth={depth} commit_statements={commit_statements} load_statements={load_statements} commit_ms={:.3} load_ms={:.3}",
+            commit_elapsed.as_secs_f64() * 1_000.0,
+            load_elapsed.as_secs_f64() * 1_000.0,
+        );
+    }
+    assert!(
+        observed
+            .iter()
+            .all(|(_, commit, load)| { *commit == observed[0].1 && *load == observed[0].2 }),
+        "checkpoint commit/load statement counts must be independent of component depth: {observed:?}"
+    );
 }
 
 fn registration(id: &str) -> ProcessRegistration {

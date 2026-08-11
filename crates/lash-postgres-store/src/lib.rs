@@ -782,6 +782,9 @@ fn schema_open_options(config: &PostgresStoreConfig) -> SchemaOpenOptions {
 }
 
 #[cfg(test)]
+#[path = "postgres/checkpoint_depth_tests.rs"]
+mod checkpoint_depth_tests;
+#[cfg(test)]
 mod graph_integrity_tests;
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
