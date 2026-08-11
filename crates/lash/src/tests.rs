@@ -191,6 +191,25 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         Ok(self.read.lock_recover().clone())
     }
 
+    async fn load_session_head_meta(
+        &self,
+    ) -> std::result::Result<Option<lash_core::store::SessionHeadMeta>, lash_core::store::StoreError>
+    {
+        Ok(self.read.lock_recover().as_ref().map(|read| {
+            lash_core::store::SessionHeadMeta::assemble(
+                lash_core::store::SessionHeadPayload {
+                    schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    session_id: read.session_id.clone(),
+                    config: read.config.clone(),
+                    current_frame_node_id: read.current_frame_node_id.clone(),
+                },
+                read.head_revision,
+                read.checkpoint_ref.clone(),
+                read.graph.leaf_node_id.clone(),
+            )
+        }))
+    }
+
     async fn load_node(
         &self,
         _node_id: &str,
@@ -783,6 +802,13 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
         Option<lash_core::store::PersistedSessionRead>,
         lash_core::store::StoreError,
     > {
+        Ok(None)
+    }
+
+    async fn load_session_head_meta(
+        &self,
+    ) -> std::result::Result<Option<lash_core::store::SessionHeadMeta>, lash_core::store::StoreError>
+    {
         Ok(None)
     }
 

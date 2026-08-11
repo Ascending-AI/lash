@@ -149,6 +149,8 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     load_session_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
+    load_session_head_meta_count: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
     fail_load_session_on_call: Mutex<Option<usize>>,
     #[cfg(test)]
     checkpoint_probe_count: std::sync::atomic::AtomicUsize,
@@ -255,6 +257,8 @@ impl InMemorySessionStore {
             drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             load_session_count: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            load_session_head_meta_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             fail_load_session_on_call: Mutex::new(None),
             #[cfg(test)]
@@ -798,6 +802,17 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     .collect(),
             )?,
         }))
+    }
+
+    async fn load_session_head_meta(
+        &self,
+    ) -> Result<Option<crate::SessionHeadMeta>, crate::StoreError> {
+        #[cfg(test)]
+        self.refuse_injected_counter_defect("session_head_revision")?;
+        #[cfg(test)]
+        self.load_session_head_meta_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(self.session_head_meta.lock_recover().clone())
     }
 
     async fn load_node(

@@ -41,6 +41,12 @@ mod tests {
             Ok(None)
         }
 
+        async fn load_session_head_meta(
+            &self,
+        ) -> Result<Option<super::super::SessionHeadMeta>, StoreError> {
+            Ok(None)
+        }
+
         async fn load_node(
             &self,
             _node_id: &str,

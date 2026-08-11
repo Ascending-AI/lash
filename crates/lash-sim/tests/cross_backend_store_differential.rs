@@ -2003,9 +2003,21 @@ impl BackendRunner {
             Ok(result) => (None, result),
             Err(error) => (Some(normalized_store_error(self.name, &error)), None),
         };
+        let freshness_head = match self.store().load_session_head_meta().await {
+            Ok(Some(head)) => FreshnessHeadObservation::Present {
+                head_revision: head.head_revision,
+                leaf_node_id: head.leaf_node_id,
+                checkpoint_ref: head.checkpoint_ref,
+            },
+            Ok(None) => FreshnessHeadObservation::Missing,
+            Err(error) => {
+                FreshnessHeadObservation::Error(normalized_store_error(self.name, &error))
+            }
+        };
         StepObservation {
             store_error,
             runtime_commit_result,
+            freshness_head,
             durable_state: self.raw_reader.observe().await,
         }
     }

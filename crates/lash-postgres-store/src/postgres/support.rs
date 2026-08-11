@@ -437,6 +437,25 @@ pub(crate) async fn load_session_head_meta_tx(
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
+    decode_session_head_meta_row(row)
+}
+
+pub(crate) async fn load_first_session_head_meta_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<Option<SessionHeadMeta>, StoreError> {
+    let row = sqlx::query(
+        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+         FROM lash_sessions ORDER BY session_id ASC LIMIT 1",
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    decode_session_head_meta_row(row)
+}
+
+fn decode_session_head_meta_row(
+    row: Option<sqlx::postgres::PgRow>,
+) -> Result<Option<SessionHeadMeta>, StoreError> {
     let Some(row) = row else {
         return Ok(None);
     };

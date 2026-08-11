@@ -180,6 +180,24 @@ impl LashRuntime {
                 .store(false, Ordering::Release);
             return Ok(());
         };
+        let head = store.load_session_head_meta().await.map_err(|err| {
+            SessionError::Protocol(format!("failed to refresh session graph from store: {err}"))
+        })?;
+        let Some(head) = head else {
+            self.graph_loaded_from_store = true;
+            self.resident_graph_head_stale
+                .store(false, Ordering::Release);
+            return Ok(());
+        };
+        let has_newer_graph = self.state.head_revision != head.head_revision
+            || head.leaf_node_id != self.state.session_graph.leaf_node_id
+            || head.checkpoint_ref != self.state.checkpoint_ref;
+        if !has_newer_graph {
+            self.graph_loaded_from_store = true;
+            self.resident_graph_head_stale
+                .store(false, Ordering::Release);
+            return Ok(());
+        }
         let read = store.load_session().await.map_err(|err| {
             SessionError::Protocol(format!("failed to refresh session graph from store: {err}"))
         })?;
@@ -189,14 +207,6 @@ impl LashRuntime {
                 .store(false, Ordering::Release);
             return Ok(());
         };
-        let has_newer_graph = self.state.head_revision != read.head_revision
-            || read.graph.leaf_node_id != self.state.session_graph.leaf_node_id
-            || read.checkpoint_ref != self.state.checkpoint_ref;
-        if !has_newer_graph {
-            self.resident_graph_head_stale
-                .store(false, Ordering::Release);
-            return Ok(());
-        }
         // Defend refreshes against third-party stores that return an unvalidated resident graph.
         read.graph
             .validate_resident_integrity()

@@ -354,6 +354,16 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(Some(read))
     }
 
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let meta = match self.session_id.as_deref() {
+            Some(session_id) => load_session_head_meta_tx(&mut tx, session_id, false).await?,
+            None => load_first_session_head_meta_tx(&mut tx).await?,
+        };
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(meta)
+    }
+
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
         let Some(session_id) = self.selected_session_id().await? else {
             return Ok(None);

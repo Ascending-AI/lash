@@ -3744,6 +3744,12 @@ impl lash_core::SessionCommitStore for CommitRetryStore {
         Ok(None)
     }
 
+    async fn load_session_head_meta(
+        &self,
+    ) -> Result<Option<lash_core::store::SessionHeadMeta>, lash_core::StoreError> {
+        Ok(None)
+    }
+
     async fn load_node(
         &self,
         node_id: &str,

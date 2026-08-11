@@ -60,8 +60,9 @@ use crate::{
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, SessionAdmission,
     SessionBinding, SessionExecutionLease, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta, StoreError,
-    StoreMaintenance, TurnInputApplication, TurnInputClaim, TurnInputStore, VacuumReport,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta, SessionMeta,
+    StoreError, StoreMaintenance, TurnInputApplication, TurnInputClaim, TurnInputStore,
+    VacuumReport,
 };
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
@@ -441,6 +442,15 @@ impl SessionCommitStore for SeamStore {
             .around(
                 TurnSeamOperation::Store(StoreOperation::LoadSession),
                 self.inner.load_session(),
+            )
+            .await
+    }
+
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::LoadSession),
+                self.inner.load_session_head_meta(),
             )
             .await
     }
