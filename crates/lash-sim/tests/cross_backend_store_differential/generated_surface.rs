@@ -1144,7 +1144,11 @@ async fn surface_runners(
             .unwrap(),
     );
 
-    let postgres_runtime = Arc::new(storage.unbound_session_store());
+    let postgres_runtime = Arc::new(
+        storage
+            .session_store("prop-runtime-session")
+            .with_clock(Arc::clone(&clock)),
+    );
     let postgres_registry = Arc::new(storage.process_registry().with_clock(Arc::clone(&clock)));
     let postgres_triggers = Arc::new(storage.trigger_store());
     let postgres_effect = Arc::new(storage.effect_host());

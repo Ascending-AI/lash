@@ -319,26 +319,24 @@ async fn lock_process_wake_source_tx(
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresSessionStore {
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
-        let Some(session_id) = self.selected_session_id().await? else {
-            return Ok(None);
-        };
+        let session_id = &self.session_id;
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        let Some(meta) = load_session_head_meta_tx(&mut tx, &session_id, false).await? else {
+        let Some(meta) = load_session_head_meta_tx(&mut tx, session_id, false).await? else {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
         };
         let leaf_node_id = meta.leaf_node_id.clone();
-        let graph = load_graph_tx(&mut tx, &session_id, leaf_node_id.clone()).await?;
+        let graph = load_graph_tx(&mut tx, session_id, leaf_node_id.clone()).await?;
         let checkpoint = match meta.checkpoint_ref.as_ref() {
             Some(blob_ref) => get_checkpoint_tx(&mut tx, blob_ref).await?,
             None => None,
         };
         let token_ledger = lash_core::store::merge_token_ledger_entries_checked(
-            load_usage_deltas_tx(&mut tx, &session_id).await?,
+            load_usage_deltas_tx(&mut tx, session_id).await?,
         )?;
         let read = PersistedSessionRead {
             session_id: meta.session_id,
@@ -356,22 +354,13 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        let meta = match self
-            .session_id
-            .as_deref()
-            .or_else(|| self.bound_session.get().map(String::as_str))
-        {
-            Some(session_id) => load_session_head_meta_tx(&mut tx, session_id, false).await?,
-            None => load_unbound_session_head_meta_tx(&mut tx).await?,
-        };
+        let meta = load_session_head_meta_tx(&mut tx, &self.session_id, false).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(meta)
     }
 
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
-        let Some(session_id) = self.selected_session_id().await? else {
-            return Ok(None);
-        };
+        let session_id = &self.session_id;
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .execute(&mut *tx)
@@ -393,7 +382,7 @@ impl SessionCommitStore for PostgresSessionStore {
                )",
         )
         .bind(node_id)
-        .bind(&session_id)
+        .bind(session_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -406,7 +395,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let json: String = row.get(2);
         let owner: String = row.get(3);
         let candidate_generation: i64 = row.get(4);
-        if owner != session_id {
+        if owner != *session_id {
             let rows = sqlx::query(
                 "WITH readable_sessions(session_id, generation_ceiling) AS (
                      SELECT $1::TEXT, NULL::BIGINT
@@ -431,7 +420,7 @@ impl SessionCommitStore for PostgresSessionStore {
                   )
                  WHERE session.session_id = $1",
             )
-            .bind(&session_id)
+            .bind(session_id)
             .bind(candidate_generation)
             .fetch_all(&mut *tx)
             .await
@@ -1018,7 +1007,7 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
-        crate::session_meta::load_session_meta(&self.pool, self.session_id.as_deref()).await
+        crate::session_meta::load_session_meta(&self.pool, Some(&self.session_id)).await
     }
 }
 
@@ -2394,42 +2383,24 @@ impl StoreMaintenance for PostgresSessionStore {
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
         // identity evidence and must survive every retention-pruning pass.
-        let removed_node_count = if let Some(session_id) = &self.session_id {
+        let removed_node_count =
             sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = TRUE")
-                .bind(session_id)
+                .bind(&self.session_id)
                 .execute(&self.pool)
                 .await
                 .map_err(store_sqlx_error)?
-                .rows_affected()
-        } else {
-            sqlx::query("DELETE FROM lash_graph_nodes WHERE tombstoned = TRUE")
-                .execute(&self.pool)
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected()
-        };
-        let removed_pending_turn_input_tombstone_count = if let Some(session_id) = &self.session_id
-        {
-            sqlx::query(
-                "DELETE FROM lash_pending_turn_inputs
-                 WHERE session_id = $1 AND state IN ($2, $3)",
-            )
-            .bind(session_id)
-            .bind(lash_core::TurnInputState::Cancelled.as_str())
-            .bind(lash_core::TurnInputState::Completed.as_str())
-            .execute(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected()
-        } else {
-            sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE state IN ($1, $2)")
-                .bind(lash_core::TurnInputState::Cancelled.as_str())
-                .bind(lash_core::TurnInputState::Completed.as_str())
-                .execute(&self.pool)
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected()
-        };
+                .rows_affected();
+        let removed_pending_turn_input_tombstone_count = sqlx::query(
+            "DELETE FROM lash_pending_turn_inputs
+             WHERE session_id = $1 AND state IN ($2, $3)",
+        )
+        .bind(&self.session_id)
+        .bind(lash_core::TurnInputState::Cancelled.as_str())
+        .bind(lash_core::TurnInputState::Completed.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
         Ok(VacuumReport {
             removed_node_count: removed_node_count as usize,
             removed_pending_turn_input_tombstone_count: removed_pending_turn_input_tombstone_count

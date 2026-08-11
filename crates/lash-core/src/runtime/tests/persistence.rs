@@ -146,7 +146,7 @@ async fn recording_store_satisfies_runtime_persistence_conformance() {
     let clock = Arc::new(crate::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
     crate::testing::conformance::runtime_persistence(
-        move || {
+        move |_| {
             std::sync::Arc::new(RecordingStore::with_clock(store_clock.clone()))
                 as std::sync::Arc<dyn crate::RuntimePersistence>
         },

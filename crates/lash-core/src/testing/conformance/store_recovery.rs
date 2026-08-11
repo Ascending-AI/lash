@@ -26,11 +26,10 @@ where
     drop((first, second));
 
     let prefix = format!("store-recovery-{}", uuid::Uuid::new_v4());
-    expired_claim_is_recoverable_once(&|| make("claim-expiry"), &prefix).await;
-    checkpoint_survives_before_claim_settlement(&|| make("checkpoint-before-settlement"), &prefix)
-        .await;
-    atomic_commit_settles_claim_once(&|| make("atomic-settlement"), &prefix).await;
-    recorded_commit_replay_is_idempotent(&|| make("commit-replay"), &prefix).await;
+    expired_claim_is_recoverable_once(&make, &prefix).await;
+    checkpoint_survives_before_claim_settlement(&make, &prefix).await;
+    atomic_commit_settles_claim_once(&make, &prefix).await;
+    recorded_commit_replay_is_idempotent(&make, &prefix).await;
 }
 
 fn recovery_timings() -> crate::LeaseTimings {
@@ -94,12 +93,12 @@ async fn acquire_successor<F>(
     source: &str,
 ) -> (Arc<dyn RuntimePersistence>, crate::SessionExecutionLease)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let successor = owner(format!("{source}:owner-b"));
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let store = make();
+            let store = make(session_id);
             bind_conformance_session(&store, session_id).await;
             let acquired = store
                 .try_claim_session_execution_lease(
@@ -162,8 +161,8 @@ async fn assert_no_parallel_reclaim(
     );
 }
 
-async fn assert_settled_once(make: impl Fn() -> Arc<dyn RuntimePersistence>, session_id: &str) {
-    let reader = make();
+async fn assert_settled_once(make: impl Fn(&str) -> Arc<dyn RuntimePersistence>, session_id: &str) {
+    let reader = make(session_id);
     bind_conformance_session(&reader, session_id).await;
     assert!(
         reader
@@ -177,10 +176,10 @@ async fn assert_settled_once(make: impl Fn() -> Arc<dyn RuntimePersistence>, ses
 
 async fn expired_claim_is_recoverable_once<F>(make: &F, prefix: &str)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = format!("{prefix}:claim-expiry");
-    let writer = make();
+    let writer = make(&session_id);
     let (_expired_lease, expired_claim) =
         seed_and_claim(&writer, &session_id, "claim-expiry").await;
     drop(writer);
@@ -226,10 +225,10 @@ where
 
 async fn checkpoint_survives_before_claim_settlement<F>(make: &F, prefix: &str)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = format!("{prefix}:checkpoint-before-settlement");
-    let writer = make();
+    let writer = make(&session_id);
     let (_expired_lease, expired_claim) =
         seed_and_claim(&writer, &session_id, "checkpoint-before-settlement").await;
     writer
@@ -241,7 +240,7 @@ where
         .expect("commit checkpoint before claim settlement");
     drop(writer);
 
-    let cold_reader = make();
+    let cold_reader = make(&session_id);
     bind_conformance_session(&cold_reader, &session_id).await;
     let mut recovered_state = crate::load_persisted_session_state(cold_reader.as_ref())
         .await
@@ -293,10 +292,10 @@ where
 
 async fn atomic_commit_settles_claim_once<F>(make: &F, prefix: &str)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = format!("{prefix}:atomic-settlement");
-    let writer = make();
+    let writer = make(&session_id);
     let (lease, claim) = seed_and_claim(&writer, &session_id, "atomic-settlement").await;
     writer
         .commit_runtime_state(
@@ -311,7 +310,7 @@ where
         .expect("atomically commit state and settle claim");
     drop(writer);
 
-    let reader = make();
+    let reader = make(&session_id);
     bind_conformance_session(&reader, &session_id).await;
     assert!(
         reader
@@ -332,10 +331,10 @@ where
 
 async fn recorded_commit_replay_is_idempotent<F>(make: &F, prefix: &str)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = format!("{prefix}:commit-replay");
-    let writer = make();
+    let writer = make(&session_id);
     let (lease, claim) = seed_and_claim(&writer, &session_id, "commit-replay").await;
     let operation = crate::OperationId::turn(&session_id, "recorded-commit", "final");
     let (commit, _) = crate::RuntimeCommit::persisted_state_for_test(
@@ -353,7 +352,7 @@ where
         .expect("record commit outcome");
     drop(writer);
 
-    let replay_store = make();
+    let replay_store = make(&session_id);
     bind_conformance_session(&replay_store, &session_id).await;
     let replay = replay_store
         .commit_runtime_state(commit)

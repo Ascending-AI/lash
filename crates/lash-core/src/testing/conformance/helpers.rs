@@ -39,10 +39,10 @@ pub struct ReopenableRuntimePersistence {
     pub reopen: Arc<dyn RuntimePersistence>,
 }
 
-/// Bind every conformance read to the session it intends to inspect.
+/// Admit the session every conformance read intends to inspect.
 ///
-/// This makes SQLite's exactly-one unbound lookup and PostgreSQL's ASC-first
-/// unbound lookup unreachable from conformance laws.
+/// Factory-produced handles are already explicitly bound; this call also
+/// checks that independently reopened handles retain that identity.
 pub(crate) async fn bind_conformance_session(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &str,

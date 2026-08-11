@@ -176,12 +176,12 @@ async fn postgres_graph_integrity_conformance_when_configured() {
             .expect("connect Postgres graph-integrity storage"),
     );
     reset_graph_integrity_storage(&storage).await;
-    lash_core::testing::conformance::graph_integrity_conformance(|_| {
+    lash_core::testing::conformance::graph_integrity_conformance(|case| {
         let storage = Arc::clone(&storage);
         async move {
             reset_graph_integrity_storage(&storage).await;
             GraphIntegrityHandles {
-                runtime: Arc::new(storage.unbound_session_store()),
+                runtime: Arc::new(storage.session_store(format!("graph-integrity-{case}"))),
                 injector: Arc::new(PostgresGraphIntegrityInjector { storage }),
             }
         }
