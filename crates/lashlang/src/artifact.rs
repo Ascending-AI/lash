@@ -1543,13 +1543,16 @@ impl<'program> RequirementsCollector<'program> {
             if let Some(module_binding) =
                 catalog.resolve_module_operation(&resource_type, &alias, &operation)
             {
-                self.requirements.resources.add_module_operation_binding(
-                    path.iter().map(String::as_str),
-                    resource_type,
-                    operation,
-                    module_binding.host_operation.clone(),
-                    binding,
-                );
+                self.requirements
+                    .resources
+                    .add_module_operation_binding(
+                        path.iter().map(String::as_str),
+                        resource_type,
+                        operation,
+                        module_binding.host_operation.clone(),
+                        binding,
+                    )
+                    .expect("host catalog operation must not conflict");
                 return;
             }
         }

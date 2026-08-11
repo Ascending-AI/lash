@@ -390,7 +390,7 @@ pub fn lashlang_resources_from_tool_catalog(
             lashlang_binding.operation.clone(),
             entry.manifest.id.to_string(),
             operation_binding,
-        );
+        )?;
     }
     Ok(host_catalog)
 }
@@ -898,6 +898,8 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
 }
 
 mod bridge;
+#[cfg(test)]
+mod catalog_tests;
 mod catalogue_preview;
 mod deferred;
 mod process;

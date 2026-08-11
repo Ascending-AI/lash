@@ -65,7 +65,11 @@ pub fn build_prefixed_name(
         &format!("mcp__{server_prefix}__{normalized_tool}"),
         used_names,
     );
-    let lashlang_binding = LashlangToolBinding::new([server_prefix], normalized_tool)
+    let operation = prefixed
+        .rsplit_once("__")
+        .map(|(_, operation)| operation)
+        .expect("prefixed MCP tool name contains the module separator");
+    let lashlang_binding = LashlangToolBinding::new([server_prefix], operation)
         .with_aliases([original_tool_name.to_string()]);
     (prefixed, lashlang_binding)
 }
@@ -101,5 +105,16 @@ mod tests {
         assert_eq!(meta.module_path, vec!["appworld".to_string()]);
         assert_eq!(meta.operation.as_deref(), Some("spotify_search_songs"));
         assert_eq!(meta.aliases, vec!["spotify-search-songs".to_string()]);
+    }
+
+    #[cfg(feature = "lashlang")]
+    #[test]
+    fn build_prefixed_name_uniquifies_the_lashlang_operation() {
+        let mut used = BTreeSet::new();
+        let (_, first) = build_prefixed_name("directory", "get-user", &mut used);
+        let (_, second) = build_prefixed_name("directory", "get_user", &mut used);
+
+        assert_eq!(first.operation.as_deref(), Some("get_user"));
+        assert_eq!(second.operation.as_deref(), Some("get_user_2"));
     }
 }

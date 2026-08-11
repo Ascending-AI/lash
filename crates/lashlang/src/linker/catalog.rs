@@ -28,7 +28,8 @@ impl LashlangHostCatalog {
                 operation,
                 TypeExpr::Any,
                 TypeExpr::Any,
-            );
+            )
+            .expect("tool-default operations are idempotent");
         }
         catalog
     }
@@ -109,7 +110,7 @@ impl LashlangHostCatalog {
         host_operation: impl Into<String>,
         input_ty: TypeExpr,
         output_ty: TypeExpr,
-    ) {
+    ) -> Result<(), LashlangHostCatalogError> {
         self.add_module_operation_binding(
             module_path,
             resource_type,
@@ -120,7 +121,7 @@ impl LashlangHostCatalog {
                 output_ty,
                 output_from_input: None,
             },
-        );
+        )
     }
 
     pub fn add_module_operation_binding(
@@ -130,25 +131,46 @@ impl LashlangHostCatalog {
         operation: impl Into<String>,
         host_operation: impl Into<String>,
         binding: ResourceOperationBinding,
-    ) {
+    ) -> Result<(), LashlangHostCatalogError> {
         let path = module_path.into_iter().map(Into::into).collect::<Vec<_>>();
         assert!(!path.is_empty(), "module path must not be empty");
         let resource_type = resource_type.into();
         let operation = operation.into();
-        self.add_module_instance(path.iter().map(String::as_str), resource_type.clone())
-            .expect("module operation resource type cannot conflict with existing module alias");
-        self.add_operation_binding(resource_type, operation.clone(), binding);
+        let host_operation = host_operation.into();
+        self.add_module_instance(path.iter().map(String::as_str), resource_type.clone())?;
         let key = module_path_key(&path);
-        self.module_instances
-            .get_mut(&key)
+        if let Some(existing) = self
+            .module_instances
+            .get(&key)
             .expect("module instance was just inserted")
             .operations
-            .insert(
+            .get(&operation)
+        {
+            let same_resource_binding = self
+                .resource_types
+                .get(&resource_type)
+                .and_then(|resource| resource.operations.get(&operation))
+                == Some(&binding);
+            if existing.host_operation == host_operation && same_resource_binding {
+                return Ok(());
+            }
+            return Err(LashlangHostCatalogError::ConflictingModuleOperation {
+                module: key,
                 operation,
-                ModuleOperationBinding {
-                    host_operation: host_operation.into(),
-                },
-            );
+                existing: existing.host_operation.clone(),
+                incoming: host_operation,
+            });
+        }
+        self.add_operation_binding(resource_type, operation.clone(), binding);
+        let module = self
+            .module_instances
+            .get_mut(&key)
+            .expect("module instance was just inserted");
+        module.operations.insert(
+            operation,
+            ModuleOperationBinding { host_operation },
+        );
+        Ok(())
     }
 
     pub fn add_value_constructor(

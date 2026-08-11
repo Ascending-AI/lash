@@ -104,14 +104,16 @@ pub(crate) fn host_environment() -> LashlangHostEnvironment {
             "additionalProperties": false
         }));
         let output_ty = lashlang::json_schema_to_type_expr(&serde_json::json!({ "type": "null" }));
-        catalog.add_module_operation(
-            ["display"],
-            "ToyDisplay",
-            operation.operation,
-            operation.operation,
-            input_ty,
-            output_ty,
-        );
+        catalog
+            .add_module_operation(
+                ["display"],
+                "ToyDisplay",
+                operation.operation,
+                operation.operation,
+                input_ty,
+                output_ty,
+            )
+            .expect("host catalog operation must not conflict");
     }
     for operation in crate::mock_tools::OPERATIONS {
         let input_ty = lashlang::json_schema_to_type_expr(&operation.input_schema());
@@ -125,17 +127,19 @@ pub(crate) fn host_environment() -> LashlangHostEnvironment {
                         .as_ref()
                         .map(lashlang::json_schema_to_type_expr),
                 });
-        catalog.add_module_operation_binding(
-            [operation.module],
-            operation.resource_type,
-            operation.operation,
-            operation.host_operation,
-            ResourceOperationBinding {
-                input_ty,
-                output_ty,
-                output_from_input,
-            },
-        );
+        catalog
+            .add_module_operation_binding(
+                [operation.module],
+                operation.resource_type,
+                operation.operation,
+                operation.host_operation,
+                ResourceOperationBinding {
+                    input_ty,
+                    output_ty,
+                    output_from_input,
+                },
+            )
+            .expect("host catalog operation must not conflict");
     }
     LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
         .with_language_features(LashlangLanguageFeatures::default().with_label_annotations())

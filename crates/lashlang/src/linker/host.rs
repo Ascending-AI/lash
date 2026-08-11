@@ -66,6 +66,15 @@ pub enum LashlangHostCatalogError {
         incoming: String,
     },
     #[error(
+        "module `{module}` operation `{operation}` already dispatches to `{existing}`, cannot change it to `{incoming}`"
+    )]
+    ConflictingModuleOperation {
+        module: String,
+        operation: String,
+        existing: String,
+        incoming: String,
+    },
+    #[error(
         "trigger source `{source_type}` already emits `{existing}`, cannot change it to `{incoming}`"
     )]
     ConflictingTriggerSource {

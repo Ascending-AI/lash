@@ -9,7 +9,9 @@
 //! Supported transports (selected per server via the `transport` field):
 //! - `stdio` — spawn a child process and speak JSON-RPC over its pipes.
 //! - `streamable_http` — HTTP/JSON streaming transport (newer MCP spec). This
-//!   is also how SSE-capable servers are reached: the current MCP HTTP
+//!   transport supports static headers only. Lash does not enable rmcp OAuth
+//!   authentication or token refresh; hosts must supply and rotate credentials.
+//!   It is also how SSE-capable servers are reached: the current MCP HTTP
 //!   transport negotiates SSE responses itself.
 //!
 //! Implementation note: the wire-level client is provided by the official

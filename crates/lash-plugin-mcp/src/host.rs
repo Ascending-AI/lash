@@ -16,7 +16,7 @@ use rmcp::model::{
     ElicitationResponseNotificationParam, ErrorCode, ErrorData, Implementation, ListRootsResult,
     ProtocolVersion, Root, RootsCapabilities, SamplingCapability,
 };
-use rmcp::service::{NotificationContext, RequestContext, RoleClient};
+use rmcp::service::{NotificationContext, Peer, RequestContext, RoleClient};
 use serde_json::Value;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinSet;
@@ -28,6 +28,11 @@ use tokio_util::sync::CancellationToken;
 /// is the first pinned revision here that includes sampling, elicitation, and
 /// roots together (including URL elicitation).
 pub const MCP_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_11_25;
+
+#[async_trait]
+pub(crate) trait McpToolListChangedHandler: Send + Sync {
+    async fn refresh_tools(&self, peer: Peer<RoleClient>);
+}
 
 /// Per-request MCP host context.
 ///
@@ -299,6 +304,7 @@ pub(crate) struct LashMcpClientHandler {
     client_info: ClientInfo,
     services: McpHostServices,
     request_tasks: Arc<McpHostRequestTasks>,
+    tool_list_changed: Option<Arc<dyn McpToolListChangedHandler>>,
 }
 
 impl LashMcpClientHandler {
@@ -311,7 +317,16 @@ impl LashMcpClientHandler {
             client_info,
             services,
             request_tasks: Arc::new(McpHostRequestTasks::default()),
+            tool_list_changed: None,
         }
+    }
+
+    pub(crate) fn with_tool_list_changed_handler(
+        mut self,
+        handler: Arc<dyn McpToolListChangedHandler>,
+    ) -> Self {
+        self.tool_list_changed = Some(handler);
+        self
     }
 
     pub(crate) fn request_tasks(&self) -> Arc<McpHostRequestTasks> {
@@ -428,6 +443,12 @@ impl ClientHandler for LashMcpClientHandler {
                 Ok(())
             })
             .await;
+    }
+
+    async fn on_tool_list_changed(&self, context: NotificationContext<RoleClient>) {
+        if let Some(handler) = &self.tool_list_changed {
+            handler.refresh_tools(context.peer).await;
+        }
     }
 }
 

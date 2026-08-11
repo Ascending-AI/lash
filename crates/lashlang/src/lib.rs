@@ -459,14 +459,16 @@ mod tests {
             LashlangAbilities::default(),
         );
         let mut changed_resources = LashlangHostCatalog::new();
-        changed_resources.add_module_operation(
-            ["tools"],
-            "Tools",
-            "read_file",
-            "read_file_v2",
-            TypeExpr::Any,
-            TypeExpr::Any,
-        );
+        changed_resources
+            .add_module_operation(
+                ["tools"],
+                "Tools",
+                "read_file",
+                "read_file_v2",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
         let changed_environment =
             LashlangHostEnvironment::new(changed_resources, LashlangAbilities::default());
         let missing_environment = LashlangHostEnvironment::new(

@@ -329,38 +329,46 @@ fn compile_program(program: &Program) -> CompiledProgram {
 
 fn runtime_test_environment() -> crate::LashlangHostEnvironment {
     let mut resources = crate::LashlangHostCatalog::new();
-    resources.add_module_operation(
-        ["tools"],
-        "Tools",
-        "echo",
-        "echo",
-        crate::TypeExpr::Any,
-        crate::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["tools"],
-        "Tools",
-        "err",
-        "err",
-        crate::TypeExpr::Any,
-        crate::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["tools"],
-        "Tools",
-        "missing",
-        "missing",
-        crate::TypeExpr::Any,
-        crate::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["tools"],
-        "Tools",
-        "spawn",
-        "spawn",
-        crate::TypeExpr::Any,
-        crate::TypeExpr::Any,
-    );
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "echo",
+            "echo",
+            crate::TypeExpr::Any,
+            crate::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "err",
+            "err",
+            crate::TypeExpr::Any,
+            crate::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "missing",
+            "missing",
+            crate::TypeExpr::Any,
+            crate::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "spawn",
+            "spawn",
+            crate::TypeExpr::Any,
+            crate::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
     crate::LashlangHostEnvironment::new(resources, crate::LashlangAbilities::all())
 }
 

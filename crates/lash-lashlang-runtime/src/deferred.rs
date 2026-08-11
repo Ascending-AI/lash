@@ -193,7 +193,7 @@ fn fold_grant(
         binding.operation.clone(),
         grant.definition.manifest.id.to_string(),
         operation_binding,
-    );
+    )?;
     Ok(())
 }
 

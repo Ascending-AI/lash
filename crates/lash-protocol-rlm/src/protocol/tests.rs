@@ -167,38 +167,46 @@ fn prompt_host_environment_with_features(
 
 fn tool_resources() -> lashlang::LashlangHostCatalog {
     let mut resources = lashlang::LashlangHostCatalog::new();
-    resources.add_module_operation(
-        ["web"],
-        "Web",
-        "search",
-        "search_web",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["web"],
-        "Web",
-        "fetch",
-        "fetch_url",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["files"],
-        "Files",
-        "read",
-        "read_file",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["module"],
-        "Module",
-        "operation",
-        "module_operation",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
+    resources
+        .add_module_operation(
+            ["web"],
+            "Web",
+            "search",
+            "search_web",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["web"],
+            "Web",
+            "fetch",
+            "fetch_url",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["files"],
+            "Files",
+            "read",
+            "read_file",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["module"],
+            "Module",
+            "operation",
+            "module_operation",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
     resources
 }
 

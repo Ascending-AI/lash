@@ -1809,7 +1809,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::turn_budget"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_advanced.rs:351#.turn_budget(lash::TurnBudget::bounded(50))"
+usage = "examples/docs-snippets/src/embedding_advanced.rs:361#.turn_budget(lash::TurnBudget::bounded(50))"
 
 [[api]]
 symbol = "lash::LashCoreBuilder::wake_turn_policy"

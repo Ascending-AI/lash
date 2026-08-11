@@ -109,9 +109,11 @@ impl McpPluginFactory {
         &self.pool
     }
 
-    /// Attach a new server at runtime. The new tools become visible to any
-    /// session created after this call returns; existing sessions will see
-    /// the new tools after their next tool-catalog refresh.
+    /// Attach a new server at runtime. Startup outages leave the server
+    /// registered and reconnecting in the background, matching factory
+    /// construction. The new tools become visible to any session created
+    /// after discovery succeeds; existing sessions will see them after their
+    /// next tool-catalog refresh.
     pub async fn attach_server(
         &self,
         server_name: String,
