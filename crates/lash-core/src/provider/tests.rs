@@ -260,6 +260,7 @@ struct StatusFailingProvider {
     fail_until: usize,
     status: u16,
     retry_after: Option<Duration>,
+    retry_after_header: Option<&'static str>,
 }
 
 impl StatusFailingProvider {
@@ -297,6 +298,9 @@ impl Provider for StatusFailingProvider {
             let mut failure = LlmTransportError::new(message).with_status(self.status);
             if let Some(retry_after) = self.retry_after {
                 failure = failure.with_retry_after(retry_after);
+            }
+            if let Some(retry_after) = self.retry_after_header {
+                failure = failure.with_headers([("retry-after", retry_after)]);
             }
             return Err(failure);
         }
@@ -871,6 +875,23 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
         automatic_retry_class(&output_started, position, GenerationRetryGuarantee::None,),
         None
     );
+
+    let usage_only = LlmTransportError::new("stream disconnected")
+        .with_kind(ProviderFailureKind::Stream)
+        .retryable(true)
+        .with_partial_response(LlmResponse {
+            usage: LlmUsage {
+                output_tokens: 1,
+                ..LlmUsage::default()
+            },
+            ..LlmResponse::default()
+        });
+    let usage_position = failure_protocol_position(&usage_only);
+    assert_eq!(usage_position, ProtocolPosition::OutputStarted);
+    assert_eq!(
+        automatic_retry_class(&usage_only, usage_position, GenerationRetryGuarantee::None,),
+        None
+    );
     assert_eq!(
         automatic_retry_class(
             &output_started,
@@ -1100,6 +1121,7 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
         fail_until: 3,
         status: 429,
         retry_after: Some(Duration::from_secs(5)),
+        retry_after_header: None,
     };
     let mut handle =
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
@@ -1122,6 +1144,65 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
 }
 
 #[tokio::test]
+async fn provider_handle_throttle_with_future_http_date_retries_for_free() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::new(RecordingClock::default());
+    let provider = StatusFailingProvider {
+        options: ProviderOptions {
+            reliability: ProviderReliability::default()
+                .max_attempts(1)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..ProviderOptions::default()
+        },
+        attempts: Arc::clone(&attempts),
+        fail_until: 1,
+        status: 429,
+        retry_after: None,
+        retry_after_header: Some("Sat, 06 Nov 2094 08:49:37 GMT"),
+    };
+    let mut handle =
+        ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
+
+    let result = handle.complete(empty_request()).await;
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    let completion =
+        result.expect("valid future HTTP-date defers without consuming the only attempt");
+    assert!(clock.slept() > Duration::ZERO);
+    assert_eq!(completion.call_record.attempts.len(), 2);
+    assert!(!completion.call_record.attempts[0].retry_budget_consumed);
+}
+
+#[tokio::test]
+async fn provider_handle_throttle_with_past_http_date_retries_immediately() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::new(RecordingClock::default());
+    let provider = StatusFailingProvider {
+        options: ProviderOptions {
+            reliability: ProviderReliability::default()
+                .max_attempts(1)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..ProviderOptions::default()
+        },
+        attempts: Arc::clone(&attempts),
+        fail_until: 1,
+        status: 429,
+        retry_after: None,
+        retry_after_header: Some("Sun, 06 Nov 1994 08:49:37 GMT"),
+    };
+    let mut handle =
+        ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
+
+    let result = handle.complete(empty_request()).await;
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    let completion = result.expect("valid past HTTP-date requests an immediate free retry");
+    assert_eq!(clock.slept(), Duration::ZERO);
+    assert_eq!(completion.call_record.attempts.len(), 2);
+    assert!(!completion.call_record.attempts[0].retry_budget_consumed);
+}
+
+#[tokio::test]
 async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let clock = Arc::new(RecordingClock::default());
@@ -1140,6 +1221,7 @@ async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting
         fail_until: 100,
         status: 429,
         retry_after: Some(Duration::from_secs(4)),
+        retry_after_header: None,
     };
     let mut handle =
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
@@ -1172,6 +1254,7 @@ async fn provider_handle_throttle_without_retry_after_is_not_retried() {
         fail_until: 100,
         status: 429,
         retry_after: None,
+        retry_after_header: None,
     };
     let mut handle = ProviderHandle::new(provider.into_components());
 
@@ -1179,6 +1262,39 @@ async fn provider_handle_throttle_without_retry_after_is_not_retried() {
         .complete(empty_request())
         .await
         .expect_err("no server-stated wait, so the normal ladder applies");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(err.kind, ProviderFailureKind::Quota);
+    assert_eq!(
+        err.code.as_deref(),
+        Some("unsafe_retry_after_response_observed")
+    );
+    assert!(!err.retryable);
+}
+
+#[tokio::test]
+async fn provider_handle_throttle_with_malformed_retry_after_is_not_retried() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let provider = StatusFailingProvider {
+        options: ProviderOptions {
+            reliability: ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..ProviderOptions::default()
+        },
+        attempts: Arc::clone(&attempts),
+        fail_until: 100,
+        status: 429,
+        retry_after: None,
+        retry_after_header: Some("not an HTTP date"),
+    };
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let err = handle
+        .complete(empty_request())
+        .await
+        .expect_err("malformed Retry-After cannot prove safe resubmission");
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert_eq!(err.kind, ProviderFailureKind::Quota);
@@ -1204,6 +1320,7 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
         fail_until: 100,
         status: 503,
         retry_after: Some(Duration::from_secs(1)),
+        retry_after_header: None,
     };
     let mut handle = ProviderHandle::new(provider.into_components())
         .with_clock(Arc::new(RecordingClock::default()) as _);

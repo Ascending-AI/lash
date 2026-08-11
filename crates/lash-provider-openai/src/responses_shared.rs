@@ -875,24 +875,14 @@ pub struct ResponsesStreamState {
     pub reasoning_deltas: Vec<String>,
     pub tool_calls: HashMap<usize, ResponsesStreamingToolCall>,
     pub tool_call_output_by_id: HashMap<String, usize>,
-    /// Set once streamed output content has arrived. The terminal
+    /// Set once streamed output evidence has arrived. Allocating an empty
+    /// message, reasoning, or tool-call slot does not set this flag. The terminal
     /// `response.completed.response.output` is authoritative for status/usage
     /// but is only parsed into parts when the stream did not deliver items.
     pub streamed_item_content_received: bool,
 }
 
 impl ResponsesStreamState {
-    /// Whether the provider has generated output, even when the accumulator
-    /// cannot yet project that output into a complete response part.
-    pub fn output_started(&self) -> bool {
-        self.streamed_item_content_received
-            || !self.parts.is_empty()
-            || !self.full_text.is_empty()
-            || !self.pending_text_deltas.is_empty()
-            || !self.reasoning_deltas.is_empty()
-            || !self.tool_calls.is_empty()
-    }
-
     pub fn begin_message(&mut self, item: Option<&Value>, output_index: Option<usize>) {
         let item_id = item
             .and_then(|item| item.get("id").and_then(|v| v.as_str()))
@@ -1205,7 +1195,8 @@ impl ResponsesStreamState {
     /// from `response.output_item.done`: the `rs_...` id, the `summary[*].text`
     /// entries, and the `encrypted_content` blob replayed on the next turn.
     pub fn finalize_reasoning_item(&mut self, item: &Value, output_index: Option<usize>) {
-        self.streamed_item_content_received = true;
+        self.streamed_item_content_received |=
+            crate::responses_output_evidence::reasoning_item_has_output_evidence(item);
         let target_index = output_index
             .and_then(|output_index| self.reasoning_parts_by_output.get(&output_index).copied())
             .or(self.current_reasoning_part)
@@ -1305,6 +1296,7 @@ impl ResponsesStreamState {
             && !arguments.is_empty()
         {
             tool_call.input_json = arguments.to_string();
+            self.streamed_item_content_received = true;
         }
         Some(slot)
     }
@@ -1338,6 +1330,9 @@ impl ResponsesStreamState {
         let Some(slot) = self.tool_call_slot(output_index, item_id) else {
             return;
         };
+        if arguments.is_empty() {
+            return;
+        }
         self.streamed_item_content_received = true;
         self.tool_calls.entry(slot).or_default().input_json = arguments.to_string();
     }
@@ -1347,7 +1342,6 @@ impl ResponsesStreamState {
         item: &Value,
         output_index: Option<usize>,
     ) -> Option<LlmOutputPart> {
-        self.streamed_item_content_received = true;
         let slot = self.update_tool_call_from_item(item, output_index)?;
         let mut tool_call = self.tool_calls.remove(&slot).unwrap_or_default();
         if !tool_call.item_id.is_empty() {

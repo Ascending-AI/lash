@@ -15,6 +15,7 @@ mod attachment_tests;
 #[cfg(feature = "testing")]
 mod conformance;
 mod generation_tests;
+mod output_started_tests;
 
 type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);
 

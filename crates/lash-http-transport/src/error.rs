@@ -125,5 +125,45 @@ pub fn retry_after_from_headers(headers: &[(String, String)]) -> Option<std::tim
     if let Ok(seconds) = value.parse::<u64>() {
         return Some(std::time::Duration::from_secs(seconds));
     }
-    None
+    let retry_at = httpdate::parse_http_date(value).ok()?;
+    Some(
+        retry_at
+            .duration_since(std::time::SystemTime::now())
+            .unwrap_or_default(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retry_after_from_headers;
+    use std::time::Duration;
+
+    #[test]
+    fn retry_after_accepts_http_dates_and_clamps_past_dates_to_zero() {
+        let delta = retry_after_from_headers(&[("Retry-After".to_string(), "17".to_string())])
+            .expect("delta-seconds remains valid Retry-After");
+        assert_eq!(delta, Duration::from_secs(17));
+
+        let future = retry_after_from_headers(&[(
+            "Retry-After".to_string(),
+            "Sat, 06 Nov 2094 08:49:37 GMT".to_string(),
+        )])
+        .expect("future HTTP-date is valid Retry-After");
+        assert!(future > Duration::ZERO);
+
+        let past = retry_after_from_headers(&[(
+            "retry-after".to_string(),
+            "Sun, 06 Nov 1994 08:49:37 GMT".to_string(),
+        )])
+        .expect("past HTTP-date is valid Retry-After");
+        assert_eq!(past, Duration::ZERO);
+
+        assert_eq!(
+            retry_after_from_headers(&[(
+                "retry-after".to_string(),
+                "not an HTTP date".to_string(),
+            )]),
+            None
+        );
+    }
 }

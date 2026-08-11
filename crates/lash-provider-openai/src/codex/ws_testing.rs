@@ -85,6 +85,11 @@ pub enum ScriptedWsAction {
     },
     /// An `error` event before any output.
     Error { message: &'static str },
+    /// Allocate an empty message item, then emit an error event.
+    AllocationThenError {
+        message_id: &'static str,
+        message: &'static str,
+    },
     /// Start streaming output, then emit an `error` event mid-stream.
     MidStreamError {
         message_id: &'static str,
@@ -264,6 +269,21 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
                                 .await;
                         }
                         ScriptedWsAction::Error { message } => {
+                            send_ws_json(
+                                &mut ws,
+                                json!({"type":"error","error":{"message": message}}),
+                            )
+                            .await;
+                        }
+                        ScriptedWsAction::AllocationThenError {
+                            message_id,
+                            message,
+                        } => {
+                            send_ws_json(
+                                &mut ws,
+                                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":message_id,"status":"in_progress","phase":"final_answer","content":[]}}),
+                            )
+                            .await;
                             send_ws_json(
                                 &mut ws,
                                 json!({"type":"error","error":{"message": message}}),

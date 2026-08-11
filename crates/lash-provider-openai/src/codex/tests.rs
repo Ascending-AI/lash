@@ -1080,6 +1080,64 @@ async fn codex_scripted_websocket_stale_previous_response_retries_full_context_o
 }
 
 #[tokio::test]
+async fn codex_stale_continuation_after_allocation_only_event_still_recovers() {
+    let ws = spawn_scripted_websocket(vec![
+        ScriptedWsAction::Complete {
+            response_id: "resp_1",
+            message_id: "msg_1",
+            text: "answer",
+        },
+        ScriptedWsAction::AllocationThenError {
+            message_id: "msg_empty",
+            message: "Previous response with id 'resp_1' not found",
+        },
+        ScriptedWsAction::Complete {
+            response_id: "resp_2",
+            message_id: "msg_2",
+            text: "recovered",
+        },
+    ])
+    .await;
+    let mut provider = websocket_test_provider(
+        CodexTransport::WebsocketCached,
+        "http://127.0.0.1:9/unused".to_string(),
+        ws.url.clone(),
+    );
+
+    provider
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .await
+        .expect("first response");
+    let second = request(vec![
+        LlmMessage::text(LlmRole::User, "hello"),
+        LlmMessage::new(
+            LlmRole::Assistant,
+            vec![lash_core::llm::types::LlmContentBlock::Text {
+                text: "answer".into(),
+                response_meta: Some(ResponseTextMeta {
+                    id: Some("msg_1".to_string()),
+                    status: Some("completed".to_string()),
+                    phase: Some("final_answer".to_string()),
+                    ..ResponseTextMeta::default()
+                }),
+                cache_breakpoint: false,
+            }],
+        ),
+        LlmMessage::text(LlmRole::User, "next"),
+    ]);
+    let full_body = provider.build_request_body(&second, true).unwrap();
+
+    let result = provider.complete(second).await;
+    let captured = ws.captured();
+    assert_eq!(captured.len(), 3);
+    let response = result.expect("allocation-only stale response retries with full context");
+    assert_eq!(response.full_text, "recovered");
+    assert_eq!(captured[1]["previous_response_id"], "resp_1");
+    assert!(captured[2].get("previous_response_id").is_none());
+    assert_eq!(captured[2]["input"], full_body["input"]);
+}
+
+#[tokio::test]
 async fn codex_scripted_websocket_dead_reused_socket_reconnects_full_context() {
     let ws = spawn_scripted_websocket(vec![
         ScriptedWsAction::CompleteAndClose {

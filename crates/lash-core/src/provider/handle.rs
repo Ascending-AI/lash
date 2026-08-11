@@ -247,9 +247,28 @@ impl ProviderHandle {
                     // above; none of Lash's bundled providers declares one.
                     if failure.retryable && retry_class.is_none() {
                         let refusal_reason = retry_refusal_reason(protocol_position);
+                        let retry_after_header_present = failure
+                            .headers
+                            .iter()
+                            .any(|(name, _)| name.eq_ignore_ascii_case("retry-after"));
+                        let partial = failure.partial_response.as_deref();
+                        let partial_response_present = partial.is_some();
+                        let partial_response_empty =
+                            partial.map(|response| !response_has_output_evidence(response));
                         tracing::warn!(
                             target: "lash_core::provider::reliability",
                             provider = self.kind(),
+                            failure_kind = failure.kind.code(),
+                            http_status = ?failure.status,
+                            retry_after_header_present,
+                            retry_after_parsed_ms = ?failure
+                                .retry_after
+                                .map(|duration| duration.as_millis() as u64),
+                            partial_response_present,
+                            partial_response_empty = ?partial_response_empty,
+                            usage = ?partial.map(|response| &response.usage),
+                            provider_usage = ?partial
+                                .and_then(|response| response.provider_usage.as_ref()),
                             protocol_position = ?protocol_position,
                             provider_retry_guarantee = ?retry_guarantee,
                             retry_class = ?retry_class,
@@ -452,7 +471,7 @@ fn success_outcome(reason: LlmTerminalReason) -> AttemptOutcome {
 fn success_protocol_position(response: &LlmResponse, outcome: AttemptOutcome) -> ProtocolPosition {
     if outcome == AttemptOutcome::Completed {
         ProtocolPosition::TerminalObserved
-    } else if response_has_output(response) {
+    } else if response_has_output_evidence(response) {
         ProtocolPosition::OutputStarted
     } else {
         ProtocolPosition::ResponseObserved
@@ -501,7 +520,7 @@ pub(super) fn failure_protocol_position(failure: &LlmTransportError) -> Protocol
         .partial_response
         .as_deref()
         .map(|response| {
-            if response_has_output(response) {
+            if response_has_output_evidence(response) {
                 ProtocolPosition::OutputStarted
             } else {
                 ProtocolPosition::ResponseObserved
@@ -547,18 +566,29 @@ fn retryable_http_rejection(failure: &LlmTransportError) -> bool {
         && failure.retry_after.is_some()
 }
 
-fn response_has_output(response: &LlmResponse) -> bool {
-    !response.full_text.is_empty() || !response.parts.is_empty()
+fn response_has_output_evidence(response: &LlmResponse) -> bool {
+    !response.full_text.is_empty()
+        || response.provider_usage.is_some()
+        || response.usage != crate::llm::types::LlmUsage::default()
+        || response.parts.iter().any(|part| match part {
+            crate::llm::types::LlmOutputPart::Text { text, .. } => !text.is_empty(),
+            crate::llm::types::LlmOutputPart::Reasoning { text, replay } => {
+                !text.is_empty()
+                    || replay.as_ref().is_some_and(|replay| {
+                        replay.encrypted_content.is_some()
+                            || replay.summary.iter().any(|text| !text.is_empty())
+                    })
+            }
+            crate::llm::types::LlmOutputPart::ToolCall { input_json, .. } => !input_json.is_empty(),
+        })
 }
 
 fn empty_stream_partial(failure: &LlmTransportError) -> bool {
     failure.kind == ProviderFailureKind::Stream
-        && failure.partial_response.as_deref().is_some_and(|partial| {
-            partial.full_text.is_empty()
-                && partial.parts.is_empty()
-                && partial.usage == crate::llm::types::LlmUsage::default()
-                && partial.provider_usage.is_none()
-        })
+        && failure
+            .partial_response
+            .as_deref()
+            .is_some_and(|partial| !response_has_output_evidence(partial))
 }
 
 fn retry_refusal_reason(position: ProtocolPosition) -> &'static str {

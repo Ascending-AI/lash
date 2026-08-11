@@ -2008,6 +2008,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "bytes",
+ "httpdate",
  "lash-sansio",
  "reqwest 0.13.4",
  "thiserror 2.0.18",
