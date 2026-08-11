@@ -230,8 +230,6 @@ async fn get_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &BlobRef,
 ) -> Result<Option<Vec<u8>>, StoreError> {
-    #[cfg(test)]
-    record_checkpoint_data_statement();
     sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
         .bind(blob_ref.as_str())
         .fetch_optional(&mut **tx)
@@ -251,8 +249,6 @@ async fn existing_checkpoint_component_refs_tx(
     let mut existing = std::collections::HashSet::with_capacity(blob_refs.len());
     let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
     for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
-        #[cfg(test)]
-        record_checkpoint_data_statement();
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT hash FROM lash_blobs WHERE hash = ANY($1::text[])",
         )
@@ -277,8 +273,6 @@ async fn checkpoint_component_bodies_tx(
     let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
     let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
     for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
-        #[cfg(test)]
-        record_checkpoint_data_statement();
         let rows = sqlx::query("SELECT hash, content FROM lash_blobs WHERE hash = ANY($1::text[])")
             .bind(chunk)
             .fetch_all(&mut **tx)
@@ -391,26 +385,36 @@ pub(crate) async fn get_checkpoint_tx(
 }
 
 #[cfg(test)]
-tokio::task_local! {
-    static CHECKPOINT_DATA_STATEMENT_COUNT: std::cell::Cell<usize>;
-}
-
-#[cfg(test)]
-fn record_checkpoint_data_statement() {
-    let _ = CHECKPOINT_DATA_STATEMENT_COUNT.try_with(|count| count.set(count.get() + 1));
-}
-
-#[cfg(test)]
 pub(crate) async fn count_checkpoint_data_statements<F: std::future::Future>(
+    stats_pool: &sqlx::postgres::PgPool,
     future: F,
 ) -> (F::Output, usize) {
-    CHECKPOINT_DATA_STATEMENT_COUNT
-        .scope(std::cell::Cell::new(0), async move {
-            let output = future.await;
-            let count = CHECKPOINT_DATA_STATEMENT_COUNT.with(std::cell::Cell::get);
-            (output, count)
-        })
+    sqlx::query("SELECT pg_stat_statements_reset()")
+        .execute(stats_pool)
         .await
+        .expect("reset PostgreSQL statement statistics");
+
+    let output = future.await;
+    let calls = sqlx::query_scalar::<_, i64>(
+        "SELECT calls
+         FROM pg_stat_statements
+         WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+           AND query NOT LIKE '%pg_stat_statements%'",
+    )
+    .fetch_all(stats_pool)
+    .await
+    .expect("read PostgreSQL statement statistics");
+    let count = calls
+        .into_iter()
+        .try_fold(0usize, |total, calls| {
+            let calls =
+                usize::try_from(calls).expect("PostgreSQL statement calls are non-negative");
+            total
+                .checked_add(calls)
+                .ok_or("PostgreSQL statement count fits usize")
+        })
+        .expect("PostgreSQL statement count fits usize");
+    (output, count)
 }
 
 pub(crate) async fn load_session_head_meta_tx(

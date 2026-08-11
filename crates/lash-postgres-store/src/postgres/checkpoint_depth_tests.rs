@@ -1,4 +1,5 @@
 use crate::*;
+use sqlx::postgres::PgPoolOptions;
 
 fn checkpoint_with_changed_components(depth: usize) -> HydratedSessionCheckpoint {
     HydratedSessionCheckpoint {
@@ -40,6 +41,15 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
         return;
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let statement_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await
+        .expect("connect PostgreSQL statement-statistics pool");
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+        .execute(&statement_pool)
+        .await
+        .expect("enable pg_stat_statements for checkpoint depth invariance");
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect checkpoint depth-invariance storage");
@@ -54,6 +64,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
 
         let commit_started = std::time::Instant::now();
         let (committed, commit_statements) = support::count_checkpoint_data_statements(
+            &statement_pool,
             support::put_checkpoint_tx(&mut tx, &unchanged),
         )
         .await;
@@ -62,6 +73,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
 
         let load_started = std::time::Instant::now();
         let (loaded, load_statements) = support::count_checkpoint_data_statements(
+            &statement_pool,
             support::get_checkpoint_tx(&mut tx, &checkpoint_ref),
         )
         .await;
