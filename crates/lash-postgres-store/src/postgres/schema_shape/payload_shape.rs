@@ -8,6 +8,12 @@
 //! decode-controlling literals and bounds), never descriptions, examples, or
 //! defaults.
 
+// The registry deliberately remains compiled when it is empty so a newly
+// classified JSON carrier can re-enable the gate without rebuilding this
+// machinery. Until then, the author-time implementation is exercised by the
+// tests below rather than by production code.
+#![cfg_attr(not(test), allow(dead_code))]
+
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
@@ -703,6 +709,28 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
 
         assert!(identities.is_empty());
+
+        // Keep the dormant registration path covered while the durable stores
+        // use structural columns instead of serialized metadata payloads.
+        let postgres_carrier =
+            PayloadCarrier::new(PayloadBackend::Postgres, "lash_session_meta", "meta_json");
+        assert_eq!(
+            postgres_carrier.artifact_identity(),
+            "postgres lash_session_meta.meta_json"
+        );
+
+        let sqlite_carrier =
+            PayloadCarrier::new(PayloadBackend::Sqlite, "session_meta", "relation_json");
+        let sqlite_projection = PayloadShape::of::<lash_core::SessionRelation>();
+        let mut registration = PayloadRegistration::of::<lash_core::SessionMeta>();
+        registration.include_persisted_projection(sqlite_carrier, sqlite_projection);
+        assert_eq!(
+            registration
+                .shape
+                .entries
+                .get("/persisted-by/sqlite/session_meta.relation_json/rust-type"),
+            Some(&"SessionRelation".to_string())
+        );
     }
 
     #[test]

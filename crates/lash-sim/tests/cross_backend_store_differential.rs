@@ -47,7 +47,10 @@ mod generated_surface;
 mod observations;
 #[path = "cross_backend_store_differential/raw_durable_reader.rs"]
 mod raw_durable_reader;
+#[path = "cross_backend_store_differential/session_meta_layout.rs"]
+mod session_meta_layout;
 use observations::*;
+use session_meta_layout::verify_independent_session_meta_layout;
 
 const SESSION_LEASE_TTL_MS: u64 = 60_000;
 // "LASH_PGT" encoded as a positive i64. This must match the shared-database
@@ -2360,6 +2363,7 @@ async fn cross_backend_store_differential_agrees() {
         .await
         .expect("connect required Postgres differential backend");
     let sqlite_root = tempfile::tempdir().expect("create SQLite differential root");
+    verify_independent_session_meta_layout(sqlite_root.path(), &postgres).await;
     let run_nonce = run_nonce();
     let mut divergences = String::new();
     eprintln!(
