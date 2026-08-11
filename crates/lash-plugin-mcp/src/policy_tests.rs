@@ -46,6 +46,11 @@ impl McpEntry {
         self.shutdown_wedge_pid.store(pid, Ordering::SeqCst);
         self
     }
+
+    fn with_never_finishing_child_reap(self: Arc<Self>) -> Arc<Self> {
+        self.never_finish_child_reap.store(true, Ordering::SeqCst);
+        self
+    }
 }
 
 const MOCK_SERVER: &str = r#"
@@ -114,14 +119,17 @@ for line in sys.stdin:
         log.write(line)
     message = json.loads(line)
     method = message.get('method')
-    if method == 'initialize':
+    if method == 'initialize' and behavior != 'hang_initialize':
         send({'jsonrpc': '2.0', 'id': message['id'], 'result': {
             'protocolVersion': protocol,
             'capabilities': {'tools': {}},
             'serverInfo': {'name': 'policy-mock', 'version': '1.0.0'}}})
     elif method == 'tools/list':
+        tool_name = 'work'
+        if behavior == 'catalog_by_generation':
+            tool_name = 'generation-' + str(starts + 1)
         send({'jsonrpc': '2.0', 'id': message['id'], 'result': {'tools': [{
-            'name': 'work', 'description': 'Policy test tool',
+            'name': tool_name, 'description': 'Policy test tool',
             'inputSchema': {'type': 'object', 'properties': {}}}]}})
         if behavior == 'exit_after_list' or (behavior == 'exit_after_list_once' and starts < 1):
             sys.exit(0)
@@ -167,6 +175,7 @@ struct MockOptions {
     reconnect_initial_ms: u64,
     reconnect_max_ms: Option<u64>,
     reconnect_max_attempts: u64,
+    startup_timeout_ms: u64,
 }
 
 impl Default for MockOptions {
@@ -184,6 +193,7 @@ impl Default for MockOptions {
             reconnect_initial_ms: 5_000,
             reconnect_max_ms: None,
             reconnect_max_attempts: 1,
+            startup_timeout_ms: 1_000,
         }
     }
 }
@@ -213,7 +223,7 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
             ),
         ]),
         cwd: None,
-        startup_timeout_ms: 1_000,
+        startup_timeout_ms: options.startup_timeout_ms,
         call_policy: McpCallPolicy {
             call_timeout_ms: options.call_timeout_ms,
             call_max_total_timeout_ms: options.call_max_total_timeout_ms,
@@ -570,8 +580,128 @@ async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
         "late failure from generation 1".to_string(),
         stale_generation,
     ));
+    // The old publish/guard-clear race is structurally absent in the actor
+    // topology. Preserve the replacement law at both fences: the caller-side
+    // snapshot rejects stale work, and a stale command already in the actor
+    // queue is also ignored.
+    current_entry
+        .actor_tx
+        .send(LifecycleCommand::Disconnect {
+            generation: stale_generation,
+            cause: "queued late failure from generation 1".to_string(),
+        })
+        .expect("queue stale generation-1 disconnect");
+    current_entry
+        .establish()
+        .await
+        .expect("actor queue barrier after stale disconnect");
     assert!(pool.server_statuses()[0].connected);
+    assert_eq!(
+        current_entry
+            .service_snapshot()
+            .expect("generation 2 survives stale disconnect")
+            .generation,
+        2
+    );
     assert_eq!(starts(root.path()), 2);
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn stale_generation_timeout_does_not_contaminate_replacement_accounting() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "crash_after_call",
+            reconnect_initial_ms: 10,
+            policy: TimeoutDisconnectPolicy::ConsecutiveTimeouts,
+            threshold: 2,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let current_entry = entry(&pool);
+    assert!(call(&pool).await.is_success());
+    wait_until(
+        || {
+            current_entry
+                .service_snapshot()
+                .is_some_and(|service| service.generation == 2)
+        },
+        "replacement connection must publish generation 2",
+    )
+    .await;
+
+    let (reply, result) = tokio::sync::oneshot::channel();
+    current_entry
+        .actor_tx
+        .send(LifecycleCommand::CallTimedOut {
+            generation: 1,
+            reply,
+        })
+        .expect("queue stale generation-1 timeout");
+    assert_eq!(result.await.expect("actor timeout observation reply"), None);
+    assert_eq!(current_entry.consecutive_timeouts.load(Ordering::SeqCst), 0);
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "catalog_by_generation",
+            reconnect_initial_ms: 10,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let current_entry = entry(&pool);
+    let initial = current_entry
+        .service_snapshot()
+        .expect("generation 1 service");
+    assert_eq!(initial.generation, 1);
+    let hook = Arc::new(ActorPauseHook::default());
+    *current_entry.refresh_install_hook.write_recover() = Some(Arc::clone(&hook));
+
+    let refreshing_entry = Arc::clone(&current_entry);
+    let refresh = tokio::spawn(async move {
+        refreshing_entry
+            .refresh_tools(initial.peer.clone(), 1)
+            .await;
+    });
+    tokio::time::timeout(Duration::from_secs(2), hook.reached.notified())
+        .await
+        .expect("generation-1 refresh did not pause before install");
+    assert!(current_entry.mark_disconnected(
+        "replace generation 1 while its catalog refresh is paused".to_string(),
+        1,
+    ));
+    wait_until(
+        || {
+            current_entry
+                .service_snapshot()
+                .is_some_and(|service| service.generation == 2)
+        },
+        "replacement connection must publish generation 2",
+    )
+    .await;
+    hook.release.notify_one();
+    refresh.await.expect("stale refresh task");
+    current_entry
+        .establish()
+        .await
+        .expect("actor queue barrier after stale catalog install");
+
+    assert_eq!(
+        pool.advertised_tools()
+            .into_iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>(),
+        ["mcp__mock__generation_2"]
+    );
     pool.shutdown_all().await;
 }
 
@@ -698,6 +828,9 @@ async fn crash_per_call_preserves_backoff_across_successful_respawns() {
 
 #[tokio::test]
 async fn disconnect_immediately_after_reconnect_publish_rearms_actor() {
+    // The old guard-clear suppression race is structurally absent in the
+    // actor topology. This replacement law proves an ordinary queued
+    // post-publication disconnect rearms the same actor.
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
     let entry = McpEntry::new(
@@ -928,6 +1061,10 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
     let elapsed = started.elapsed();
     eprintln!("actor-reap shutdown elapsed: {elapsed:?}");
     assert!(
+        elapsed >= Duration::from_secs(3),
+        "close-ignoring child did not receive the literal three-second grace: {elapsed:?}"
+    );
+    assert!(
         elapsed < Duration::from_secs(5),
         "actor-reap shutdown exceeded its literal elapsed ceiling: {elapsed:?}"
     );
@@ -936,6 +1073,202 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
         process_state(pid),
         None,
         "shutdown_all must join the actor and fully reap stdio child PID {pid}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = Arc::new(McpConnectionPool::empty());
+    let attaching_pool = Arc::clone(&pool);
+    let config = mock_config(
+        root.path(),
+        MockOptions {
+            behavior: "hang_initialize",
+            startup_timeout_ms: 30_000,
+            ..MockOptions::default()
+        },
+    );
+    let attaching =
+        tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
+    wait_until(
+        || root.path().join("pid").exists(),
+        "handshake child did not publish its PID",
+    )
+    .await;
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("handshake child pid")
+        .parse()
+        .expect("numeric child pid");
+    assert_eq!(
+        wait_for_process_state(pid, 'S', Duration::from_secs(2)),
+        Some('S')
+    );
+    let current_entry = entry(&pool);
+
+    let started = Instant::now();
+    pool.shutdown_all().await;
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "live-handshake shutdown exceeded the literal five-second bound: {elapsed:?}"
+    );
+    assert!(matches!(
+        attaching.await.expect("attach task panicked"),
+        Err(McpError::PoolShutDown)
+    ));
+    assert_eq!(process_state(pid), None);
+    assert_eq!(
+        current_entry.last_error.read_recover().as_deref(),
+        Some(format!("MCP stdio child PID {pid} handshake interrupted by pool shutdown").as_str())
+    );
+    assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn non_finishing_child_reap_records_literal_pid_at_cleanup_deadline() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = Arc::new(McpConnectionPool::empty());
+    let current_entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "ignore_eof",
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    )
+    .with_never_finishing_child_reap();
+    assert!(
+        pool.install("mock".to_string(), Arc::clone(&current_entry))
+            .is_ok()
+    );
+    current_entry.establish().await.expect("connect mock");
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("stdio child pid")
+        .parse()
+        .expect("numeric child pid");
+
+    let started = Instant::now();
+    pool.shutdown_all().await;
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(4),
+        "non-finishing reap returned before the literal 3s + 1s cleanup deadline: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "non-finishing reap exceeded the literal five-second entry bound: {elapsed:?}"
+    );
+    assert_eq!(
+        current_entry.last_error.read_recover().as_deref(),
+        Some(
+            format!(
+                "MCP stdio child PID {pid} abandoned unreaped after bounded lifecycle cleanup: MCP stdio child PID {pid} did not exit within 1s after the kill request"
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        wait_for_process_state(pid, 'Z', Duration::from_secs(1)),
+        Some('Z')
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_preempts_in_flight_keepalive_probe_and_reaps_child() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "ignore_eof",
+            probe_interval_ms: 10,
+            probe_timeout_ms: 5_000,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    wait_until(
+        || received(root.path()).contains("\"method\":\"ping\""),
+        "keepalive probe did not enter its unresponsive wait",
+    )
+    .await;
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("stdio child pid")
+        .parse()
+        .expect("numeric child pid");
+
+    let started = Instant::now();
+    pool.shutdown_all().await;
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(2_900),
+        "close-ignoring child did not receive its literal three-second grace: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "probe-preempting shutdown exceeded the literal five-second bound: {elapsed:?}"
+    );
+    assert_eq!(process_state(pid), None);
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_shutdown_owner_aborts_actor_on_live_runtime() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "ignore_eof",
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let current_entry = entry(&pool);
+    let actor = current_entry
+        .actor_handle
+        .lock_recover()
+        .as_ref()
+        .expect("actor handle")
+        .abort_handle();
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("stdio child pid")
+        .parse()
+        .expect("numeric child pid");
+    let shutdown_pool = Arc::clone(&pool);
+    let shutdown = tokio::spawn(async move { shutdown_pool.shutdown_all().await });
+    wait_until(
+        || root.path().join("eof").exists(),
+        "shutdown did not enter the child grace period",
+    )
+    .await;
+
+    shutdown.abort();
+    assert!(
+        shutdown
+            .await
+            .expect_err("first shutdown must be cancelled")
+            .is_cancelled()
+    );
+    wait_until(
+        || actor.is_finished(),
+        "cancelled shutdown left actor running",
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(1), pool.shutdown_all())
+        .await
+        .expect("second shutdown must return immediately");
+    assert!(actor.is_finished());
+    assert_eq!(
+        wait_for_process_state(pid, 'Z', Duration::from_secs(2)),
+        Some('Z'),
+        "abort-on-drop must kill the actor-owned child rather than leave it running"
     );
 }
 

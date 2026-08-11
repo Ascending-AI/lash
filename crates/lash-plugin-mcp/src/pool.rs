@@ -53,8 +53,10 @@ use crate::service_lifecycle::build_http_headers;
 use crate::service_lifecycle::{equal_jitter, is_connection_loss};
 use lifecycle_actor::{LifecycleActor, LifecycleCommand};
 
-/// One entry's complete explicit-shutdown budget: graceful close (3s), kill,
-/// bounded reap (1s), and one second of containment margin.
+/// One entry's complete explicit-shutdown budget. Every actor await that can
+/// precede cleanup is preempted by `Shutdown`, leaving the full three-second
+/// graceful close plus one-second post-kill reap and one second of scheduling
+/// margin: `3s + 1s + 1s = 5s`.
 ///
 /// All entry actors are joined concurrently, so `shutdown_all()` takes roughly
 /// one five-second bound rather than `entries * five seconds`.
@@ -113,16 +115,22 @@ struct McpEntry {
     reconnect_jitter: RwLock<Arc<dyn Fn(Duration) -> Duration + Send + Sync>>,
     /// Set when a bounded reconnect loop spends its final attempt.
     reconnect_exhausted: AtomicBool,
-    /// Consecutive idle timeouts since the last successful tool call.
+    /// Consecutive idle timeouts since the last successful tool call. Both
+    /// increments and resets are generation-stamped messages, so accounting
+    /// is asynchronously serialized by the lifecycle actor.
     consecutive_timeouts: AtomicU64,
     /// Keeps the protocol-version degradation warning to once per server.
     ping_degrade_warned: AtomicBool,
     #[cfg(test)]
     mid_establish_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
+    refresh_install_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
+    #[cfg(test)]
     panic_actor_on_quit: AtomicBool,
     #[cfg(test)]
     shutdown_wedge_pid: AtomicU32,
+    #[cfg(test)]
+    never_finish_child_reap: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -595,9 +603,10 @@ impl McpConnectionPool {
     /// bounded reap, so total pool shutdown is approximately five seconds, not
     /// the number of entries multiplied by five seconds.
     ///
-    /// If a child ignores both graceful close and kill, its actor is abandoned
-    /// at that deadline. The literal PID and reason are recorded in `last_error`
-    /// and tracing; no background waitpid sweep is retained.
+    /// Only a child that survives the actor's preemptive kill and bounded reap
+    /// can be abandoned at that deadline. Its literal PID and reason are
+    /// recorded in `last_error` and tracing; no background waitpid sweep is
+    /// retained.
     ///
     /// The first caller wins and completes teardown. A concurrent or later
     /// caller returns immediately.
@@ -724,9 +733,13 @@ impl McpEntry {
                 #[cfg(test)]
                 mid_establish_hook: RwLock::new(None),
                 #[cfg(test)]
+                refresh_install_hook: RwLock::new(None),
+                #[cfg(test)]
                 panic_actor_on_quit: AtomicBool::new(false),
                 #[cfg(test)]
                 shutdown_wedge_pid: AtomicU32::new(0),
+                #[cfg(test)]
+                never_finish_child_reap: AtomicBool::new(false),
             }
         })
     }
@@ -767,16 +780,12 @@ impl McpEntry {
                 return;
             }
         };
-        if self.shutting_down.load(Ordering::SeqCst)
-            || self
-                .service_snapshot()
-                .as_ref()
-                .map(|service| service.generation)
-                != Some(observed_generation)
-        {
-            return;
-        }
-        *self.imported_tools.write_recover() = import_tools(&self.server_name, tools);
+        #[cfg(test)]
+        self.pause_before_refresh_install().await;
+        let _ = self.actor_tx.send(LifecycleCommand::InstallToolCatalog {
+            generation: observed_generation,
+            tools,
+        });
     }
 
     fn mark_disconnected(&self, cause: String, observed_generation: u64) -> bool {
@@ -850,24 +859,20 @@ impl McpEntry {
                 }
             },
             TimeoutDisconnectPolicy::ConsecutiveTimeouts => {
+                let (reply, result) = tokio::sync::oneshot::channel();
                 if self
-                    .service_snapshot()
-                    .as_ref()
-                    .map(|service| service.generation)
-                    != Some(observed_generation)
+                    .actor_tx
+                    .send(LifecycleCommand::CallTimedOut {
+                        generation: observed_generation,
+                        reply,
+                    })
+                    .is_err()
                 {
                     return timeout_failure();
                 }
-                let consecutive = self.consecutive_timeouts.fetch_add(1, Ordering::SeqCst) + 1;
-                if consecutive < self.config.consecutive_timeouts_before_disconnect() {
+                let Ok(Some(cause)) = result.await else {
                     return timeout_failure();
-                }
-                let cause = format!(
-                    "MCP server `{server_name}` reached {consecutive} consecutive call timeouts"
-                );
-                if !self.mark_disconnected(cause.clone(), observed_generation) {
-                    return timeout_failure();
-                }
+                };
                 ToolResult::retryable_failure(
                     ToolFailureClass::Unavailable,
                     "mcp_connection_lost",
@@ -936,6 +941,7 @@ impl McpEntry {
         let Some(mut handle) = handle else {
             return;
         };
+        let mut abort_on_drop = AbortOnDrop::new(handle.abort_handle());
         match timeout(ENTRY_SHUTDOWN_TOTAL_BOUND, &mut handle).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
@@ -963,11 +969,47 @@ impl McpEntry {
                 );
             }
         }
+        abort_on_drop.disarm();
     }
 
     #[cfg(test)]
     fn set_mid_establish_hook(&self, hook: Option<Arc<policy_tests::ActorPauseHook>>) {
         *self.mid_establish_hook.write_recover() = hook;
+    }
+
+    #[cfg(test)]
+    async fn pause_before_refresh_install(&self) {
+        let hook = self.refresh_install_hook.read_recover().clone();
+        if let Some(hook) = hook {
+            hook.reached.notify_one();
+            hook.release.notified().await;
+        }
+    }
+}
+
+struct AbortOnDrop {
+    handle: tokio::task::AbortHandle,
+    armed: bool,
+}
+
+impl AbortOnDrop {
+    fn new(handle: tokio::task::AbortHandle) -> Self {
+        Self {
+            handle,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        if self.armed {
+            self.handle.abort();
+        }
     }
 }
 

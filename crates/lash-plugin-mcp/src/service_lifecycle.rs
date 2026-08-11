@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
+use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -44,19 +45,26 @@ impl Transport<RoleClient> for ManagedChildTransport {
     }
 }
 
-pub(crate) struct ConnectedService {
-    pub(crate) running: RunningService<RoleClient, LashMcpClientHandler>,
+type HandshakeFuture = Pin<
+    Box<
+        dyn Future<Output = Result<RunningService<RoleClient, LashMcpClientHandler>, McpError>>
+            + Send,
+    >,
+>;
+
+pub(crate) struct ConnectingService {
+    pub(crate) handshake: HandshakeFuture,
     pub(crate) stdio_child: Option<StdioChildGuard>,
 }
 
-pub(crate) async fn connect_service(
+pub(crate) fn connect_service(
     server_name: &str,
     config: &McpServerConfig,
     host_services: McpHostServices,
     tool_list_changed: Arc<dyn McpToolListChangedHandler>,
     active_pid: Arc<AtomicU32>,
     shutdown_requested: Arc<AtomicBool>,
-) -> Result<ConnectedService, McpError> {
+) -> Result<ConnectingService, McpError> {
     let client_handler = LashMcpClientHandler::new(server_name, host_services)
         .with_tool_list_changed_handler(tool_list_changed);
 
@@ -77,34 +85,42 @@ pub(crate) async fn connect_service(
                 cmd.env(key, value);
             }
             cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
-            let mut child = cmd.spawn().map_err(|err| {
+            let child = cmd.spawn().map_err(|err| {
                 McpError::Protocol(format!(
                     "failed to spawn `{command}` for `{server_name}`: {err}"
                 ))
             })?;
-            let stdout = child.stdout.take().ok_or_else(|| {
-                McpError::Protocol(format!(
-                    "failed to capture stdout for `{command}` MCP server `{server_name}`"
-                ))
-            })?;
-            let stdin = child.stdin.take().ok_or_else(|| {
-                McpError::Protocol(format!(
-                    "failed to capture stdin for `{command}` MCP server `{server_name}`"
-                ))
-            })?;
-            let stdio_child = StdioChildGuard::new(server_name, child, shutdown_requested);
+            // Construct the guard immediately after spawn. Preparation errors
+            // are returned by the handshake future so the actor first takes
+            // ownership of the exact child handle and can always reap it.
+            let mut stdio_child = StdioChildGuard::new(server_name, child, shutdown_requested);
             active_pid.store(stdio_child.pid(), Ordering::SeqCst);
-            let transport = ManagedChildTransport {
-                io: AsyncRwTransport::new(
-                    tokio::fs::File::from_std(child_stdout_file(stdout)),
-                    tokio::fs::File::from_std(child_stdin_file(stdin)),
-                ),
+            let io = match (
+                stdio_child.child.stdout.take(),
+                stdio_child.child.stdin.take(),
+            ) {
+                (Some(stdout), Some(stdin)) => Ok(ManagedChildTransport {
+                    io: AsyncRwTransport::new(
+                        tokio::fs::File::from_std(child_stdout_file(stdout)),
+                        tokio::fs::File::from_std(child_stdin_file(stdin)),
+                    ),
+                }),
+                (None, _) => Err(McpError::Protocol(format!(
+                    "failed to capture stdout for `{command}` MCP server `{server_name}`"
+                ))),
+                (_, None) => Err(McpError::Protocol(format!(
+                    "failed to capture stdin for `{command}` MCP server `{server_name}`"
+                ))),
             };
-            let running = client_handler.serve(transport).await.map_err(|err| {
-                McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
-            })?;
-            Ok(ConnectedService {
-                running,
+            let server_name = server_name.to_string();
+            let handshake = Box::pin(async move {
+                let transport = io?;
+                client_handler.serve(transport).await.map_err(|err| {
+                    McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
+                })
+            });
+            Ok(ConnectingService {
+                handshake,
                 stdio_child: Some(stdio_child),
             })
         }
@@ -114,11 +130,14 @@ pub(crate) async fn connect_service(
             let config = StreamableHttpClientTransportConfig::with_uri(url.as_str())
                 .custom_headers(custom_headers);
             let transport = StreamableHttpClientTransport::from_config(config);
-            let running = client_handler.serve(transport).await.map_err(|err| {
-                McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
-            })?;
-            Ok(ConnectedService {
-                running,
+            let server_name = server_name.to_string();
+            let handshake = Box::pin(async move {
+                client_handler.serve(transport).await.map_err(|err| {
+                    McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
+                })
+            });
+            Ok(ConnectingService {
+                handshake,
                 stdio_child: None,
             })
         }
@@ -202,6 +221,8 @@ pub(crate) struct StdioChildGuard {
     reaped: bool,
     explicit_abandonment: bool,
     shutdown_requested: Arc<AtomicBool>,
+    #[cfg(test)]
+    never_finish_reap: bool,
 }
 
 impl StdioChildGuard {
@@ -217,6 +238,8 @@ impl StdioChildGuard {
             reaped: false,
             explicit_abandonment: false,
             shutdown_requested,
+            #[cfg(test)]
+            never_finish_reap: false,
         }
     }
 
@@ -224,7 +247,7 @@ impl StdioChildGuard {
         self.explicit_abandonment = true;
         let deadline = Instant::now() + STDIO_GRACEFUL_SHUTDOWN_PERIOD;
         loop {
-            if self.child.try_wait()?.is_some() {
+            if self.try_wait()?.is_some() {
                 self.reaped = true;
                 return Ok(());
             }
@@ -237,7 +260,7 @@ impl StdioChildGuard {
         let kill_error = self.child.kill().err();
         let reap_deadline = Instant::now() + STDIO_POST_KILL_WAIT_BOUND;
         loop {
-            if self.child.try_wait()?.is_some() {
+            if self.try_wait()?.is_some() {
                 self.reaped = true;
                 return Ok(());
             }
@@ -263,6 +286,19 @@ impl StdioChildGuard {
 
     pub(crate) fn begin_bounded_cleanup(&mut self) {
         self.explicit_abandonment = true;
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        #[cfg(test)]
+        if self.never_finish_reap {
+            return Ok(None);
+        }
+        self.child.try_wait()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn never_finish_reap(&mut self) {
+        self.never_finish_reap = true;
     }
 }
 
