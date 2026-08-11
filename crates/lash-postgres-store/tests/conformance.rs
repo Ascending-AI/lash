@@ -500,6 +500,19 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_unbound_session_reads_resolve_the_same_session_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres unbound session reads: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::unbound_session_reads_resolve_the_same_session(|| {
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres fence corruption test: LASH_POSTGRES_DATABASE_URL is not set");

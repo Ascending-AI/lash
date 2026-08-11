@@ -1258,6 +1258,16 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance() {
 }
 
 #[tokio::test]
+async fn sqlite_unbound_session_reads_resolve_the_same_session() {
+    let dir = tempfile::tempdir().expect("unbound-read tempdir");
+    let path = dir.path().join("unbound-session-reads.db");
+    lash_core::testing::conformance::unbound_session_reads_resolve_the_same_session(|| {
+        open_store(&path)
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_store_enforces_core_lease_fence_authority() {
     let store = Store::memory().await.expect("in-memory SQLite store");
     lash_core::testing::conformance::session_execution_lease_fence_authority(&store).await;

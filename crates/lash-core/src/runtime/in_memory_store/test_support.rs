@@ -214,6 +214,11 @@ impl InMemorySessionStore {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    pub(crate) fn fail_next_load_session_head_meta(&self) {
+        self.fail_next_load_session_head_meta
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub(crate) fn fail_load_session_on_call(&self, call: usize) {
         *self.fail_load_session_on_call.lock_recover() = Some(call);
     }

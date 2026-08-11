@@ -365,8 +365,14 @@ impl Store {
             })
             .await
             .map_err(sqlite_error)?;
-        if session_ids.len() != 1 {
-            return Ok(None);
+        match session_ids.len() {
+            0 => return Ok(None),
+            1 => {}
+            count => {
+                return Err(StoreError::Backend(format!(
+                    "SQLite durable-core store is unbound and found {count} sessions; bind an explicit session through SqliteSessionStoreFactory"
+                )));
+            }
         }
         self.bind_session(&session_ids[0])?;
         Ok(self.session_id.get().cloned())

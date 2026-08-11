@@ -64,6 +64,35 @@ async fn unchanged_session_freshness_is_independent_of_history_depth() {
 }
 
 #[tokio::test]
+async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let head_reads_before = store.load_session_head_meta_count();
+    let full_loads_before = store.load_session_count();
+    runtime
+        .resident_graph_head_stale
+        .store(true, Ordering::Release);
+    store.fail_next_load_session_head_meta();
+
+    runtime
+        .refresh_session_graph_from_store()
+        .await
+        .expect("an indeterminate head must fall back to the full session read");
+
+    assert_eq!(
+        store.load_session_head_meta_count() - head_reads_before,
+        1,
+        "freshness must attempt the bounded head projection first"
+    );
+    assert_eq!(
+        store.load_session_count() - full_loads_before,
+        1,
+        "a failed head projection must not be treated as a fresh session"
+    );
+    assert!(!runtime.resident_graph_head_stale.load(Ordering::Acquire));
+}
+
+#[tokio::test]
 async fn freshness_hydrates_when_revision_changed() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;

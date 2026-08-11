@@ -180,19 +180,24 @@ impl LashRuntime {
                 .store(false, Ordering::Release);
             return Ok(());
         };
-        let head = store.load_session_head_meta().await.map_err(|err| {
-            SessionError::Protocol(format!("failed to refresh session graph from store: {err}"))
-        })?;
-        let Some(head) = head else {
-            self.graph_loaded_from_store = true;
-            self.resident_graph_head_stale
-                .store(false, Ordering::Release);
-            return Ok(());
+        let requires_hydration = match store.load_session_head_meta().await {
+            Ok(Some(head)) => {
+                self.state.head_revision != head.head_revision
+                    || head.leaf_node_id != self.state.session_graph.leaf_node_id
+                    || head.checkpoint_ref != self.state.checkpoint_ref
+            }
+            Ok(None) => {
+                self.graph_loaded_from_store = true;
+                self.resident_graph_head_stale
+                    .store(false, Ordering::Release);
+                return Ok(());
+            }
+            // The bounded read is an optimization. If it cannot determine the
+            // durable head, retain the canonical full read rather than letting
+            // probe failure report the resident graph as fresh.
+            Err(_) => true,
         };
-        let has_newer_graph = self.state.head_revision != head.head_revision
-            || head.leaf_node_id != self.state.session_graph.leaf_node_id
-            || head.checkpoint_ref != self.state.checkpoint_ref;
-        if !has_newer_graph {
+        if !requires_hydration {
             self.graph_loaded_from_store = true;
             self.resident_graph_head_stale
                 .store(false, Ordering::Release);

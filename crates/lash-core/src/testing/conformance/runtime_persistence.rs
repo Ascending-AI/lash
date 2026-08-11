@@ -109,6 +109,106 @@ where
     runtime_persistence_survives_reopen(make()).await;
 }
 
+/// Prove that an unbound handle resolves the same session for both shared
+/// session-read projections as durable storage moves from zero to one to two
+/// persisted sessions.
+///
+/// Every `open` call must return a newly opened, unbound handle over the same
+/// initially empty durable substrate.
+pub async fn unbound_session_reads_resolve_the_same_session<F>(open: F)
+where
+    F: Fn() -> Arc<dyn RuntimePersistence>,
+{
+    #[derive(Debug, PartialEq, Eq)]
+    enum ReadResolution {
+        Absent,
+        Present,
+        Indeterminate,
+    }
+
+    async fn assert_reads_agree(
+        store: Arc<dyn RuntimePersistence>,
+        expected: &str,
+    ) -> ReadResolution {
+        let head = store.load_session_head_meta().await;
+        let full = store.load_session().await;
+        match (full, head) {
+            (Ok(None), Ok(None)) => ReadResolution::Absent,
+            (Ok(Some(full)), Ok(Some(head))) => {
+                assert_eq!(head.session_id, full.session_id, "{expected}: session id");
+                assert_eq!(
+                    head.head_revision, full.head_revision,
+                    "{expected}: head revision"
+                );
+                assert_eq!(
+                    head.leaf_node_id, full.graph.leaf_node_id,
+                    "{expected}: leaf node id"
+                );
+                assert_eq!(
+                    head.checkpoint_ref, full.checkpoint_ref,
+                    "{expected}: checkpoint reference"
+                );
+                ReadResolution::Present
+            }
+            (Err(full), Err(head)) => {
+                assert_eq!(
+                    head.to_string(),
+                    full.to_string(),
+                    "{expected}: full and head reads must report the same indeterminacy"
+                );
+                ReadResolution::Indeterminate
+            }
+            (full, head) => panic!(
+                "{expected}: full and head reads disagreed about session resolution: full={full:?}, head={head:?}"
+            ),
+        }
+    }
+
+    assert_eq!(
+        assert_reads_agree(open(), "zero persisted sessions").await,
+        ReadResolution::Absent,
+        "an empty store must resolve as absent"
+    );
+
+    let first = open();
+    let first_state = RuntimeSessionState {
+        session_id: "unbound-resolution-a".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    commit_runtime_state_for_test(
+        &first,
+        RuntimeCommit::persisted_state_for_test(&first_state, &[]),
+        "unbound-resolution-a",
+    )
+    .await
+    .expect("seed first session through an unbound handle");
+    assert_eq!(
+        assert_reads_agree(open(), "one persisted session").await,
+        ReadResolution::Present,
+        "a sole persisted session must resolve through an unbound reopened handle"
+    );
+
+    let second = open();
+    let second_state = RuntimeSessionState {
+        session_id: "unbound-resolution-b".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    commit_runtime_state_for_test(
+        &second,
+        RuntimeCommit::persisted_state_for_test(&second_state, &[]),
+        "unbound-resolution-b",
+    )
+    .await
+    .expect("seed second session through an unbound handle");
+    assert!(
+        matches!(
+            assert_reads_agree(open(), "two persisted sessions").await,
+            ReadResolution::Present | ReadResolution::Indeterminate
+        ),
+        "two persisted sessions must resolve consistently or report indeterminacy"
+    );
+}
+
 /// A newly minted turn-input identity is store-wide rather than handle-local.
 ///
 /// Reopenable backends exercise this through two independently constructed
