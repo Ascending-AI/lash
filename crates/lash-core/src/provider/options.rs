@@ -4,14 +4,13 @@ pub const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 300_000;
 pub const DEFAULT_CHUNK_TIMEOUT_MS: u64 = 120_000;
 pub const DEFAULT_THROTTLE_WAIT_BUDGET_MS: u64 = 90_000;
 
-/// Minimum amount a single deferred throttle wait charges against
-/// [`ProviderRetryPolicy::throttle_wait_budget_ms`]. Charging at least this
-/// much per deference bounds the courtesy in count as well as time: a zero or
-/// near-zero `Retry-After` (or a zero [`retry_after_cap_ms`]) cannot spin the
-/// attempt-free retry loop more than `budget / charge` times.
+/// Minimum provider-stated wait eligible for attempt-free throttle deference.
+/// A shorter `Retry-After` (including a past HTTP-date or a zero
+/// [`retry_after_cap_ms`]) consumes the ordinary retry ladder and uses its
+/// backoff instead of spinning the courtesy loop.
 ///
 /// [`retry_after_cap_ms`]: ProviderRetryPolicy::retry_after_cap_ms
-pub(crate) const MIN_THROTTLE_BUDGET_CHARGE: Duration = Duration::from_secs(1);
+pub(crate) const MIN_FREE_THROTTLE_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlmTimeouts {
@@ -325,15 +324,18 @@ pub struct ProviderRetryPolicy {
     pub base_delay_ms: u64,
     pub max_delay_ms: u64,
     pub jitter_ms: u64,
+    /// Maximum provider-stated `Retry-After` honored by the host. `None`
+    /// deliberately accepts an unbounded provider duration; selecting it means
+    /// the host accepts that a hostile header can stall a completion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_cap_ms: Option<u64>,
     /// Cumulative time [`ProviderHandle::complete`] may spend honoring
     /// provider throttle waits — a retryable [`ProviderFailureKind::Quota`]
     /// failure carrying `Retry-After` — without consuming retry attempts.
-    /// Each deferred wait charges what it actually waits, with a one-second
-    /// floor per deference, so the courtesy is bounded in count as well as
-    /// time. Once the budget is spent, throttled failures consume attempts
-    /// like any other retryable failure. `0` disables the deference entirely.
+    /// Only waits of at least one second qualify, and each deferred wait
+    /// charges what it actually waits. Once the budget is spent, throttled
+    /// failures consume attempts like any other retryable failure. `0`
+    /// disables the deference entirely.
     #[serde(
         default = "default_throttle_wait_budget_ms",
         skip_serializing_if = "is_default_throttle_wait_budget_ms"
@@ -399,7 +401,10 @@ impl ProviderRetryPolicy {
         retry_after: Option<Duration>,
     ) -> Duration {
         if let Some(retry_after) = retry_after {
-            return self.cap_retry_after(retry_after);
+            let retry_after = self.cap_retry_after(retry_after);
+            if retry_after >= MIN_FREE_THROTTLE_WAIT {
+                return retry_after;
+            }
         }
         let multiplier = 1u64.checked_shl(retry_index).unwrap_or(u64::MAX);
         let delay_ms = self

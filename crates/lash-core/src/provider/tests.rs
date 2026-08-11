@@ -793,6 +793,21 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
 }
 
 #[test]
+fn raw_provider_usage_requires_a_reported_quantity() {
+    let empty_usage = LlmResponse {
+        provider_usage: Some(serde_json::json!({})),
+        ..LlmResponse::default()
+    };
+    assert!(!response_has_output_evidence(&empty_usage));
+
+    let zero_quantities = LlmResponse {
+        provider_usage: Some(serde_json::json!({ "input_tokens": 0 })),
+        ..LlmResponse::default()
+    };
+    assert!(response_has_output_evidence(&zero_quantities));
+}
+
+#[test]
 fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
     let no_response = LlmTransportError::new("connect failed")
         .with_kind(ProviderFailureKind::Transport)
@@ -1174,7 +1189,7 @@ async fn provider_handle_throttle_with_future_http_date_retries_for_free() {
 }
 
 #[tokio::test]
-async fn provider_handle_throttle_with_past_http_date_retries_immediately() {
+async fn provider_handle_throttle_with_past_http_date_consumes_attempt() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let clock = Arc::new(RecordingClock::default());
     let provider = StatusFailingProvider {
@@ -1194,12 +1209,46 @@ async fn provider_handle_throttle_with_past_http_date_retries_immediately() {
     let mut handle =
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
 
-    let result = handle.complete(empty_request()).await;
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    let completion = result.expect("valid past HTTP-date requests an immediate free retry");
+    let failure = handle
+        .complete(empty_request())
+        .await
+        .expect_err("past HTTP-date is not an attempt-free deferral");
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert_eq!(clock.slept(), Duration::ZERO);
-    assert_eq!(completion.call_record.attempts.len(), 2);
-    assert!(!completion.call_record.attempts[0].retry_budget_consumed);
+    assert_eq!(failure.call_record.attempts.len(), 1);
+    assert!(failure.call_record.attempts[0].retry_budget_consumed);
+}
+
+#[tokio::test]
+async fn provider_handle_repeated_past_http_dates_are_attempt_bounded() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::new(RecordingClock::default());
+    let provider = StatusFailingProvider {
+        options: ProviderOptions::default(),
+        attempts: Arc::clone(&attempts),
+        fail_until: 100,
+        status: 429,
+        retry_after: None,
+        retry_after_header: Some("Sun, 06 Nov 1994 08:49:37 GMT"),
+    };
+    let mut handle =
+        ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
+
+    let failure = handle
+        .complete(empty_request())
+        .await
+        .expect_err("past-date throttle storm must exhaust the attempt ladder");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 4);
+    assert_eq!(failure.call_record.attempts.len(), 4);
+    assert!(
+        failure
+            .call_record
+            .attempts
+            .iter()
+            .all(|attempt| attempt.retry_budget_consumed)
+    );
+    assert_eq!(clock.slept(), Duration::from_secs(14));
 }
 
 #[tokio::test]

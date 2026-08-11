@@ -880,6 +880,11 @@ pub struct ResponsesStreamState {
     /// `response.completed.response.output` is authoritative for status/usage
     /// but is only parsed into parts when the stream did not deliver items.
     pub streamed_item_content_received: bool,
+    /// Set when the stream contains an event type this adapter does not
+    /// recognise. Unknown events are possible output by default: teaching the
+    /// parser about a new event may make that classification more precise, but
+    /// schema drift must never make a second generation look charge-safe.
+    pub unrecognized_event_observed: bool,
 }
 
 impl ResponsesStreamState {
@@ -916,6 +921,15 @@ impl ResponsesStreamState {
         }
         let part_index = self.ensure_text_part_index(output_index);
         self.append_text_delta_to_part(part_index, piece);
+    }
+
+    pub fn reconcile_text_event(&mut self, text: &str, output_index: Option<usize>) {
+        if text.is_empty() {
+            return;
+        }
+        let part_index = self.ensure_text_part_index(output_index);
+        self.reconcile_text_part(part_index, text);
+        self.streamed_item_content_received = true;
     }
 
     fn reconcile_text_part(&mut self, part_index: usize, text: &str) {
@@ -1291,6 +1305,7 @@ impl ResponsesStreamState {
         }
         if let Some(tool_name) = item.get("name").and_then(|v| v.as_str()) {
             tool_call.tool_name = tool_name.to_string();
+            self.streamed_item_content_received |= !tool_name.is_empty();
         }
         if let Some(arguments) = item.get("arguments").and_then(|v| v.as_str())
             && !arguments.is_empty()
@@ -1414,22 +1429,6 @@ impl ResponsesStreamState {
 // SSE event state machine
 // ---------------------------------------------------------------------------
 
-fn error_message_from_response_failed(provider: &str, event: &Value) -> String {
-    event
-        .get("response")
-        .and_then(|r| r.get("error"))
-        .and_then(|e| e.get("message"))
-        .and_then(|m| m.as_str())
-        .or_else(|| {
-            event
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(|m| m.as_str())
-        })
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("{provider} response failed"))
-}
-
 /// Drive one SSE event into `state`. `emitted_parts`, when supplied, receives
 /// each tool-call part as it finalizes so the caller can stream it. `provider`
 /// names the backend for error messages.
@@ -1474,10 +1473,14 @@ pub fn process_sse_event(
 
     if let Some(resp) = event.get("response") {
         state.final_response = Some(resp.clone());
-        state.provider_usage = resp.get("usage").cloned();
+        state.provider_usage = resp.get("usage").filter(|usage| !usage.is_null()).cloned();
         merge_usage(&mut state.usage, &usage_from_response_value(resp));
     } else {
         merge_usage(&mut state.usage, &usage_from_response_value(&event));
+    }
+
+    if crate::responses_output_evidence::handle_evidence_only_event(event_type, &event, state) {
+        return Ok(());
     }
 
     match event_type {
@@ -1489,7 +1492,8 @@ pub fn process_sse_event(
                         let _ = state.update_tool_call_from_item(item, output_index);
                     }
                     Some("reasoning") => state.begin_reasoning_part(output_index),
-                    _ => {}
+                    Some(_) => state.streamed_item_content_received = true,
+                    None => {}
                 }
             }
         }
@@ -1521,7 +1525,11 @@ pub fn process_sse_event(
                 state.push_text_delta(delta, output_index);
             }
         }
-        "response.output_text.done" => {}
+        "response.output_text.done" => {
+            if let Some(text) = event.get("text").and_then(|v| v.as_str()) {
+                state.reconcile_text_event(text, output_index);
+            }
+        }
         "response.function_call_arguments.delta" => {
             if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
                 state.push_tool_call_delta(
@@ -1539,6 +1547,10 @@ pub fn process_sse_event(
                     arguments,
                 );
             }
+            state.streamed_item_content_received |= event
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| !name.is_empty());
         }
         "response.output_item.done" => {
             if let Some(item) = event.get("item") {
@@ -1554,7 +1566,8 @@ pub fn process_sse_event(
                             parts.push(part);
                         }
                     }
-                    _ => {}
+                    Some(_) => state.streamed_item_content_received = true,
+                    None => {}
                 }
             }
         }
@@ -1566,19 +1579,11 @@ pub fn process_sse_event(
         }
         "response.failed" => {
             state.terminal_event_seen = true;
-            let error_value = event
-                .get("response")
-                .and_then(|r| r.get("error"))
-                .or_else(|| event.get("error"))
-                .cloned()
-                .unwrap_or(Value::Null);
-            return Err(LlmTransportError::new(error_message_from_response_failed(
+            return Err(crate::responses_output_evidence::response_failed_error(
                 provider, &event,
-            ))
-            .retryable(responses_error_is_retryable(&error_value))
-            .with_raw(event.to_string()));
+            ));
         }
-        _ => {}
+        _ => state.unrecognized_event_observed = true,
     }
     Ok(())
 }
