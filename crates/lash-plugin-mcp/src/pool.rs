@@ -13,7 +13,7 @@
 //! The wire-level transport is provided by the official [`rmcp`] SDK.
 
 use lash_sansio::sync::{LockResultExt, RwLockExt};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::Weak;
@@ -22,19 +22,15 @@ use std::time::Duration;
 
 use base64::Engine;
 use futures_util::future::join_all;
-use http::{HeaderName, HeaderValue};
+#[cfg(test)]
+use http::HeaderName;
 use rmcp::ServiceError;
 use rmcp::model::{
     CallToolRequestParams, ClientRequest, Content, PingRequest, ProtocolVersion, RawContent,
     Request, ResourceContents, ServerResult,
 };
-use rmcp::service::{Peer, PeerRequestOptions, QuitReason, RoleClient, RunningService, ServiceExt};
-use rmcp::transport::child_process::TokioChildProcess;
-use rmcp::transport::streamable_http_client::{
-    StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
-};
+use rmcp::service::{Peer, PeerRequestOptions, QuitReason, RoleClient, RunningService};
 use serde_json::{Value, json};
-use tokio::process::Command;
 use tokio::time::timeout;
 
 use lash_core::{
@@ -51,8 +47,11 @@ use crate::host::{
     LashMcpClientHandler, McpHostRequestTasks, McpHostServices, McpToolListChangedHandler,
 };
 use crate::naming;
+#[cfg(test)]
+use crate::service_lifecycle::build_http_headers;
 use crate::service_lifecycle::{
-    McpService, ServiceQuit, cancel_running_service, equal_jitter, is_connection_loss, stop_service,
+    ConnectedService, McpService, ServiceQuit, StdioChildGuard, cancel_running_service,
+    connect_service, equal_jitter, is_connection_loss, stop_service,
 };
 
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
@@ -72,6 +71,8 @@ pub struct McpServerStatus {
     pub last_error: Option<String>,
     /// Number of tools imported from the server's last successful discovery.
     pub tool_count: usize,
+    /// Whether the configured reconnect-attempt budget has been exhausted.
+    pub reconnect_exhausted: bool,
 }
 
 struct McpEntry {
@@ -98,6 +99,11 @@ struct McpEntry {
     /// Persists across reconnect tasks so short-lived successful handshakes do
     /// not restart a crash loop at the initial delay.
     reconnect_backoff_ms: AtomicU64,
+    /// Allocates an identity for every connection attempt, including attempts
+    /// that fail before publishing a service.
+    generation_allocator: AtomicU64,
+    /// Set when a bounded reconnect loop spends its final attempt.
+    reconnect_exhausted: AtomicBool,
     /// Consecutive idle timeouts since the last successful tool call.
     consecutive_timeouts: AtomicU64,
     /// Monotonically identifies the service currently installed in `service`.
@@ -319,6 +325,7 @@ impl McpConnectionPool {
                 connected: entry.connected.load(Ordering::SeqCst),
                 last_error: entry.last_error.read_recover().clone(),
                 tool_count: entry.imported_tools.read_recover().len(),
+                reconnect_exhausted: entry.reconnect_exhausted.load(Ordering::SeqCst),
             })
             .collect()
     }
@@ -440,6 +447,21 @@ impl McpConnectionPool {
                             message: format!(
                                 "MCP server `{server_name}` is unavailable because its pool entry is shutting down"
                             ),
+                            source: ToolFailureSource::Plugin,
+                            retry: ToolRetryDisposition::Never,
+                            raw: None,
+                        });
+                    }
+                    if entry.reconnect_exhausted.load(Ordering::SeqCst) {
+                        let last_error = entry.last_error.read_recover().clone();
+                        return ToolResult::failure(ToolFailure {
+                            class: ToolFailureClass::Unavailable,
+                            code: "mcp_reconnect_exhausted".into(),
+                            message: last_error.unwrap_or_else(|| {
+                                format!(
+                                    "MCP server `{server_name}` reconnect attempts exhausted; no background recovery is active"
+                                )
+                            }),
                             source: ToolFailureSource::Plugin,
                             retry: ToolRetryDisposition::Never,
                             raw: None,
@@ -683,6 +705,8 @@ impl McpEntry {
             connecting: AtomicBool::new(false),
             reconnect_jitter: Arc::new(equal_jitter),
             reconnect_backoff_ms: AtomicU64::new(reconnect_backoff_ms),
+            generation_allocator: AtomicU64::new(0),
+            reconnect_exhausted: AtomicBool::new(false),
             consecutive_timeouts: AtomicU64::new(0),
             service_generation: AtomicU64::new(0),
             ping_degrade_warned: AtomicBool::new(false),
@@ -778,16 +802,18 @@ impl McpEntry {
                 self.server_name
             )));
         }
-        let next_generation = self
-            .service_generation
-            .load(Ordering::SeqCst)
-            .checked_add(1)
+        let previous_generation = self
+            .generation_allocator
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |generation| {
+                generation.checked_add(1)
+            })
             .expect("MCP service generation exhausted");
+        let next_generation = previous_generation + 1;
         let tool_list_refresh = Arc::new(McpToolListRefresh {
             entry: Arc::downgrade(self),
             service_generation: next_generation,
         });
-        let service = timeout(
+        let connected_service = timeout(
             self.config.startup_timeout(),
             connect_service(
                 &self.server_name,
@@ -801,9 +827,16 @@ impl McpEntry {
             server: self.server_name.clone(),
             timeout_ms: self.config.startup_timeout().as_millis() as u64,
         })??;
+        let ConnectedService {
+            running: service,
+            stdio_child,
+        } = connected_service;
 
         if self.cancelled.load(Ordering::SeqCst) {
             cancel_running_service(service).await;
+            if let Some(child) = &stdio_child {
+                child.reap_after_ungraceful_drop();
+            }
             return Err(McpError::Protocol(format!(
                 "MCP connection for `{}` was cancelled during startup",
                 self.server_name
@@ -832,6 +865,9 @@ impl McpEntry {
             () = self.cancelled_notify.notified() => {
                 if self.cancelled.load(Ordering::SeqCst) {
                     cancel_running_service(service).await;
+                    if let Some(child) = &stdio_child {
+                        child.reap_after_ungraceful_drop();
+                    }
                     return Err(McpError::Protocol(format!(
                         "MCP connection for `{}` was cancelled during discovery",
                         self.server_name
@@ -843,8 +879,9 @@ impl McpEntry {
         let tools = match tools_result {
             Ok(tools) => tools,
             Err(error) => {
-                if self.cancelled.load(Ordering::SeqCst) {
-                    cancel_running_service(service).await;
+                cancel_running_service(service).await;
+                if let Some(child) = &stdio_child {
+                    child.reap_after_ungraceful_drop();
                 }
                 return Err(error);
             }
@@ -852,6 +889,9 @@ impl McpEntry {
 
         if self.cancelled.load(Ordering::SeqCst) {
             cancel_running_service(service).await;
+            if let Some(child) = &stdio_child {
+                child.reap_after_ungraceful_drop();
+            }
             return Err(McpError::Protocol(format!(
                 "MCP connection for `{}` was cancelled before installation",
                 self.server_name
@@ -873,12 +913,20 @@ impl McpEntry {
                 request_tasks: Arc::clone(&request_tasks),
                 cancellation: Some(cancellation),
                 quit: Arc::clone(&quit),
+                stdio_child: stdio_child.clone(),
             })
         };
         // A fresh connection starts with a fresh timeout budget.
         self.consecutive_timeouts.store(0, Ordering::SeqCst);
         *self.last_error.write_recover() = None;
-        self.spawn_service_watcher(service, next_generation, request_tasks, Arc::clone(&quit));
+        self.reconnect_exhausted.store(false, Ordering::SeqCst);
+        self.spawn_service_watcher(
+            service,
+            next_generation,
+            request_tasks,
+            Arc::clone(&quit),
+            stdio_child,
+        );
         if let Some(previous_service) = previous_service {
             stop_service(previous_service).await;
         }
@@ -891,6 +939,7 @@ impl McpEntry {
         service_generation: u64,
         request_tasks: Arc<McpHostRequestTasks>,
         quit: Arc<ServiceQuit>,
+        stdio_child: Option<Arc<StdioChildGuard>>,
     ) {
         let weak_entry = Arc::downgrade(self);
         tokio::spawn(async move {
@@ -913,6 +962,9 @@ impl McpEntry {
                     waiting.await
                 }
             };
+            if let Some(child) = &stdio_child {
+                child.reap_after_ungraceful_drop();
+            }
             request_tasks.shutdown().await;
             if let Some(entry) = weak_entry.upgrade() {
                 entry.observe_service_quit(service_generation, reason).await;
@@ -984,6 +1036,7 @@ impl McpEntry {
         if self.cancelled.load(Ordering::SeqCst) || self.connecting.swap(true, Ordering::SeqCst) {
             return;
         }
+        self.reconnect_exhausted.store(false, Ordering::SeqCst);
         let entry = Arc::clone(self);
         tokio::spawn(async move {
             let max_attempts = entry.config.reconnect_max_attempts();
@@ -1022,6 +1075,11 @@ impl McpEntry {
                             "MCP reconnect attempt failed"
                         );
                         if max_attempts != 0 && attempts >= max_attempts {
+                            *entry.last_error.write_recover() = Some(format!(
+                                "MCP server `{}` reconnect attempts exhausted after {attempts} attempt(s); no background recovery is active; last error: {err}",
+                                entry.server_name
+                            ));
+                            entry.reconnect_exhausted.store(true, Ordering::SeqCst);
                             tracing::warn!(
                                 server = %entry.server_name,
                                 attempts,
@@ -1306,77 +1364,6 @@ impl McpEntry {
     }
 }
 
-async fn connect_service(
-    server_name: &str,
-    config: &McpServerConfig,
-    host_services: McpHostServices,
-    tool_list_changed: Arc<dyn McpToolListChangedHandler>,
-) -> Result<RunningService<RoleClient, LashMcpClientHandler>, McpError> {
-    let client_handler = LashMcpClientHandler::new(server_name, host_services)
-        .with_tool_list_changed_handler(tool_list_changed);
-
-    match config {
-        McpServerConfig::Stdio {
-            command,
-            args,
-            env,
-            cwd,
-            ..
-        } => {
-            let mut cmd = Command::new(command);
-            cmd.args(args);
-            if let Some(cwd) = cwd {
-                cmd.current_dir(cwd);
-            }
-            for (key, value) in env {
-                cmd.env(key, value);
-            }
-            let transport = TokioChildProcess::new(cmd).map_err(|err| {
-                McpError::Protocol(format!(
-                    "failed to spawn `{command}` for `{server_name}`: {err}"
-                ))
-            })?;
-            client_handler.serve(transport).await.map_err(|err| {
-                McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
-            })
-        }
-        McpServerConfig::StreamableHttp { url, headers, .. } => {
-            let custom_headers = build_http_headers(server_name, headers)?;
-            let config = StreamableHttpClientTransportConfig::with_uri(url.as_str())
-                .custom_headers(custom_headers);
-            let transport = StreamableHttpClientTransport::from_config(config);
-            client_handler.serve(transport).await.map_err(|err| {
-                McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
-            })
-        }
-    }
-}
-
-/// Translate a config `headers` map into the `http` header types `rmcp`'s
-/// streamable-HTTP transport expects, failing with a clear config error on a
-/// malformed name or value. Header names are case-insensitive per HTTP, so a
-/// configured `Authorization` reaches the server as `authorization`.
-fn build_http_headers(
-    server_name: &str,
-    headers: &BTreeMap<String, String>,
-) -> Result<HashMap<HeaderName, HeaderValue>, McpError> {
-    let mut out = HashMap::with_capacity(headers.len());
-    for (name, value) in headers {
-        let header_name = HeaderName::try_from(name.as_str()).map_err(|err| {
-            McpError::Config(format!(
-                "MCP server `{server_name}` has invalid HTTP header name `{name}`: {err}"
-            ))
-        })?;
-        let header_value = HeaderValue::try_from(value.as_str()).map_err(|err| {
-            McpError::Config(format!(
-                "MCP server `{server_name}` has invalid value for HTTP header `{name}`: {err}"
-            ))
-        })?;
-        out.insert(header_name, header_value);
-    }
-    Ok(out)
-}
-
 fn import_tools(
     server_name: &str,
     mut tools: Vec<rmcp::model::Tool>,
@@ -1575,11 +1562,10 @@ impl Drop for McpConnectionPool {
         for entry in self.entries.get_mut().recover().values() {
             entry.cancel();
         }
-        // We can't .await in Drop. The RunningService values inside each
-        // entry will cancel their processes when they're dropped
-        // (rmcp drops the transport, which kills the child process or
-        // closes the HTTP connection). For a graceful shutdown, callers
-        // should call `shutdown_all` themselves.
+        // We can't .await in Drop. Entry drop cancels every rmcp service; stdio
+        // entries additionally retain their exact child-process handle so
+        // teardown can kill and wait without relying on the dropped runtime.
+        // For graceful shutdown, callers should call `shutdown_all` themselves.
     }
 }
 

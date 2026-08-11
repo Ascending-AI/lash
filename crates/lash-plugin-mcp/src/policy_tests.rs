@@ -38,6 +38,10 @@ behavior = os.environ['BEHAVIOR']
 protocol = os.environ.get('PROTOCOL', '2025-11-25')
 log_path = os.environ['LOG_PATH']
 starts_path = os.environ['STARTS_PATH']
+pid_path = os.environ.get('PID_PATH')
+if pid_path:
+    with open(pid_path, 'w', encoding='utf-8') as f:
+        f.write(str(os.getpid()))
 
 try:
     with open(starts_path, 'r', encoding='utf-8') as f:
@@ -167,6 +171,10 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
             (
                 "STARTS_PATH".to_string(),
                 root.join("starts").display().to_string(),
+            ),
+            (
+                "PID_PATH".to_string(),
+                root.join("pid").display().to_string(),
             ),
         ]),
         cwd: None,
@@ -427,10 +435,25 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
 
     let result = call(&pool).await;
     assert_eq!(failure(&result).class, ToolFailureClass::Unavailable);
-    wait_until(|| starts(root.path()) == 2, "reconnect cycle did not run").await;
+    wait_until(
+        || starts(root.path()) == 2 && pool.server_statuses()[0].reconnect_exhausted,
+        "reconnect cycle did not become terminal",
+    )
+    .await;
     let status = &pool.server_statuses()[0];
     assert!(!status.connected);
     assert!(status.last_error.is_some());
+    assert!(
+        status.reconnect_exhausted,
+        "terminal reconnect exhaustion must be visible in public status"
+    );
+    let terminal = call(&pool).await;
+    assert!(
+        failure(&terminal)
+            .message
+            .contains("reconnect attempts exhausted"),
+        "terminal tool-call failure must not claim recovery is active: {terminal:?}"
+    );
     assert_eq!(starts(root.path()), 2);
     pool.shutdown_all().await;
 }
@@ -512,6 +535,37 @@ async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
     assert!(pool.server_statuses()[0].connected);
     assert_eq!(starts(root.path()), 2);
     pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn failed_connection_attempt_reserves_a_unique_generation() {
+    let root = tempfile::tempdir().unwrap();
+    let entry = Arc::new(McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "fail_once_then_success",
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    ));
+
+    entry
+        .establish()
+        .await
+        .expect_err("first attempt must fail before publication");
+    assert_eq!(
+        entry.generation_allocator.load(Ordering::SeqCst),
+        1,
+        "a failed unpublished attempt must consume its generation"
+    );
+
+    entry.establish().await.expect("replacement connection");
+    assert_eq!(entry.service_generation.load(Ordering::SeqCst), 2);
+    entry.cancel();
+    entry.shutdown().await;
 }
 
 #[tokio::test]
@@ -669,6 +723,43 @@ async fn dropped_pool_releases_entry_and_keepalive_task() {
         .expect("keepalive task retained the dropped entry")
         .expect("keepalive task panicked");
     assert!(weak.upgrade().is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn dropping_connected_pool_and_runtime_reaps_stdio_child() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let pool = runtime.block_on(connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "success",
+            ..MockOptions::default()
+        },
+    ));
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("stdio child must publish its pid")
+        .parse()
+        .expect("numeric child pid");
+
+    drop(pool);
+    drop(runtime);
+
+    let process_path = format!("/proc/{pid}");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while std::path::Path::new(&process_path).exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if std::path::Path::new(&process_path).exists() {
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+        panic!("stdio child PID {pid} remained alive after pool and runtime drop");
+    }
 }
 
 #[derive(Clone, Default)]
@@ -867,5 +958,15 @@ fn equal_jitter_stays_in_upper_half_of_configured_backoff() {
         let delay = equal_jitter(Duration::from_millis(25));
         assert!(delay >= Duration::from_millis(13));
         assert!(delay <= Duration::from_millis(25));
+    }
+}
+
+#[test]
+fn one_millisecond_backoff_never_jitters_to_zero() {
+    for _ in 0..100 {
+        assert_eq!(
+            equal_jitter(Duration::from_millis(1)),
+            Duration::from_millis(1)
+        );
     }
 }

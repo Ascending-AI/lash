@@ -151,12 +151,14 @@ pub struct McpCallPolicy {
     #[serde(default, skip_serializing_if = "is_zero")]
     pub liveness_probe_interval_ms: u64,
     /// Initial reconnect backoff ceiling, in milliseconds.
+    /// Must be greater than zero and no greater than the maximum ceiling.
     #[serde(
         default = "default_reconnect_initial_backoff_ms",
         skip_serializing_if = "is_default_reconnect_initial_backoff_ms"
     )]
     pub reconnect_initial_backoff_ms: u64,
     /// Maximum reconnect backoff ceiling, in milliseconds.
+    /// Must be greater than or equal to the initial ceiling.
     #[serde(
         default = "default_reconnect_max_backoff_ms",
         skip_serializing_if = "is_default_reconnect_max_backoff_ms"
@@ -469,6 +471,11 @@ impl McpServerConfig {
                 "MCP server `{server_name}` reconnect_initial_backoff_ms must be greater than zero"
             )));
         }
+        if policy.reconnect_max_backoff_ms < policy.reconnect_initial_backoff_ms {
+            return Err(McpError::Config(format!(
+                "MCP server `{server_name}` reconnect_max_backoff_ms must be greater than or equal to reconnect_initial_backoff_ms"
+            )));
+        }
         if policy.call_max_total_timeout_ms <= policy.call_timeout_ms {
             return Err(McpError::Config(format!(
                 "MCP server `{server_name}` call_max_total_timeout_ms must be greater than call_timeout_ms"
@@ -641,6 +648,37 @@ mod tests {
                 .to_string()
                 .contains("reconnect_initial_backoff_ms must be greater than zero")
         );
+    }
+
+    #[test]
+    fn validation_rejects_zero_or_sub_initial_max_reconnect_backoff() {
+        for max_ms in [0, 9] {
+            let config: McpServerConfig = serde_json::from_value(serde_json::json!({
+                "transport": "stdio",
+                "command": "srv",
+                "reconnect_initial_backoff_ms": 10,
+                "reconnect_max_backoff_ms": max_ms
+            }))
+            .unwrap();
+            let error = config
+                .validate("srv")
+                .expect_err("maximum below the non-zero initial delay must be rejected");
+            assert!(
+                error.to_string().contains(
+                    "reconnect_max_backoff_ms must be greater than or equal to reconnect_initial_backoff_ms"
+                ),
+                "unexpected validation error: {error}"
+            );
+        }
+
+        let boundary: McpServerConfig = serde_json::from_value(serde_json::json!({
+            "transport": "stdio",
+            "command": "srv",
+            "reconnect_initial_backoff_ms": 1,
+            "reconnect_max_backoff_ms": 1
+        }))
+        .unwrap();
+        boundary.validate("srv").expect("one millisecond is valid");
     }
 
     #[test]
