@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::ToolProvider;
-use lash_sansio::sync::RwLockExt;
+use lash_sansio::sync::{MutexExt, RwLockExt};
 
 #[tokio::test]
 async fn roots_notification_failures_are_aggregated_after_every_attempt() {
@@ -720,9 +720,9 @@ fn process_exists(pid: &str) -> bool {
 }
 
 #[tokio::test]
-async fn shutdown_all_wakes_sleeping_keepalive_loop() {
+async fn shutdown_all_wakes_actor_sleeping_until_keepalive() {
     let pool = Arc::new(McpConnectionPool::empty());
-    let entry = Arc::new(McpEntry::new(
+    let entry = McpEntry::new(
         "keepalive".to_string(),
         McpServerConfig::Stdio {
             command: "unused".to_string(),
@@ -737,17 +737,15 @@ async fn shutdown_all_wakes_sleeping_keepalive_loop() {
             binary_content_attachments: false,
         },
         McpHostServices::default(),
-    ));
+    );
     assert!(
         pool.install("keepalive".to_string(), Arc::clone(&entry))
             .is_ok()
     );
-    assert!(entry.spawn_keepalive_loop().is_some());
-
     tokio::time::timeout(Duration::from_secs(1), pool.shutdown_all())
         .await
         .expect("shutdown must wake keepalive instead of waiting for its interval");
-    assert!(!entry.keepalive_started.load(Ordering::SeqCst));
+    assert!(entry.actor_handle.lock_recover().is_none());
 }
 
 /// A connection that dies mid-life is detected on the next call and
@@ -977,17 +975,13 @@ async fn discovery_hang_surfaces_startup_timeout() {
         binary_content_attachments: false,
     };
 
-    let entry = Arc::new(McpEntry::new(
-        "hangs".to_string(),
-        config,
-        McpHostServices::default(),
-    ));
+    let entry = McpEntry::new("hangs".to_string(), config, McpHostServices::default());
     match entry.establish().await {
         Err(McpError::StartupTimeout { .. }) => {}
         Err(other) => panic!("expected StartupTimeout from a hung tools/list, got {other:?}"),
         Ok(_) => panic!("a hung tools/list must not connect"),
     }
-    assert!(!entry.connected.load(Ordering::SeqCst));
+    assert!(entry.service_snapshot().is_none());
     assert!(
         entry
             .last_error
@@ -998,7 +992,7 @@ async fn discovery_hang_surfaces_startup_timeout() {
     );
 }
 
-/// Regression for the service mutex held across the network await: two
+/// Regression for accidentally serializing calls behind lifecycle state: two
 /// concurrent `tools/call` requests to the same server must be able to be
 /// in flight at once. The mock refuses to answer the first call until it
 /// has read the second request line, so a serializing implementation (lock

@@ -14,33 +14,15 @@ use serde_json::json;
 
 use super::*;
 
-pub(super) struct ReconnectPublishHook {
-    pub(super) armed: AtomicBool,
-    pub(super) published: tokio::sync::Notify,
-    pub(super) release: tokio::sync::Notify,
-}
-
-pub(super) struct EagerInstallHook {
-    pub(super) armed: AtomicBool,
+pub(super) struct ActorPauseHook {
     pub(super) reached: tokio::sync::Notify,
     pub(super) release: tokio::sync::Notify,
 }
 
-impl Default for EagerInstallHook {
+impl Default for ActorPauseHook {
     fn default() -> Self {
         Self {
-            armed: AtomicBool::new(true),
             reached: tokio::sync::Notify::new(),
-            release: tokio::sync::Notify::new(),
-        }
-    }
-}
-
-impl Default for ReconnectPublishHook {
-    fn default() -> Self {
-        Self {
-            armed: AtomicBool::new(true),
-            published: tokio::sync::Notify::new(),
             release: tokio::sync::Notify::new(),
         }
     }
@@ -48,44 +30,21 @@ impl Default for ReconnectPublishHook {
 
 impl McpEntry {
     fn with_reconnect_jitter(
-        mut self,
+        self: Arc<Self>,
         reconnect_jitter: Arc<dyn Fn(Duration) -> Duration + Send + Sync>,
-    ) -> Self {
-        self.reconnect_jitter = reconnect_jitter;
+    ) -> Arc<Self> {
+        *self.reconnect_jitter.write_recover() = reconnect_jitter;
         self
     }
 
-    fn with_reconnect_publish_hook(mut self, hook: Arc<ReconnectPublishHook>) -> Self {
-        self.reconnect_publish_hook = Some(hook);
+    fn with_panicking_actor(self: Arc<Self>) -> Arc<Self> {
+        self.panic_actor_on_quit.store(true, Ordering::SeqCst);
         self
     }
 
-    fn with_panicking_service_watcher(mut self) -> Self {
-        self.panic_service_watcher = true;
+    fn with_shutdown_wedge(self: Arc<Self>, pid: u32) -> Arc<Self> {
+        self.shutdown_wedge_pid.store(pid, Ordering::SeqCst);
         self
-    }
-
-    pub(super) fn with_eager_install_hook(mut self, hook: Option<Arc<EagerInstallHook>>) -> Self {
-        self.eager_install_hook = hook;
-        self
-    }
-
-    pub(super) async fn pause_after_reconnect_publish(&self) {
-        if let Some(hook) = &self.reconnect_publish_hook
-            && hook.armed.swap(false, Ordering::SeqCst)
-        {
-            hook.published.notify_one();
-            hook.release.notified().await;
-        }
-    }
-
-    pub(super) async fn pause_before_eager_install(&self) {
-        if let Some(hook) = &self.eager_install_hook
-            && hook.armed.swap(false, Ordering::SeqCst)
-        {
-            hook.reached.notify_one();
-            hook.release.notified().await;
-        }
     }
 }
 
@@ -115,6 +74,8 @@ if behavior == 'silent_no_ping_once' and starts > 0:
 if behavior == 'fail_once_then_success' and starts < 1:
     sys.exit(1)
 if behavior == 'fail_twice_then_success' and starts < 2:
+    sys.exit(1)
+if behavior == 'reset_attempts_after_success' and starts in (0, 2):
     sys.exit(1)
 
 def send(message):
@@ -162,7 +123,9 @@ for line in sys.stdin:
         send({'jsonrpc': '2.0', 'id': message['id'], 'result': {'tools': [{
             'name': 'work', 'description': 'Policy test tool',
             'inputSchema': {'type': 'object', 'properties': {}}}]}})
-        if behavior == 'exit_after_list':
+        if behavior == 'exit_after_list' or (behavior == 'exit_after_list_once' and starts < 1):
+            sys.exit(0)
+        if behavior == 'reset_attempts_after_success' and starts == 1:
             sys.exit(0)
         if behavior == 'close_streams_after_list':
             os.close(sys.stdin.fileno())
@@ -316,12 +279,10 @@ async fn wait_until(mut condition: impl FnMut() -> bool, message: &str) {
 
 async fn peer(pool: &McpConnectionPool) -> Peer<RoleClient> {
     entry(pool)
-        .service
-        .lock()
-        .await
+        .service_snapshot()
         .as_ref()
         .expect("connected service")
-        .peer()
+        .peer
         .clone()
 }
 
@@ -550,13 +511,21 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
     assert_eq!(failure(&call(&pool).await).class, ToolFailureClass::Timeout);
     *entry(&pool).last_error.write_recover() = Some("stale error".to_string());
     assert!(call(&pool).await.is_success());
-    assert!(pool.server_statuses()[0].last_error.is_none());
+    wait_until(
+        || pool.server_statuses()[0].last_error.is_none(),
+        "successful call was not observed by the lifecycle actor",
+    )
+    .await;
     assert_eq!(failure(&call(&pool).await).class, ToolFailureClass::Timeout);
     assert_eq!(
         failure(&call(&pool).await).class,
         ToolFailureClass::Unavailable
     );
-    assert!(!pool.server_statuses()[0].connected);
+    wait_until(
+        || !pool.server_statuses()[0].connected,
+        "timeout-threshold disconnect was not observed by the lifecycle actor",
+    )
+    .await;
     wait_until(
         || pool.server_statuses()[0].connected,
         "threshold disconnect did not reconnect",
@@ -576,35 +545,31 @@ async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
     let pool = connect_mock(
         root.path(),
         MockOptions {
-            call_timeout_ms: 50,
-            probe_timeout_ms: 300,
-            policy: TimeoutDisconnectPolicy::PingProbe,
+            behavior: "crash_after_call",
+            reconnect_initial_ms: 10,
             ..MockOptions::default()
         },
     )
     .await;
     let current_entry = entry(&pool);
-    let call_task = tokio::spawn({
-        let pool = Arc::clone(&pool);
-        async move { call(&pool).await }
-    });
+    let stale_generation = current_entry
+        .service_snapshot()
+        .expect("initial service")
+        .generation;
+    assert!(call(&pool).await.is_success());
     wait_until(
-        || received(root.path()).contains("\"method\":\"ping\""),
-        "probe was not dispatched",
+        || {
+            current_entry
+                .service_snapshot()
+                .is_some_and(|service| service.generation == 2)
+        },
+        "replacement connection must publish generation 2",
     )
     .await;
-
-    let stale_generation = current_entry.service_generation.load(Ordering::SeqCst);
-    current_entry
-        .try_connect()
-        .await
-        .expect("replacement connection");
-    assert!(
-        current_entry.service_generation.load(Ordering::SeqCst) > stale_generation,
-        "replacement connection must publish a new generation"
-    );
-    let result = call_task.await.expect("call task");
-    assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
+    assert!(!current_entry.mark_disconnected(
+        "late failure from generation 1".to_string(),
+        stale_generation,
+    ));
     assert!(pool.server_statuses()[0].connected);
     assert_eq!(starts(root.path()), 2);
     pool.shutdown_all().await;
@@ -613,7 +578,7 @@ async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
 #[tokio::test]
 async fn failed_connection_attempt_reserves_a_unique_generation() {
     let root = tempfile::tempdir().unwrap();
-    let entry = Arc::new(McpEntry::new(
+    let entry = McpEntry::new(
         "mock".to_string(),
         mock_config(
             root.path(),
@@ -623,22 +588,61 @@ async fn failed_connection_attempt_reserves_a_unique_generation() {
             },
         ),
         McpHostServices::default(),
-    ));
+    )
+    .with_reconnect_jitter(Arc::new(|_| Duration::ZERO));
 
     entry
         .establish()
         .await
         .expect_err("first attempt must fail before publication");
-    assert_eq!(
-        entry.generation_allocator.load(Ordering::SeqCst),
-        1,
-        "a failed unpublished attempt must consume its generation"
-    );
-
-    entry.establish().await.expect("replacement connection");
-    assert_eq!(entry.service_generation.load(Ordering::SeqCst), 2);
-    entry.cancel();
+    wait_until(
+        || {
+            entry
+                .service_snapshot()
+                .is_some_and(|service| service.generation == 2)
+        },
+        "a failed unpublished attempt must consume generation 1",
+    )
+    .await;
     entry.shutdown().await;
+}
+
+#[tokio::test]
+async fn successful_respawn_resets_reconnect_attempt_budget_but_not_generation() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = Arc::new(McpConnectionPool::empty());
+    let entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "reset_attempts_after_success",
+                reconnect_initial_ms: 10,
+                reconnect_max_attempts: 2,
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    )
+    .with_reconnect_jitter(Arc::new(|_| Duration::ZERO));
+    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
+    entry
+        .establish()
+        .await
+        .expect_err("generation 1 must fail before publication");
+
+    wait_until(
+        || {
+            entry
+                .service_snapshot()
+                .is_some_and(|service| service.generation == 4)
+        },
+        "successful generation 2 did not reset the reconnect-attempt budget for generations 3 and 4",
+    )
+    .await;
+    assert_eq!(starts(root.path()), 4);
+    assert!(!pool.server_statuses()[0].reconnect_exhausted);
+    pool.shutdown_all().await;
 }
 
 #[tokio::test]
@@ -653,22 +657,20 @@ async fn crash_per_call_preserves_backoff_across_successful_respawns() {
         }) as Arc<dyn Fn(Duration) -> Duration + Send + Sync>
     };
     let pool = Arc::new(McpConnectionPool::empty());
-    let entry = Arc::new(
-        McpEntry::new(
-            "mock".to_string(),
-            mock_config(
-                root.path(),
-                MockOptions {
-                    behavior: "crash_after_call",
-                    reconnect_initial_ms: 10,
-                    reconnect_max_ms: Some(1_000),
-                    ..MockOptions::default()
-                },
-            ),
-            McpHostServices::default(),
-        )
-        .with_reconnect_jitter(reconnect_jitter),
-    );
+    let entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "crash_after_call",
+                reconnect_initial_ms: 10,
+                reconnect_max_ms: Some(1_000),
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    )
+    .with_reconnect_jitter(reconnect_jitter);
     assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
     entry.establish().await.expect("initial connection");
 
@@ -695,53 +697,49 @@ async fn crash_per_call_preserves_backoff_across_successful_respawns() {
 }
 
 #[tokio::test]
-async fn disconnect_in_reconnect_publish_window_rearms_after_guard_clear() {
+async fn disconnect_immediately_after_reconnect_publish_rearms_actor() {
     let root = tempfile::tempdir().unwrap();
-    let hook = Arc::new(ReconnectPublishHook::default());
     let pool = Arc::new(McpConnectionPool::empty());
-    let entry = Arc::new(
-        McpEntry::new(
-            "mock".to_string(),
-            mock_config(
-                root.path(),
-                MockOptions {
-                    behavior: "fail_once_then_success",
-                    reconnect_initial_ms: 10,
-                    ..MockOptions::default()
-                },
-            ),
-            McpHostServices::default(),
-        )
-        .with_reconnect_jitter(Arc::new(|_| Duration::ZERO))
-        .with_reconnect_publish_hook(Arc::clone(&hook)),
-    );
+    let entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "fail_once_then_success",
+                reconnect_initial_ms: 10,
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    )
+    .with_reconnect_jitter(Arc::new(|_| Duration::ZERO));
     assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
     entry
         .establish()
         .await
         .expect_err("the eager connection must fail");
-    entry.spawn_reconnect_loop();
-    tokio::time::timeout(Duration::from_secs(3), hook.published.notified())
-        .await
-        .expect("reconnect did not pause after publishing its service");
-    assert!(pool.server_statuses()[0].connected);
-
-    let generation = entry.service_generation.load(Ordering::SeqCst);
-    assert!(
-        entry
-            .mark_disconnected("forced publish-window disconnect".to_string(), generation)
-            .await
-    );
-    assert!(entry.connecting.load(Ordering::SeqCst));
-    assert!(!pool.server_statuses()[0].connected);
-    assert!(entry.service.lock().await.is_none());
-
-    hook.release.notify_one();
     wait_until(
-        || starts(root.path()) >= 3 && pool.server_statuses()[0].connected,
-        "disconnect in reconnect publish window left the entry wedged",
+        || {
+            entry
+                .service_snapshot()
+                .is_some_and(|service| service.generation == 2)
+        },
+        "reconnect did not publish generation 2",
     )
     .await;
+    assert!(pool.server_statuses()[0].connected);
+
+    assert!(entry.mark_disconnected("forced post-publish disconnect".to_string(), 2));
+    wait_until(
+        || {
+            entry
+                .service_snapshot()
+                .is_some_and(|service| service.generation == 3)
+        },
+        "disconnect immediately after reconnect publication left the actor wedged",
+    )
+    .await;
+    assert_eq!(starts(root.path()), 3);
     pool.shutdown_all().await;
 }
 
@@ -769,10 +767,10 @@ async fn keepalive_rearms_an_exhausted_reconnect_loop() {
 }
 
 #[tokio::test]
-async fn dropped_pool_releases_entry_and_keepalive_task() {
+async fn dropped_pool_releases_entry_and_lifecycle_actor() {
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
-    let entry = Arc::new(McpEntry::new(
+    let entry = McpEntry::new(
         "mock".to_string(),
         mock_config(
             root.path(),
@@ -782,19 +780,11 @@ async fn dropped_pool_releases_entry_and_keepalive_task() {
             },
         ),
         McpHostServices::default(),
-    ));
+    );
     let weak = Arc::downgrade(&entry);
-    let keepalive = entry
-        .spawn_keepalive_loop()
-        .expect("enabled keepalive task");
     assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
     drop(entry);
     drop(pool);
-
-    tokio::time::timeout(Duration::from_millis(100), keepalive)
-        .await
-        .expect("keepalive task retained the dropped entry")
-        .expect("keepalive task panicked");
     assert!(weak.upgrade().is_none());
 }
 
@@ -901,7 +891,7 @@ fn shutdown_all_fully_reaps_stdio_child() {
 
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shutdown_all_joins_watcher_reaping_stdio_child() {
+async fn shutdown_all_joins_actor_reaping_stdio_child() {
     let root = tempfile::tempdir().unwrap();
     let pool = connect_mock(
         root.path(),
@@ -919,38 +909,38 @@ async fn shutdown_all_joins_watcher_reaping_stdio_child() {
 
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if entry.service.lock().await.is_none() {
+            if entry.service_snapshot().is_none() {
                 break;
             }
             tokio::task::yield_now().await;
         }
     })
     .await
-    .expect("watcher must take the service during graceful reap");
+    .expect("actor must unpublish the service during graceful reap");
     assert_eq!(
         process_state(pid),
         Some('S'),
-        "watcher must own a still-running child during graceful reap"
+        "actor must own a still-running child during graceful reap"
     );
 
     let started = Instant::now();
     pool.shutdown_all().await;
     let elapsed = started.elapsed();
-    eprintln!("watcher-handoff shutdown elapsed: {elapsed:?}");
+    eprintln!("actor-reap shutdown elapsed: {elapsed:?}");
     assert!(
         elapsed < Duration::from_secs(5),
-        "watcher-handoff shutdown exceeded its literal elapsed ceiling: {elapsed:?}"
+        "actor-reap shutdown exceeded its literal elapsed ceiling: {elapsed:?}"
     );
 
     assert_eq!(
         process_state(pid),
         None,
-        "shutdown_all must join the watcher and fully reap stdio child PID {pid}"
+        "shutdown_all must join the actor and fully reap stdio child PID {pid}"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shutdown_all_bounds_a_watcher_wait_that_never_finishes() {
+async fn shutdown_all_bounds_an_actor_that_never_finishes() {
     let traces = TraceBuffer::default();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -960,12 +950,12 @@ async fn shutdown_all_bounds_a_watcher_wait_that_never_finishes() {
     let _guard = tracing::subscriber::set_default(subscriber);
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
-    let entry = Arc::new(McpEntry::new(
+    let entry = McpEntry::new(
         "mock".to_string(),
         mock_config(root.path(), MockOptions::default()),
         McpHostServices::default(),
-    ));
-    *entry.watcher_quit.write_recover() = Some(Arc::new(ServiceQuit::new(Some(424_242))));
+    )
+    .with_shutdown_wedge(424_242);
     assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
 
     let started = Instant::now();
@@ -974,33 +964,77 @@ async fn shutdown_all_bounds_a_watcher_wait_that_never_finishes() {
 
     assert!(
         elapsed >= Duration::from_secs(4),
-        "mock watcher wait returned before the literal join bound: {elapsed:?}"
+        "mock actor wait returned before the literal total bound: {elapsed:?}"
     );
     assert!(
         elapsed < Duration::from_secs(6),
-        "bounded watcher join exceeded its literal elapsed ceiling: {elapsed:?}"
+        "bounded actor join exceeded its literal elapsed ceiling: {elapsed:?}"
     );
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
         entry.last_error.read_recover().as_deref(),
-        Some("MCP stdio child PID 424242 abandoned: service watcher did not finish within 5s")
+        Some(
+            "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
+        )
     );
     let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     assert!(
         trace.contains(
-            "MCP stdio child PID 424242 abandoned: service watcher did not finish within 5s"
+            "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
         ),
         "captured trace: {trace}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn abandoned_actor_teardown_releases_normalized_prefix_reservation() {
+    let first_root = tempfile::tempdir().unwrap();
+    let replacement_root = tempfile::tempdir().unwrap();
+    let pool = Arc::new(McpConnectionPool::empty());
+    let abandoned = McpEntry::new(
+        "Mock Server".to_string(),
+        mock_config(first_root.path(), MockOptions::default()),
+        McpHostServices::default(),
+    )
+    .with_shutdown_wedge(333_333);
+    assert!(
+        pool.install("Mock Server".to_string(), Arc::clone(&abandoned))
+            .is_ok()
+    );
+
+    let started = Instant::now();
+    pool.detach("Mock Server").await.expect("detach entry");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(4),
+        "abandoned detach returned before the literal actor bound: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "abandoned detach exceeded its literal ceiling: {elapsed:?}"
+    );
+    assert_eq!(pool.entries.read_recover().len(), 0);
+
+    let replacement = McpEntry::new(
+        "mock_server".to_string(),
+        mock_config(replacement_root.path(), MockOptions::default()),
+        McpHostServices::default(),
+    );
+    assert!(
+        pool.install("mock_server".to_string(), Arc::clone(&replacement))
+            .is_ok(),
+        "abandoned entry must not retain its normalized prefix reservation"
+    );
+    replacement.shutdown().await;
 }
 
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn eager_attach_cannot_publish_after_shutdown() {
     let root = tempfile::tempdir().unwrap();
-    let hook = Arc::new(EagerInstallHook::default());
+    let hook = Arc::new(ActorPauseHook::default());
     let pool = Arc::new(McpConnectionPool::empty());
-    *pool.eager_install_hook.write_recover() = Some(Arc::clone(&hook));
+    *pool.mid_establish_hook.write_recover() = Some(Arc::clone(&hook));
 
     let attaching_pool = Arc::clone(&pool);
     let config = mock_config(root.path(), MockOptions::default());
@@ -1008,7 +1042,7 @@ async fn eager_attach_cannot_publish_after_shutdown() {
         tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
     tokio::time::timeout(Duration::from_secs(2), hook.reached.notified())
         .await
-        .expect("eager attach did not pause before installing its service");
+        .expect("eager attach actor did not pause mid-establish");
     let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
         .expect("stdio child must publish its pid")
         .parse()
@@ -1016,7 +1050,7 @@ async fn eager_attach_cannot_publish_after_shutdown() {
     assert_eq!(
         wait_for_process_state(pid, 'S', Duration::from_secs(2)),
         Some('S'),
-        "paused eager attach must still own its exact live child"
+        "paused lifecycle actor must still own its exact live child"
     );
 
     let shutdown_pool = Arc::clone(&pool);
@@ -1033,12 +1067,6 @@ async fn eager_attach_cannot_publish_after_shutdown() {
     })
     .await
     .expect("shutdown did not remove the attaching entry");
-    assert!(
-        !shutdown.is_finished(),
-        "shutdown must join the in-flight eager attachment"
-    );
-
-    hook.release.notify_one();
     let attach_result = attaching.await.expect("attach task panicked");
     shutdown.await.expect("shutdown task panicked");
 
@@ -1051,45 +1079,206 @@ async fn eager_attach_cannot_publish_after_shutdown() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn watcher_panic_completes_quit_signal_before_shutdown_returns() {
+async fn aborted_mid_establish_attach_still_allows_bounded_shutdown() {
+    let root = tempfile::tempdir().unwrap();
+    let hook = Arc::new(ActorPauseHook::default());
+    let pool = Arc::new(McpConnectionPool::empty());
+    *pool.mid_establish_hook.write_recover() = Some(Arc::clone(&hook));
+
+    let attaching_pool = Arc::clone(&pool);
+    let config = mock_config(root.path(), MockOptions::default());
+    let attaching =
+        tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
+    tokio::time::timeout(Duration::from_secs(2), hook.reached.notified())
+        .await
+        .expect("lifecycle actor did not pause mid-establish");
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("stdio child must publish its pid")
+        .parse()
+        .expect("numeric child pid");
+    assert_eq!(
+        wait_for_process_state(pid, 'S', Duration::from_secs(2)),
+        Some('S'),
+        "mid-establish actor must own the exact live child"
+    );
+
+    attaching.abort();
+    assert!(
+        attaching
+            .await
+            .expect_err("aborted attach must not complete")
+            .is_cancelled()
+    );
+    let started = Instant::now();
+    pool.shutdown_all().await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "shutdown after an aborted attach exceeded its literal ceiling: {elapsed:?}"
+    );
+    assert_eq!(pool.entries.read_recover().len(), 0);
+    assert_eq!(
+        process_state(pid),
+        None,
+        "shutdown must fully reap the actor-owned mid-establish child PID {pid}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn publish_then_die_while_attach_is_in_flight_reconnects() {
+    let root = tempfile::tempdir().unwrap();
+    let hook = Arc::new(ActorPauseHook::default());
+    let pool = Arc::new(McpConnectionPool::empty());
+    *pool.attach_return_hook.write_recover() = Some(Arc::clone(&hook));
+
+    let attaching_pool = Arc::clone(&pool);
+    let config = mock_config(
+        root.path(),
+        MockOptions {
+            behavior: "exit_after_list_once",
+            reconnect_initial_ms: 10,
+            ..MockOptions::default()
+        },
+    );
+    let attaching =
+        tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
+    tokio::time::timeout(Duration::from_secs(2), hook.reached.notified())
+        .await
+        .expect("attach did not pause after the first service publication");
+    assert!(
+        !attaching.is_finished(),
+        "attach must remain in flight at the seam"
+    );
+
+    wait_until(
+        || {
+            entry(&pool)
+                .service_snapshot()
+                .is_some_and(|service| service.generation == 2)
+        },
+        "published service death did not trigger generation 2 while attach was in flight",
+    )
+    .await;
+    assert_eq!(starts(root.path()), 2);
+    assert!(
+        !attaching.is_finished(),
+        "reconnect must not depend on attach returning"
+    );
+
+    hook.release.notify_one();
+    assert!(matches!(
+        attaching.await.expect("attach task panicked"),
+        Ok(())
+    ));
+    pool.shutdown_all().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_wedged_entries_shutdown_concurrently_within_one_total_bound() {
+    let first_root = tempfile::tempdir().unwrap();
+    let second_root = tempfile::tempdir().unwrap();
+    let pool = Arc::new(McpConnectionPool::empty());
+    let first = McpEntry::new(
+        "first".to_string(),
+        mock_config(first_root.path(), MockOptions::default()),
+        McpHostServices::default(),
+    )
+    .with_shutdown_wedge(111_111);
+    let second = McpEntry::new(
+        "second".to_string(),
+        mock_config(second_root.path(), MockOptions::default()),
+        McpHostServices::default(),
+    )
+    .with_shutdown_wedge(222_222);
+    assert!(
+        pool.install("first".to_string(), Arc::clone(&first))
+            .is_ok()
+    );
+    assert!(
+        pool.install("second".to_string(), Arc::clone(&second))
+            .is_ok()
+    );
+
+    let started = Instant::now();
+    pool.shutdown_all().await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed >= Duration::from_secs(4),
+        "wedged actors returned before the literal total bound: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "two wedged actors serialized their total bounds: {elapsed:?}"
+    );
+    assert_eq!(pool.entries.read_recover().len(), 0);
+    assert_eq!(
+        first.last_error.read_recover().as_deref(),
+        Some(
+            "MCP stdio child PID 111111 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
+        )
+    );
+    assert_eq!(
+        second.last_error.read_recover().as_deref(),
+        Some(
+            "MCP stdio child PID 222222 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
+        )
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actor_panic_surfaces_as_join_error_and_shutdown_continues() {
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
-    let entry = Arc::new(
-        McpEntry::new(
-            "mock".to_string(),
-            mock_config(
-                root.path(),
-                MockOptions {
-                    behavior: "exit_after_list",
-                    ..MockOptions::default()
-                },
-            ),
-            McpHostServices::default(),
-        )
-        .with_panicking_service_watcher(),
-    );
+    let entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "exit_after_list",
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    )
+    .with_panicking_actor();
     assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
     entry.establish().await.expect("initial connection");
-    let quit = entry
-        .watcher_quit
-        .read_recover()
-        .clone()
-        .expect("installed service watcher signal");
-
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if entry
+                .actor_handle
+                .lock_recover()
+                .as_ref()
+                .is_some_and(tokio::task::JoinHandle::is_finished)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("injected lifecycle actor panic did not occur");
     let started = Instant::now();
     tokio::time::timeout(Duration::from_secs(2), pool.shutdown_all())
         .await
-        .expect("RAII watcher completion did not release shutdown");
+        .expect("panicked actor made shutdown exceed its literal ceiling");
     let elapsed = started.elapsed();
 
     assert!(
         elapsed < Duration::from_secs(2),
-        "watcher panic shutdown exceeded its literal elapsed ceiling: {elapsed:?}"
+        "actor panic shutdown exceeded its literal elapsed ceiling: {elapsed:?}"
     );
     assert!(
-        quit.is_finished(),
-        "shutdown returned through the completed quit signal, not the join timeout"
+        entry
+            .last_error
+            .read_recover()
+            .as_deref()
+            .is_some_and(|error| error.contains("JoinError")),
+        "actor panic must surface through its retained JoinHandle"
     );
     assert_eq!(pool.entries.read_recover().len(), 0);
 }

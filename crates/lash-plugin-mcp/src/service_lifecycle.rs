@@ -2,15 +2,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use http::{HeaderName, HeaderValue};
 use rmcp::ServiceError;
-use rmcp::service::{
-    Peer, RoleClient, RunningService, RunningServiceCancellationToken, RxJsonRpcMessage,
-    ServiceExt, TxJsonRpcMessage,
-};
+use rmcp::service::{RoleClient, RunningService, RxJsonRpcMessage, ServiceExt, TxJsonRpcMessage};
 use rmcp::transport::Transport;
 use rmcp::transport::async_rw::AsyncRwTransport;
 use rmcp::transport::streamable_http_client::{
@@ -19,11 +16,9 @@ use rmcp::transport::streamable_http_client::{
 
 use crate::config::McpServerConfig;
 use crate::error::McpError;
-use crate::host::{
-    LashMcpClientHandler, McpHostRequestTasks, McpHostServices, McpToolListChangedHandler,
-};
+use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
 
-const STDIO_GRACEFUL_SHUTDOWN_PERIOD: Duration = Duration::from_secs(3);
+pub(crate) const STDIO_GRACEFUL_SHUTDOWN_PERIOD: Duration = Duration::from_secs(3);
 const STDIO_POST_KILL_WAIT_BOUND: Duration = Duration::from_secs(1);
 
 struct ManagedChildTransport {
@@ -59,6 +54,8 @@ pub(crate) async fn connect_service(
     config: &McpServerConfig,
     host_services: McpHostServices,
     tool_list_changed: Arc<dyn McpToolListChangedHandler>,
+    active_pid: Arc<AtomicU32>,
+    shutdown_requested: Arc<AtomicBool>,
 ) -> Result<ConnectedService, McpError> {
     let client_handler = LashMcpClientHandler::new(server_name, host_services)
         .with_tool_list_changed_handler(tool_list_changed);
@@ -95,7 +92,8 @@ pub(crate) async fn connect_service(
                     "failed to capture stdin for `{command}` MCP server `{server_name}`"
                 ))
             })?;
-            let stdio_child = StdioChildGuard::new(server_name, child);
+            let stdio_child = StdioChildGuard::new(server_name, child, shutdown_requested);
+            active_pid.store(stdio_child.pid(), Ordering::SeqCst);
             let transport = ManagedChildTransport {
                 io: AsyncRwTransport::new(
                     tokio::fs::File::from_std(child_stdout_file(stdout)),
@@ -111,6 +109,7 @@ pub(crate) async fn connect_service(
             })
         }
         McpServerConfig::StreamableHttp { url, headers, .. } => {
+            active_pid.store(0, Ordering::SeqCst);
             let custom_headers = build_http_headers(server_name, headers)?;
             let config = StreamableHttpClientTransportConfig::with_uri(url.as_str())
                 .custom_headers(custom_headers);
@@ -191,29 +190,6 @@ pub(crate) fn equal_jitter(max: std::time::Duration) -> std::time::Duration {
     std::time::Duration::from_millis(fastrand::u64(min_ms..=max_ms))
 }
 
-pub(crate) struct McpService {
-    pub(crate) peer: Peer<RoleClient>,
-    pub(crate) request_tasks: Arc<McpHostRequestTasks>,
-    pub(crate) cancellation: Option<RunningServiceCancellationToken>,
-    pub(crate) quit: Arc<ServiceQuit>,
-    pub(crate) stdio_child: Option<StdioChildGuard>,
-}
-
-impl McpService {
-    pub(crate) fn peer(&self) -> &Peer<RoleClient> {
-        &self.peer
-    }
-}
-
-impl Drop for McpService {
-    fn drop(&mut self) {
-        drop(self.stdio_child.take());
-        if let Some(cancellation) = self.cancellation.take() {
-            cancellation.cancel();
-        }
-    }
-}
-
 /// Exact child-process handle retained outside rmcp's async service task.
 ///
 /// Explicit shutdown closes the child's stdin, gives it a grace period, and
@@ -224,19 +200,28 @@ pub(crate) struct StdioChildGuard {
     pid: u32,
     child: std::process::Child,
     reaped: bool,
+    explicit_abandonment: bool,
+    shutdown_requested: Arc<AtomicBool>,
 }
 
 impl StdioChildGuard {
-    pub(crate) fn new(server_name: &str, child: std::process::Child) -> Self {
+    pub(crate) fn new(
+        server_name: &str,
+        child: std::process::Child,
+        shutdown_requested: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             server_name: server_name.to_string(),
             pid: child.id(),
             child,
             reaped: false,
+            explicit_abandonment: false,
+            shutdown_requested,
         }
     }
 
     pub(crate) async fn reap_after_graceful_close(mut self) -> std::io::Result<()> {
+        self.explicit_abandonment = true;
         let deadline = Instant::now() + STDIO_GRACEFUL_SHUTDOWN_PERIOD;
         loop {
             if self.child.try_wait()?.is_some() {
@@ -276,11 +261,8 @@ impl StdioChildGuard {
         self.pid
     }
 
-    pub(crate) fn kill_and_reap(mut self) -> std::io::Result<()> {
-        let _ = self.child.kill();
-        self.child.wait()?;
-        self.reaped = true;
-        Ok(())
+    pub(crate) fn begin_bounded_cleanup(&mut self) {
+        self.explicit_abandonment = true;
     }
 }
 
@@ -288,97 +270,19 @@ impl Drop for StdioChildGuard {
     fn drop(&mut self) {
         if !self.reaped {
             let _ = self.child.kill();
-            tracing::error!(
-                pid = self.pid,
-                server = %self.server_name,
-                "MCP stdio child killed without explicit pool shutdown; call shutdown_all() to reap it"
-            );
-        }
-    }
-}
-
-pub(crate) struct ServiceQuit {
-    finished: AtomicBool,
-    notify: tokio::sync::Notify,
-    stdio_pid: Option<u32>,
-}
-
-impl ServiceQuit {
-    pub(crate) fn new(stdio_pid: Option<u32>) -> Self {
-        Self {
-            finished: AtomicBool::new(false),
-            notify: tokio::sync::Notify::new(),
-            stdio_pid,
-        }
-    }
-
-    pub(crate) fn finish(&self) {
-        self.finished.store(true, Ordering::SeqCst);
-        self.notify.notify_waiters();
-    }
-
-    pub(crate) fn completion_guard(self: &Arc<Self>) -> ServiceQuitGuard {
-        ServiceQuitGuard {
-            quit: Arc::clone(self),
-        }
-    }
-
-    pub(crate) fn stdio_pid(&self) -> Option<u32> {
-        self.stdio_pid
-    }
-
-    #[cfg(test)]
-    pub(crate) fn is_finished(&self) -> bool {
-        self.finished.load(Ordering::SeqCst)
-    }
-
-    pub(crate) async fn wait(&self) {
-        loop {
-            let finished = self.notify.notified();
-            if self.finished.load(Ordering::SeqCst) {
-                return;
+            if self.explicit_abandonment || self.shutdown_requested.load(Ordering::SeqCst) {
+                tracing::error!(
+                    pid = self.pid,
+                    server = %self.server_name,
+                    "MCP stdio child abandoned unreaped after bounded lifecycle cleanup"
+                );
+            } else {
+                tracing::error!(
+                    pid = self.pid,
+                    server = %self.server_name,
+                    "MCP stdio child killed without explicit pool shutdown; call shutdown_all() to reap it"
+                );
             }
-            finished.await;
         }
-    }
-}
-
-pub(crate) struct ServiceQuitGuard {
-    quit: Arc<ServiceQuit>,
-}
-
-impl Drop for ServiceQuitGuard {
-    fn drop(&mut self) {
-        self.quit.finish();
-    }
-}
-
-pub(crate) async fn stop_service(mut service: McpService) {
-    service.request_tasks.shutdown().await;
-    if let Some(cancellation) = service.cancellation.take() {
-        cancellation.cancel();
-    }
-    service.quit.wait().await;
-    if let Some(child) = service.stdio_child.take()
-        && let Err(error) = child.reap_after_graceful_close().await
-    {
-        tracing::warn!(%error, "failed to reap MCP stdio child during explicit shutdown");
-    }
-}
-
-pub(crate) async fn cancel_running_service(
-    service: RunningService<RoleClient, LashMcpClientHandler>,
-    stdio_child: Option<StdioChildGuard>,
-) {
-    let request_tasks = service.service().request_tasks();
-    request_tasks.shutdown().await;
-    // `cancel` consumes the service and waits for rmcp's graceful cancellation
-    // plus transport-task drain. Errors only surface if the transport already
-    // shut down; ignore them.
-    let _ = service.cancel().await;
-    if let Some(child) = stdio_child
-        && let Err(error) = child.kill_and_reap()
-    {
-        tracing::warn!(%error, "failed to reap cancelled MCP stdio child");
     }
 }
