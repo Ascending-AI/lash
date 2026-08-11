@@ -23,6 +23,9 @@ use crate::host::{
     LashMcpClientHandler, McpHostRequestTasks, McpHostServices, McpToolListChangedHandler,
 };
 
+const STDIO_GRACEFUL_SHUTDOWN_PERIOD: Duration = Duration::from_secs(3);
+const STDIO_POST_KILL_WAIT_BOUND: Duration = Duration::from_secs(1);
+
 struct ManagedChildTransport {
     io: AsyncRwTransport<RoleClient, tokio::fs::File, tokio::fs::File>,
 }
@@ -234,20 +237,43 @@ impl StdioChildGuard {
     }
 
     pub(crate) async fn reap_after_graceful_close(mut self) -> std::io::Result<()> {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + STDIO_GRACEFUL_SHUTDOWN_PERIOD;
         loop {
             if self.child.try_wait()?.is_some() {
                 self.reaped = true;
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                let _ = self.child.kill();
-                self.child.wait()?;
-                self.reaped = true;
-                return Ok(());
+                break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+
+        let kill_error = self.child.kill().err();
+        let reap_deadline = Instant::now() + STDIO_POST_KILL_WAIT_BOUND;
+        loop {
+            if self.child.try_wait()?.is_some() {
+                self.reaped = true;
+                return Ok(());
+            }
+            if Instant::now() >= reap_deadline {
+                let kill_context = kill_error.map_or_else(String::new, |error| {
+                    format!("; kill request failed: {error}")
+                });
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!(
+                        "MCP stdio child PID {} did not exit within 1s after the kill request{kill_context}",
+                        self.pid
+                    ),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    pub(crate) fn pid(&self) -> u32 {
+        self.pid
     }
 
     pub(crate) fn kill_and_reap(mut self) -> std::io::Result<()> {
@@ -271,16 +297,39 @@ impl Drop for StdioChildGuard {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct ServiceQuit {
     finished: AtomicBool,
     notify: tokio::sync::Notify,
+    stdio_pid: Option<u32>,
 }
 
 impl ServiceQuit {
+    pub(crate) fn new(stdio_pid: Option<u32>) -> Self {
+        Self {
+            finished: AtomicBool::new(false),
+            notify: tokio::sync::Notify::new(),
+            stdio_pid,
+        }
+    }
+
     pub(crate) fn finish(&self) {
         self.finished.store(true, Ordering::SeqCst);
         self.notify.notify_waiters();
+    }
+
+    pub(crate) fn completion_guard(self: &Arc<Self>) -> ServiceQuitGuard {
+        ServiceQuitGuard {
+            quit: Arc::clone(self),
+        }
+    }
+
+    pub(crate) fn stdio_pid(&self) -> Option<u32> {
+        self.stdio_pid
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::SeqCst)
     }
 
     pub(crate) async fn wait(&self) {
@@ -291,6 +340,16 @@ impl ServiceQuit {
             }
             finished.await;
         }
+    }
+}
+
+pub(crate) struct ServiceQuitGuard {
+    quit: Arc<ServiceQuit>,
+}
+
+impl Drop for ServiceQuitGuard {
+    fn drop(&mut self) {
+        self.quit.finish();
     }
 }
 

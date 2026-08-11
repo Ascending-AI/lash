@@ -50,9 +50,13 @@ use crate::naming;
 #[cfg(test)]
 use crate::service_lifecycle::build_http_headers;
 use crate::service_lifecycle::{
-    ConnectedService, McpService, ServiceQuit, cancel_running_service, connect_service,
-    equal_jitter, is_connection_loss, stop_service,
+    ConnectedService, McpService, ServiceQuit, StdioChildGuard, cancel_running_service,
+    connect_service, equal_jitter, is_connection_loss, stop_service,
 };
+
+/// Explicit shutdown abandons a watcher that outlives the stdio child's
+/// three-second graceful-close period plus a two-second containment margin.
+const SHUTDOWN_WATCHER_JOIN_BOUND: Duration = Duration::from_secs(5);
 
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
 /// session plugin instance.
@@ -65,6 +69,8 @@ pub struct McpConnectionPool {
     entries: RwLock<BTreeMap<String, Arc<McpEntry>>>,
     host_services: McpHostServices,
     shut_down: AtomicBool,
+    #[cfg(test)]
+    eager_install_hook: RwLock<Option<Arc<policy_tests::EagerInstallHook>>>,
 }
 
 /// Connection status of one configured server, for host/UI observability.
@@ -130,6 +136,10 @@ struct McpEntry {
     reconnect_idle_notify: tokio::sync::Notify,
     #[cfg(test)]
     reconnect_publish_hook: Option<Arc<policy_tests::ReconnectPublishHook>>,
+    #[cfg(test)]
+    eager_install_hook: Option<Arc<policy_tests::EagerInstallHook>>,
+    #[cfg(test)]
+    panic_service_watcher: bool,
 }
 
 struct McpToolListRefresh {
@@ -165,6 +175,8 @@ impl McpConnectionPool {
             entries: RwLock::new(BTreeMap::new()),
             host_services,
             shut_down: AtomicBool::new(false),
+            #[cfg(test)]
+            eager_install_hook: RwLock::new(None),
         }
     }
 
@@ -228,17 +240,15 @@ impl McpConnectionPool {
         config: McpServerConfig,
     ) -> Result<(), McpError> {
         if self.shut_down.load(Ordering::SeqCst) {
-            return Err(McpError::Protocol(
-                "MCP connection pool has already shut down".to_string(),
-            ));
+            return Err(McpError::PoolShutDown);
         }
         config.validate(&server_name)?;
         self.validate_server_prefix_available(&server_name)?;
-        let entry = Arc::new(McpEntry::new(
-            server_name.clone(),
-            config,
-            self.host_services.clone(),
-        ));
+        let new_entry = McpEntry::new(server_name.clone(), config, self.host_services.clone());
+        #[cfg(test)]
+        let new_entry =
+            new_entry.with_eager_install_hook(self.eager_install_hook.read_recover().clone());
+        let entry = Arc::new(new_entry);
         let previous = match self.install(server_name.clone(), Arc::clone(&entry)) {
             Ok(previous) => previous,
             Err((rejected, error)) => {
@@ -251,14 +261,15 @@ impl McpConnectionPool {
             previous.cancel();
             previous.shutdown().await;
         }
+        entry.connecting.store(true, Ordering::SeqCst);
         let connect_result = entry.establish().await;
+        entry.connecting.store(false, Ordering::SeqCst);
+        entry.reconnect_idle_notify.notify_waiters();
         let _ = entry.spawn_keepalive_loop();
+        if self.shut_down.load(Ordering::SeqCst) || entry.cancelled.load(Ordering::SeqCst) {
+            return Err(McpError::PoolShutDown);
+        }
         if let Err(err) = connect_result {
-            if self.shut_down.load(Ordering::SeqCst) || entry.cancelled.load(Ordering::SeqCst) {
-                return Err(McpError::Protocol(
-                    "MCP connection pool shut down while attaching a server".to_string(),
-                ));
-            }
             tracing::warn!(
                 server = %server_name,
                 error = %err,
@@ -291,10 +302,7 @@ impl McpConnectionPool {
         let previous = {
             let mut entries = self.entries.write_recover();
             if self.shut_down.load(Ordering::SeqCst) {
-                return Err((
-                    entry,
-                    McpError::Protocol("MCP connection pool has already shut down".to_string()),
-                ));
+                return Err((entry, McpError::PoolShutDown));
             }
             if let Some((existing_server, prefix)) =
                 conflicting_server_prefix(entries.keys().map(String::as_str), &server_name)
@@ -611,7 +619,9 @@ impl McpConnectionPool {
     /// pool for a graceful shutdown; `Drop` itself cannot await. Each entry is
     /// cancellation-notified before any entry begins teardown, and each explicit
     /// rmcp service cancellation is bounded by rmcp's three-second grace plus
-    /// transport-task drain.
+    /// transport-task drain. A kill-immune child whose watcher does not finish
+    /// within five seconds is recorded and abandoned rather than blocking the
+    /// host indefinitely.
     ///
     /// The first caller wins and completes teardown. A concurrent or later
     /// caller returns immediately.
@@ -728,34 +738,10 @@ impl McpEntry {
             reconnect_idle_notify: tokio::sync::Notify::new(),
             #[cfg(test)]
             reconnect_publish_hook: None,
-        }
-    }
-
-    #[cfg(test)]
-    fn with_reconnect_jitter(
-        mut self,
-        reconnect_jitter: Arc<dyn Fn(Duration) -> Duration + Send + Sync>,
-    ) -> Self {
-        self.reconnect_jitter = reconnect_jitter;
-        self
-    }
-
-    #[cfg(test)]
-    fn with_reconnect_publish_hook(
-        mut self,
-        hook: Arc<policy_tests::ReconnectPublishHook>,
-    ) -> Self {
-        self.reconnect_publish_hook = Some(hook);
-        self
-    }
-
-    #[cfg(test)]
-    async fn pause_after_reconnect_publish(&self) {
-        if let Some(hook) = &self.reconnect_publish_hook
-            && hook.armed.swap(false, Ordering::SeqCst)
-        {
-            hook.published.notify_one();
-            hook.release.notified().await;
+            #[cfg(test)]
+            eager_install_hook: None,
+            #[cfg(test)]
+            panic_service_watcher: false,
         }
     }
 
@@ -899,11 +885,15 @@ impl McpEntry {
             )));
         }
 
+        #[cfg(test)]
+        self.pause_before_eager_install().await;
+
         *self.imported_tools.write_recover() = import_tools(&self.server_name, tools);
         let peer = service.peer().clone();
         let request_tasks = service.service().request_tasks();
         let cancellation = service.cancellation_token();
-        let quit = Arc::new(ServiceQuit::default());
+        let stdio_pid = stdio_child.as_ref().map(StdioChildGuard::pid);
+        let quit = Arc::new(ServiceQuit::new(stdio_pid));
         let previous_service = {
             let mut service_guard = self.service.lock().await;
             self.service_generation
@@ -938,6 +928,7 @@ impl McpEntry {
     ) {
         let weak_entry = Arc::downgrade(self);
         tokio::spawn(async move {
+            let _completion = quit.completion_guard();
             let waiting = service.waiting();
             tokio::pin!(waiting);
             let healthy_dwell = tokio::time::sleep(
@@ -958,6 +949,13 @@ impl McpEntry {
                 }
             };
             request_tasks.shutdown().await;
+            #[cfg(test)]
+            if weak_entry
+                .upgrade()
+                .is_some_and(|entry| entry.panic_service_watcher)
+            {
+                panic!("injected MCP service watcher panic");
+            }
             if let Some(entry) = weak_entry.upgrade() {
                 entry.observe_service_quit(service_generation, reason).await;
             }
@@ -1355,8 +1353,24 @@ impl McpEntry {
         // before shutdown set the flag and installed while teardown waited.
         self.cancel_service().await;
         let watcher_quit = self.watcher_quit.read_recover().clone();
-        if let Some(watcher_quit) = watcher_quit {
-            watcher_quit.wait().await;
+        if let Some(watcher_quit) = watcher_quit
+            && timeout(SHUTDOWN_WATCHER_JOIN_BOUND, watcher_quit.wait())
+                .await
+                .is_err()
+        {
+            let reason = match watcher_quit.stdio_pid() {
+                Some(pid) => format!(
+                    "MCP stdio child PID {pid} abandoned: service watcher did not finish within 5s"
+                ),
+                None => "MCP service watcher abandoned: it did not finish within 5s".to_string(),
+            };
+            *self.last_error.write_recover() = Some(reason.clone());
+            tracing::error!(
+                server = %self.server_name,
+                pid = watcher_quit.stdio_pid(),
+                reason = %reason,
+                "MCP explicit shutdown abandoned a wedged service watcher"
+            );
         }
     }
 

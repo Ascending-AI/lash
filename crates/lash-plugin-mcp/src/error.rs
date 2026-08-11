@@ -5,6 +5,8 @@ use lash_core::facade_support::ReconfigureError;
 /// surface.
 #[derive(Debug, thiserror::Error)]
 pub enum McpError {
+    #[error("MCP connection pool has shut down")]
+    PoolShutDown,
     #[error("{0}")]
     Config(String),
     #[error("MCP transport I/O error: {0}")]
