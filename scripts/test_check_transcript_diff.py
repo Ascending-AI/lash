@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("check-transcript-diff.py")
@@ -43,6 +46,53 @@ diff --git a/crates/demo/tests/transcript.rs b/crates/demo/tests/transcript.rs
 
 
 class TranscriptDiffTests(unittest.TestCase):
+    def test_enforcement_fails_an_unacknowledged_durable_change(self) -> None:
+        completed = mock.Mock(stdout=DURABLE_DIFF)
+        with mock.patch.object(MODULE.subprocess, "run", return_value=completed):
+            exit_code = MODULE.main(["--enforce", "base...head"])
+
+        self.assertEqual(exit_code, 1)
+
+    def test_enforcement_accepts_a_named_pr_justification(self) -> None:
+        completed = mock.Mock(stdout=DURABLE_DIFF)
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            event_path.write_text(
+                json.dumps(
+                    {
+                        "pull_request": {
+                            "body": "## Validation\n\nTranscript: the revision changes because the fixture commits twice."
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(MODULE.subprocess, "run", return_value=completed),
+                mock.patch.dict(
+                    MODULE.os.environ, {"GITHUB_EVENT_PATH": str(event_path)}
+                ),
+            ):
+                exit_code = MODULE.main(["--enforce", "base...head"])
+
+        self.assertEqual(exit_code, 0)
+
+    def test_advisory_mode_reports_without_failing(self) -> None:
+        completed = mock.Mock(stdout=DURABLE_DIFF)
+        with mock.patch.object(MODULE.subprocess, "run", return_value=completed):
+            exit_code = MODULE.main(["--advisory", "base...head"])
+
+        self.assertEqual(exit_code, 0)
+
+    def test_an_unevaluable_range_fails_in_both_modes(self) -> None:
+        error = MODULE.subprocess.CalledProcessError(128, ["git", "diff"])
+        for mode in ("--enforce", "--advisory"):
+            with (
+                self.subTest(mode=mode),
+                mock.patch.object(MODULE.subprocess, "run", side_effect=error),
+            ):
+                self.assertEqual(MODULE.main([mode, "missing...range"]), 2)
+
     def test_durable_line_is_reported_with_pair_and_location(self) -> None:
         findings = MODULE.classify_patch(DURABLE_DIFF)
 

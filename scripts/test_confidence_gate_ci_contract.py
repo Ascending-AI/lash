@@ -370,10 +370,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("bash scripts/check-core-ui-boundary.sh", lint)
         self.assertIn("bash scripts/check-workflow-graph-model.sh", lint)
         self.assertIn("bash scripts/check-production-file-size.sh", lint)
-        self.assertIn("python3 scripts/check-transcript-diff.py", lint)
+        self.assertIn("python3 scripts/check-transcript-diff.py --enforce", lint)
         self.assertLess(
             lint.index("cargo clippy --workspace --all-targets --locked"),
-            lint.index("python3 scripts/check-transcript-diff.py"),
+            lint.index("python3 scripts/check-transcript-diff.py --enforce"),
         )
 
     def test_lint_job_checks_and_previews_pr_release_notes(self) -> None:

@@ -34,11 +34,12 @@ DOC_VERSION_FILES = [
 ]
 SCHEMA_VERSION_CLAIMS = [
     (
-        "SQLite",
+        "SQLite durable-core",
         ROOT / "crates" / "lash-sqlite-store" / "src" / "schema.rs",
         "SCHEMA_VERSION",
         [
             (DOCS / "persistence.html", r"SQLite durable-core version (\d+)"),
+            (DOCS / "operations.html", r"SQLite durable-core version (\d+)"),
             (
                 DOCS / "architecture" / "durable-background-processes.md",
                 r"SQLite durable-core schema (\d+)",
@@ -46,7 +47,25 @@ SCHEMA_VERSION_CLAIMS = [
         ],
     ),
     (
-        "Postgres",
+        "SQLite process-registry",
+        ROOT / "crates" / "lash-sqlite-store" / "src" / "schema.rs",
+        "PROCESS_SCHEMA_VERSION",
+        [(DOCS / "operations.html", r"process-registry version (\d+)")],
+    ),
+    (
+        "SQLite effect",
+        ROOT / "crates" / "lash-sqlite-store" / "src" / "schema.rs",
+        "EFFECT_SCHEMA_VERSION",
+        [(DOCS / "operations.html", r"effect version (\d+)")],
+    ),
+    (
+        "SQLite trigger",
+        ROOT / "crates" / "lash-sqlite-store" / "src" / "schema.rs",
+        "TRIGGER_SCHEMA_VERSION",
+        [(DOCS / "operations.html", r"trigger version (\d+)")],
+    ),
+    (
+        "Postgres component",
         ROOT / "crates" / "lash-postgres-store" / "src" / "lib.rs",
         "SCHEMA_VERSION",
         [
@@ -54,6 +73,7 @@ SCHEMA_VERSION_CLAIMS = [
                 DOCS / "persistence.html",
                 r"Postgres component version (\d+)",
             ),
+            (DOCS / "operations.html", r"Postgres component version (\d+)"),
             (
                 DOCS / "architecture" / "durable-background-processes.md",
                 r"PostgreSQL schema (\d+) includes",
