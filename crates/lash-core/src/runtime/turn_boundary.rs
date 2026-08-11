@@ -304,9 +304,9 @@ impl TurnBoundary {
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
         let agent_frame_switch_materializes = match &returned_turn.outcome {
-            TurnOutcome::AgentFrameSwitch { frame_id, .. } => agent_frame_switch_materializes(
+            TurnOutcome::AgentFrameSwitch { frame_key, .. } => agent_frame_switch_materializes(
                 &self.state().session_id,
-                frame_id,
+                frame_key,
                 self.state().current_frame_node_id.as_deref(),
             ),
             _ => false,
@@ -810,7 +810,7 @@ mod tests {
         let mut state = state_with_graph(graph);
         state.ensure_agent_frame_initialized();
         let previous_frame_node_id = state.current_frame_node_id.clone();
-        let frame_id = "frame-2".to_string();
+        let frame_key = crate::FrameKey::from_caller_material("frame-2");
         let seed_node = crate::SessionAppendNode::message(crate::PluginMessage::text(
             MessageRole::User,
             "seed message",
@@ -818,7 +818,7 @@ mod tests {
         materialize_agent_frame_switch(
             &mut state,
             &TurnOutcome::AgentFrameSwitch {
-                frame_id: frame_id.clone(),
+                frame_key: frame_key.clone(),
                 task: "next task".to_string(),
                 initial_nodes: vec![seed_node],
             },
@@ -826,7 +826,7 @@ mod tests {
             true,
         );
         let expected_frame_node_id =
-            crate::session_graph::frame_node_id(&state.session_id, &frame_id);
+            crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
 
         assert_eq!(state.session_id, "session-1");
         assert_eq!(

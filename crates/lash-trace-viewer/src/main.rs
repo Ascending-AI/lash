@@ -1326,7 +1326,7 @@ mod tests {
                 status: "completed".to_string(),
                 done_reason: "modelstop".to_string(),
                 agent_frame_switch: Some(TraceAgentFrameSwitch {
-                    frame_id: "f1".to_string(),
+                    frame_key: "frame-key/v1/example".to_string(),
                 }),
             },
             TraceEvent::Custom {

@@ -462,12 +462,12 @@ pub(crate) fn validate_runtime_perf_turn(
                 value
             );
         }
-        TurnOutcome::AgentFrameSwitch { frame_id, .. } => {
+        TurnOutcome::AgentFrameSwitch { frame_key, .. } => {
             anyhow::bail!(
                 "runtime perf scenario {} turn {} unexpectedly switched to agent frame {}",
                 scenario.name(),
                 turn_index + 1,
-                frame_id
+                frame_key.as_str()
             );
         }
         TurnOutcome::Stopped(stop) => {

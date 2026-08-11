@@ -9,12 +9,13 @@ use super::RuntimeSessionState;
 
 pub(super) fn agent_frame_switch_materializes(
     session_id: &str,
-    requested_frame_id: &str,
+    requested_frame_key: &crate::FrameKey,
     current_frame_node_id: Option<&str>,
 ) -> bool {
-    !requested_frame_id.trim().is_empty()
-        && current_frame_node_id
-            != Some(crate::session_graph::frame_node_id(session_id, requested_frame_id).as_str())
+    current_frame_node_id
+        != Some(
+            crate::session_graph::frame_node_id(session_id, requested_frame_key.as_str()).as_str(),
+        )
 }
 
 pub(super) fn committed_attachment_ids(
@@ -83,7 +84,7 @@ pub(super) fn materialize_agent_frame_switch(
     materializes: bool,
 ) {
     let TurnOutcome::AgentFrameSwitch {
-        frame_id,
+        frame_key,
         initial_nodes,
         ..
     } = outcome
@@ -96,7 +97,7 @@ pub(super) fn materialize_agent_frame_switch(
         materializes,
         agent_frame_switch_materializes(
             &state.session_id,
-            frame_id,
+            frame_key,
             state.current_frame_node_id.as_deref(),
         )
     );
@@ -105,8 +106,11 @@ pub(super) fn materialize_agent_frame_switch(
     }
     super::super::open_agent_frame_in_state_with_clock(
         state,
-        crate::OpenAgentFrameRequest::new(frame_id.clone(), crate::AgentFrameReason::continue_as())
-            .with_initial_nodes(initial_nodes.clone()),
+        crate::OpenAgentFrameRequest::new(
+            frame_key.as_str(),
+            crate::AgentFrameReason::continue_as(),
+        )
+        .with_initial_nodes(initial_nodes.clone()),
         clock,
     );
 }

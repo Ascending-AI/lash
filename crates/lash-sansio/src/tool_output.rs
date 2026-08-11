@@ -658,7 +658,7 @@ impl ToolCancellation {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolControl {
     SwitchAgentFrame {
-        frame_id: String,
+        frame_key: crate::FrameKey,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         initial_nodes: Vec<crate::SessionAppendNode>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

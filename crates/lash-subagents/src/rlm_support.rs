@@ -276,8 +276,10 @@ pub(crate) fn task_result_value(turn: &AssembledTurn) -> Value {
         }
         TurnOutcome::Stopped(TurnStop::SubmittedError { value }) => return value.clone(),
         TurnOutcome::Stopped(TurnStop::ToolError { value, .. }) => return value.clone(),
-        TurnOutcome::AgentFrameSwitch { frame_id, task, .. } => {
-            return json!({ "frame_id": frame_id, "task": task });
+        TurnOutcome::AgentFrameSwitch {
+            frame_key, task, ..
+        } => {
+            return json!({ "frame_key": frame_key, "task": task });
         }
         TurnOutcome::Stopped(_) => {}
     }

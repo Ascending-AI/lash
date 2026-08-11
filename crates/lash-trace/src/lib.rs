@@ -631,7 +631,7 @@ pub struct TraceTokenUsage {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceAgentFrameSwitch {
-    pub frame_id: String,
+    pub frame_key: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1026,7 +1026,7 @@ mod tests {
                 status: "completed".to_string(),
                 done_reason: "modelstop".to_string(),
                 agent_frame_switch: Some(TraceAgentFrameSwitch {
-                    frame_id: "frame-1".to_string(),
+                    frame_key: "frame-key/v1/example".to_string(),
                 }),
             },
         );
@@ -1037,7 +1037,10 @@ mod tests {
 
         let completed_json = serde_json::to_value(completed).unwrap();
         assert_eq!(completed_json["type"], "turn_completed");
-        assert_eq!(completed_json["agent_frame_switch"]["frame_id"], "frame-1");
+        assert_eq!(
+            completed_json["agent_frame_switch"]["frame_key"],
+            "frame-key/v1/example"
+        );
     }
 
     #[test]

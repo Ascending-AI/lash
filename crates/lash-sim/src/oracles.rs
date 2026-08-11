@@ -4584,7 +4584,7 @@ fn rlm_protocol_execution_fact(
                 "exec_code": "x = await tools.custom_frame_switch({})?",
                 "checkpoint": "before_completion",
                 "agent_frame_switch": {
-                    "frame_id": "next-frame",
+                    "frame_key_material": "next-frame",
                     "task": "continue",
                     "initial_node_count": 1,
                 },
@@ -5075,11 +5075,12 @@ fn require_rlm_tool_call_event(result: &Value, contract: &str) -> Result<(), Str
 
 fn require_rlm_agent_frame_switch(
     result: &Value,
-    frame_id: &str,
+    frame_key_material: &str,
     task: &str,
     initial_node_count: usize,
     contract: &str,
 ) -> Result<(), String> {
+    let expected_frame_key = lash_core::FrameKey::from_caller_material(frame_key_material);
     if result
         .get("turn_outcomes")
         .and_then(Value::as_array)
@@ -5087,7 +5088,8 @@ fn require_rlm_agent_frame_switch(
         .flatten()
         .any(|outcome| {
             outcome.get("kind").and_then(Value::as_str) == Some("agent_frame_switch")
-                && outcome.get("frame_id").and_then(Value::as_str) == Some(frame_id)
+                && outcome.get("frame_key").and_then(Value::as_str)
+                    == Some(expected_frame_key.as_str())
                 && outcome.get("task").and_then(Value::as_str) == Some(task)
                 && outcome
                     .get("initial_nodes")
@@ -5098,7 +5100,7 @@ fn require_rlm_agent_frame_switch(
         Ok(())
     } else {
         Err(format!(
-            "{contract} missing AgentFrameSwitch outcome `{frame_id}` / `{task}` with {initial_node_count} seed nodes"
+            "{contract} missing AgentFrameSwitch outcome for key material `{frame_key_material}` / `{task}` with {initial_node_count} seed nodes"
         ))
     }
 }
@@ -7208,16 +7210,18 @@ mod tests {
             "rlm.exec_tool_control_frame_switch_terminal",
             |execution| {
                 execution
-                    .pointer_mut("/result/turn_outcomes/0/frame_id")
-                    .expect("frame switch id")
-                    .clone_from(&json!("wrong-frame"));
+                    .pointer_mut("/result/turn_outcomes/0/frame_key")
+                    .expect("frame switch key")
+                    .clone_from(&json!(
+                        lash_core::FrameKey::from_caller_material("wrong-frame").as_str()
+                    ));
             },
         );
         let err = scenario_contract_generated_facts_for_semantic(
             "rlm.exec_tool_control_frame_switch_terminal",
             &frame_switch_wrong_frame,
         )
-        .expect_err("RLM frame-switch fact must require exact frame id");
+        .expect_err("RLM frame-switch fact must require exact frame key");
         assert!(
             err.contains("fixed-source replay validation"),
             "unexpected RLM frame-switch replay failure: {err}"

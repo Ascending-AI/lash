@@ -420,7 +420,7 @@ pub enum SessionStreamEvent {
 pub enum TurnOutcome {
     Finished(TurnFinish),
     AgentFrameSwitch {
-        frame_id: String,
+        frame_key: crate::FrameKey,
         task: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         initial_nodes: Vec<SessionAppendNode>,
@@ -779,28 +779,32 @@ mod tests {
     }
 
     #[test]
-    fn agent_frame_switch_decodes_legacy_event_without_initial_nodes() {
-        let legacy = r#"{
+    fn agent_frame_switch_decodes_event_without_initial_nodes() {
+        let frame_key = crate::FrameKey::from_caller_material("frame-2");
+        let event_json = format!(
+            r#"{{
             "type":"turn_outcome",
-            "outcome":{
-                "agent_frame_switch":{
-                    "frame_id":"frame-2",
+            "outcome":{{
+                "agent_frame_switch":{{
+                    "frame_key":"{}",
                     "task":"continue"
-                }
-            }
-        }"#;
+                }}
+            }}
+        }}"#,
+            frame_key.as_str()
+        );
         let event: SessionStreamEvent =
-            serde_json::from_str(legacy).expect("legacy frame switch event");
+            serde_json::from_str(&event_json).expect("frame switch event");
         match event {
             SessionStreamEvent::TurnOutcome {
                 outcome:
                     TurnOutcome::AgentFrameSwitch {
-                        frame_id,
+                        frame_key: decoded_frame_key,
                         task,
                         initial_nodes,
                     },
             } => {
-                assert_eq!(frame_id, "frame-2");
+                assert_eq!(decoded_frame_key, frame_key);
                 assert_eq!(task, "continue");
                 assert!(initial_nodes.is_empty());
             }

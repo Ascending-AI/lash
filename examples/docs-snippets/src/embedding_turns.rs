@@ -1,13 +1,13 @@
 //! Compiled sources for the Rust snippets on `docs/embedding-turns.html`.
 
+use lash::{FrameKey, TurnFinish, TurnOutcome, TurnStop};
 use lash::{LashCore, LashSession, TurnInput, TurnResult};
-use lash::{TurnFinish, TurnOutcome, TurnStop};
 
 fn persist_terminal(_finish: TurnFinish) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn record_frame_boundary(_frame_id: String) -> anyhow::Result<()> {
+fn record_frame_boundary(_frame_key: FrameKey) -> anyhow::Result<()> {
     Ok(())
 }
 
@@ -23,7 +23,7 @@ fn outcome_match(result: TurnResult) -> anyhow::Result<()> {
     // docs:start:outcome-match
     match result.outcome {
         TurnOutcome::Finished(finish) => persist_terminal(finish)?,
-        TurnOutcome::AgentFrameSwitch { frame_id, .. } => record_frame_boundary(frame_id)?,
+        TurnOutcome::AgentFrameSwitch { frame_key, .. } => record_frame_boundary(frame_key)?,
         TurnOutcome::Stopped(stop) => match stop {
             TurnStop::Cancelled | TurnStop::InvalidInput => report_user_visible(stop),
             TurnStop::ProviderError | TurnStop::Incomplete => offer_retry(stop),

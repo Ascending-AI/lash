@@ -1454,16 +1454,14 @@ mod test_protocol_fakes {
                 if terminal_outcome.is_none() && outcome.output.is_success() {
                     terminal_outcome = match outcome.output.control.as_ref() {
                         Some(crate::ToolControl::SwitchAgentFrame {
-                            frame_id,
+                            frame_key,
                             initial_nodes,
                             task: Some(task),
-                        }) if !frame_id.trim().is_empty() && !task.trim().is_empty() => {
-                            Some(TurnOutcome::AgentFrameSwitch {
-                                frame_id: frame_id.clone(),
-                                task: task.clone(),
-                                initial_nodes: initial_nodes.clone(),
-                            })
-                        }
+                        }) if !task.trim().is_empty() => Some(TurnOutcome::AgentFrameSwitch {
+                            frame_key: frame_key.clone(),
+                            task: task.clone(),
+                            initial_nodes: initial_nodes.clone(),
+                        }),
                         Some(crate::ToolControl::Finish { value }) => {
                             Some(TurnOutcome::Finished(TurnFinish::ToolValue {
                                 tool_name: outcome.tool_name.clone(),

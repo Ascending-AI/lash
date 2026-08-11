@@ -737,11 +737,11 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
     };
     let control = output.control.as_ref().map(|control| match control {
         ToolControl::SwitchAgentFrame {
-            frame_id,
+            frame_key,
             initial_nodes,
             task,
         } => ToolControl::SwitchAgentFrame {
-            frame_id: frame_id.clone(),
+            frame_key: frame_key.clone(),
             initial_nodes: initial_nodes.clone(),
             task: task.clone(),
         },

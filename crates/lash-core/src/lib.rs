@@ -453,8 +453,8 @@ pub use lash_sansio::llm::types::{
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CheckpointDelivery,
     CheckpointKind, CompactToolContract, ExecImage, ExecResponse, ExecutedCallOutcome,
-    ExecutedCallRecord, LashSchema, LlmCallError, MediaType, Message, MessageOrigin, MessageRole,
-    Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode, PromptBuiltin,
+    ExecutedCallRecord, FrameKey, LashSchema, LlmCallError, MediaType, Message, MessageOrigin,
+    MessageRole, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode, PromptBuiltin,
     PromptContribution, PromptContributionGate, PromptLayer, PromptSlot, PromptSlotLayer,
     PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PruneState, SchemaContract,
     SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata,
@@ -485,16 +485,14 @@ pub fn turn_outcome_from_tool_control(
 ) -> Option<TurnOutcome> {
     match control {
         ToolControl::SwitchAgentFrame {
-            frame_id,
+            frame_key,
             initial_nodes,
             task: Some(task),
-        } if !frame_id.trim().is_empty() && !task.trim().is_empty() => {
-            Some(TurnOutcome::AgentFrameSwitch {
-                frame_id: frame_id.clone(),
-                task: task.clone(),
-                initial_nodes: initial_nodes.clone(),
-            })
-        }
+        } if !task.trim().is_empty() => Some(TurnOutcome::AgentFrameSwitch {
+            frame_key: frame_key.clone(),
+            task: task.clone(),
+            initial_nodes: initial_nodes.clone(),
+        }),
         ToolControl::Finish { value } => Some(TurnOutcome::Finished(TurnFinish::ToolValue {
             tool_name: tool_name.to_string(),
             value: value.to_json_value(),
@@ -929,9 +927,10 @@ mod tests {
 
     #[test]
     fn invalid_agent_frame_seed_is_rejected_at_the_serde_boundary() {
+        let frame_key = FrameKey::from_caller_material("delegate");
         let err = serde_json::from_value::<ToolControl>(serde_json::json!({
             "type": "switch_agent_frame",
-            "frame_id": "delegate",
+            "frame_key": frame_key,
             "initial_nodes": [{ "not": "a session append node" }],
             "task": "continue the work"
         }))

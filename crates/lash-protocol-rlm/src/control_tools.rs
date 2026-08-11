@@ -23,7 +23,7 @@ impl ToolProvider for RlmControlToolsProvider {
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         let result = match call.name {
-            "continue_as" => continue_as_switch_frame(call.args),
+            "continue_as" => continue_as_switch_frame(call.args, call.context),
             _ => return ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
         };
         finalise_tool_result(result)
@@ -52,7 +52,7 @@ fn continue_as_output_schema() -> Value {
         "type": "object",
         "properties": {
             "ok": { "type": "boolean" },
-            "frame_id": { "type": "string" },
+            "frame_key": { "type": "string" },
             "task": { "type": "string" },
             "seed_keys": {
                 "type": "array",
@@ -62,7 +62,7 @@ fn continue_as_output_schema() -> Value {
         },
         "required": [
             "ok",
-            "frame_id",
+            "frame_key",
             "task",
             "seed_keys",
             "seed_count"
@@ -90,7 +90,10 @@ pub fn continue_as_input_schema() -> Value {
     })
 }
 
-fn continue_as_switch_frame(args: &Value) -> Result<ContinueAsResult, String> {
+fn continue_as_switch_frame(
+    args: &Value,
+    context: &lash_core::ToolContext<'_>,
+) -> Result<ContinueAsResult, String> {
     let task = required_string(args, "task")?;
     let seed = RlmSeed::from_tool_args(args).map_err(|err| format!("continue_as {err}"))?;
     let mut seed_keys = seed
@@ -101,19 +104,26 @@ fn continue_as_switch_frame(args: &Value) -> Result<ContinueAsResult, String> {
         .collect::<Vec<_>>();
     seed_keys.sort();
     let seed_count = seed_keys.len();
-    let frame_id = uuid::Uuid::new_v4().to_string();
+    let tool_call_id = context
+        .tool_call_id()
+        .ok_or_else(|| "continue_as requires a stable tool call id".to_string())?;
+    let frame_key = lash_core::FrameKey::from_call_site(
+        context.session_id(),
+        context.agent_frame_id(),
+        tool_call_id,
+    );
     let initial_nodes = crate::rlm_seed_initial_nodes(seed);
 
     Ok(ContinueAsResult {
         value: json!({
             "ok": true,
-            "frame_id": frame_id.clone(),
+            "frame_key": frame_key.as_str(),
             "task": task.clone(),
             "seed_keys": seed_keys,
             "seed_count": seed_count,
         }),
         control: ToolControl::SwitchAgentFrame {
-            frame_id,
+            frame_key,
             initial_nodes,
             task: Some(task),
         },
@@ -171,10 +181,10 @@ mod tests {
 
         assert_eq!(
             definition.contract.output_schema.canonical["required"],
-            json!(["ok", "frame_id", "task", "seed_keys", "seed_count"])
+            json!(["ok", "frame_key", "task", "seed_keys", "seed_count"])
         );
         let rendered = definition.compact_contract().render_signature();
-        assert!(rendered.contains("frame_id"), "{rendered}");
+        assert!(rendered.contains("frame_key"), "{rendered}");
         assert!(!rendered.contains("handle_count"), "{rendered}");
         assert!(!rendered.contains("projected_count"), "{rendered}");
         assert!(!rendered.contains("global_count"), "{rendered}");
@@ -334,10 +344,11 @@ mod tests {
         }
     }
 
-    async fn run_continue_as(
+    async fn run_continue_as_at_call(
         provider: &RlmControlToolsProvider,
         manager: Arc<BatonManager>,
         args: &Value,
+        tool_call_id: &str,
     ) -> ToolResult {
         let sessions: Arc<dyn SessionStateService> = manager.clone();
         let session_lifecycle: Arc<dyn SessionLifecycleService> = manager.clone();
@@ -355,8 +366,9 @@ mod tests {
                     "direct completions are unavailable in continue_as tests".to_string(),
                 ))
             }),
-            Some("continue-as-test".to_string()),
-        );
+            Some(tool_call_id.to_string()),
+        )
+        .with_agent_frame_id_for_testing("frame-node/v2/test-lineage");
         provider
             .execute(lash_core::ToolCall {
                 name: "continue_as",
@@ -364,6 +376,14 @@ mod tests {
                 context: &context,
             })
             .await
+    }
+
+    async fn run_continue_as(
+        provider: &RlmControlToolsProvider,
+        manager: Arc<BatonManager>,
+        args: &Value,
+    ) -> ToolResult {
+        run_continue_as_at_call(provider, manager, args, "continue-as-test").await
     }
 
     #[test]
@@ -419,13 +439,13 @@ mod tests {
 
         assert!(result.is_success(), "{:?}", result.value_for_projection());
         let value = result.value_for_projection();
-        assert!(value.get("frame_id").and_then(Value::as_str).is_some());
+        assert!(value.get("frame_key").and_then(Value::as_str).is_some());
         assert_eq!(value.get("seed_keys"), Some(&json!(["query", "x"])));
         assert_eq!(value.get("seed_count"), Some(&json!(2)));
         assert!(value.get("projected_count").is_none());
         assert!(value.get("global_count").is_none());
         let Some(ToolControl::SwitchAgentFrame {
-            frame_id,
+            frame_key,
             initial_nodes,
             task,
         }) = result.as_output().control.as_ref()
@@ -433,8 +453,8 @@ mod tests {
             panic!("expected frame switch control");
         };
         assert_eq!(
-            value.get("frame_id").and_then(Value::as_str),
-            Some(frame_id.as_str())
+            value.get("frame_key").and_then(Value::as_str),
+            Some(frame_key.as_str())
         );
         assert_eq!(task.as_deref(), Some("finish from here"));
         assert_eq!(initial_nodes.len(), 1);
@@ -453,6 +473,45 @@ mod tests {
         assert_eq!(seed.globals["query"], json!("original"));
         assert!(seed.projected.is_empty());
         assert!(manager.created.lock_recover().is_empty());
+    }
+
+    fn frame_key(result: &ToolResult) -> &lash_core::FrameKey {
+        let Some(ToolControl::SwitchAgentFrame { frame_key, .. }) =
+            result.as_output().control.as_ref()
+        else {
+            panic!("expected frame switch control");
+        };
+        frame_key
+    }
+
+    #[tokio::test]
+    async fn continue_as_redrive_derives_the_same_frame_identity() {
+        let provider = RlmControlToolsProvider;
+        let args = json!({ "task": "continue deterministically" });
+        let manager = Arc::new(BatonManager::default());
+
+        let first =
+            run_continue_as_at_call(&provider, Arc::clone(&manager), &args, "redriven-call").await;
+        let redriven = run_continue_as_at_call(&provider, manager, &args, "redriven-call").await;
+
+        assert_eq!(frame_key(&first), frame_key(&redriven));
+        assert_eq!(
+            lash_core::facade_support::frame_node_id("test-session", frame_key(&first).as_str()),
+            lash_core::facade_support::frame_node_id("test-session", frame_key(&redriven).as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn identical_continue_as_tasks_at_distinct_calls_derive_distinct_keys() {
+        let provider = RlmControlToolsProvider;
+        let args = json!({ "task": "same task" });
+        let manager = Arc::new(BatonManager::default());
+
+        let first =
+            run_continue_as_at_call(&provider, Arc::clone(&manager), &args, "call-one").await;
+        let second = run_continue_as_at_call(&provider, manager, &args, "call-two").await;
+
+        assert_ne!(frame_key(&first), frame_key(&second));
     }
 
     #[tokio::test]
