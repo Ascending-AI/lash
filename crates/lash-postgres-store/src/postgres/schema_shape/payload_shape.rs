@@ -57,15 +57,11 @@ impl PayloadShape {
         }
     }
 
-    fn include_persisted_projection(
-        &mut self,
-        backend: &str,
-        carrier: &str,
-        projection: PayloadShape,
-    ) {
+    fn include_persisted_projection(&mut self, carrier: PayloadCarrier, projection: PayloadShape) {
+        let qualified_column = carrier.qualified_column();
         let prefix = child_path(
-            &child_path(&child_path("", "persisted-by"), backend),
-            carrier,
+            &child_path(&child_path("", "persisted-by"), carrier.backend.as_str()),
+            &qualified_column,
         );
         self.entries
             .insert(child_path(&prefix, "rust-type"), projection.rust_type);
@@ -75,34 +71,77 @@ impl PayloadShape {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PayloadBackend {
+    Postgres,
+    Sqlite,
+}
+
+impl PayloadBackend {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Postgres => "postgres",
+            Self::Sqlite => "sqlite",
+        }
+    }
+}
+
+/// Durable store location that owns one serialized Rust payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct PayloadCarrier {
+    backend: PayloadBackend,
+    scope: &'static str,
+    column: &'static str,
+}
+
+impl PayloadCarrier {
+    const fn new(backend: PayloadBackend, scope: &'static str, column: &'static str) -> Self {
+        Self {
+            backend,
+            scope,
+            column,
+        }
+    }
+
+    fn qualified_column(self) -> String {
+        format!("{}.{}", self.scope, self.column)
+    }
+
+    #[cfg(test)]
+    fn artifact_identity(self) -> String {
+        format!("{} {}", self.backend.as_str(), self.qualified_column())
+    }
+}
+
+#[cfg(test)]
+struct PayloadFingerprint {
+    rust_type: String,
+    sha256: String,
+}
+
 struct PayloadRegistration {
     shape: PayloadShape,
     #[cfg(test)]
-    fingerprints: BTreeMap<(String, String, String), String>,
+    fingerprint: PayloadFingerprint,
 }
 
 impl PayloadRegistration {
-    fn of<T: JsonSchema>(_backend: &str, _carrier: &str) -> Self {
+    fn of<T: JsonSchema>() -> Self {
         let schema = serde_json::to_value(schemars::schema_for!(T))
             .expect("schemars root schemas are serializable");
         let shape = PayloadShape::from_schema::<T>(&schema);
         Self {
             shape,
             #[cfg(test)]
-            fingerprints: [(
-                (_backend.to_string(), _carrier.to_string(), T::schema_name()),
-                unfiltered_schema_fingerprint(&schema),
-            )]
-            .into_iter()
-            .collect(),
+            fingerprint: PayloadFingerprint {
+                rust_type: T::schema_name(),
+                sha256: unfiltered_schema_fingerprint(&schema),
+            },
         }
     }
 
-    fn include_persisted_projection(&mut self, backend: &str, carrier: &str, projection: Self) {
-        self.shape
-            .include_persisted_projection(backend, carrier, projection.shape);
-        #[cfg(test)]
-        self.fingerprints.extend(projection.fingerprints);
+    fn include_persisted_projection(&mut self, carrier: PayloadCarrier, projection: PayloadShape) {
+        self.shape.include_persisted_projection(carrier, projection);
     }
 }
 
@@ -116,36 +155,40 @@ impl PayloadRegistration {
 pub(super) fn registered_payload_shapes() -> BTreeMap<(String, String), PayloadShape> {
     registered_payloads()
         .into_iter()
-        .map(|(identity, registration)| (identity, registration.shape))
+        .filter_map(|(carrier, registration)| {
+            (carrier.backend == PayloadBackend::Postgres).then(|| {
+                (
+                    (carrier.scope.to_string(), carrier.column.to_string()),
+                    registration.shape,
+                )
+            })
+        })
         .collect()
 }
 
-fn registered_payloads() -> BTreeMap<(String, String), PayloadRegistration> {
-    let mut session_meta = PayloadRegistration::of::<lash_core::SessionMeta>(
-        "postgres",
-        "lash_session_meta.meta_json",
-    );
-    session_meta.include_persisted_projection(
-        "sqlite",
-        "session_meta.relation_json",
-        PayloadRegistration::of::<lash_core::SessionRelation>(
-            "sqlite",
-            "session_meta.relation_json",
-        ),
-    );
-    [(
-        ("lash_session_meta".to_string(), "meta_json".to_string()),
-        session_meta,
-    )]
+fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
+    let postgres_carrier =
+        PayloadCarrier::new(PayloadBackend::Postgres, "lash_session_meta", "meta_json");
+    let sqlite_carrier =
+        PayloadCarrier::new(PayloadBackend::Sqlite, "session_meta", "relation_json");
+    let sqlite_registration = PayloadRegistration::of::<lash_core::SessionRelation>();
+    let mut postgres_registration = PayloadRegistration::of::<lash_core::SessionMeta>();
+    postgres_registration
+        .include_persisted_projection(sqlite_carrier, sqlite_registration.shape.clone());
+
+    [
+        (postgres_carrier, postgres_registration),
+        (sqlite_carrier, sqlite_registration),
+    ]
     .into_iter()
     .collect()
 }
 
 #[cfg(test)]
-fn registered_payload_fingerprints() -> BTreeMap<(String, String, String), String> {
+fn registered_payload_fingerprints() -> BTreeMap<PayloadCarrier, PayloadFingerprint> {
     registered_payloads()
-        .into_values()
-        .flat_map(|registration| registration.fingerprints)
+        .into_iter()
+        .map(|(carrier, registration)| (carrier, registration.fingerprint))
         .collect()
 }
 
@@ -213,10 +256,16 @@ fn collect_shape_entries(value: &Value, path: &str, entries: &mut BTreeMap<Strin
                         if let Some(children) = child.as_object() {
                             for (name, schema) in children {
                                 let property_path = child_path(&child_path(path, key), name);
-                                if schema.as_object().is_some_and(serde_json::Map::is_empty) {
+                                let mut property_entries = BTreeMap::new();
+                                collect_shape_entries(
+                                    schema,
+                                    &property_path,
+                                    &mut property_entries,
+                                );
+                                if property_entries.is_empty() {
                                     entries.insert(property_path, "schema".into());
                                 } else {
-                                    collect_shape_entries(schema, &property_path, entries);
+                                    entries.extend(property_entries);
                                 }
                             }
                         }
@@ -459,7 +508,7 @@ fn path_token(value: &str) -> String {
 
 fn schema_fingerprint(value: &Value) -> String {
     let mut canonical = String::new();
-    write_canonical_json(value, &mut canonical);
+    write_canonical_json(value, &mut canonical, CanonicalFilter::Structural);
     let digest = Sha256::digest(canonical.as_bytes());
     format!("{digest:x}")
 }
@@ -471,43 +520,22 @@ fn schema_fingerprint(value: &Value) -> String {
 /// arrays retain their schema order, then SHA-256 is applied to the compact JSON
 /// bytes. This remains only as complete as schemars: a handwritten `Serialize`
 /// implementation or a serde attribute schemars does not model is invisible.
+/// A schemars upgrade may change annotations, definition/reference layout,
+/// numeric spelling, or array order and therefore move this fingerprint without
+/// a Rust source change. That fail-closed churn requires regenerating the
+/// artifact and advancing every owning backend's component schema version.
 #[cfg(test)]
 fn unfiltered_schema_fingerprint(value: &Value) -> String {
     let mut canonical = String::new();
-    write_canonical_unfiltered_json(value, &mut canonical);
+    write_canonical_json(value, &mut canonical, CanonicalFilter::Complete);
     let digest = Sha256::digest(canonical.as_bytes());
     format!("{digest:x}")
 }
 
-#[cfg(test)]
-fn write_canonical_unfiltered_json(value: &Value, output: &mut String) {
-    match value {
-        Value::Object(object) => {
-            output.push('{');
-            let mut fields = object.iter().collect::<Vec<_>>();
-            fields.sort_unstable_by_key(|(key, _)| key.as_str());
-            for (index, (key, value)) in fields.into_iter().enumerate() {
-                if index != 0 {
-                    output.push(',');
-                }
-                output.push_str(&literal_value(&Value::String(key.clone())));
-                output.push(':');
-                write_canonical_unfiltered_json(value, output);
-            }
-            output.push('}');
-        }
-        Value::Array(values) => {
-            output.push('[');
-            for (index, value) in values.iter().enumerate() {
-                if index != 0 {
-                    output.push(',');
-                }
-                write_canonical_unfiltered_json(value, output);
-            }
-            output.push(']');
-        }
-        _ => output.push_str(&literal_value(value)),
-    }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CanonicalFilter {
+    Complete,
+    Structural,
 }
 
 #[cfg(test)]
@@ -520,24 +548,34 @@ fn render_registered_payload_fingerprints() -> String {
 # Each SHA-256 covers complete schemars JSON canonicalized by recursively sorting\n\
 # object keys, retaining array order, and emitting compact JSON. The filtered\n\
 # schema-shape.txt remains the human-readable explanation of payload changes.\n\
+# A schemars upgrade can change annotations or schema layout and move these\n\
+# hashes without a Rust source change. Regenerate the artifact and advance every\n\
+# owning backend's component schema version whenever that happens.\n\
 # Regenerate with LASH_UPDATE_PAYLOAD_SCHEMA_FINGERPRINTS=1 cargo test -p\n\
 # lash-postgres-store committed_fingerprints_match_every_registered_carrier.\n",
     );
-    for ((backend, carrier, rust_type), fingerprint) in registered_payload_fingerprints() {
+    for (carrier, fingerprint) in registered_payload_fingerprints() {
         output.push_str(&format!(
-            "payload-fingerprint {backend} {carrier} {rust_type} sha256:{fingerprint}\n"
+            "payload-fingerprint {} {} {} sha256:{}\n",
+            carrier.backend.as_str(),
+            carrier.qualified_column(),
+            fingerprint.rust_type,
+            fingerprint.sha256,
         ));
     }
     output
 }
 
-fn write_canonical_json(value: &Value, output: &mut String) {
+fn write_canonical_json(value: &Value, output: &mut String, filter: CanonicalFilter) {
     match value {
         Value::Object(object) => {
             output.push('{');
             let mut fields = object
                 .iter()
-                .filter(|(key, _)| !NON_DECODING_ANNOTATIONS.contains(&key.as_str()))
+                .filter(|(key, _)| {
+                    filter == CanonicalFilter::Complete
+                        || !NON_DECODING_ANNOTATIONS.contains(&key.as_str())
+                })
                 .collect::<Vec<_>>();
             fields.sort_unstable_by_key(|(key, _)| key.as_str());
             for (index, (key, value)) in fields.into_iter().enumerate() {
@@ -546,10 +584,12 @@ fn write_canonical_json(value: &Value, output: &mut String) {
                 }
                 output.push_str(&literal_value(&Value::String(key.clone())));
                 output.push(':');
-                if matches!(key.as_str(), "allOf" | "anyOf" | "oneOf") {
-                    write_canonical_unordered_array(value, output);
+                if filter == CanonicalFilter::Structural
+                    && matches!(key.as_str(), "allOf" | "anyOf" | "oneOf")
+                {
+                    write_canonical_unordered_array(value, output, filter);
                 } else {
-                    write_canonical_json(value, output);
+                    write_canonical_json(value, output, filter);
                 }
             }
             output.push('}');
@@ -560,7 +600,7 @@ fn write_canonical_json(value: &Value, output: &mut String) {
                 if index != 0 {
                     output.push(',');
                 }
-                write_canonical_json(value, output);
+                write_canonical_json(value, output, filter);
             }
             output.push(']');
         }
@@ -568,16 +608,16 @@ fn write_canonical_json(value: &Value, output: &mut String) {
     }
 }
 
-fn write_canonical_unordered_array(value: &Value, output: &mut String) {
+fn write_canonical_unordered_array(value: &Value, output: &mut String, filter: CanonicalFilter) {
     let Some(values) = value.as_array() else {
-        write_canonical_json(value, output);
+        write_canonical_json(value, output, filter);
         return;
     };
     let mut rendered = values
         .iter()
         .map(|value| {
             let mut item = String::new();
-            write_canonical_json(value, &mut item);
+            write_canonical_json(value, &mut item, filter);
             item
         })
         .collect::<Vec<_>>();
@@ -672,6 +712,23 @@ mod tests {
                 .entries
                 .get("/persisted-by/sqlite/session_meta.relation_json/rust-type"),
             Some(&"SessionRelation".to_string())
+        );
+    }
+
+    #[test]
+    fn registered_carrier_identities_are_explicit_and_independent() {
+        let identities = registered_payloads()
+            .keys()
+            .copied()
+            .map(PayloadCarrier::artifact_identity)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(
+            identities,
+            std::collections::BTreeSet::from([
+                "postgres lash_session_meta.meta_json".to_string(),
+                "sqlite session_meta.relation_json".to_string(),
+            ])
         );
     }
 
@@ -805,6 +862,23 @@ mod tests {
         assert_eq!(
             entries.get("/properties/opaque"),
             Some(&"schema".to_string())
+        );
+    }
+
+    #[test]
+    fn derived_annotation_only_property_schema_still_records_the_property_name() {
+        #[derive(JsonSchema)]
+        #[allow(dead_code)]
+        struct Example {
+            /// An opaque payload whose schema contains only this annotation.
+            opaque: serde_json::Value,
+        }
+
+        let shape = PayloadShape::of::<Example>();
+
+        assert_eq!(
+            shape.entries.get("/properties/opaque").map(String::as_str),
+            Some("schema")
         );
     }
 

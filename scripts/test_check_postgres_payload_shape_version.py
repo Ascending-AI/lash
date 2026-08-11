@@ -83,6 +83,18 @@ new file mode 100644
         valid, _ = MODULE.validate_patch(POSTGRES_FINGERPRINT_DIFF)
         self.assertFalse(valid)
 
+    def test_unknown_fingerprint_backend_is_a_hard_error(self) -> None:
+        unknown_backend_diff = POSTGRES_FINGERPRINT_DIFF.replace(
+            "payload-fingerprint postgres", "payload-fingerprint postgress"
+        )
+
+        result = MODULE.validate_patch(unknown_backend_diff)
+
+        self.assertEqual(
+            result,
+            (False, "Unknown payload fingerprint backend 'postgress'."),
+        )
+
     def test_postgres_fingerprint_change_with_forward_bump_passes(self) -> None:
         patch = POSTGRES_FINGERPRINT_DIFF
         patch += version_diff(MODULE.POSTGRES_VERSION_SOURCE, 43, 44)

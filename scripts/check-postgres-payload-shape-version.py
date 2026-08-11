@@ -15,6 +15,7 @@ import sys
 DEFAULT_RANGE = "origin/main...HEAD"
 ARTIFACT = "crates/lash-postgres-store/schema-shape.txt"
 FINGERPRINT_ARTIFACT = "crates/lash-postgres-store/payload-schema-fingerprints.txt"
+FINGERPRINT_BACKENDS = {"postgres", "sqlite"}
 POSTGRES_VERSION_SOURCE = "crates/lash-postgres-store/src/lib.rs"
 SQLITE_VERSION_SOURCE = "crates/lash-sqlite-store/src/schema.rs"
 PAYLOAD_LINE = re.compile(r"^[+-]\s+(?:payload-shape|shape)\s+")
@@ -118,11 +119,12 @@ def payload_shape_change(patch: str) -> tuple[bool, bool, bool]:
     return changed, registration_only, sqlite_shared_changed
 
 
-def payload_fingerprint_change(patch: str) -> tuple[set[str], bool]:
+def payload_fingerprint_change(patch: str) -> tuple[set[str], bool, set[str]]:
     current_path = ""
     changed: set[str] = set()
     added: set[str] = set()
     removed = False
+    unknown_backends: set[str] = set()
     for line in patch.splitlines():
         if line.startswith("+++ "):
             current_path = normalized_diff_path(line[4:])
@@ -132,6 +134,8 @@ def payload_fingerprint_change(patch: str) -> tuple[set[str], bool]:
         content = line[1:].strip()
         if content.startswith("payload-fingerprint "):
             _, backend, *_ = content.split()
+            if backend not in FINGERPRINT_BACKENDS:
+                unknown_backends.add(backend)
             changed.add(backend)
             if line.startswith("+"):
                 added.add(content)
@@ -142,7 +146,7 @@ def payload_fingerprint_change(patch: str) -> tuple[set[str], bool]:
         and not removed
         and added == FINGERPRINT_REGISTRATION_BASELINES
     )
-    return changed, registration_only
+    return changed, registration_only, unknown_backends
 
 
 def payload_identity(table: str, column: str, rust_type: str) -> str:
@@ -175,7 +179,17 @@ def component_version_advanced(patch: str, version_source: str) -> bool:
 
 def validate_patch(patch: str) -> tuple[bool, str]:
     changed, registration_only, sqlite_shared_changed = payload_shape_change(patch)
-    fingerprint_backends, fingerprint_registration_only = payload_fingerprint_change(patch)
+    (
+        fingerprint_backends,
+        fingerprint_registration_only,
+        unknown_fingerprint_backends,
+    ) = payload_fingerprint_change(patch)
+    if unknown_fingerprint_backends:
+        if len(unknown_fingerprint_backends) == 1:
+            backend = next(iter(unknown_fingerprint_backends))
+            return False, f"Unknown payload fingerprint backend '{backend}'."
+        backends = ", ".join(sorted(unknown_fingerprint_backends))
+        return False, f"Unknown payload fingerprint backends: {backends}."
     required_backends = fingerprint_backends.copy()
     if changed:
         required_backends.add("postgres")
@@ -194,8 +208,11 @@ def validate_patch(patch: str) -> tuple[bool, str]:
     if (not postgres_required or postgres_advanced) and (not sqlite_required or sqlite_advanced):
         if postgres_required and sqlite_required:
             return True, "Shared payload contract change advances both durable backend versions."
-        backend = "PostgreSQL" if postgres_required else "SQLite"
-        return True, f"{backend} payload contract change advances its component version."
+        if postgres_required:
+            return True, "PostgreSQL payload contract change advances its component version."
+        if sqlite_required:
+            return True, "SQLite payload contract change advances its component version."
+        return False, "Payload fingerprint backend validation failed."
     missing = []
     if postgres_required and not postgres_advanced:
         missing.append(f"PostgreSQL SCHEMA_VERSION in {POSTGRES_VERSION_SOURCE}")
