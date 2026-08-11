@@ -23,7 +23,7 @@ runs:
       # v0.0.10+ exports the cache-service-v2 environment that sccache 0.16's
       # GHA backend requires; older action versions make the server panic on
       # startup, which fails every rustc invocation through the wrapper.
-      uses: mozilla-actions/sccache-action@v0.0.10
+      uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
     - name: Route rustc through sccache
       shell: bash
@@ -39,7 +39,7 @@ runs:
 
     - name: Install mold
       if: inputs.link-with-mold == 'true'
-      uses: rui314/setup-mold@v1
+      uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
 
     - name: Link through mold
       if: inputs.link-with-mold == 'true'
