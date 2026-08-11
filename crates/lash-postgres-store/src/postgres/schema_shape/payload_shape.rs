@@ -41,11 +41,16 @@ pub(crate) struct PayloadShape {
 
 impl PayloadShape {
     /// Derives a payload shape from the Rust type rather than from a sample row.
+    #[cfg(test)]
     pub(super) fn of<T: JsonSchema>() -> Self {
         let schema = serde_json::to_value(schemars::schema_for!(T))
             .expect("schemars root schemas are serializable");
+        Self::from_schema::<T>(&schema)
+    }
+
+    fn from_schema<T: JsonSchema>(schema: &Value) -> Self {
         let mut entries = BTreeMap::new();
-        collect_shape_entries(&schema, "", &mut entries);
+        collect_shape_entries(schema, "", &mut entries);
         Self {
             rust_type: T::schema_name(),
             entries,
@@ -70,6 +75,37 @@ impl PayloadShape {
     }
 }
 
+struct PayloadRegistration {
+    shape: PayloadShape,
+    #[cfg(test)]
+    fingerprints: BTreeMap<(String, String, String), String>,
+}
+
+impl PayloadRegistration {
+    fn of<T: JsonSchema>(_backend: &str, _carrier: &str) -> Self {
+        let schema = serde_json::to_value(schemars::schema_for!(T))
+            .expect("schemars root schemas are serializable");
+        let shape = PayloadShape::from_schema::<T>(&schema);
+        Self {
+            shape,
+            #[cfg(test)]
+            fingerprints: [(
+                (_backend.to_string(), _carrier.to_string(), T::schema_name()),
+                unfiltered_schema_fingerprint(&schema),
+            )]
+            .into_iter()
+            .collect(),
+        }
+    }
+
+    fn include_persisted_projection(&mut self, backend: &str, carrier: &str, projection: Self) {
+        self.shape
+            .include_persisted_projection(backend, carrier, projection.shape);
+        #[cfg(test)]
+        self.fingerprints.extend(projection.fingerprints);
+    }
+}
+
 /// PostgreSQL blob columns selected for Rust-type-derived component-version
 /// gating. The first registered carrier is the concrete FIG-1219 blind spot.
 ///
@@ -78,11 +114,24 @@ impl PayloadShape {
 /// versioned records, enums, and intentionally opaque JSON values into this
 /// component-version gate.
 pub(super) fn registered_payload_shapes() -> BTreeMap<(String, String), PayloadShape> {
-    let mut session_meta = PayloadShape::of::<lash_core::SessionMeta>();
+    registered_payloads()
+        .into_iter()
+        .map(|(identity, registration)| (identity, registration.shape))
+        .collect()
+}
+
+fn registered_payloads() -> BTreeMap<(String, String), PayloadRegistration> {
+    let mut session_meta = PayloadRegistration::of::<lash_core::SessionMeta>(
+        "postgres",
+        "lash_session_meta.meta_json",
+    );
     session_meta.include_persisted_projection(
         "sqlite",
         "session_meta.relation_json",
-        PayloadShape::of::<lash_core::SessionRelation>(),
+        PayloadRegistration::of::<lash_core::SessionRelation>(
+            "sqlite",
+            "session_meta.relation_json",
+        ),
     );
     [(
         ("lash_session_meta".to_string(), "meta_json".to_string()),
@@ -90,6 +139,14 @@ pub(super) fn registered_payload_shapes() -> BTreeMap<(String, String), PayloadS
     )]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+fn registered_payload_fingerprints() -> BTreeMap<(String, String, String), String> {
+    registered_payloads()
+        .into_values()
+        .flat_map(|registration| registration.fingerprints)
+        .collect()
 }
 
 /// Projects a JSON Schema document into stable shape-only path entries.
@@ -152,8 +209,20 @@ fn collect_shape_entries(value: &Value, path: &str, entries: &mut BTreeMap<Strin
                             collect_composition_branches(children, path, key, entries);
                         }
                     }
+                    "properties" => {
+                        if let Some(children) = child.as_object() {
+                            for (name, schema) in children {
+                                let property_path = child_path(&child_path(path, key), name);
+                                if schema.as_object().is_some_and(serde_json::Map::is_empty) {
+                                    entries.insert(property_path, "schema".into());
+                                } else {
+                                    collect_shape_entries(schema, &property_path, entries);
+                                }
+                            }
+                        }
+                    }
                     "$defs" | "definitions" | "dependencies" | "dependentRequired"
-                    | "dependentSchemas" | "patternProperties" | "properties" => {
+                    | "dependentSchemas" | "patternProperties" => {
                         if let Some(children) = child.as_object() {
                             for (name, schema) in children {
                                 collect_shape_entries(
@@ -217,14 +286,36 @@ fn collect_composition_branches(
 }
 
 fn tagged_branch_identities(children: &[Value]) -> Option<Vec<String>> {
-    let tagged = children
+    if let Some(literal_fields) = children
         .iter()
-        .map(required_tag_identity)
-        .collect::<Option<Vec<_>>>();
-    if let Some(identities) = tagged {
-        let unique = identities.iter().collect::<std::collections::BTreeSet<_>>();
-        if unique.len() == identities.len() {
-            return Some(identities);
+        .map(required_literal_fields)
+        .collect::<Option<Vec<_>>>()
+    {
+        let common_fields = literal_fields
+            .first()?
+            .keys()
+            .filter(|name| {
+                literal_fields
+                    .iter()
+                    .all(|fields| fields.contains_key(*name))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !common_fields.is_empty() {
+            let identities = literal_fields
+                .iter()
+                .map(|fields| {
+                    common_fields
+                        .iter()
+                        .map(|name| format!("tag:{}={}", path_token(name), fields[name]))
+                        .collect::<Vec<_>>()
+                        .join("+")
+                })
+                .collect::<Vec<_>>();
+            let unique = identities.iter().collect::<std::collections::BTreeSet<_>>();
+            if unique.len() == identities.len() {
+                return Some(identities);
+            }
         }
     }
 
@@ -283,6 +374,17 @@ fn type_domains_overlap(
 }
 
 fn required_tag_identity(value: &Value) -> Option<String> {
+    let fields = required_literal_fields(value)?;
+    (!fields.is_empty()).then(|| {
+        fields
+            .into_iter()
+            .map(|(name, literal)| format!("tag:{}={literal}", path_token(&name)))
+            .collect::<Vec<_>>()
+            .join("+")
+    })
+}
+
+fn required_literal_fields(value: &Value) -> Option<BTreeMap<String, String>> {
     let object = value.as_object()?;
     let properties = object.get("properties")?.as_object()?;
     let required = object.get("required")?.as_array()?;
@@ -290,21 +392,16 @@ fn required_tag_identity(value: &Value) -> Option<String> {
         .iter()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
-    let mut tags = properties
-        .iter()
-        .filter(|(name, _)| required.contains(&name.as_str()))
-        .filter_map(|(name, schema)| {
-            single_literal(schema).map(|literal| {
-                format!(
-                    "tag:{}={}",
-                    path_token(name),
-                    path_token(&typed_literal(literal))
-                )
+    Some(
+        properties
+            .iter()
+            .filter(|(name, _)| required.contains(&name.as_str()))
+            .filter_map(|(name, schema)| {
+                single_literal(schema)
+                    .map(|literal| (name.clone(), path_token(&typed_literal(literal))))
             })
-        })
-        .collect::<Vec<_>>();
-    tags.sort_unstable();
-    (!tags.is_empty()).then(|| tags.join("+"))
+            .collect(),
+    )
 }
 
 fn branch_identity(value: &Value) -> String {
@@ -365,6 +462,73 @@ fn schema_fingerprint(value: &Value) -> String {
     write_canonical_json(value, &mut canonical);
     let digest = Sha256::digest(canonical.as_bytes());
     format!("{digest:x}")
+}
+
+/// Hashes the complete schemars document for the author-time safety gate.
+///
+/// The human artifact above is filtered for diagnosis; this fingerprint is
+/// deliberately unfiltered for safety. Object keys are sorted recursively and
+/// arrays retain their schema order, then SHA-256 is applied to the compact JSON
+/// bytes. This remains only as complete as schemars: a handwritten `Serialize`
+/// implementation or a serde attribute schemars does not model is invisible.
+#[cfg(test)]
+fn unfiltered_schema_fingerprint(value: &Value) -> String {
+    let mut canonical = String::new();
+    write_canonical_unfiltered_json(value, &mut canonical);
+    let digest = Sha256::digest(canonical.as_bytes());
+    format!("{digest:x}")
+}
+
+#[cfg(test)]
+fn write_canonical_unfiltered_json(value: &Value, output: &mut String) {
+    match value {
+        Value::Object(object) => {
+            output.push('{');
+            let mut fields = object.iter().collect::<Vec<_>>();
+            fields.sort_unstable_by_key(|(key, _)| key.as_str());
+            for (index, (key, value)) in fields.into_iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                output.push_str(&literal_value(&Value::String(key.clone())));
+                output.push(':');
+                write_canonical_unfiltered_json(value, output);
+            }
+            output.push('}');
+        }
+        Value::Array(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                write_canonical_unfiltered_json(value, output);
+            }
+            output.push(']');
+        }
+        _ => output.push_str(&literal_value(value)),
+    }
+}
+
+#[cfg(test)]
+fn render_registered_payload_fingerprints() -> String {
+    let mut output = String::from(
+        "# lash durable JSON payload schema fingerprints.\n\
+#\n\
+# Generated artifact -- never edit by hand. It is checked only at author time;\n\
+# lash neither stores these hashes in a database nor checks them at store open.\n\
+# Each SHA-256 covers complete schemars JSON canonicalized by recursively sorting\n\
+# object keys, retaining array order, and emitting compact JSON. The filtered\n\
+# schema-shape.txt remains the human-readable explanation of payload changes.\n\
+# Regenerate with LASH_UPDATE_PAYLOAD_SCHEMA_FINGERPRINTS=1 cargo test -p\n\
+# lash-postgres-store committed_fingerprints_match_every_registered_carrier.\n",
+    );
+    for ((backend, carrier, rust_type), fingerprint) in registered_payload_fingerprints() {
+        output.push_str(&format!(
+            "payload-fingerprint {backend} {carrier} {rust_type} sha256:{fingerprint}\n"
+        ));
+    }
+    output
 }
 
 fn write_canonical_json(value: &Value, output: &mut String) {
@@ -537,6 +701,54 @@ mod tests {
     }
 
     #[test]
+    fn unfiltered_fingerprint_is_key_order_independent_but_keeps_annotations() {
+        let first: Value = serde_json::from_str(
+            r#"{"title":"First","properties":{"b":{"type":"string"},"a":{}}}"#,
+        )
+        .expect("valid schema");
+        let reordered: Value = serde_json::from_str(
+            r#"{"properties":{"a":{},"b":{"type":"string"}},"title":"First"}"#,
+        )
+        .expect("valid schema");
+        let annotation_changed: Value = serde_json::from_str(
+            r#"{"properties":{"a":{},"b":{"type":"string"}},"title":"Second"}"#,
+        )
+        .expect("valid schema");
+
+        assert_eq!(
+            unfiltered_schema_fingerprint(&first),
+            unfiltered_schema_fingerprint(&reordered)
+        );
+        assert_ne!(
+            unfiltered_schema_fingerprint(&first),
+            unfiltered_schema_fingerprint(&annotation_changed)
+        );
+    }
+
+    #[test]
+    fn committed_fingerprints_match_every_registered_carrier() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("payload-schema-fingerprints.txt");
+        let committed = std::fs::read_to_string(&path).expect("read fingerprint artifact");
+        let generated = render_registered_payload_fingerprints();
+        if committed != generated
+            && std::env::var("LASH_UPDATE_PAYLOAD_SCHEMA_FINGERPRINTS").as_deref() == Ok("1")
+        {
+            std::fs::write(&path, &generated).expect("rewrite fingerprint artifact");
+            panic!(
+                "regenerated {} -- rerun the test to confirm",
+                path.display()
+            );
+        }
+        assert_eq!(
+            committed,
+            generated,
+            "{} must be regenerated whenever a registered schemars schema changes",
+            path.display()
+        );
+    }
+
+    #[test]
     fn numeric_width_is_part_of_decode_shape() {
         #[derive(JsonSchema)]
         #[allow(dead_code)]
@@ -579,6 +791,24 @@ mod tests {
     }
 
     #[test]
+    fn empty_property_schema_still_records_the_property_name() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "opaque": {}
+            }
+        });
+        let mut entries = BTreeMap::new();
+
+        collect_shape_entries(&schema, "", &mut entries);
+
+        assert_eq!(
+            entries.get("/properties/opaque"),
+            Some(&"schema".to_string())
+        );
+    }
+
+    #[test]
     fn tagged_enum_variant_order_is_not_part_of_decode_shape() {
         #[derive(JsonSchema)]
         #[serde(tag = "type", rename_all = "snake_case")]
@@ -599,6 +829,31 @@ mod tests {
             PayloadShape::of::<Before>().entries,
             PayloadShape::of::<After>().entries
         );
+    }
+
+    #[test]
+    fn distinct_literal_fields_do_not_form_a_shared_discriminator() {
+        let left = serde_json::json!({
+            "type": "object",
+            "properties": { "left_kind": { "const": "left" } },
+            "required": ["left_kind"]
+        });
+        let right = serde_json::json!({
+            "type": "object",
+            "properties": { "right_kind": { "const": "right" } },
+            "required": ["right_kind"]
+        });
+        let before = serde_json::json!({ "oneOf": [left.clone(), right.clone()] });
+        let after = serde_json::json!({ "oneOf": [right, left] });
+        let mut before_entries = BTreeMap::new();
+        let mut after_entries = BTreeMap::new();
+
+        collect_shape_entries(&before, "", &mut before_entries);
+        collect_shape_entries(&after, "", &mut after_entries);
+
+        assert_ne!(before_entries, after_entries);
+        assert!(before_entries.contains_key("/oneOf/0/properties/left_kind/const-value"));
+        assert!(after_entries.contains_key("/oneOf/0/properties/right_kind/const-value"));
     }
 
     #[test]

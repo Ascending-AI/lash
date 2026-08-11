@@ -1,0 +1,11 @@
+# lash durable JSON payload schema fingerprints.
+#
+# Generated artifact -- never edit by hand. It is checked only at author time;
+# lash neither stores these hashes in a database nor checks them at store open.
+# Each SHA-256 covers complete schemars JSON canonicalized by recursively sorting
+# object keys, retaining array order, and emitting compact JSON. The filtered
+# schema-shape.txt remains the human-readable explanation of payload changes.
+# Regenerate with LASH_UPDATE_PAYLOAD_SCHEMA_FINGERPRINTS=1 cargo test -p
+# lash-postgres-store committed_fingerprints_match_every_registered_carrier.
+payload-fingerprint postgres lash_session_meta.meta_json SessionMeta sha256:8a0da3fa01fac44c3785e7d3842c490c931ce91c3af1eec968890313fece9618
+payload-fingerprint sqlite session_meta.relation_json SessionRelation sha256:c8c90e0ab38cc10c5a900af2a561b7d2f87f9e2ef9b4b76b8f5788b7c1152da0

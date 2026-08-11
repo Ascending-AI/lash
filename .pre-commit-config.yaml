@@ -74,7 +74,7 @@ repos:
         name: PostgreSQL payload-shape component version
         language: system
         entry: python3 scripts/check-postgres-payload-shape-version.py --cached
-        files: '^(crates/lash-postgres-store/schema-shape\.txt|crates/lash-postgres-store/src/lib\.rs|crates/lash-sqlite-store/src/schema\.rs)$'
+        files: '^(crates/lash-postgres-store/(?:schema-shape|payload-schema-fingerprints)\.txt|crates/lash-postgres-store/src/lib\.rs|crates/lash-sqlite-store/src/schema\.rs)$'
         pass_filenames: false
 
       # Mirrors CI Lint "Clippy (workspace, all targets)". Warm-cache this is

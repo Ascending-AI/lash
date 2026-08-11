@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require shared JSON payload-shape changes to bump every durable backend."""
+"""Require payload artifact or fingerprint changes to bump every owning backend."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import sys
 
 DEFAULT_RANGE = "origin/main...HEAD"
 ARTIFACT = "crates/lash-postgres-store/schema-shape.txt"
+FINGERPRINT_ARTIFACT = "crates/lash-postgres-store/payload-schema-fingerprints.txt"
 POSTGRES_VERSION_SOURCE = "crates/lash-postgres-store/src/lib.rs"
 SQLITE_VERSION_SOURCE = "crates/lash-sqlite-store/src/schema.rs"
 PAYLOAD_LINE = re.compile(r"^[+-]\s+(?:payload-shape|shape)\s+")
@@ -30,6 +31,15 @@ REGISTRATION_BASELINES = {
     "lash_session_meta.meta_json SessionMeta": (
         "37c1eb8b238a48b82360be2ea054163c0deb9e3902f0bd56d4216964edaebdea"
     )
+}
+# Burned one-time proof for FIG-1283's enrollment of the already-current
+# schemars documents. Only adding this complete, exact set is exempt; a later
+# removal/re-addition or any changed hash still requires the owning bumps.
+FINGERPRINT_REGISTRATION_BASELINES = {
+    "payload-fingerprint postgres lash_session_meta.meta_json SessionMeta "
+    "sha256:8a0da3fa01fac44c3785e7d3842c490c931ce91c3af1eec968890313fece9618",
+    "payload-fingerprint sqlite session_meta.relation_json SessionRelation "
+    "sha256:c8c90e0ab38cc10c5a900af2a561b7d2f87f9e2ef9b4b76b8f5788b7c1152da0",
 }
 
 
@@ -108,6 +118,33 @@ def payload_shape_change(patch: str) -> tuple[bool, bool, bool]:
     return changed, registration_only, sqlite_shared_changed
 
 
+def payload_fingerprint_change(patch: str) -> tuple[set[str], bool]:
+    current_path = ""
+    changed: set[str] = set()
+    added: set[str] = set()
+    removed = False
+    for line in patch.splitlines():
+        if line.startswith("+++ "):
+            current_path = normalized_diff_path(line[4:])
+            continue
+        if current_path != FINGERPRINT_ARTIFACT or line[:1] not in {"+", "-"}:
+            continue
+        content = line[1:].strip()
+        if content.startswith("payload-fingerprint "):
+            _, backend, *_ = content.split()
+            changed.add(backend)
+            if line.startswith("+"):
+                added.add(content)
+            else:
+                removed = True
+    registration_only = (
+        bool(changed)
+        and not removed
+        and added == FINGERPRINT_REGISTRATION_BASELINES
+    )
+    return changed, registration_only
+
+
 def payload_identity(table: str, column: str, rust_type: str) -> str:
     qualified_column = column if "." in column else f"{table}.{column}"
     return f"{qualified_column} {rust_type}"
@@ -138,24 +175,35 @@ def component_version_advanced(patch: str, version_source: str) -> bool:
 
 def validate_patch(patch: str) -> tuple[bool, str]:
     changed, registration_only, sqlite_shared_changed = payload_shape_change(patch)
-    if not changed:
-        return True, "No PostgreSQL payload shapes changed."
-    if registration_only:
+    fingerprint_backends, fingerprint_registration_only = payload_fingerprint_change(patch)
+    required_backends = fingerprint_backends.copy()
+    if changed:
+        required_backends.add("postgres")
+    if sqlite_shared_changed:
+        required_backends.add("sqlite")
+    if not required_backends:
+        return True, "No durable payload shapes or fingerprints changed."
+    if registration_only and not fingerprint_backends:
         return True, "A previously unobserved PostgreSQL payload shape was registered."
+    if fingerprint_registration_only and not changed:
+        return True, "The already-current payload schemas received their initial fingerprints."
     postgres_advanced = component_version_advanced(patch, POSTGRES_VERSION_SOURCE)
     sqlite_advanced = component_version_advanced(patch, SQLITE_VERSION_SOURCE)
-    if postgres_advanced and (not sqlite_shared_changed or sqlite_advanced):
-        if sqlite_shared_changed:
-            return True, "Shared payload-shape change advances both durable backend versions."
-        return True, "PostgreSQL-only payload-shape change advances its component version."
+    postgres_required = "postgres" in required_backends
+    sqlite_required = "sqlite" in required_backends
+    if (not postgres_required or postgres_advanced) and (not sqlite_required or sqlite_advanced):
+        if postgres_required and sqlite_required:
+            return True, "Shared payload contract change advances both durable backend versions."
+        backend = "PostgreSQL" if postgres_required else "SQLite"
+        return True, f"{backend} payload contract change advances its component version."
     missing = []
-    if not postgres_advanced:
+    if postgres_required and not postgres_advanced:
         missing.append(f"PostgreSQL SCHEMA_VERSION in {POSTGRES_VERSION_SOURCE}")
-    if sqlite_shared_changed and not sqlite_advanced:
+    if sqlite_required and not sqlite_advanced:
         missing.append(f"SQLite SCHEMA_VERSION in {SQLITE_VERSION_SOURCE}")
     return (
         False,
-        f"Payload shape changed in {ARTIFACT} without advancing "
+        "Durable payload shape or fingerprint changed without advancing "
         + " and ".join(missing)
         + ".",
     )
