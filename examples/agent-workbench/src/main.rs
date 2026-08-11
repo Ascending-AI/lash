@@ -39,6 +39,14 @@ use lash::{
         TraceLashlangGraph, TraceLashlangGraphStore, TraceLevel, TraceRecord, TraceSink,
     },
 };
+
+#[cfg(test)]
+fn test_core_owner() -> lash::persistence::LeaseOwnerIdentity {
+    lash::persistence::LeaseOwnerIdentity::opaque(
+        "agent-workbench-test-worker",
+        "agent-workbench-test-boot",
+    )
+}
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionObservation, RemoteSessionObservationEvent,

@@ -209,6 +209,7 @@ async fn inherited_child_session_carries_parent_tool_state() {
         test_host_config(),
         crate::RuntimeServices::new(plugin_session),
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime");
@@ -374,6 +375,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
             Arc::clone(&root_store) as Arc<dyn crate::store::RuntimePersistence>,
         ),
         state,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("durable root runtime");
@@ -486,6 +488,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
             session_id: "root".to_string(),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("durable root runtime");
@@ -586,6 +589,7 @@ async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebui
         test_host_config(),
         crate::RuntimeServices::new(plugin_session),
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime");

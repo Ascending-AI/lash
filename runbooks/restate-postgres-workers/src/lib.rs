@@ -1,7 +1,8 @@
 use anyhow::{Context, Result, bail};
 use lash::durability::EffectHost;
 use lash::persistence::{
-    AttachmentStore, LashlangArtifactStore, ProcessExecutionEnvStore, SessionStoreFactory,
+    AttachmentStore, LashlangArtifactStore, LeaseOwnerIdentity, ProcessExecutionEnvStore,
+    SessionStoreFactory,
 };
 use lash::plugins::{
     PluginExtensionContribution, PluginFactory, PluginRegistrar, PluginSessionContext,
@@ -27,7 +28,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_SESSION_ID: &str = "restate-postgres-workers-e2e";
@@ -494,6 +495,8 @@ pub async fn record_terminal_result(pool: &PgPool, response: &TurnResponse) -> R
             streamed_event_count = EXCLUDED.streamed_event_count,
             replay_cursor = EXCLUDED.replay_cursor,
             created_at_ms = EXCLUDED.created_at_ms
+        WHERE NOT lash_e2e_terminal_results.queued_turn_ran
+           OR EXCLUDED.queued_turn_ran
         "#,
     )
     .bind(&response.workflow_id)
@@ -613,6 +616,10 @@ pub struct E2eCoreConfig {
 }
 
 pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
+    let session_execution_owner = LeaseOwnerIdentity::opaque(
+        config.worker_id.clone(),
+        format!("{}:{}", config.worker_id, process_incarnation_id()),
+    );
     let artifact_store =
         Arc::new(config.storage.lashlang_artifact_store()) as Arc<dyn LashlangArtifactStore>;
     let process_env_store =
@@ -682,7 +689,14 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         builder =
             builder.trace_jsonl_path(trace_dir.join(format!("{}.trace.jsonl", config.worker_id)));
     }
-    builder.build().context("build e2e LashCore")
+    builder
+        .build(session_execution_owner)
+        .context("build e2e LashCore")
+}
+
+fn process_incarnation_id() -> &'static str {
+    static INCARNATION_ID: OnceLock<String> = OnceLock::new();
+    INCARNATION_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
 }
 
 pub fn process_registry_from_storage(

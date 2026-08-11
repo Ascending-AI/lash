@@ -7,7 +7,7 @@ use lash::observe::SessionResume;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
-    ExecutionScope, LeaseOwnerIdentity, ProcessEventAppendRequest, facade_support::TurnOutcome,
+    ExecutionScope, ProcessEventAppendRequest, facade_support::TurnOutcome,
     facade_support::TurnStop,
 };
 use lash_postgres_store::PostgresStorage;
@@ -155,14 +155,8 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session_execution_owner_id = format!("E2eTurnWorkflow/{}/run", request.workflow_id);
-        let session_execution_owner = LeaseOwnerIdentity::opaque(
-            session_execution_owner_id.clone(),
-            format!("{session_execution_owner_id}/incarnation"),
-        );
         let session = core
             .session(DEFAULT_SESSION_ID)
-            .session_execution_owner(session_execution_owner)
             .open()
             .await
             .map_err(terminal_error)?;
@@ -176,16 +170,32 @@ impl AppState {
             "queued",
             Some(cursor_text.clone()),
         );
-        let turn = session
-            .queued_turn()
-            .drain_id(request.workflow_id.clone())
-            .effects(controller)
-            .stream_to(&sink)
-            .await
-            .map_err(terminal_error)?;
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let turn = loop {
+            let turn = session
+                .queued_turn()
+                .drain_id(request.workflow_id.clone())
+                .effects(controller)
+                .stream_to(&sink)
+                .await
+                .map_err(terminal_error)?;
+            if turn.is_some()
+                || session
+                    .queued_work()
+                    .await
+                    .map_err(terminal_error)?
+                    .is_empty()
+                || Instant::now() >= deadline
+            {
+                break turn;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        };
+        let streamed_final_value = sink.final_values().await.into_iter().last();
         let final_value = turn
             .as_ref()
             .and_then(|turn| turn.final_value().cloned())
+            .or(streamed_final_value)
             .unwrap_or(serde_json::Value::Null);
         self.finish_response(
             &request,
@@ -203,14 +213,8 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session_execution_owner_id = format!("E2eTurnWorkflow/{}/run", request.workflow_id);
-        let session_execution_owner = LeaseOwnerIdentity::opaque(
-            session_execution_owner_id.clone(),
-            format!("{session_execution_owner_id}/incarnation"),
-        );
         let session = core
             .session(turn_session_id(&request.workflow_id))
-            .session_execution_owner(session_execution_owner)
             .open()
             .await
             .map_err(terminal_error)?;
@@ -305,7 +309,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = open_e2e_session(core, &request.workflow_id).await?;
+        let session = open_e2e_session(core).await?;
         let first = session
             .enqueue(TurnInput::text(format!(
                 "Run queued frame switch. workflow_id={} frame_switch_queued_start=true",
@@ -334,13 +338,13 @@ impl AppState {
                 .await
                 .map_err(anyhow::Error::from)
         });
-        let first_turn = session
-            .queued_turn()
-            .drain_id(format!("{}:first-drain", request.workflow_id))
-            .effects(controller)
-            .run()
-            .await
-            .map_err(terminal_error)?
+        let first_turn = self
+            .run_queued_turn_with_restate(
+                &session,
+                controller,
+                format!("{}:first-drain", request.workflow_id),
+            )
+            .await?
             .ok_or_else(|| terminal_error("first queued frame-switch turn did not run"))?;
         let first_value = first_turn.final_value().cloned().ok_or_else(|| {
             terminal_error("queued frame-switch follow-on produced no final value")
@@ -359,13 +363,13 @@ impl AppState {
         let second_pending_before_drain = pending_after_follow
             .iter()
             .any(|input| input.input_id == second.input_id);
-        let second_turn = session
-            .queued_turn()
-            .drain_id(format!("{}:second-drain", request.workflow_id))
-            .effects(controller)
-            .run()
-            .await
-            .map_err(terminal_error)?
+        let second_turn = self
+            .run_queued_turn_with_restate(
+                &session,
+                controller,
+                format!("{}:second-drain", request.workflow_id),
+            )
+            .await?
             .ok_or_else(|| terminal_error("second queued turn did not run"))?;
         let second_value = second_turn
             .final_value()
@@ -406,7 +410,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = open_e2e_session(core, &request.workflow_id).await?;
+        let session = open_e2e_session(core).await?;
         session
             .enqueue(TurnInput::text(format!(
                 "Run cancellable frame switch. workflow_id={} frame_switch_cancel_start=true",
@@ -426,13 +430,13 @@ impl AppState {
                     .cancel_running_turns_with_origin(Some("scripted-e2e-worker".to_string())),
             )
         });
-        let cancelled = session
-            .queued_turn()
-            .drain_id(format!("{}:cancel-drain", request.workflow_id))
-            .effects(controller)
-            .run()
-            .await
-            .map_err(terminal_error)?
+        let cancelled = self
+            .run_queued_turn_with_restate(
+                &session,
+                controller,
+                format!("{}:cancel-drain", request.workflow_id),
+            )
+            .await?
             .ok_or_else(|| terminal_error("cancellable queued turn did not run"))?;
         let cancel_count = canceller
             .await
@@ -480,6 +484,35 @@ impl AppState {
             true,
         )
         .await
+    }
+
+    async fn run_queued_turn_with_restate(
+        &self,
+        session: &lash::LashSession,
+        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+        drain_id: String,
+    ) -> HandlerResult<Option<lash::TurnOutput>> {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let turn = session
+                .queued_turn()
+                .drain_id(drain_id.clone())
+                .effects(controller)
+                .run()
+                .await
+                .map_err(terminal_error)?;
+            if turn.is_some()
+                || session
+                    .queued_work()
+                    .await
+                    .map_err(terminal_error)?
+                    .is_empty()
+                || Instant::now() >= deadline
+            {
+                return Ok(turn);
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
     }
 
     async fn finish_response(
@@ -746,17 +779,9 @@ fn prompt_for_request(request: &TurnRequest) -> String {
     }
 }
 
-async fn open_e2e_session(
-    core: &lash::LashCore,
-    workflow_id: &str,
-) -> HandlerResult<lash::LashSession> {
-    let owner_id = format!("E2eTurnWorkflow/{workflow_id}/run");
+async fn open_e2e_session(core: &lash::LashCore) -> HandlerResult<lash::LashSession> {
     Ok(core
         .session(DEFAULT_SESSION_ID)
-        .session_execution_owner(LeaseOwnerIdentity::opaque(
-            owner_id.clone(),
-            format!("{owner_id}/incarnation"),
-        ))
         .open()
         .await
         .map_err(terminal_error)?)

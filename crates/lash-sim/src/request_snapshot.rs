@@ -42,7 +42,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         )]))
         .trace_jsonl_path(&trace_path)
         .trace_level(TraceLevel::Extended)
-        .build()
+        .build(crate::sim_process_owner())
         .expect("runtime core");
     let session = core
         .session("history-request-snapshot")

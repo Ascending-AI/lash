@@ -529,6 +529,7 @@ pub(crate) async fn standard_runtime_with_transport(transport: TestProvider) -> 
         test_host_config(),
         crate::RuntimeServices::new(plugin_session_with_tools("root", tools)),
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime");
@@ -632,6 +633,7 @@ pub(crate) async fn runtime_with_plugins_and_tools_and_host(
         host,
         crate::RuntimeServices::new(plugin_session),
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime");
@@ -661,6 +663,7 @@ pub(crate) async fn runtime_with_plugins_and_tools_and_host_and_store(
         host,
         services,
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime");
@@ -906,6 +909,7 @@ pub(crate) async fn standard_runtime_with_transport_and_host(
         host,
         crate::RuntimeServices::new(plugin_session_with_tools("root", tools)),
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime");

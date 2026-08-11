@@ -218,7 +218,10 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "embed-plugins-test-worker",
+            "embed-plugins-test-boot",
+        ))
         .expect("core")
 }
 

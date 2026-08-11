@@ -19,7 +19,7 @@ async fn standard_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
 
     // A plain `open()` runs the session in standard mode.
     let session = core.session("chat-1").open().await?;
@@ -48,7 +48,7 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
 
     let session = core.session("task-1").open().await?;
     // docs:end:rlm-core

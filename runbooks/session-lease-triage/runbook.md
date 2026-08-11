@@ -153,10 +153,9 @@ the loser was alive, so the run silently substituted the easy case for the one u
 ## Phase 3 — Livelock: sustained misrouting, repeated rejections
 
 **Setup.** `04-commit-cas-livelock.jsonl`. Three rounds of the misconfiguration the docs
-name: two writers are handed the same session under one explicit
-`session_execution_owner`, so the second reenters the first's lease instead of being
-rejected as busy, and both run a turn at once. Each round is a fresh pair, which is what a
-retry-on-conflict host does after losing.
+name: two writers are handed the same session under one explicit core worker identity. The
+busy claimant remains lane-less, both run a turn at once, and the head CAS alone selects the
+winner. Each round is a fresh pair, which is what a retry-on-conflict host does after losing.
 
 **Action.** Read `rounds_attempted`, `rounds_with_a_rejection`, the per-round records, and
 every `commit_cas_rejected` event.

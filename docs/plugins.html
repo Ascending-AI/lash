@@ -92,7 +92,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .configure_plugins(|plugins| {
         plugins.push(Arc::new(AppPluginFactory) as Arc&lt;dyn PluginFactory&gt;);
     })
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
       <p>Use <code>.plugin(...)</code> to append one factory, <code>.plugins(...)</code> to replace the full stack, and <code>.configure_plugins(...)</code> to mutate the current stack.</p>
     </div>
 

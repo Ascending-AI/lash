@@ -30,7 +30,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .build()
+        .build(crate::test_core_owner())
     {
         Ok(_) => panic!("builder must not invent a commit budget"),
         Err(error) => error,
@@ -63,6 +63,6 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .build();
-    assert!(configured.is_ok());
+        .build(crate::test_core_owner());
+    assert!(configured.is_ok(), "an explicit commit budget should build");
 }

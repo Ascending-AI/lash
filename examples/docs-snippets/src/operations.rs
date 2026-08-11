@@ -17,6 +17,7 @@ fn configure_lease_timings(
     store_factory: Arc<dyn SessionStoreFactory>,
     attachment_store: Arc<dyn AttachmentStore>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    session_execution_owner: LeaseOwnerIdentity,
 ) -> lash::Result<LashCore> {
     // docs:start:lease-timings
     // One timing decision governs the three durable lease lanes:
@@ -46,27 +47,23 @@ fn configure_lease_timings(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .lease_timings(lease_timings) // omit to keep the 30s ttl / 10s renew default
-        .build()?;
+        .build(session_execution_owner)?;
     // docs:end:lease-timings
     Ok(core)
 }
 
-async fn open_with_stable_owner(core: &LashCore, chat_id: &str) -> lash::Result<LashSession> {
+fn build_with_stable_owner(builder: lash::LashCoreBuilder) -> lash::Result<LashCore> {
     // docs:start:worker-identity
-    // A stable owner id per replica plus a per-boot incarnation. A crashed
-    // holder remains busy until the lease TTL expires.
+    // Stable per worker or process, never per turn. Change only the
+    // incarnation when this process boots.
     let owner = LeaseOwnerIdentity::opaque(
         std::env::var("WORKER_ID").unwrap_or_else(|_| "worker-1".to_string()),
         std::env::var("AGENT_SERVICE_INCARNATION").unwrap_or_else(|_| boot_incarnation()),
     );
 
-    let session = core
-        .session(chat_id)
-        .session_execution_owner(owner)
-        .open()
-        .await?;
+    let core = builder.build(owner)?;
     // docs:end:worker-identity
-    Ok(session)
+    Ok(core)
 }
 
 fn boot_incarnation() -> String {
@@ -234,6 +231,7 @@ mod tests {
             Arc::new(lash::persistence::InMemorySessionStoreFactory::new()),
             Arc::new(lash::persistence::InMemoryAttachmentStore::new()),
             Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::new()),
+            crate::example_process_owner(),
         )
         .expect("lease-timing snippet must build");
     }

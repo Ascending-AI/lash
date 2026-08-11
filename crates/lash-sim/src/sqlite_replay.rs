@@ -1011,7 +1011,7 @@ async fn runtime_core_for_scripts(
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .provider(provider_handle)
         .model(model)
-        .build()
+        .build(crate::sim_process_owner())
         .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;
     Ok((core, transport, provider_kind))
 }

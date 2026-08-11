@@ -22,7 +22,7 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
         ))
         .provider(provider_handle)
         .model(model)
-        .build()
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
         .session("sim-runtime-session")
@@ -141,7 +141,7 @@ pub(super) async fn run_live_turn_facts(
         ))
         .provider(provider_handle)
         .model(model)
-        .build()
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session_id = format!("sim-live-failure-{provider_kind}-{offered_prose_deltas}");
     let session = core
@@ -300,7 +300,7 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         )
         .tools(Arc::new(PendingToolProvider::new(key_tx)) as Arc<dyn lash_core::ToolProvider>)
-        .build()
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
         .session("sim-pending-tool-session")
@@ -535,7 +535,7 @@ pub(super) async fn prove_final_value_semantic_channel()
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         )
-        .build()
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
         .session("sim-final-value-session")

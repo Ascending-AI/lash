@@ -824,7 +824,7 @@ async fn turn_run_uses_configured_inline_effect_host_without_explicit_effects() 
         )))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("inline-default-effect-host").open().await?;
 
     let output = session.turn(TurnInput::text("inline")).run().await?;
@@ -858,7 +858,7 @@ async fn durable_configured_effect_host_requires_explicit_handler_effects() -> R
         .effect_host(Arc::new(DurableNoopEffectHost))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-default-effect-host").open().await?;
 
     let err = session
@@ -884,7 +884,7 @@ async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
         )))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("stable-turn-id").open().await?;
 
     session
@@ -956,7 +956,7 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-turn-run").open().await?;
     session
         .enqueue(TurnInput::text("queued work"))
@@ -1843,7 +1843,7 @@ async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("idle-input-application").open().await?;
     let cursor = session.observe().current_remote_observation().cursor;
     let empty_admission = session
@@ -1931,7 +1931,7 @@ async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Res
             ),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-input-application-gap").open().await?;
     let stale_cursor = session.observe().current_remote_observation().cursor;
     let admission = session
@@ -1985,7 +1985,7 @@ async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> R
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-explicit-effects").open().await?;
     session
         .enqueue(TurnInput::text("queued handler"))
@@ -2248,7 +2248,7 @@ fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Result<()> 
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-provider-retry-prose").open().await?;
 
         let first = session
@@ -2384,7 +2384,7 @@ fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-natural-prose-single-copy").open().await?;
 
         let first = session
@@ -2529,7 +2529,7 @@ async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_r
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(retrying_visible_stream_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("retry-visible-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
     let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
@@ -2762,7 +2762,7 @@ async fn session_observation_remote_recovery_stream_yields_dto_gap() -> Result<(
                 },
             ),
         ))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("session-observation-remote-gap")
         .open()
@@ -2806,7 +2806,7 @@ async fn session_observation_recovery_stream_yields_gap_for_trimmed_cursor() -> 
                 },
             ),
         ))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("session-observation-recovered-gap")
         .open()
@@ -2980,7 +2980,7 @@ async fn recoverable_chat_snapshot_handoff_never_loses_concurrent_terminal_commi
         .provider(mock_provider())
         .model(mock_model_spec())
         .live_replay_store(replay_store.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("recoverable-chat-atomic-handoff")
         .open()
@@ -3083,7 +3083,7 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
             .provider(mock_provider())
             .model(mock_model_spec())
             .store_factory(store_factory.clone())
-            .build()?;
+            .build(crate::testing::runtime_lease_owner())?;
     bootstrap_core
         .session(session_id)
         .open()
@@ -3100,7 +3100,7 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
             .live_replay_store(Arc::new(
                 lash_core::facade_support::InMemoryLiveReplayStore::default(),
             ))
-            .build()?;
+            .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
     first_session.observe().runtime.record_turn_activity(
@@ -3129,7 +3129,7 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
             .live_replay_store(Arc::new(
                 lash_core::facade_support::InMemoryLiveReplayStore::default(),
             ))
-            .build()?;
+            .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     let restarted_at = second_session.observe().recoverable_chat_snapshot().cursor;
     let mut retained_applied_ids = second_session
@@ -3213,7 +3213,7 @@ async fn recoverable_chat_conformance_forwards_trimmed_gap_and_continues() -> Re
                 },
             ),
         ))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("recoverable-chat-gap").open().await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     session
@@ -3283,7 +3283,7 @@ async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("recoverable-chat-disconnect").open().await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     let stream = session.observe().subscribe_recoverable_chat(cursor);
@@ -3342,7 +3342,7 @@ async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(semantic_group_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("turn-stream-last-group").open().await?;
     let mut stream = session.turn(TurnInput::text("stream groups")).stream()?;
 
@@ -3364,7 +3364,7 @@ async fn turn_run_collects_activities_and_returns_committed_assistant_prose() ->
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(semantic_group_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("turn-run-last-group").open().await?;
 
     let collected = session.turn(TurnInput::text("run groups")).run().await?;
@@ -3386,7 +3386,7 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(retry_once_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("retry-status").open().await?;
     let events = RecordingEvents::default();
 
@@ -3444,7 +3444,7 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-input").open().await?;
     let events = Arc::new(RecordingEvents::default());
     let turn_session = session.clone();
@@ -3570,7 +3570,7 @@ async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let session = core.session("cancel-inflight").open().await?;
     let stopper = session.clone();
@@ -3662,7 +3662,7 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
             builds: Arc::clone(&builds),
         }))
         .queued_work_execution_concurrency(1)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-work-live-lease").open().await?;
     let entered = first_entered.notified();
     let foreground = session.turn(TurnInput::text("foreground turn")).stream()?;
@@ -3687,9 +3687,21 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
     );
 
     release_first.add_permits(1);
-    tokio::time::timeout(std::time::Duration::from_secs(2), foreground.finish())
-        .await
-        .expect("foreground turn completes after release")?;
+    let foreground_result =
+        tokio::time::timeout(std::time::Duration::from_secs(2), foreground.finish())
+            .await
+            .expect("foreground turn completes after release");
+    match foreground_result {
+        Ok(_) => {}
+        Err(EmbedError::Runtime(error)) => {
+            assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
+            assert!(
+                error.message.contains("store head revision conflict"),
+                "the only accepted concurrent-writer loss is head CAS, got: {error}"
+            );
+        }
+        Err(error) => return Err(error),
+    }
     Ok(())
 }
 
@@ -3741,7 +3753,7 @@ async fn create_only_factory_returns_to_idle_after_draining_unknown_claimability
             builds: Arc::clone(&builds),
         }))
         .queued_work_execution_concurrency(1)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let baseline_builds = builds.load(Ordering::SeqCst);
 
     core.enqueue_turn_input(
@@ -3863,7 +3875,7 @@ async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
         .plugin(Arc::new(QueuedWorkHydrationProbeFactory {
             builds: Arc::clone(&builds),
         }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     assert_eq!(builds.load(Ordering::SeqCst), 1, "build-time validation");
 
     let entered = first_entered.notified();
@@ -3963,7 +3975,7 @@ async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let session = core.session("cancel-lock-queue").open().await?;
 
@@ -3999,7 +4011,7 @@ async fn cancel_running_turns_does_not_cross_separately_opened_handles() -> Resu
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let handle_a = core.session("cancel-scope").open().await?;
     let handle_b = core.session("cancel-scope").open().await?;
@@ -4036,7 +4048,7 @@ async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let session = core.session("cancel-queued-drain").open().await?;
     session
@@ -4108,7 +4120,7 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("active-steer-interrupt-cancel").open().await?;
     let active_turn_id = "active-steer-interrupt-turn";
     let turn_session = session.clone();
@@ -4253,7 +4265,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("accepted-active-steer-interrupt")
         .open()
@@ -4373,7 +4385,7 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-active-input-next-iteration")
             .open()
@@ -4454,7 +4466,7 @@ async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let session = core.session("await-queued").open().await?;
     let receipt = session
@@ -4491,7 +4503,7 @@ async fn await_queued_work_batch_resolves_immediately_for_unknown_batch() -> Res
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let session = core.session("await-unknown").open().await?;
     tokio::time::timeout(
@@ -4570,7 +4582,7 @@ async fn core_catalog_and_actual_turn_resolve_the_identical_contract() -> Result
         .provider(tool_roundtrip_provider())
         .model(mock_model_spec())
         .tools(Arc::new(tools.clone()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let core_contract = core
         .tool_catalog()
         .resolve_contract("app_lookup")
@@ -4672,7 +4684,7 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("fanout-tool-events").open().await?;
 
     let output = session
@@ -4719,7 +4731,7 @@ fn turn_run_batch_tool_runs_every_call_concurrently_and_preserves_order() -> Res
                     lash_core::facade_support::InMemorySessionStoreFactory::new(),
                 ))
                 .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-                .build()?;
+                .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("runtime-batch-tool-order").open().await?;
 
         let output = session.turn(TurnInput::text("run batch")).run().await?;
@@ -4790,7 +4802,7 @@ fn batch_child_tool_calls_carry_parent_call_id_linkage() -> Result<()> {
                         lash_core::facade_support::InMemorySessionStoreFactory::new(),
                     ))
                     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-                    .build()?;
+                    .build(crate::testing::runtime_lease_owner())?;
             let session = core.session("batch-child-parent-linkage").open().await?;
 
             let output = session.turn(TurnInput::text("run batch")).run().await?;
@@ -4878,7 +4890,7 @@ async fn pending_host_tool_completion_parks_turn_and_resolves_through_core_ingre
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pending-host-tool").open().await?;
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
@@ -4996,7 +5008,7 @@ async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Res
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("tool-events").open().await?;
     let events = RecordingEvents::default();
 
@@ -5086,7 +5098,7 @@ fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Res
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-streamed-raw-final-cell").open().await?;
         let events = Arc::new(RecordingEvents::default());
 
@@ -5156,7 +5168,7 @@ fn rlm_abort_drain_core(provider: ProviderHandle) -> Result<LashCore> {
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-    .build()
+    .build(crate::testing::runtime_lease_owner())
 }
 
 #[cfg(feature = "rlm")]
@@ -5313,7 +5325,7 @@ finish "done""#,
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-live-tool-events").open().await?;
     let events = Arc::new(RecordingEvents::default());
 
@@ -5466,7 +5478,7 @@ finish "recovered""#,
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-recovered-tool-failure").open().await?;
 
         let result = session
@@ -5513,7 +5525,7 @@ finish "done""#,
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-aggregate-tool-ids").open().await?;
     let events = Arc::new(RecordingEvents::default());
 
@@ -5595,7 +5607,7 @@ finish "done""#,
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
     .trace_jsonl_path(trace_path.clone())
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-tool-trace").open().await?;
 
     let result = session.turn(TurnInput::text("use tool")).run().await?;
@@ -5725,7 +5737,7 @@ fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue() -> Resul
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .trace_jsonl_path(trace_path.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-native-tool-contract").open().await?;
 
         let turn = session
@@ -5809,7 +5821,7 @@ async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inner() -> Resu
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-pending-host-tool").open().await?;
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
@@ -5897,7 +5909,7 @@ finish result"#,
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-pending-host-tool").open().await?;
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
@@ -5975,7 +5987,7 @@ async fn continue_as_observation_emits_frame_switch_then_commit_inner() -> Resul
     .store_factory(Arc::new(
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("continue-as-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
@@ -6033,7 +6045,7 @@ async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_turn_inner()
         max_appends: 1,
     }))
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
     let first = session
@@ -6091,7 +6103,7 @@ async fn probe_inprocess_continue_as_survives_post_commit_graph_append_inner() -
         max_appends: 1,
     }))
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
     let output = session
@@ -6140,7 +6152,7 @@ async fn durable_queued_continue_as_survives_post_commit_graph_append_inner() ->
         max_appends: 1,
     }))
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
         .enqueue(TurnInput::text("switch frames from queued work"))
@@ -6239,7 +6251,7 @@ finish { established: control.total }"#,
     .model(mock_model_spec())
     .store_factory(store_factory)
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let established = session
         .turn(TurnInput::text(
@@ -6314,7 +6326,7 @@ fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-leaf-append-stale-rollback")
             .open()
@@ -6478,7 +6490,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .tools(Arc::new(FrameStateDeferredTools))
     .plugin(Arc::new(StopAfterFrameSwitchCommitFactory))
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
 
     let mut initial_execution_state = first_session
@@ -6612,7 +6624,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .model(mock_model_spec())
     .store_factory(sqlite_store_factory)
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     let execution_state = reopened_session
         .admin()
@@ -6826,7 +6838,7 @@ async fn durable_queued_chained_continue_as_survives_nested_commit_handoff_inner
         max_appends: 2,
     }))
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
         .enqueue(TurnInput::text("start chained frame handoff"))
@@ -6884,7 +6896,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let mut input = TurnInput::text("switch frames");
     input.trace_turn_id = Some(root_turn_id.to_string());
@@ -6986,7 +6998,7 @@ finish value"#,
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-control-tool").open().await?;
     let turn_session = session.clone();
     let scoped_effect_controller = turn_scope(&turn_session.session_id());
@@ -7060,7 +7072,7 @@ finish value"#,
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-lashlang-graph-store").open().await?;
     let turn_session = session.clone();
     let scoped_effect_controller = turn_scope(&turn_session.session_id());
@@ -7114,7 +7126,7 @@ async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
     ))
     .provider(queued_text_provider(vec!["done in prose"]))
     .model(mock_model_spec())
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-prose-completion").open().await?;
     let events = Arc::new(RecordingEvents::default());
 
@@ -7156,7 +7168,7 @@ async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
         r#"finish "done via finish""#,
     )]))
     .model(mock_model_spec())
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("rlm-finish-required-completion")
         .open()
@@ -7202,7 +7214,7 @@ async fn rlm_failed_code_emits_failed_code_completion_without_fake_tools() -> Re
     ]))
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-failed-code-event").open().await?;
     let events = RecordingEvents::default();
 

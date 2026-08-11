@@ -1385,7 +1385,10 @@ impl BackendRunner {
             .provider(provider)
             .model(model)
             .clock(Arc::clone(&self.clock))
-            .build()
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "cross-backend-differential-test",
+                "cross-backend-differential-test-boot",
+            ))
             .expect("build differential lifecycle core")
     }
     async fn close_reopened_postgres_pool(&mut self) {

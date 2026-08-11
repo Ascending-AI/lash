@@ -25,6 +25,10 @@ use lash_core::{
     ToolFailureClass, ToolManifest, ToolProvider, ToolResult, ToolRetryDisposition,
     TurnDriverConfig, TurnDriverPreamble, TurnInput,
 };
+
+fn test_runtime_owner() -> lash_core::LeaseOwnerIdentity {
+    lash_core::LeaseOwnerIdentity::opaque("panic-test-worker", "panic-test-boot")
+}
 use lash_sansio::sync::MutexExt;
 use tokio_util::sync::CancellationToken;
 
@@ -509,6 +513,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            test_runtime_owner(),
         )
         .with_session_id("tool-panic-session")
         .with_policy(policy("scripted-panic-containment"))
@@ -574,6 +579,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
         LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            test_runtime_owner(),
         )
         .with_session_id("parent-session")
         .with_policy(policy("scripted-panic-containment"))
@@ -644,6 +650,7 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            test_runtime_owner(),
         )
         .with_session_id("provider-panic-session")
         .with_policy(policy("panic-once-provider"))
@@ -709,6 +716,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            test_runtime_owner(),
         )
         .with_session_id("quiet-provider-record-session")
         .with_policy(policy("panic-provider"))
@@ -745,6 +753,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            test_runtime_owner(),
         )
         .with_session_id("loud-provider-record-session")
         .with_policy(policy("panic-provider"))
@@ -793,6 +802,7 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
         LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            test_runtime_owner(),
         )
         .with_session_id("loud-provider-panic-session")
         .with_policy(policy("panic-provider"))

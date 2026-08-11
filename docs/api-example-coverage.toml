@@ -1480,7 +1480,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::shutdown"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/slack-clone/src/bot.rs:195#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
+usage = "examples/slack-clone/src/bot.rs:193#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
 assertion = "examples/slack-clone/tests/mcp.rs:451#!process_exists(pid),"
 
 [[api]]
@@ -2351,7 +2351,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::ModelSpec", "lash_core::ModelSpec"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/state.rs:8#use lash::{LashCore, LashSession, ModelSpec, TurnWorkDriver};"
+usage = "examples/agent-service/src/state.rs:7#use lash::{LashCore, LashSession, ModelSpec, TurnWorkDriver};"
 
 [[api]]
 symbol = "lash::ModelSpec::builder"
@@ -3629,15 +3629,6 @@ aliases = ["lash::prelude::SessionBuilder::provider"]
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::SessionBuilder::provider to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::SessionBuilder::session_execution_owner"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash::prelude::SessionBuilder::session_execution_owner"]
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "The current example use of lash::SessionBuilder::session_execution_owner is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
 symbol = "lash::SessionBuilder::session_spec"
@@ -12487,7 +12478,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LeaseOwnerIdentity"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/state.rs:24#session_owner: LeaseOwnerIdentity,"
+usage = "examples/slack-clone/src/bot/runtime.rs:93#pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {"
 
 [[api]]
 symbol = "lash::persistence::LeaseOwnerIdentity::incarnation_id"
@@ -15780,7 +15771,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionNodeRecord::message_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/slack-clone/src/bot/threads.rs:296#node.message_id()"
+usage = "examples/slack-clone/src/bot/threads.rs:290#node.message_id()"
 assertion = "examples/slack-clone/src/tests/bot_events.rs:894#!requests[2].contains(\"later channel turn\"),"
 
 [[api]]
@@ -43845,14 +43836,6 @@ disposition = "unused-add"
 reason = "Add lash::runtime::LashRuntime::set_provider to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::runtime::LashRuntime::set_runtime_lease_owner"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::runtime::LashRuntime::set_runtime_lease_owner to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::runtime::LashRuntime::snapshot_execution_state"
 kind = "function"
 availability = "default+all-features"
@@ -57206,7 +57189,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:486#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:488#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:275#assert_eq!(call_usage.len(), 1);"
 
 [[api]]
@@ -57245,7 +57228,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted::usage"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:486#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:488#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:275#assert_eq!(call_usage.len(), 1);"
 
 [[api]]

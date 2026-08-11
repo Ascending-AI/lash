@@ -77,7 +77,7 @@ let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;
+    .build(crate::example_process_owner())?;
 
 // A plain `open()` runs the session in standard mode.
 let session = core.session("chat-1").open().await?;</code></pre>
@@ -122,7 +122,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;
+    .build(crate::example_process_owner())?;
 
 let session = core.session("task-1").open().await?;</code></pre>
       <p>The <a href="./rlm.html">RLM protocol</a> page covers prompt construction, the execution loop, <code>finish</code> semantics, and failure modes; the <a href="./architecture/lashlang.html">Lashlang language</a> reference covers the syntax the model writes.</p>

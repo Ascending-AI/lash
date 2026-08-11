@@ -370,7 +370,9 @@ fn attachment_usage_gate_core(
     if let Some(trace_sink) = trace_sink {
         builder = builder.trace_sink(trace_sink).trace_level(TraceLevel::Extended);
     }
-    builder.build().expect("build attachment/usage gate core")
+    builder
+        .build(crate::test_core_owner())
+        .expect("build attachment/usage gate core")
 }
 
 fn attachment_usage_gate_state(

@@ -226,7 +226,10 @@ async fn async_main() -> AnyhowResult<()> {
         .queued_work_driver(queued_work_driver.clone())
         .advanced()
         .runtime_host_config(runtime_host_config)
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "agent-workbench",
+            process_incarnation_id(),
+        ))
         .context("build Lash core")?;
     let process_worker = lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config()
@@ -342,6 +345,13 @@ async fn async_main() -> AnyhowResult<()> {
         .context("bind listener")?;
     axum::serve(listener, app).await.context("serve")?;
     Ok(())
+}
+
+fn process_incarnation_id() -> &'static str {
+    static PROCESS_INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PROCESS_INCARNATION
+        .get_or_init(|| uuid::Uuid::new_v4().to_string())
+        .as_str()
 }
 
 fn validate_provider_credentials(

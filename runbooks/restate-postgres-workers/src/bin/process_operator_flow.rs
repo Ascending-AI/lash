@@ -346,7 +346,10 @@ fn core(
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "process-operator-flow-worker",
+            format!("process-operator-flow-worker:{}", std::process::id()),
+        ))
         .context("build process operator-flow core")
 }
 

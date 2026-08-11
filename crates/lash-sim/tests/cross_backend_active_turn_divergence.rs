@@ -73,7 +73,10 @@ async fn build_core_with_effect_host(
         .store_factory(store_factory)
         .provider(provider_handle)
         .model(model)
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "cross-backend-active-turn-test",
+            "cross-backend-active-turn-test-boot",
+        ))
         .expect("core");
     (core, transport)
 }

@@ -157,7 +157,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;
+    .build(crate::example_process_owner())?;
 
 let session = core.session("chat-123").open().await?;
 let result = session
@@ -234,7 +234,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .configure_plugins(|plugins| {
         plugins.push(Arc::new(AppPluginFactory) as Arc&lt;dyn PluginFactory&gt;);
     })
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
             </article>
             <article class="panel">
               <h3>Explicit stacks</h3>
@@ -263,7 +263,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
             </article>
           </div>
           <p><code>.plugin(...)</code> appends; <code>.plugins(...)</code> replaces; <code>.configure_plugins(...)</code> mutates in place.</p>

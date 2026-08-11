@@ -44,7 +44,7 @@ mod turn_control_timeout_tests {
             .store_factory(Arc::clone(&store_factory))
             .process_registry(Arc::clone(&process_registry))
             .disable_queued_work_driver()
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -280,7 +280,7 @@ mod turn_control_timeout_tests {
             .model(model)
             .store_factory(Arc::clone(&store_factory))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -457,7 +457,7 @@ finish (await handle)?
             .model(model)
             .store_factory(Arc::clone(&store_factory))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build Stop-over-process core");
         let process_observer = core
             .processes()

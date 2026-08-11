@@ -1343,6 +1343,7 @@ async fn property_runtime(
         )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(store)),
         state,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .map_err(|error| error.to_string())

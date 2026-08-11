@@ -71,7 +71,7 @@ async fn service_core(
         .trigger_store(trigger_store)
         .trace_sink(trace_sink)
         .trace_level(TraceLevel::Extended)
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:service-core
     Ok(())
 }

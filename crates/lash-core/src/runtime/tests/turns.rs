@@ -953,6 +953,7 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
         test_host_config(),
         crate::PersistentRuntimeServices::new(plugins, runtime_store),
         durable,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("cold reopen restores the last committed execution state");
@@ -1079,6 +1080,7 @@ async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_s
         test_host_config(),
         crate::PersistentRuntimeServices::new(plugins, runtime_store),
         durable,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("cold reopen restores the still-live frame execution state");
@@ -1554,6 +1556,7 @@ async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
         test_host_config(),
         crate::RuntimeServices::new(plugins),
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("frame child runtime");

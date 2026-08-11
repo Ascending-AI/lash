@@ -61,7 +61,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
           <pre data-lang="rust" data-snippet="embedding_advanced#sqlite-core"><code>use std::sync::Arc;
 
 use lash::persistence::FileAttachmentStore;
@@ -89,7 +89,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
         </div>
 
         <div class="section" id="session-lifecycle">
@@ -144,7 +144,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
           <aside class="gotcha">
             <strong>Gotcha</strong>
             <p>A process registry enables the generic process admin plane, and the configured <code>ProcessWorkDriver</code> owns execution and waits. In RLM, the Lashlang runtime maps that plane into process/lifecycle abilities when the matching artifact store and process engine are configured. The registry does not make in-flight effects durable by itself; durable replay still comes from the active <code>EffectHost</code> and scoped controller.</p>
@@ -267,7 +267,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .plugin(Arc::new(subagents) as Arc&lt;dyn PluginFactory&gt;)
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
           <p>Capabilities return <code>SessionSpec</code> overlays. <code>StaticCapability</code> pins exact child authority; <code>TierCapability</code> backs the built-in <code>explore</code> and <code>peer</code> tiers. Do not construct <code>SessionPolicy</code> directly; it's the resolved runtime artifact.</p>
           <h3>Built-in tiers</h3>
           <div class="two-col">
@@ -365,7 +365,7 @@ lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .plugin(std::sync::Arc::new(mcp))
-    .build()
+    .build(crate::example_process_owner())
 }</code></pre>
           <p>Tools appear as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> with original schemas preserved. <code>attach_server</code> / <code>detach_server</code> mutate the live pool without rebuilding the core.</p>
           <h3>Server-to-client requests: host owns policy</h3>
@@ -429,7 +429,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .turn_budget(lash::TurnBudget::bounded(50))
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
           <p>Streaming is semantic: <code>TurnBuilder::stream</code> emits <code>TurnActivity</code> and resolves to a <code>TurnResult</code>. Raw runtime telemetry belongs in tracing, not the app surface.</p>
         </div>
 

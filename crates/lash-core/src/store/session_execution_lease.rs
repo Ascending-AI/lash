@@ -219,6 +219,11 @@ pub fn trace_session_execution_lease_refusal(
 }
 
 /// Stable identity for a lease holder.
+///
+/// Hosts keep `owner_id` stable for one worker or process, never one turn, and
+/// assign a new `incarnation_id` on every process boot. The slack-clone example
+/// is the reference shape: one constant worker owner id plus its boot-specific
+/// incarnation.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LeaseOwnerIdentity {
     pub owner_id: String,

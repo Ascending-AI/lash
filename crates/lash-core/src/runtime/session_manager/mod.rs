@@ -388,6 +388,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
                 crate::TurnBudget::Unbounded,
             ))
         },
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("mixed-envelope runtime");
@@ -701,6 +702,7 @@ pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
                 crate::TurnBudget::Unbounded,
             ))
         },
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("cancelled usage runtime");

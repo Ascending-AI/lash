@@ -101,7 +101,6 @@ pub async fn run(config: BotConfig) -> Result<()> {
         .with_demo_mcp_server(&config.api_base_url, &config.bot_token)?;
     runtime_config.trace_path = config.trace_path.clone();
     let (provider, model) = runtime::provider_from_env()?;
-    let session_owner = runtime::session_owner(&runtime_config.incarnation);
     let core = runtime::build_core(&runtime_config, provider, model, Arc::clone(&api)).await?;
 
     let bot = Arc::new(ChannelBot::new(
@@ -110,7 +109,6 @@ pub async fn run(config: BotConfig) -> Result<()> {
         ledger,
         identity,
         config.verification_token.clone(),
-        session_owner,
     ));
     let host_result: Result<()> = async {
         if let Err(error) = bot.refresh_directory().await {

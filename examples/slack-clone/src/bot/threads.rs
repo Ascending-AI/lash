@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
-use lash::persistence::{ChronologicalPayload, LeaseOwnerIdentity, StoreError};
+use lash::persistence::{ChronologicalPayload, StoreError};
 use lash::{LashCore, LashSession, TurnInput};
 
 use super::ledger::{EventLedger, EventRecord};
@@ -50,7 +50,6 @@ enum RootRoute {
 pub async fn open_thread_session(
     core: &LashCore,
     ledger: &EventLedger,
-    owner: &LeaseOwnerIdentity,
     record: &EventRecord,
     #[cfg(test)] missing_root_observed: &tokio::sync::Notify,
     root_wait_budget: Duration,
@@ -60,7 +59,7 @@ pub async fn open_thread_session(
         .as_deref()
         .context("thread route has no thread_ts")?;
     let thread_id = thread_session_id(&record.channel_id, thread_ts);
-    let channel = open_channel_session(core, owner, &record.channel_id).await?;
+    let channel = open_channel_session(core, &record.channel_id).await?;
 
     let child_exists = core
         .session_exists(&thread_id)
@@ -110,12 +109,7 @@ pub async fn open_thread_session(
         }
     }
 
-    let session = match core
-        .session(&thread_id)
-        .session_execution_owner(owner.clone())
-        .open()
-        .await
-    {
+    let session = match core.session(&thread_id).open().await {
         Ok(session) => session,
         Err(lash::EmbedError::Store(StoreError::SessionDeleted { .. })) => {
             return Ok(ThreadSessionOpen::Retired);
@@ -296,14 +290,9 @@ fn node_message_id(node: &lash::persistence::SessionNodeRecord) -> Option<&str> 
     node.message_id()
 }
 
-async fn open_channel_session(
-    core: &LashCore,
-    owner: &LeaseOwnerIdentity,
-    channel_id: &str,
-) -> Result<LashSession> {
+async fn open_channel_session(core: &LashCore, channel_id: &str) -> Result<LashSession> {
     let session = core
         .session(session_id(channel_id))
-        .session_execution_owner(owner.clone())
         .open()
         .await
         .with_context(|| format!("open session for channel {channel_id}"))?;

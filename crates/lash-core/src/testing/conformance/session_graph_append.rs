@@ -401,6 +401,7 @@ async fn append_conformance_runtime(
         )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(store)),
         state,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("append conformance runtime")

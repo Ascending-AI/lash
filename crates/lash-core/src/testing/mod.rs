@@ -42,6 +42,11 @@ pub fn queued_work_claim_policy(max_rows: usize) -> crate::QueuedWorkClaimPolicy
     }
 }
 
+/// Explicit process-scoped owner used by test-only runtime construction.
+pub fn runtime_lease_owner() -> crate::LeaseOwnerIdentity {
+    crate::LeaseOwnerIdentity::opaque("lash-core-test-worker", "lash-core-test-boot")
+}
+
 /// Synthesize the response produced when a plugin aborts an in-flight LLM
 /// stream after `events` have reached core's stream accumulator.
 ///

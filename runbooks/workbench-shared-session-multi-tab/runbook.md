@@ -168,7 +168,7 @@ Two consequences that matter more than the pill:
   **client-local** `busy` flag — `postCommand`'s early return and `sendButton.disabled` —
   is no longer the only thing standing between a second viewer and a doomed concurrent
   turn; it is now just the local affordance. The server check is advisory (two sends can
-  race past it), so the fence-refused path has to be visible too: a failed turn retires the
+  race past it), so a head-CAS loser has to be visible too: a failed turn retires the
   rows the workbench published for it and publishes `done` with `outcome: "failed"`.
   Phase 6 gates both halves.
 
@@ -182,7 +182,7 @@ on every turn start, and it is the *only* path — a trigger press has no direct
 signal either, not even in the tab that pressed. A host that wants a first-class
 turn-started fan-out must publish one itself. Concurrent submission, by contrast, needs no
 host invention: `/api/turn` holds a second viewer's send as the next turn's input and says
-so, and a turn the durable fence refuses anyway surfaces as a failure row whose optimistic
+so, and a turn that loses the head CAS surfaces as a failure row whose optimistic
 rows retire in every viewer (Phase 6). What a host does have to copy is the *shape*: an
 advisory admission check plus an honest failure path, because the lease and the CAS — never
 the handler — decide who commits.
@@ -438,16 +438,28 @@ Require all of:
 The pair of turns must never both be lost, and no tab may end on a phantom row: the DOM
 multiset must equal durable truth exactly, with no row the graph does not have.
 
-**The losing-race path is part of this gate.** The admission check is advisory — two sends
-can both read an idle session, and the lease and CAS remain the authority — so if a turn is
-refused by the fence anyway (server log `session execution lease for session ... is busy`
-or `store head revision conflict: expected N, actual N+1`), require that the refusal is
-*visible*: the failed turn publishes a `turn:<id>:failed` product row with the fixed public
-copy `turn could not be completed`, its `done` event carries `outcome: "failed"`, and every
-tab drops the refused turn's optimistic user row (the server retires it from the product
-lane and the `failed` outcome makes each tab re-derive from `/api/state`). A refused turn
-that leaves a rendered row durable truth does not have, or that returns both pills to
-`idle` with nothing said, is a **FAIL** — that was the FIG-993 defect this phase now gates.
+**The concurrent-append outcome is the hard replacement gate.** Against the same idle
+session head, submit two uniquely marked graph appends concurrently and retain the typed
+result of each operation. Exactly one of these outcomes is acceptable:
+
+- both appends return `Appended`, and a fresh store-backed graph read contains both markers
+  exactly once on one active path in the order reported by their durable node ordinals; or
+- one append returns `Appended` and the other returns the typed
+  `StoreError::HeadRevisionConflict { expected, actual }`, with `actual > expected`; the
+  durable graph contains the winner exactly once and contains no node or projection fragment
+  from the loser.
+
+`Ok` without both durable markers, an untyped string error, a busy-lease refusal, reversed
+durable ordering, a lost winner, or any partial loser state is a **FAIL**. Save both typed
+results, the active-path node ids/ordinals, and marker counts in
+`06-concurrent-append.json`. This assertion is intentionally stronger than "no error
+occurred": removing either append from the probe must make the marker/count gate fail.
+
+If the head CAS rejects one turn in the API race, require that rejection to be *visible*:
+the failed turn publishes a `turn:<id>:failed` product row with the fixed public copy
+`turn could not be completed`, its `done` event carries `outcome: "failed"`, and every tab
+drops the losing turn's optimistic user row. A loser that leaves a rendered row durable
+truth does not have, or returns both pills to `idle` with nothing said, is a **FAIL**.
 
 Then gate what this scenario exists for: after everything settles, require **both tabs
 still converge** — multisets equal, and each tab's per-role counts reconciled against the

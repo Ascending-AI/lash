@@ -314,7 +314,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
     .store_factory(Arc::new(
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("commit-budget-surface").open().await?;
 
     let error = match session
@@ -366,7 +366,7 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
     .store_factory(Arc::new(
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("commit-node-budget-surface").open().await?;
 
     let error = match session.turn(TurnInput::text("produce a turn")).run().await {
@@ -403,7 +403,7 @@ fn core_with_commit_budget(commit_budget: crate::CommitBudget) -> Result<LashCor
     .store_factory(Arc::new(
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
-    .build()
+    .build(crate::testing::runtime_lease_owner())
 }
 
 fn pending_park_state(session_id: &str, text: &str) -> RuntimeSessionState {
@@ -567,7 +567,7 @@ fn typed_core_builders_require_explicit_store_choice() {
     let err = match LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()
+        .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("standard preset must not install implicit in-memory stores"),
         Err(err) => err,
@@ -578,7 +578,7 @@ fn typed_core_builders_require_explicit_store_choice() {
         .provider(mock_provider())
         .model(mock_model_spec())
         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
-        .build()
+        .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("attachment store must be explicit after effect host is wired"),
         Err(err) => err,
@@ -593,7 +593,7 @@ fn typed_core_builders_require_explicit_store_choice() {
         let err = match rlm_core_builder()
             .provider(mock_provider())
             .model(mock_model_spec())
-            .build()
+            .build(crate::testing::runtime_lease_owner())
         {
             Ok(_) => panic!("rlm preset must not install implicit generic stores"),
             Err(err) => err,
@@ -607,7 +607,7 @@ fn generic_lash_core_builder_requires_protocol_plugin() {
     let err = match explicit_ephemeral_facets(LashCore::builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()
+        .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("generic LashCore must require an explicit protocol plugin"),
         Err(err) => err,
@@ -626,7 +626,7 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
         .instructions("Repeated instruction.")
         .instructions("Repeated instruction.")
         .prompt_contribution(PromptContribution::guidance("Core", "core guidance"))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("prompt-api")
         .instructions("Alpha session instruction.")
@@ -686,7 +686,7 @@ async fn provider_overrides_apply_at_core_session_turn_and_config_scopes() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(text_provider("core-provider", "core-model", "core"))
         .model(model_spec("core-model", None, 200_000))
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("standard core");
     let session = core
         .session("main")
@@ -746,7 +746,7 @@ async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> 
             Some("core-variant".to_string()),
             200_000,
         ))
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("standard core");
     let session = core
         .session("main")
@@ -814,7 +814,7 @@ async fn rlm_core_opens_rlm_session() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     core.session("rlm").open().await?;
     Ok(())
@@ -858,7 +858,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         ))
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-abilities-prompt").open().await?;
 
     session
@@ -919,7 +919,7 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         .provider(provider)
         .model(mock_model_spec())
         .trace_jsonl_path(trace_path.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("rlm-finish-history-single-copy")
         .open()
@@ -1025,7 +1025,7 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(provider)
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-multi-turn-history-shape").open().await?;
 
     for (turn, answer) in ANSWERS.iter().enumerate() {
@@ -1151,7 +1151,7 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(recording_request_provider(Arc::clone(&seen)))
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let markdown = core.session("rlm-root-markdown").open().await?;
     markdown.turn(TurnInput::text("hello")).run().await?;
@@ -1180,7 +1180,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-root").open().await?;
     let mut plugin_options = lash_core::PluginOptions {
         plugins: BTreeMap::new(),
@@ -1229,7 +1229,7 @@ async fn rlm_projection_errors_surface_from_protocol_extensions() -> Result<()> 
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm").open().await?;
     session
         .admin()
@@ -1306,7 +1306,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let error = match core.session(session_id).open().await {
         Ok(_) => panic!("cold open must reject the persisted v5 execution snapshot"),
@@ -1342,7 +1342,7 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = core.session("persisted").open().await?;
     let messages = reopened.read_view().messages().to_vec();
@@ -1357,7 +1357,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked").open().await?;
     session.turn(TurnInput::text("hello")).run().await?;
@@ -1413,7 +1413,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("deleted-while-parked").open().await?;
     session.turn(TurnInput::text("hello")).run().await?;
@@ -1454,7 +1454,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("busy").open().await?;
     // A live clone shares the underlying runtime handle, exactly as an in-flight
@@ -1520,7 +1520,7 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = core.session("provider-rebind").open().await?;
     let persisted = reopened.admin().state().persist_current().await?;
@@ -1554,7 +1554,7 @@ async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> 
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("provider-mismatch").open().await?;
     let err = match session.turn(TurnInput::text("must not run")).run().await {
@@ -1606,7 +1606,7 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("frame-provider-mismatch").open().await?;
     assert_eq!(
@@ -1638,7 +1638,7 @@ async fn refreshed_head_provider_id_mismatch_fails_before_turn() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let session = core
         .session("refresh-provider-mismatch")
@@ -1669,7 +1669,7 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let first = core
         .session("provider-reload")
@@ -1701,7 +1701,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("delete-session").open().await?;
     session
         .turn(TurnInput::text("stored before delete"))
@@ -1732,7 +1732,7 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
         .model(mock_model_spec())
         .store_factory(factory)
         .effect_host(effect_host.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("retire-delete-session").open().await?);
 
     let execution_scope = core.session_delete_scope("retire-delete-session").await?;
@@ -1757,7 +1757,7 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     for (session_id, append_plugin_body) in [
         ("retired-append-messages", false),
@@ -1827,7 +1827,7 @@ async fn store_session_id_mismatch_is_rejected() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let err = match core.session("requested-session").open().await {
         Ok(_) => panic!("mismatched store should fail"),
@@ -1864,7 +1864,7 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
         .provider(mock_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let opened = core
         .session("manual-state")
@@ -1957,7 +1957,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         .provider(provider)
         .model(builder_model.clone())
         .plugin(probe_factory)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
         .store(Arc::clone(&store))
@@ -2069,7 +2069,7 @@ async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(builder_model.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session(session_id).open_with_state(persisted).await?;
     let writer = session.runtime.writer();
@@ -2152,7 +2152,7 @@ async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("root-with-child-store").open().await?;
 
     session
@@ -2198,7 +2198,7 @@ async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> 
         .store_factory(Arc::new(ReusableStoreFactory {
             store: reused_store,
         }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("root-store").open().await?;
 
     let err = session
@@ -2239,7 +2239,7 @@ async fn explicit_root_store_keeps_configured_child_store_factory() -> Result<()
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("explicit-root-store")
         .store(explicit_store)
@@ -2305,7 +2305,7 @@ async fn explicit_session_store_takes_precedence_over_core_store_factory() -> Re
         .store_factory(Arc::new(ReusableStoreFactory {
             store: factory_store,
         }))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = core
         .session("store-precedence")

@@ -5601,7 +5601,10 @@ async fn restate_enqueue_never_errors_after_commit() {
         .queued_work_driver(lash_core::facade_support::QueuedWorkDriver::new(
             queued_work.clone(),
         ))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "lash-restate-fig430-test",
+            "lash-restate-fig430-test-boot",
+        ))
         .expect("build FIG-430 core");
     let session = core
         .session(session_id)
@@ -5745,6 +5748,10 @@ async fn replay_test_runtime_with_plugins_and_registry(
     let mut builder = lash_core::facade_support::LashRuntime::builder(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
+        lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-replay-test",
+            "lash-restate-replay-test-boot",
+        ),
     )
     .with_session_id(session_id)
     .with_policy(policy)

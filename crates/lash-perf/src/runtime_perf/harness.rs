@@ -38,6 +38,16 @@ const DEFAULT_PROMPT: &str =
 const HISTORY_EXCHANGES: usize = 18;
 const RUNTIME_PERF_MAX_TURNS: usize = 1;
 
+fn runtime_perf_owner() -> lash::persistence::LeaseOwnerIdentity {
+    static INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    lash::persistence::LeaseOwnerIdentity::opaque(
+        "lash-perf",
+        INCARNATION
+            .get_or_init(|| uuid::Uuid::new_v4().to_string())
+            .clone(),
+    )
+}
+
 const BENCHMARK_MAIL_RESOURCE: &str = "Mail";
 const BENCHMARK_MAIL_ALIAS: &str = "mail";
 const BENCHMARK_MAIL_EVENT: &str = "received";
@@ -603,7 +613,7 @@ pub(crate) fn build_embed_core(
                 .provider(benchmark_provider(scenario).into_handle())
                 .model(benchmark_model_spec())
                 .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
-                .build()
+                .build(runtime_perf_owner())
                 .map(BenchmarkCore::Standard)
                 .map_err(anyhow::Error::from)
         }
@@ -623,7 +633,7 @@ pub(crate) fn build_embed_core(
                 .model(benchmark_model_spec())
                 .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
                 .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
-                .build()
+                .build(runtime_perf_owner())
                 .map(BenchmarkCore::Rlm)
                 .map_err(anyhow::Error::from)
         }
@@ -751,7 +761,7 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder
                     .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
             }
-            BenchmarkCore::Standard(builder.build()?)
+            BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
             let mut factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -788,7 +798,7 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder
                     .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
             }
-            BenchmarkCore::Rlm(builder.build()?)
+            BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }
     };
     let session = core
@@ -1048,7 +1058,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 .trigger_store(trigger_store.clone())
                 .store_factory(store_factory.clone())
                 .plugins(plugin_stack)
-                .build()?,
+                .build(runtime_perf_owner())?,
         ),
         ExecutionMode::Rlm => {
             let artifact_store = Arc::new(
@@ -1077,7 +1087,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .store_factory(store_factory.clone())
                     .plugins(plugin_stack)
                     .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
-                    .build()?,
+                    .build(runtime_perf_owner())?,
             )
         }
     };

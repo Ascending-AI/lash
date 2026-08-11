@@ -241,7 +241,7 @@ impl AgentScenarioSetup {
             builder = builder.turn_budget(lash_core::TurnBudget::bounded(max_turns));
         }
         Ok(AgentScenarioRuntime {
-            core: builder.build()?,
+            core: builder.build(crate::testing::runtime_lease_owner())?,
             graph_store,
             process_registry,
             prompt_captures,

@@ -44,7 +44,7 @@
             .process_registry(Arc::clone(&process_registry))
             .trigger_store(trigger_store.clone())
             .disable_queued_work_driver()
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let session = core
             .session(session_id.clone())

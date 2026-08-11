@@ -89,7 +89,7 @@ fn runtime_rebuild_and_worker_recovery_with_inline_stores() {
                     explicit_ephemeral_facets(builder)
                         .store_factory(Arc::clone(&store_factory))
                         .trigger_store(Arc::clone(&trigger_store))
-                        .build()
+                        .build(crate::testing::runtime_lease_owner())
                         .expect("build core")
                 }),
             }
@@ -131,7 +131,7 @@ fn runtime_rebuild_and_worker_recovery_with_durable_stores() {
                         .process_env_store(Arc::clone(&process_env_store))
                         .trigger_store(Arc::clone(&trigger_store))
                         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
-                        .build()
+                        .build(crate::testing::runtime_lease_owner())
                         .expect("build core")
                 }),
             }

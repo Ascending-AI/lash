@@ -148,7 +148,7 @@ async fn async_main() -> Result<()> {
     };
     submit_workflow(&ingress_url, &main_wake_request).await?;
     let main_wake_response =
-        wait_for_terminal_result(storage.pool(), &main_wake_request.workflow_id).await?;
+        wait_for_queued_wake_result(storage.pool(), &main_wake_request.workflow_id).await?;
     assert_queued_wake_response(&main_wake_response)?;
 
     let trigger_request = TurnRequest {
@@ -208,7 +208,7 @@ async fn async_main() -> Result<()> {
     };
     submit_workflow(&ingress_url, &failover_wake_request).await?;
     let failover_wake_response =
-        wait_for_terminal_result(storage.pool(), &failover_wake_request.workflow_id).await?;
+        wait_for_queued_wake_result(storage.pool(), &failover_wake_request.workflow_id).await?;
     assert_queued_wake_response(&failover_wake_response)?;
 
     submit_signal_workflow(
@@ -1181,6 +1181,29 @@ async fn wait_for_terminal_result(pool: &sqlx::PgPool, workflow_id: &str) -> Res
     }
     dump_workflow_timeout_diagnostics(pool, workflow_id).await;
     anyhow::bail!("timed out waiting for `{workflow_id}`")
+}
+
+async fn wait_for_queued_wake_result(
+    pool: &sqlx::PgPool,
+    workflow_id: &str,
+) -> Result<TurnResponse> {
+    let deadline = Instant::now() + Duration::from_secs(180);
+    while Instant::now() < deadline {
+        if let Some(response) = load_terminal_result(pool, workflow_id).await?
+            && response.queued_turn_ran
+            && response
+                .final_value
+                .get("wake_consumed")
+                .and_then(Value::as_bool)
+                == Some(true)
+        {
+            report_workflow_progress(workflow_id, "completed");
+            return Ok(response);
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    dump_workflow_timeout_diagnostics(pool, workflow_id).await;
+    anyhow::bail!("timed out waiting for substantive queued wake result for `{workflow_id}`")
 }
 
 async fn wait_for_terminal_results(

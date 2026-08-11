@@ -1275,6 +1275,7 @@ async fn build_runtime(
         crate::LashRuntime::builder(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
+            crate::testing::runtime_lease_owner(),
         )
         .with_session_id(&identity.session_id)
         .with_policy(runtime_policy())

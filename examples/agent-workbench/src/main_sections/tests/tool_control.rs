@@ -144,7 +144,7 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .store_factory(store_factory)
             .process_registry(Arc::clone(&process_registry))
             .disable_queued_work_driver()
-            .build()
+            .build(crate::test_core_owner())
             .expect("build tool control workbench core");
         let session = core
             .session("workbench-tool-control-session")

@@ -396,7 +396,7 @@ fn hello_lash_core(provider: ProviderHandle, model: ModelSpec) -&gt; lash::Resul
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()
+        .build(crate::example_process_owner())
 }</code></pre>
         <p>From there the runtime hands a backend more: <code>session.enqueue(...)</code> and <code>session.queued_turn()</code> drive app-owned queues, session construction selects the agent model, <code>turn.provider(…)</code> can supply a per-turn provider, and durable workflow hosts run turns with <code>.turn_id(...).effects(&amp;controller)</code>.</p>
         <a class="stanza__link" href="./quickstart.html">read the quickstart <span class="arrow" aria-hidden="true">→</span></a>

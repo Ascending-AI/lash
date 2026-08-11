@@ -214,7 +214,10 @@ mod tests {
                     .expect("valid model metadata"),
             )
             .store_factory(Arc::clone(&factory))
-            .build()
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "agent-service-lease-triage-test",
+                "agent-service-lease-triage-test-boot",
+            ))
             .expect("build durable core");
         (core, factory)
     }

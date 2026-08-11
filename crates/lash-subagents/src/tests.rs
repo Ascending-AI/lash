@@ -948,6 +948,10 @@ async fn run_seed_probe_inner(
                 lash_core::TurnBudget::Unbounded,
             ))
         },
+        lash_core::LeaseOwnerIdentity::opaque(
+            "lash-subagents-test-worker",
+            "lash-subagents-test-boot",
+        ),
     )
     .await
     .expect("runtime");

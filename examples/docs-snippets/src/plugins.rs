@@ -61,7 +61,7 @@ async fn plugin_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result
         .configure_plugins(|plugins| {
             plugins.push(Arc::new(AppPluginFactory) as Arc<dyn PluginFactory>);
         })
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:plugin-core
     Ok(())
 }

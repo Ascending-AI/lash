@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use lash::persistence::LeaseOwnerIdentity;
 use lash::sync::MutexExt;
 use lash::{LashCore, LashSession, ModelSpec, TurnWorkDriver};
 use serde_json::json;
@@ -18,10 +17,6 @@ pub(crate) struct AppStateData {
     core: LashCore,
     turn_work_driver: TurnWorkDriver,
     db: Arc<Mutex<AppDb>>,
-    // Stable owner id + per-boot incarnation for durable session-execution
-    // leases. Attached to every session open so a crashed boot's leases are
-    // reclaimable by the next boot (see `open_session`).
-    session_owner: LeaseOwnerIdentity,
     default_model: String,
     default_model_variant: Option<String>,
     #[cfg_attr(not(feature = "restate"), allow(dead_code))]
@@ -38,7 +33,6 @@ impl AppStateData {
         core: LashCore,
         turn_work_driver: TurnWorkDriver,
         db: Arc<Mutex<AppDb>>,
-        session_owner: LeaseOwnerIdentity,
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
@@ -48,7 +42,6 @@ impl AppStateData {
             core,
             turn_work_driver,
             db,
-            session_owner,
             default_model,
             default_model_variant,
             durability,
@@ -62,7 +55,6 @@ impl AppStateData {
         core: LashCore,
         turn_work_driver: TurnWorkDriver,
         db: AppDb,
-        session_owner: LeaseOwnerIdentity,
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
@@ -71,7 +63,6 @@ impl AppStateData {
             core,
             turn_work_driver,
             db: Arc::new(Mutex::new(db)),
-            session_owner,
             default_model,
             default_model_variant,
             durability,
@@ -122,10 +113,6 @@ impl AppStateData {
             .plugin::<DemoPlugin>(DemoPluginConfig {
                 db: Arc::clone(&self.db),
             })
-            // Explicit owner identity: this boot's stable owner + incarnation, so
-            // a same-host peer that finds this process crashed can reclaim the
-            // session lease before its TTL instead of waiting the window out.
-            .session_execution_owner(self.session_owner.clone())
             .open()
             .await?)
     }

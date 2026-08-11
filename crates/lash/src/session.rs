@@ -27,7 +27,6 @@ pub struct SessionBuilder {
     pub(crate) session_id: String,
     pub(crate) spec: SessionSpec,
     pub(crate) parent_session_id: Option<String>,
-    pub(crate) session_execution_owner: Option<lash_core::LeaseOwnerIdentity>,
     pub(crate) store: Option<Arc<dyn RuntimePersistence>>,
     pub(crate) provider: Option<ProviderHandle>,
     pub(crate) active_plugins: Vec<ActivePluginBinding>,
@@ -72,16 +71,6 @@ impl SessionBuilder {
 
     pub fn parent(mut self, parent_session_id: impl Into<String>) -> Self {
         self.parent_session_id = Some(parent_session_id.into());
-        self
-    }
-
-    /// Use an explicit owner identity for durable session execution leases.
-    ///
-    /// This is only for hosts that already serialize one logical execution lane
-    /// and intentionally choose stable owner + incarnation values. Normal
-    /// embedders should keep the default per-open identity.
-    pub fn session_execution_owner(mut self, owner: lash_core::LeaseOwnerIdentity) -> Self {
-        self.session_execution_owner = Some(owner);
         self
     }
 
@@ -218,7 +207,14 @@ impl SessionBuilder {
         let drivers = self.core.work_driver.drivers().await;
         env.process_work_driver = drivers.process.clone();
         env.queued_work_driver = drivers.queued.clone();
-        let mut runtime = LashRuntime::from_environment(&env, policy, state, store).await?;
+        let mut runtime = LashRuntime::from_environment(
+            &env,
+            policy,
+            state,
+            store,
+            self.core.session_execution_owner.clone(),
+        )
+        .await?;
         // Fire the protocol materialization hook for this root/builder open
         // (including resume): the protocol plugin applies and defaults its
         // per-session options at open time.
@@ -226,9 +222,6 @@ impl SessionBuilder {
             &self.plugin_options,
             self.parent_session_id.is_none(),
         )?;
-        if let Some(owner) = self.session_execution_owner {
-            runtime.set_runtime_lease_owner(owner);
-        }
         if drivers.drive_process_on_open
             && let Some(driver) = drivers.process.as_ref()
         {

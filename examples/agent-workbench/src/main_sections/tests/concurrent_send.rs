@@ -1,24 +1,5 @@
-/// The lease owner a Restate turn workflow opens its session with, mirrored
-/// here so a test-driven turn contends for the session exactly as the workflow
-/// does.
-fn test_turn_execution_owner(turn_id: &str) -> lash::persistence::LeaseOwnerIdentity {
-    test_turn_execution_owner_for_incarnation(turn_id, "test-incarnation")
-}
-
-fn test_turn_execution_owner_for_incarnation(
-    turn_id: &str,
-    incarnation_id: &str,
-) -> lash::persistence::LeaseOwnerIdentity {
-    let owner_id = format!("WorkbenchTurnWorkflow/{turn_id}/run");
-    lash::persistence::LeaseOwnerIdentity::opaque(
-        owner_id.clone(),
-        format!("{owner_id}/{incarnation_id}"),
-    )
-}
-
 /// The body of `restate::run_user_turn`, minus the Restate effect controller the
-/// in-process test host does not need: open the session under the turn's
-/// execution owner, run the turn, and publish its outcome.
+/// in-process test host does not need.
 async fn run_workbench_turn_attempt(
     state: &AppState,
     session_id: &str,
@@ -28,7 +9,6 @@ async fn run_workbench_turn_attempt(
     let session = state
         .core
         .session(session_id.to_string())
-        .session_execution_owner(test_turn_execution_owner(turn_id))
         .open()
         .await
         .map_err(AppError::session_open)?;
@@ -127,13 +107,10 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .collect()
 }
 
-/// FIG-1129: a replacement Restate worker keeps the logical workflow owner id
-/// but starts with a new process incarnation. The dead process's advisory lane
-/// can therefore still be live when redrive finishes the runtime turn. Both the
-/// turn commit and the workbench-owned assistant projection must proceed under
-/// the head CAS; an unrelated live owner must still retain the hard busy result.
+/// FIG-1133: a new turn started by the replacement worker inside a dead lane's
+/// TTL still publishes its paid-for turn and projection under head-CAS authority.
 #[tokio::test]
-async fn successor_persistence_tolerates_the_dead_incarnations_live_lease_window() {
+async fn new_turn_within_dead_lease_ttl_commits_under_head_cas() {
     let data_dir = tempfile::tempdir().expect("successor persistence tempdir");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         data_dir.path().join("lash-sessions"),
@@ -157,11 +134,11 @@ async fn successor_persistence_tolerates_the_dead_incarnations_live_lease_window
     )
     .await;
     let session_id = state.current_session_id();
-    let turn_id = "fig1129-successor-turn";
-    let dead_incarnation =
-        test_turn_execution_owner_for_incarnation(turn_id, "dead-incarnation-a");
-    let successor_incarnation =
-        test_turn_execution_owner_for_incarnation(turn_id, "successor-incarnation-b");
+    let turn_id = "fig1133-new-turn";
+    let dead_incarnation = lash::persistence::LeaseOwnerIdentity::opaque(
+        "legacy-workbench-turn-17/run",
+        "legacy-workbench-turn-17/dead-boot",
+    );
 
     // Materialize and park the durable session before incarnation A claims the
     // workflow lane. Dropping the acquisition value simulates process loss: it
@@ -169,7 +146,6 @@ async fn successor_persistence_tolerates_the_dead_incarnations_live_lease_window
     let parked = state
         .core
         .session(session_id.clone())
-        .session_execution_owner(dead_incarnation.clone())
         .open()
         .await
         .expect("open the first incarnation")
@@ -195,7 +171,6 @@ async fn successor_persistence_tolerates_the_dead_incarnations_live_lease_window
     let successor = state
         .core
         .session(session_id.clone())
-        .session_execution_owner(successor_incarnation)
         .open()
         .await
         .expect("open the replacement incarnation");
@@ -247,55 +222,193 @@ async fn successor_persistence_tolerates_the_dead_incarnations_live_lease_window
         state_rows(&projected)
     );
 
-    // The tolerance is not general lease bypass. Relative to this claimant the
-    // same still-live row belongs to a different logical owner, so the existing
-    // busy error must remain visible and no extra message may commit.
+    // A lane-less append also proceeds while the unrelated legacy holder stays
+    // live; the append is complete or loses only at the head CAS.
     let contender = state
         .core
         .session(session_id.clone())
-        .session_execution_owner(lash::persistence::LeaseOwnerIdentity::opaque(
-            "genuinely-live-contender",
-            "genuinely-live-contender/incarnation",
-        ))
         .open()
         .await
-        .expect("open a genuinely contending runtime");
-    let contention_error = contender
+        .expect("open the replacement worker runtime");
+    contender
         .admin()
         .state()
         .append_messages(vec![lash::plugins::PluginMessage::text(
             lash::messages::MessageRole::Assistant,
-            "must not commit under a different owner's live lease",
+            "append committed under head CAS",
         )])
         .await
-        .expect_err("a different live owner must retain the hard busy refusal");
-    assert!(
-        contention_error.to_string().contains("is busy"),
-        "live contention must surface the existing busy error: {contention_error}"
-    );
-    assert!(
-        contender
-            .read_view()
-            .messages()
-            .iter()
-            .all(|message| !lash::message_text(message).contains("must not commit")),
-        "the refused live contender must not mutate resident projection"
-    );
-    let durable_after_refusal = lash::persistence::load_persisted_session_state(&store)
+        .expect("the lane-less append commits despite the unrelated busy holder");
+    let durable_after_append = lash::persistence::load_persisted_session_state(&store)
         .await
-        .expect("re-read durable session after different-owner refusal")
+        .expect("re-read durable session after lane-less append")
         .expect("the durable session remains present");
     assert!(
-        durable_after_refusal
+        durable_after_append
             .read_view()
             .messages()
             .iter()
-            .all(|message| !lash::message_text(message).contains("must not commit")),
-        "the refused live contender must not mutate durable projection"
+            .any(|message| lash::message_text(message) == "append committed under head CAS"),
+        "the lane-less append must be fully durable"
     );
 
     // Keep the exact pre-TTL evidence live through both assertions.
     assert_eq!(dead_lease.owner, dead_incarnation);
+}
+
+/// FIG-1117 restart arm: a replacement boot of the same worker owner may commit
+/// while the dead boot's lease is still inside its TTL.
+#[tokio::test]
+async fn same_turn_successor_within_dead_lease_ttl_commits_under_head_cas() {
+    let data_dir = tempfile::tempdir().expect("same-turn successor tempdir");
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        data_dir.path().join("lash-sessions"),
+    ));
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-same-turn-successor")
+        .complete_error("the append-only restart gate must not call the provider")
+        .build()
+        .into_handle();
+    let state = recoverable_chat_test_state_with_dependencies(
+        data_dir.path(),
+        64,
+        provider,
+        in_memory_trigger_store(),
+        store_factory.clone(),
+        Some(inert_queued_work_driver()),
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("materialize restart-gate session");
+    session
+        .park()
+        .await
+        .expect("park restart-gate session before simulating process loss");
+
+    let store = lash_sqlite_store::Store::open(&store_factory.catalog_path())
+        .await
+        .expect("open restart-gate store");
+    let dead_boot = lash::persistence::LeaseOwnerIdentity::opaque(
+        "agent-workbench-test-worker",
+        "agent-workbench-dead-boot",
+    );
+    let dead_lease = lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        &store,
+        &session_id,
+        &dead_boot,
+        60_000,
+    )
+    .await
+    .expect("dead boot claims the lane")
+    .acquired()
+    .expect("restart-gate lane starts free");
+
+    let successor = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open same-worker successor boot");
+    successor
+        .admin()
+        .state()
+        .append_messages(vec![lash::plugins::PluginMessage::text(
+            lash::messages::MessageRole::Assistant,
+            "same-turn successor committed",
+        )])
+        .await
+        .expect("same-turn successor commits inside the dead lease TTL");
+    let durable = lash::persistence::load_persisted_session_state(&store)
+        .await
+        .expect("read same-turn successor state")
+        .expect("same-turn successor state exists");
+    assert!(durable.read_view().messages().iter().any(|message| {
+        lash::message_text(message) == "same-turn successor committed"
+    }));
+    assert_eq!(dead_lease.owner, dead_boot);
+}
+
+/// FIG-1133 Phase 6 gate: two live writers serialize through graph refresh and
+/// head CAS without losing, duplicating, or partially publishing an append.
+#[tokio::test]
+async fn two_live_writers_rebase_appends_into_durable_graph_order() {
+    let data_dir = tempfile::tempdir().expect("concurrent append tempdir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-concurrent-append")
+        .complete_error("the append gate must not call the provider")
+        .build()
+        .into_handle();
+    let state = queued_send_test_state(data_dir.path(), provider).await;
+    let session_id = state.current_session_id();
+    let left = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open left append writer");
+    let right = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open right append writer");
+
+    let left_committed = Arc::new(tokio::sync::Notify::new());
+    let left_task = tokio::spawn({
+        let left_committed = Arc::clone(&left_committed);
+        async move {
+            let result = left
+                .admin()
+                .state()
+                .append_messages(vec![lash::plugins::PluginMessage::text(
+                    lash::messages::MessageRole::Assistant,
+                    "fig1133-concurrent-left",
+                )])
+                .await;
+            left_committed.notify_one();
+            result
+        }
+    });
+    let right_task = tokio::spawn(async move {
+        left_committed.notified().await;
+        right
+            .admin()
+            .state()
+            .append_messages(vec![lash::plugins::PluginMessage::text(
+                lash::messages::MessageRole::Assistant,
+                "fig1133-concurrent-right",
+            )])
+            .await
+    });
+    let (left_result, right_result) = tokio::join!(left_task, right_task);
+    let left_result = left_result.expect("left append task");
+    let right_result = right_result.expect("right append task");
+    left_result.expect("left concurrent append must commit");
+    right_result.expect("right concurrent append must rebase and commit");
+
+    let fresh = state
+        .core
+        .session(session_id)
+        .open()
+        .await
+        .expect("reopen durable append graph");
+    let ordered = fresh
+        .read_view()
+        .messages()
+        .iter()
+        .map(lash::message_text)
+        .filter(|text| text.starts_with("fig1133-concurrent-"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ordered,
+        vec!["fig1133-concurrent-left", "fig1133-concurrent-right"],
+        "both appends must appear exactly once in durable graph order"
+    );
 }
 
 /// A provider whose first call parks until released, so a turn can be held
@@ -654,7 +767,6 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
     let competitor = state
         .core
         .session(session_id.clone())
-        .session_execution_owner(test_turn_execution_owner("competing-turn"))
         .open()
         .await
         .expect("open competing session");

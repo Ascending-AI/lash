@@ -727,10 +727,6 @@ async fn run_user_turn(
     let session = state
         .core
         .session(request.session_id.clone())
-        .session_execution_owner(workbench_turn_session_execution_owner(
-            "WorkbenchTurnWorkflow",
-            &request.turn_id,
-        ))
         .open()
         .await
         .map_err(AppError::session_open)?;
@@ -974,10 +970,6 @@ async fn run_queued_turn(
     let session = state
         .core
         .session(request.session_id.clone())
-        .session_execution_owner(workbench_turn_session_execution_owner(
-            "WorkbenchQueuedTurnWorkflow",
-            &request.turn_id,
-        ))
         .open()
         .await
         .map_err(AppError::session_open)?;
@@ -1157,24 +1149,6 @@ pub(crate) async fn settle_workbench_turn(
     );
     state.active_turns.remove(session_id, turn_id);
     Ok(())
-}
-
-fn workbench_turn_session_execution_owner(
-    workflow_name: &str,
-    turn_id: &str,
-) -> lash::persistence::LeaseOwnerIdentity {
-    let owner_id = format!("{workflow_name}/{turn_id}/run");
-    lash::persistence::LeaseOwnerIdentity::opaque(
-        owner_id.clone(),
-        format!("{owner_id}/{}", process_incarnation_id()),
-    )
-}
-
-fn process_incarnation_id() -> &'static str {
-    static PROCESS_INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    PROCESS_INCARNATION
-        .get_or_init(|| uuid::Uuid::new_v4().to_string())
-        .as_str()
 }
 
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {

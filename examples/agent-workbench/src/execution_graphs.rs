@@ -501,7 +501,7 @@ mod tests {
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))
             .process_registry(registry)
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         core.processes()
             .observer()

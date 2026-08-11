@@ -60,24 +60,20 @@
     <div class="section" id="worker-identity">
       <div class="section-header">
         <h2>Worker Identity</h2>
-        <p>By default every opened session gets a fresh owner id and incarnation id, so two workers on the same session resolve at the lease boundary. A host that needs a stable logical execution lane sets an explicit identity with <code>SessionBuilder::session_execution_owner</code>.</p>
+        <p>Every host must give <code>LashCoreBuilder::build</code> an explicit session-execution owner. The core carries that process identity into every root, child, queued-work, and process-worker runtime it constructs.</p>
       </div>
-      <p>An identity is a stable <code>owner_id</code> (one per replica, stable across restarts) plus an <code>incarnation_id</code> the process bumps each boot. Reentry requires the same owner id <em>and</em> the same incarnation; a new incarnation waits until the old lease's TTL expires before it can acquire a new fenced lease. Lease ownership is platform-neutral and never inspects the holder's process table.</p>
-      <pre data-lang="rust" data-snippet="operations#worker-identity"><code>// A stable owner id per replica plus a per-boot incarnation. A crashed
-// holder remains busy until the lease TTL expires.
+      <p>The contract is exact: <code>owner_id</code> is stable per worker or process, never per turn, while <code>incarnation_id</code> changes once per boot. The <a href="https://github.com/lash-lang/lash/tree/main/examples/slack-clone">slack-clone example</a> is the reference shape: constant owner id <code>slack-clone-bot</code> with a fresh boot incarnation. Lease ownership is platform-neutral and never inspects the holder's process table.</p>
+      <pre data-lang="rust" data-snippet="operations#worker-identity"><code>// Stable per worker or process, never per turn. Change only the
+// incarnation when this process boots.
 let owner = LeaseOwnerIdentity::opaque(
     std::env::var("WORKER_ID").unwrap_or_else(|_| "worker-1".to_string()),
     std::env::var("AGENT_SERVICE_INCARNATION").unwrap_or_else(|_| boot_incarnation()),
 );
 
-let session = core
-    .session(chat_id)
-    .session_execution_owner(owner)
-    .open()
-    .await?;</code></pre>
+let core = builder.build(owner)?;</code></pre>
       <aside class="gotcha">
         <strong>Gotcha</strong>
-        <p>An explicit identity is stable within a boot, so a durable retry of the same logical execution lane reenters its own lease instead of being rejected as busy. That is the point for a workflow engine that serializes one invocation. A host that does <em>not</em> serialize one logical lane per session should keep the default per-open identity, or a second concurrent turn on the same session will reenter rather than see <code>session_execution_busy</code>. The head CAS remains the last-resort single-writer backstop either way.</p>
+        <p>A turn id is not a worker identity. Per-turn owners make a replacement boot look unrelated to its own predecessor and obscure the operational lane. Concurrent lane-less persistence still settles only through the session-head CAS; the lease remains the fast-path serializer and contention signal.</p>
       </aside>
     </div>
 
@@ -216,7 +212,7 @@ let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .lease_timings(lease_timings) // omit to keep the 30s ttl / 10s renew default
-    .build()?;</code></pre>
+    .build(session_execution_owner)?;</code></pre>
     </div>
 
     <div class="section" id="graceful-drain">
@@ -389,14 +385,14 @@ match lease.renewal() {
     }
 }
 Ok(())</code></pre>
-      <p><strong>2. Read the lease timeline.</strong> The structured lease events cover the decisive lease transitions, and one covers settlement authority removed during recovery. Events emitted while holding or acquiring a lane carry <code>session_id</code>, <code>generation</code> (the lane's fencing token, which ADR 0029 calls the generation), <code>owner_id</code>, and <code>incarnation_id</code>; the lane-less successor advisory instead hashes the predecessor identity and claims no generation. A takeover is reported by the worker that <em>won</em> the lane, atomically with its claim, so it is present even when the displaced worker is dead: that is the usual reason a lease lapsed, and a report from the loser would be missing exactly when it matters.</p>
+      <p><strong>2. Read the lease timeline.</strong> The structured lease events cover the decisive lease transitions, and one covers settlement authority removed during recovery. Events emitted while holding or acquiring a lane carry <code>session_id</code>, <code>generation</code> (the lane's fencing token, which ADR 0029 calls the generation), <code>owner_id</code>, and <code>incarnation_id</code>; the lane-less commit advisory instead hashes the holder identity and claims no generation. A takeover is reported by the worker that <em>won</em> the lane, atomically with its claim, so it is present even when the displaced worker is dead: that is the usual reason a lease lapsed, and a report from the loser would be missing exactly when it matters.</p>
       <div class="table">
         <table>
           <thead><tr><th>Event</th><th>Level</th><th>Extra fields</th><th>What it establishes</th></tr></thead>
           <tbody>
             <tr><td><code>session_execution_lease.acquired</code></td><td>info</td><td><code>expires_at_epoch_ms</code></td><td>this worker acquired the lane at this generation.</td></tr>
             <tr><td><code>session_execution_lease.taken_over</code></td><td>info</td><td><code>displaced_fencing_token</code>, <code>displaced_owner_id</code>, <code>displaced_incarnation_id</code>, <code>displaced_expired_at_epoch_ms</code></td><td>emitted by the <em>winner</em>: this worker took the lane from that named lapsed holder. Always present on a real takeover, including when the displaced worker is dead.</td></tr>
-            <tr><td><code>session_execution_lease.successor_busy_advisory</code></td><td>info</td><td><code>holder_owner_id_sha256</code>, <code>holder_incarnation_id_sha256</code></td><td>a different incarnation of the same logical owner found a live predecessor lane and is committing lane-lessly under the head CAS without displacing that holder.</td></tr>
+            <tr><td><code>session_execution_lease.commit_busy_advisory</code></td><td>info</td><td><code>holder_owner_id_sha256</code>, <code>holder_incarnation_id_sha256</code></td><td>a lane-less persistence claimant found a live holder and is committing under the head CAS without displacing that holder.</td></tr>
             <tr><td><code>session_execution_lease.lost</code></td><td>warn</td><td><code>error</code></td><td>a renewal was rejected; this worker no longer holds the lane. A purely local notice that names no successor, and absent entirely when the worker is gone. Not a turn failure.</td></tr>
             <tr><td><code>session_execution_lease.commit_cas_rejected</code></td><td>warn</td><td><code>lane_held</code>, <code>lease_lost</code>, <code>expected_head_revision</code>, <code>actual_head_revision</code></td><td>this worker's commit lost the head compare-and-set. This, and only this, proves a turn did not publish. <code>lane_held</code> says whether <code>generation</code> is this worker's own lane or the one it knowingly raced under the busy advisory, which is what the livelock row below keys on.</td></tr>
             <tr><td><code>claim_settlement.recovered_row_dropped</code><br><small>target: <code>lash_core::claim_settlement</code></small></td><td>warn</td><td><code>decision_basis</code>, <code>session_id</code>, <code>row_kind</code>, <code>row_id</code>, <code>stale_claim_id</code>, <code>stale_session_lease_generation</code>, <code>current_session_lease_generation</code>, <code>superseding_claim_id</code>, <code>superseding_session_lease_generation</code> (both omitted when the store names no successor claim), <code>outcome</code></td><td>recovery intentionally removed settlement authority already superseded by a peer. This is expected during ordinary takeover; investigate sustained volume or occurrences outside failover.</td></tr>
@@ -411,10 +407,10 @@ Ok(())</code></pre>
           <thead><tr><th>Reading</th><th>Situation</th><th>Do this</th></tr></thead>
           <tbody>
             <tr><td><code>Current</code>, no <code>session_execution_lease.lost</code> in the log</td><td><strong>provider hang.</strong> The lane is healthy and renewals are landing, so the worker is alive and blocked inside its own turn. Most often that is a provider call with no timeout, sometimes a tool or a durable wait.</td><td>Inspect the provider call and the turn's own activity. If it must stop, cancel the exact turn through <code>core.turn_work_driver()</code>. Do not touch the lease.</td></tr>
-            <tr><td><code>Current</code> with <code>session_execution_lease.successor_busy_advisory</code></td><td><strong>successor publication.</strong> The current row may name a dead holder whose replacement incarnation is committing lane-lessly under the same logical owner ID. The predecessor remains untouched until TTL; the head CAS decides which commit publishes.</td><td>Read the committed session head. Do not displace or release the current row: only <code>session_execution_lease.commit_cas_rejected</code> proves a writer lost.</td></tr>
+            <tr><td><code>Current</code> with <code>session_execution_lease.commit_busy_advisory</code></td><td><strong>lane-less publication.</strong> A persistence claimant observed this live row and proceeded without displacing it. The holder remains untouched; the head CAS decides which commit publishes.</td><td>Read the committed session head. Do not displace or release the current row: only <code>session_execution_lease.commit_cas_rejected</code> proves a writer lost.</td></tr>
             <tr><td><code>Lapsed</code>, or a different holder than you expected, with a <code>taken_over</code> naming your worker as <code>displaced_owner_id</code></td><td><strong>lease loss / takeover.</strong> The original worker stopped renewing and a peer swept the lane with a higher generation. A matching <code>session_execution_lease.lost</code> from the displaced worker appears only if it is still alive to notice; its absence means the worker is gone, not that no takeover happened.</td><td>Nothing, yet. The displaced worker may still be running and may still win the commit CAS: a lost lease is not a failed turn. Wait for the turn's committed outcome, or for <code>commit_cas_rejected</code> to prove it lost. Killing the worker here is how a successful turn gets destroyed.</td></tr>
             <tr><td>A single <code>commit_cas_rejected</code> with <code>lease_lost = false</code></td><td><strong>concurrent-writer CAS contention.</strong> Two writers overlapped once on this session head and the CAS did its job. One rejection is not a pattern.</td><td>Note it and move on. Investigate only if it recurs, which is the next row.</td></tr>
-            <tr><td><em>Repeated</em> <code>commit_cas_rejected</code> with <code>lease_lost = false</code> and <code>lane_held = true</code>, across attempts on the same session</td><td><strong>livelock.</strong> The same contention keeps recurring because nothing serializes the writers: usually a host that routes two concurrent writers to one session under one explicit <code>session_execution_owner</code> identity, so each reenters the other's lease instead of seeing <code>session_execution_busy</code>, and retries keep colliding.</td><td>Fix the identity or the routing, not the lease timings. See <a href="#worker-identity">worker identity</a>: the default per-open identity is what makes a second concurrent writer resolve at the lease boundary.</td></tr>
+            <tr><td><em>Repeated</em> <code>commit_cas_rejected</code> with <code>lease_lost = false</code>, across attempts on the same session</td><td><strong>livelock.</strong> The same contention keeps recurring because writers repeatedly race the same session head.</td><td>Fix routing or retry backoff, not the lease timings. See <a href="#worker-identity">worker identity</a> and correlate each rejection with its preceding busy event.</td></tr>
             <tr><td><code>Unheld</code> while the host still shows a turn running</td><td><strong>stale host record.</strong> The lane is free, so nothing is executing under it.</td><td>Reconcile the host's in-flight record against the session's committed head; the turn either landed or never started.</td></tr>
           </tbody>
         </table>

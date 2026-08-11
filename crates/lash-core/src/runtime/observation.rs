@@ -749,6 +749,7 @@ mod tests {
             LashRuntime::builder(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
+                crate::testing::runtime_lease_owner(),
             )
             .with_session_id("session-a")
             .with_policy(crate::SessionPolicy {
@@ -798,6 +799,7 @@ mod tests {
             LashRuntime::builder(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
+                crate::testing::runtime_lease_owner(),
             )
             .with_session_id("revision-equivalence")
             .with_policy(crate::SessionPolicy {
@@ -832,6 +834,7 @@ mod tests {
             LashRuntime::builder(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
+                crate::testing::runtime_lease_owner(),
             )
             .with_session_id("publish-order")
             .with_policy(crate::SessionPolicy {
@@ -879,6 +882,7 @@ mod tests {
             LashRuntime::builder(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
+                crate::testing::runtime_lease_owner(),
             )
             .with_session_id("publish-perf")
             .with_policy(crate::SessionPolicy {

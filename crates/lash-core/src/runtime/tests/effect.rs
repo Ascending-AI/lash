@@ -1772,6 +1772,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
         host_with_effect_recorder(recorder.clone()),
         RuntimeServices::new(plugin_session),
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime");
@@ -1824,6 +1825,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         )),
         RuntimeServices::new(plugin_session),
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime");

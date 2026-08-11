@@ -101,7 +101,7 @@ async fn full_core(provider: ProviderHandle, data_dir: std::path::PathBuf) -> an
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
 
     let session = core.session("chat-123").open().await?;
     let result = session
@@ -157,7 +157,7 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
         .configure_plugins(|plugins| {
             plugins.push(Arc::new(AppPluginFactory) as Arc<dyn PluginFactory>);
         })
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:preset-core
     let _ = core;
     Ok(())
@@ -190,7 +190,7 @@ async fn custom_stack(root_spec: SessionSpec) -> anyhow::Result<()> {
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:custom-stack
     let _ = core;
     Ok(())

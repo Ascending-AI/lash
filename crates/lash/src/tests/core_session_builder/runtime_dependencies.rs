@@ -27,7 +27,7 @@ fn commit_budget_is_required_for_builder_construction_and_deserialization() {
             .process_env_store(Arc::new(
                 lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
             ))
-            .build(),
+            .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing commit budget",
     );
     assert!(matches!(error, EmbedError::MissingCommitBudget));
@@ -121,7 +121,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
         .process_registry(Arc::new(registry))
         .advanced()
         .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(lash_core::CommitBudget::bounded(1024 * 1024, 512), lash_core::QueuedWorkBatchingConfig::new(1)).with_clock(clock))
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("build core with SQLite process registry");
     let registry = core.process_registry().expect("built process registry");
     let delivery_expiry_ms = registry.wake_delivery_config().delivery_expiry_ms;
@@ -177,7 +177,7 @@ async fn builder_requires_explicit_process_env_store_at_build() {
     let result = peer_coherence_builder()
         .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()))
-        .build();
+        .build(crate::testing::runtime_lease_owner());
     let err = expect_build_error(
         result,
         "builder must reject missing process execution environment store",
@@ -207,7 +207,7 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
         .process_env_store(durable_process_env_store(dir.path()).await)
         .trigger_store(durable_trigger_store(dir.path()).await)
         .process_registry(registry)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     Ok(())
 }
 
@@ -231,7 +231,7 @@ async fn durable_registry_with_only_child_store_factory_builds() -> Result<()> {
         .process_env_store(durable_process_env_store(dir.path()).await)
         .trigger_store(durable_trigger_store(dir.path()).await)
         .process_registry(registry)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     Ok(())
 }
 
@@ -242,7 +242,7 @@ async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
     explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     Ok(())
 }
 
@@ -265,7 +265,7 @@ async fn process_work_driver_configures_external_runner_without_inline_store_fac
     let driver_registry = driver.process_registry();
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .process_work_driver(driver)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let configured = core
         .process_registry()
@@ -297,7 +297,7 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     core.session("main").open().await?;
     assert!(
         core.work_driver.drivers().await.process.is_some(),
@@ -316,7 +316,7 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .trigger_store(Arc::clone(&trigger_store))
         .process_registry(Arc::clone(&registry))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     assert!(core.processes().observer().is_ok());
     let config = core.durable_process_worker_config()?;
@@ -341,7 +341,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let collected_error = core
         .fork_at("collected-fork-point", "collected-fork-branch")
@@ -439,7 +439,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .model(mock_model_spec())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
         .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let mut source_model = mock_model_spec();
     source_model.id = "fork-source-model".to_string();
     let policy = lash_core::SessionPolicy {
@@ -824,7 +824,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         .model(mock_model_spec())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
         .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     assert!(
         !registry.is_observer(session_id, process_id).await?,
@@ -891,7 +891,7 @@ async fn nested_session_observer_intents_settle_every_layer_before_open_returns(
         .model(mock_model_spec())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
         .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
         let session_id = format!("nested-observer-intent-{case}");
@@ -1006,7 +1006,7 @@ fn builder_rejects_invalid_process_execution_concurrency() {
     let err = expect_build_error(
         explicit_ephemeral_facets(peer_coherence_builder())
             .process_execution_concurrency(0)
-            .build(),
+            .build(crate::testing::runtime_lease_owner()),
         "zero process execution concurrency must be rejected",
     );
     assert!(matches!(err, EmbedError::ProcessExecutionConcurrency(_)));
@@ -1017,7 +1017,7 @@ fn builder_rejects_invalid_queued_work_execution_concurrency() {
     let err = expect_build_error(
         explicit_ephemeral_facets(peer_coherence_builder())
             .queued_work_execution_concurrency(0)
-            .build(),
+            .build(crate::testing::runtime_lease_owner()),
         "zero queued-work execution concurrency must be rejected",
     );
     assert!(matches!(
@@ -1030,7 +1030,7 @@ fn builder_rejects_invalid_queued_work_execution_concurrency() {
 async fn durable_process_worker_config_requires_core_process_registry() {
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
-        .build()
+        .build(crate::testing::runtime_lease_owner())
         .expect("build core without process support");
 
     let Err(err) = core.durable_process_worker_config() else {
@@ -1047,7 +1047,7 @@ async fn registry_without_store_factory_fails_loudly() {
     // (a process started in such a host would otherwise hang forever).
     let result = explicit_ephemeral_facets(peer_coherence_builder())
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build();
+        .build(crate::testing::runtime_lease_owner());
     let err = expect_build_error(
         result,
         "a process registry with no store factory must be rejected",
@@ -1081,7 +1081,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         .model(mock_model_spec())
         .generation(host_generation.clone())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
 
     let mut source_model = mock_model_spec();
     source_model.id = "fork-source-model".to_string();

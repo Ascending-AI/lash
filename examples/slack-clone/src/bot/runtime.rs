@@ -187,7 +187,7 @@ pub async fn build_core(
         // takes the decision back: every turn in this host starts because a human
         // mentioned the bot.
         .disable_queued_work_driver()
-        .build()
+        .build(session_owner(&config.incarnation))
         .context("build slack-clone bot Lash core")
 }
 

@@ -4,35 +4,14 @@ use lash_core::facade_support;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 
 pub(crate) struct InlineQueuedWorkRunConfig {
-    env: RuntimeEnvironment,
-    policy: SessionPolicy,
-    protocol_factory: Option<Arc<dyn PluginFactory>>,
-    plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-    store_factory: Arc<dyn SessionStoreFactory>,
-    live_replay_store: Arc<dyn LiveReplayStore>,
-    process_lifecycle_available: bool,
-}
-
-impl InlineQueuedWorkRunConfig {
-    pub(super) fn new(
-        env: RuntimeEnvironment,
-        policy: SessionPolicy,
-        protocol_factory: Option<Arc<dyn PluginFactory>>,
-        plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-        store_factory: Arc<dyn SessionStoreFactory>,
-        live_replay_store: Arc<dyn LiveReplayStore>,
-        process_lifecycle_available: bool,
-    ) -> Self {
-        Self {
-            env,
-            policy,
-            protocol_factory,
-            plugin_factories,
-            store_factory,
-            live_replay_store,
-            process_lifecycle_available,
-        }
-    }
+    pub(super) session_execution_owner: lash_core::LeaseOwnerIdentity,
+    pub(super) env: RuntimeEnvironment,
+    pub(super) policy: SessionPolicy,
+    pub(super) protocol_factory: Option<Arc<dyn PluginFactory>>,
+    pub(super) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
+    pub(super) store_factory: Arc<dyn SessionStoreFactory>,
+    pub(super) live_replay_store: Arc<dyn LiveReplayStore>,
+    pub(super) process_lifecycle_available: bool,
 }
 
 pub(super) struct InlineQueuedWorkRunHandle {
@@ -101,13 +80,19 @@ impl InlineQueuedWorkRunHandle {
             })?;
         env.plugin_host = Some(Arc::new(plugin_host));
         let effect_host = Arc::clone(&env.core.control.effect_host);
-        let runtime = LashRuntime::from_environment(&env, policy, state, Some(store))
-            .await
-            .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
+        let runtime = LashRuntime::from_environment(
+            &env,
+            policy,
+            state,
+            Some(store),
+            self.config.session_execution_owner.clone(),
+        )
+        .await
+        .map_err(|error| {
+            facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                error.to_string(),
+            ))
+        })?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.config.live_replay_store),

@@ -518,7 +518,7 @@ async fn effect_replay_ownership_decides_who_may_drive_a_foreground_turn() {
                 data_dir.path().join("lash-sessions"),
             )))
             .effect_host(effect_host)
-            .build()
+            .build(crate::test_core_owner())
             .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
     };
 
