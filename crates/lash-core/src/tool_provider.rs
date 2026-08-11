@@ -417,6 +417,7 @@ impl<'run> ToolContext<'run> {
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),
             effect_controller: self.effect_controller.clone(),
+            parent_invocation: self.parent_invocation.clone(),
         }
     }
 

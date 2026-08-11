@@ -57,13 +57,14 @@ mod process_tool_replay;
 mod replay_corpus;
 mod tool_context_conformance;
 use endpoint_protocol::{
-    encode_call_replay, encode_captured_run_and_call_replay,
+    encode_call_replay, encode_captured_run_and_call_replay, encode_captured_run_command_replay,
     encode_completed_captured_sleep_replay, encode_completed_sleep_replay,
     encode_effectful_process_terminal_replay, encode_one_way_call_replay,
     encode_pending_sleep_replay, encode_process_segment_send_replay,
     encode_process_terminal_delivery_replay, encode_run_replay,
     encode_two_one_way_calls_and_call_replay, invoke_endpoint, invoke_endpoint_body,
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
+    invoke_endpoint_with_named_call_and_invocation_responses,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
     invoke_process_workflow_endpoint, restate_call_frames, restate_error_message,
     restate_message_types, restate_output_failure_message, restate_output_json,
@@ -801,6 +802,369 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
         };
         self.terminal_resumes.fetch_add(1, Ordering::SeqCst);
         Ok(Json(resolution))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Fig1127NestedRoute {
+    Processes,
+    Triggers,
+    Sessions,
+}
+
+impl Fig1127NestedRoute {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Processes => "processes",
+            Self::Triggers => "triggers",
+            Self::Sessions => "sessions",
+        }
+    }
+
+    fn expected_refusal(self) -> &'static str {
+        match self {
+            Self::Processes => {
+                "ToolContext::processes().start() is unavailable inside an atomic tool attempt"
+            }
+            Self::Triggers => {
+                "ToolContext::triggers().emit() is unavailable inside an atomic tool attempt"
+            }
+            Self::Sessions => {
+                "ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt"
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+struct Fig1127NestedRouteInput {
+    route: Fig1127NestedRoute,
+}
+
+#[restate_sdk::workflow]
+trait Fig1127NestedRouteRedrive {
+    async fn run(input: Json<Fig1127NestedRouteInput>) -> HandlerResult<Json<String>>;
+}
+
+struct Fig1127NestedTurnLifecycle {
+    registry: Arc<dyn ProcessRegistry>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::SessionLifecycleService for Fig1127NestedTurnLifecycle {
+    async fn create_session(
+        &self,
+        _request: lash_core::SessionCreateRequest,
+    ) -> Result<lash_core::plugin::SessionHandle, PluginError> {
+        Err(PluginError::Session(
+            "session creation is unused by the FIG-1127 fixture".to_string(),
+        ))
+    }
+
+    async fn close_session(&self, _session_id: &str) -> Result<(), PluginError> {
+        Err(PluginError::Session(
+            "session closure is unused by the FIG-1127 fixture".to_string(),
+        ))
+    }
+
+    async fn start_turn(
+        &self,
+        request: lash_core::plugin::SessionTurnRequest<'_>,
+    ) -> Result<lash_core::runtime::AssembledTurn, PluginError> {
+        let (turn, scoped_effect_controller) = request.into_parts();
+        let process_id = format!("fig1127-nested-turn-{}", turn.turn_id);
+        let registration = ProcessRegistration::new(
+            process_id,
+            ProcessInput::Engine {
+                kind: "fig1127-nested-turn".to_string(),
+                payload: serde_json::json!({}),
+            },
+            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::ProcessProvenance::host(),
+        )
+        .with_identity(lash_core::ProcessIdentity::new("fig1127-nested-turn"))
+        .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+            "process-env:fig1127-nested-turn",
+        )));
+        let command = ProcessCommand::Start {
+            registration,
+            observers: vec![turn.session_id.clone()],
+            execution_context: Box::new(ProcessExecutionContext::default()),
+        };
+        let effect_id = command.effect_id();
+        scoped_effect_controller
+            .controller()
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    RuntimeInvocation::effect(
+                        RuntimeScope::new(turn.session_id.clone()),
+                        effect_id.clone(),
+                        RuntimeEffectKind::Process,
+                        effect_id,
+                    ),
+                    RuntimeEffectCommand::process(command),
+                ),
+                RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None),
+            )
+            .await?;
+        Ok(lash_core::testing::mock_assembled_turn(
+            &turn.session_id,
+            "nested turn completed",
+        ))
+    }
+}
+
+struct Fig1127NestedRouteRedriveImpl {
+    registry: Arc<dyn ProcessRegistry>,
+    trigger_router: lash_core::facade_support::TriggerRouter,
+    tool_body_runs: Arc<AtomicUsize>,
+}
+
+impl Fig1127NestedRouteRedrive for Fig1127NestedRouteRedriveImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig1127NestedRouteInput>,
+    ) -> HandlerResult<Json<String>> {
+        let controller = RestateRuntimeEffectController::new(ctx);
+        let parent_invocation = RuntimeInvocation::effect(
+            RuntimeScope::for_turn(
+                "atomic-tool-test-session",
+                format!("fig1127-{}-turn", input.route.label()),
+                0,
+                0,
+            ),
+            format!("fig1127-{}-attempt", input.route.label()),
+            RuntimeEffectKind::ToolAttempt,
+            format!("fig1127-{}-attempt", input.route.label()),
+        );
+        let scoped = controller
+            .scoped_effect_controller(ExecutionScope::turn(
+                "atomic-tool-test-session",
+                format!("fig1127-{}-turn", input.route.label()),
+            ))
+            .map_err(TerminalError::from_error)?;
+        let lifecycle: Arc<dyn lash_core::plugin::SessionLifecycleService> =
+            Arc::new(Fig1127NestedTurnLifecycle {
+                registry: Arc::clone(&self.registry),
+            });
+        let processes =
+            lash_core::testing::effect_backed_process_service(Arc::clone(&self.registry));
+        let tool_context = lash_core::testing::atomic_tool_context_with_services(
+            scoped,
+            lifecycle,
+            processes,
+            Some(self.trigger_router.clone()),
+            parent_invocation.clone(),
+        );
+        let route = input.route;
+        let tool_body_runs = Arc::clone(&self.tool_body_runs);
+        let outcome = controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    parent_invocation,
+                    RuntimeEffectCommand::ToolAttempt {
+                        call: prepared_tool_call_with(
+                            &format!("fig1127-{}-call", route.label()),
+                            &format!("fig1127_{}", route.label()),
+                        ),
+                        execution_grant: None,
+                        attempt: 1,
+                        max_attempts: 1,
+                    },
+                ),
+                RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                    tool_body_runs.fetch_add(1, Ordering::SeqCst);
+                    let result = match route {
+                        Fig1127NestedRoute::Processes => tool_context
+                            .processes()
+                            .start(lash_core::ProcessStartRequest::new(
+                                "fig1127-tool-started-process",
+                                ProcessInput::Engine {
+                                    kind: "fig1127-tool-start".to_string(),
+                                    payload: serde_json::json!({}),
+                                },
+                                lash_core::RecoveryDisposition::Rerunnable,
+                                lash_core::ProcessOriginator::host_scoped("fig1127"),
+                            ))
+                            .await
+                            .map(|_| ()),
+                        Fig1127NestedRoute::Triggers => tool_context
+                            .triggers()
+                            .emit(lash_core::TriggerOccurrenceRequest::new(
+                                "fig1127.trigger",
+                                "fig1127-source",
+                                serde_json::json!({"route": "trigger"}),
+                                "fig1127-occurrence",
+                            ))
+                            .await
+                            .map(|_| ()),
+                        Fig1127NestedRoute::Sessions => tool_context
+                            .sessions()
+                            .start_turn(
+                                "fig1127-child-session",
+                                "fig1127-child-turn",
+                                lash_core::TurnInput::text("nested turn"),
+                            )
+                            .await
+                            .map(|_| ()),
+                    };
+                    let output = match result {
+                        Ok(()) => lash_core::ToolCallOutput::success(serde_json::json!("ok")),
+                        Err(error) => {
+                            lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
+                                lash_core::ToolFailureClass::InvalidRequest,
+                                "nested_atomic_tool_route",
+                                error.to_string(),
+                            ))
+                        }
+                    };
+                    Ok(RuntimeEffectOutcome::ToolAttempt {
+                        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
+                            record: Box::new(lash_core::ToolCallRecord {
+                                call_id: Some(format!("fig1127-{}-call", route.label())),
+                                tool: format!("fig1127_{}", route.label()),
+                                args: serde_json::Value::Null,
+                                output,
+                                duration_ms: 0,
+                            }),
+                        }),
+                        triggers: Vec::new(),
+                    })
+                }),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::ToolAttempt { launch, .. } = outcome else {
+            return Err(TerminalError::new("FIG-1127 fixture expected a tool outcome").into());
+        };
+        let lash_core::ToolAttemptLaunch::Done { record } = *launch else {
+            return Err(TerminalError::new("FIG-1127 fixture expected a completed tool").into());
+        };
+
+        let request: restate_sdk::context::Request<
+            '_,
+            Json<serde_json::Value>,
+            Json<serde_json::Value>,
+        > = ContextClient::request(
+            controller.context(),
+            RequestTarget::workflow("Fig1127NestedRouteSink", "fig1127-sink", "complete"),
+            Json(serde_json::Value::Null),
+        );
+        let Json(_sink) = request.call().await?;
+        Ok(Json(record.output.value_for_projection().to_string()))
+    }
+}
+
+async fn fig1127_endpoint() -> (Endpoint, Arc<AtomicUsize>) {
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    store
+        .execute_command(
+            "fig1127-register-trigger",
+            lash_core::TriggerCommand::Register {
+                owner_scope: lash_core::TriggerOwnerScope::host("fig1127")
+                    .expect("FIG-1127 trigger owner scope"),
+                actor: lash_core::ProcessOriginator::host_scoped("fig1127"),
+                draft: lash_core::TriggerSubscriptionDraft::for_process(
+                    "fig1127/subscription",
+                    lash_core::ProcessExecutionEnvRef::new("process-env:fig1127"),
+                    "fig1127.trigger",
+                    "fig1127-source",
+                    ProcessInput::Engine {
+                        kind: "fig1127-trigger".to_string(),
+                        payload: serde_json::json!({}),
+                    },
+                    lash_core::ProcessIdentity::new("fig1127-trigger"),
+                )
+                .with_payload_schema(lash_core::LashSchema::any()),
+            },
+        )
+        .await
+        .expect("register FIG-1127 trigger subscription")
+        .expect("FIG-1127 trigger registration outcome");
+    let registry = process_registry();
+    let trigger_router = lash_core::facade_support::TriggerRouter::new(
+        Arc::clone(&store) as Arc<dyn TriggerStore>,
+        Some(Arc::clone(&registry)),
+        None,
+    );
+    let tool_body_runs = Arc::new(AtomicUsize::new(0));
+    let endpoint = Endpoint::builder()
+        .bind(
+            Fig1127NestedRouteRedriveImpl {
+                registry,
+                trigger_router,
+                tool_body_runs: Arc::clone(&tool_body_runs),
+            }
+            .serve(),
+        )
+        .build();
+    (endpoint, tool_body_runs)
+}
+
+#[tokio::test]
+async fn fig1127_nested_tool_routes_refuse_and_redrive_without_ordinal_shift() {
+    for route in [
+        Fig1127NestedRoute::Processes,
+        Fig1127NestedRoute::Triggers,
+        Fig1127NestedRoute::Sessions,
+    ] {
+        let (endpoint, tool_body_runs) = fig1127_endpoint().await;
+        let workflow_key = format!("fig1127-{}-redrive", route.label());
+        let input = Fig1127NestedRouteInput { route };
+        let invocation_ids = vec![format!("inv_fig1127_{}_nested", route.label())];
+        let call_completions = vec![
+            serde_json::json!(false),
+            serde_json::json!(false),
+            serde_json::json!(false),
+        ];
+        let first = invoke_endpoint_with_named_call_and_invocation_responses(
+            &endpoint,
+            "Fig1127NestedRouteRedrive",
+            "run",
+            &workflow_key,
+            &input,
+            invocation_ids.clone(),
+            vec![
+                ("is_revoked".to_string(), serde_json::json!(false)),
+                ("is_revoked".to_string(), serde_json::json!(false)),
+                ("complete".to_string(), serde_json::json!(false)),
+            ],
+        )
+        .await
+        .expect("first FIG-1127 attempt must complete");
+        let replay = encode_captured_run_command_replay(
+            &workflow_key,
+            &input,
+            &first,
+            &invocation_ids,
+            &call_completions,
+        )
+        .expect("capture the exact FIG-1127 first-attempt command journal");
+
+        let redriven = invoke_endpoint_body(&endpoint, "Fig1127NestedRouteRedrive", "run", replay)
+            .await
+            .expect("redrive the FIG-1127 command journal");
+        assert!(
+            restate_error_message(&redriven).is_none(),
+            "{} route redrive shifted onto a nested command (RT0016): {:?}",
+            route.label(),
+            restate_error_message(&redriven)
+        );
+        let refusal = restate_output_json::<String>(&redriven)
+            .unwrap_or_else(|| panic!("decode {} route refusal", route.label()));
+        assert!(
+            refusal.contains(route.expected_refusal()),
+            "{} route returned the wrong refusal: {refusal}",
+            route.label()
+        );
+        assert_eq!(
+            tool_body_runs.load(Ordering::SeqCst),
+            1,
+            "{} route replay must not re-enter the ToolAttempt body",
+            route.label()
+        );
     }
 }
 

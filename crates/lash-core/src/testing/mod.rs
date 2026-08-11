@@ -578,6 +578,209 @@ pub fn code_execution_context_with_trigger_store_and_effect_controller(
     )
 }
 
+/// Builds the production-shaped `ToolContext` installed while a controller-owned
+/// `ToolAttempt` local executor is open. Durable-adapter tests use this to prove
+/// that tool-facing clients refuse before entering a nested controller command.
+pub fn atomic_tool_context_with_services<'run>(
+    scoped_effect_controller: crate::ScopedEffectController<'run>,
+    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
+    parent_invocation: crate::RuntimeInvocation,
+) -> crate::ToolContext<'run> {
+    let host = Arc::new(MockSessionManager::default());
+    let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
+        .build_session("atomic-tool-test-session", None)
+        .expect("build atomic-tool test plugin session");
+    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
+    let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
+    let execution_env_spec = crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
+    let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
+        plugins,
+        tools: Arc::new(EmptyToolProvider),
+        tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
+        sessions: host.clone(),
+        session_lifecycle,
+        session_graph: host,
+        processes,
+        trigger_router,
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(
+            scoped_effect_controller,
+        ),
+        direct_completions: crate::DirectCompletionClient::unavailable(
+            "direct completions are unavailable in this test context",
+        ),
+        parent_invocation: Some(parent_invocation),
+        execution_env_spec,
+        session_id: "atomic-tool-test-session".to_string(),
+        agent_frame_id: String::new(),
+        event_tx,
+        checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+        trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        attachment_store,
+        attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+        turn_context: crate::TurnContext::default(),
+        clock: Arc::new(crate::SystemClock),
+    });
+    crate::ToolContext::from_dispatch(dispatch).build()
+}
+
+struct EffectBackedProcessService {
+    registry: Arc<dyn crate::ProcessRegistry>,
+}
+
+impl EffectBackedProcessService {
+    async fn execute(
+        &self,
+        scope: crate::ProcessOpScope<'_>,
+        command: crate::ProcessCommand,
+    ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
+        let effect_id = command.effect_id();
+        let outcome = scope
+            .controller()
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    crate::RuntimeInvocation::effect(
+                        crate::RuntimeScope::new("atomic-tool-test-session"),
+                        effect_id.clone(),
+                        crate::RuntimeEffectKind::Process,
+                        effect_id,
+                    ),
+                    crate::RuntimeEffectCommand::process(command),
+                ),
+                crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None),
+            )
+            .await?;
+        outcome.into_process().map_err(crate::PluginError::from)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessService for EffectBackedProcessService {
+    async fn start_from_request(
+        &self,
+        _session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+        let observers = request.observers.clone();
+        let env_ref = request
+            .env_spec
+            .as_ref()
+            .map(|_| crate::ProcessExecutionEnvRef::new("process-env:atomic-tool-test"));
+        let registration = request.into_registration(env_ref);
+        let command = crate::ProcessCommand::Start {
+            registration,
+            observers,
+            execution_context: Box::new(crate::ProcessExecutionContext::default()),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Start { record } => {
+                Ok(crate::ProcessHandleSummary::from_record(*record))
+            }
+            _ => unreachable!("start command returns start outcome"),
+        }
+    }
+
+    async fn start(
+        &self,
+        _session_id: &str,
+        registration: crate::ProcessRegistration,
+        options: crate::ProcessStartOptions,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let command = crate::ProcessCommand::Start {
+            registration,
+            observers: options.initial_observers,
+            execution_context: Box::new(crate::ProcessExecutionContext::default()),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Start { record } => Ok(*record),
+            _ => unreachable!("start command returns start outcome"),
+        }
+    }
+
+    async fn await_process(
+        &self,
+        _process_id: &str,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "process awaiting is unavailable in this test service".to_string(),
+        ))
+    }
+
+    async fn list_visible(
+        &self,
+        _session_id: &str,
+        _mode: crate::ProcessListMode,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "process listing is unavailable in this test service".to_string(),
+        ))
+    }
+
+    async fn validate_visible(
+        &self,
+        _session_id: &str,
+        _process_ids: &[String],
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "process visibility is unavailable in this test service".to_string(),
+        ))
+    }
+
+    async fn cancel(
+        &self,
+        _session_id: &str,
+        _process_id: &str,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "process cancellation is unavailable in this test service".to_string(),
+        ))
+    }
+
+    async fn signal(
+        &self,
+        _session_id: &str,
+        _process_id: &str,
+        _signal_name: String,
+        _signal_id: String,
+        _payload: serde_json::Value,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "process signaling is unavailable in this test service".to_string(),
+        ))
+    }
+
+    async fn transfer(
+        &self,
+        _from_session_id: &str,
+        _to_session_id: &str,
+        _process_ids: Vec<String>,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "process transfer is unavailable in this test service".to_string(),
+        ))
+    }
+}
+
+/// Builds a process service whose starts cross the supplied operation scope's
+/// effect controller, matching the production durable process-start route.
+pub fn effect_backed_process_service(
+    registry: Arc<dyn crate::ProcessRegistry>,
+) -> Arc<dyn crate::ProcessService> {
+    Arc::new(EffectBackedProcessService { registry })
+}
+
 /// Convenience helper for the common tool-test shape: build a
 /// [`mock_tool_context`], wrap `name` + `args` in a `ToolCall`, and `await`
 /// the provider's `execute`. Use this for unit tests that don't need to

@@ -32,6 +32,21 @@ That exception does not extend to a `ToolProvider::execute` implementation.
 Nested tool-batch dispatch from a tool attempt remains prohibited; authors must
 decompose that composition into process steps.
 
+The controller-owned replay boundary is enforced at every `ToolContext` route
+that can otherwise enter another journaled command. The inventory is:
+
+| Route from a tool body | Resolution |
+| --- | --- |
+| `ToolContext::dispatch().batch()` | Refuses nested dispatch and directs the author to process steps. |
+| `ToolContext::processes().start()` | Refuses before process registration or workflow start; start the process from a process step. |
+| `ToolContext::triggers().emit()` | Refuses before occurrence ingestion or delivery routing; emit the trigger from a process step. |
+| `ToolContext::sessions().start_turn()` | Refuses before turn-scope registration; start the nested turn from a process step. |
+| `ToolContext::direct_completions()` | Executes locally at `DirectExecutionPosition::ToolAttempt`, without a nested journal command. |
+
+These refusals apply specifically when a controller owns replay for the parent
+`ToolAttempt`. Inline execution has no controller journal to nest and retains
+its existing behavior.
+
 The former `ToolContext::durable_effects()` facade and its `DurableStep`
 producer are removed, including the serialized command and outcome. External
 waits use deferred tool completion when the whole job has one eventual tool

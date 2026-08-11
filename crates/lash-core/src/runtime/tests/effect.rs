@@ -846,16 +846,17 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
 }
 
 #[tokio::test]
-async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_session_node() {
+async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appending_session_node()
+{
     #[derive(Clone, Default)]
-    struct CapturingToolReplayController {
+    struct CapturingRuntimeReplayController {
         llm_calls: Arc<Mutex<usize>>,
         tool_outcomes: Arc<Mutex<Vec<serde_json::Value>>>,
         process_starts: Arc<std::sync::atomic::AtomicUsize>,
         inline: InlineRuntimeEffectController,
     }
 
-    impl CapturingToolReplayController {
+    impl CapturingRuntimeReplayController {
         fn tool_outcomes(&self) -> Vec<serde_json::Value> {
             self.tool_outcomes.lock_recover().clone()
         }
@@ -866,9 +867,9 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
     }
 
     #[async_trait::async_trait]
-    impl crate::AwaitEventResolver for CapturingToolReplayController {
+    impl crate::AwaitEventResolver for CapturingRuntimeReplayController {
         fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-            crate::EffectReplayOwnership::Controller
+            crate::EffectReplayOwnership::Runtime
         }
 
         async fn await_event_key(
@@ -923,7 +924,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
     }
 
     #[async_trait::async_trait]
-    impl RuntimeEffectController for CapturingToolReplayController {
+    impl RuntimeEffectController for CapturingRuntimeReplayController {
         async fn execute_effect(
             &self,
             envelope: RuntimeEffectEnvelope,
@@ -1087,7 +1088,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
         }
     }
 
-    let controller = CapturingToolReplayController::default();
+    let controller = CapturingRuntimeReplayController::default();
     let mut config = runtime_host_config_with_inline_controller(Arc::new(controller.clone()));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),

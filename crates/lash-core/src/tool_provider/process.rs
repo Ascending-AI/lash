@@ -29,6 +29,16 @@ impl ToolSessionProcessAdmin<'_> {
         &self,
         mut request: crate::ProcessStartRequest,
     ) -> Result<crate::ProcessHandleSummary, PluginError> {
+        if self.parent_invocation.as_ref().is_some_and(|invocation| {
+            invocation.effect_kind() == Some(crate::RuntimeEffectKind::ToolAttempt)
+        }) && self.effect_controller.controller().replay_ownership()
+            == crate::EffectReplayOwnership::Controller
+        {
+            return Err(PluginError::Session(
+                "ToolContext::processes().start() is unavailable inside an atomic tool attempt; decompose the process start into a process step"
+                    .to_string(),
+            ));
+        }
         if !request
             .observers
             .iter()
@@ -139,6 +149,25 @@ mod tests {
     use crate::ProcessRegistry;
     use crate::runtime::RuntimeEffectControllerHandle;
 
+    struct ControllerOwnedReplay;
+
+    impl crate::AwaitEventResolver for ControllerOwnedReplay {
+        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+            crate::EffectReplayOwnership::Controller
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::RuntimeEffectController for ControllerOwnedReplay {
+        async fn execute_effect(
+            &self,
+            _envelope: crate::RuntimeEffectEnvelope,
+            _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+            panic!("nested process-start guard must reject before effect execution")
+        }
+    }
+
     fn admin(processes: Arc<dyn crate::ProcessService>) -> ToolSessionProcessAdmin<'static> {
         ToolSessionProcessAdmin {
             session_id: "session".to_string(),
@@ -202,5 +231,42 @@ mod tests {
             .await
             .expect("observe process");
         assert!(admin.await_process("process").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn process_start_is_rejected_inside_controller_owned_atomic_tool_attempt() {
+        let admin = ToolSessionProcessAdmin {
+            session_id: "session".to_string(),
+            agent_frame_id: "frame".to_string(),
+            processes: Arc::new(crate::UnavailableProcessService),
+            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
+                ControllerOwnedReplay,
+            )),
+            parent_invocation: Some(crate::RuntimeInvocation::effect(
+                crate::RuntimeScope::new("session"),
+                "parent-tool-attempt",
+                crate::RuntimeEffectKind::ToolAttempt,
+                "parent-tool-attempt",
+            )),
+            tool_call_id: Some("call".to_string()),
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+        };
+
+        let error = admin
+            .start(crate::ProcessStartRequest::external(
+                "nested-process",
+                crate::ProcessOriginator::host_scoped("test"),
+                serde_json::Value::Null,
+            ))
+            .await
+            .expect_err("nested process start must be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            "plugin session error: ToolContext::processes().start() is unavailable inside an atomic tool attempt; decompose the process start into a process step"
+        );
     }
 }
