@@ -109,7 +109,7 @@ where
     runtime_persistence_survives_reopen(make()).await;
 }
 
-fn assert_matching_session_resolution_errors(full: StoreError, head: StoreError, expected: &str) {
+fn assert_two_session_resolution_errors(full: StoreError, head: StoreError, expected: &str) {
     match (full, head) {
         (
             StoreError::SessionResolutionAmbiguous {
@@ -118,10 +118,16 @@ fn assert_matching_session_resolution_errors(full: StoreError, head: StoreError,
             StoreError::SessionResolutionAmbiguous {
                 session_count: head_count,
             },
-        ) => assert_eq!(
-            head_count, full_count,
-            "{expected}: full and head reads must report the same candidate count"
-        ),
+        ) => {
+            assert_eq!(
+                full_count, 2,
+                "{expected}: full read session candidate count: expected 2, got {full_count}"
+            );
+            assert_eq!(
+                head_count, 2,
+                "{expected}: head read session candidate count: expected 2, got {head_count}"
+            );
+        }
         (full, head) => panic!(
             "{expected}: full and head reads returned different typed errors: full={full:?}, head={head:?}"
         ),
@@ -200,7 +206,7 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
                 ReadResolution::Present
             }
             (Err(full), Err(head)) => {
-                assert_matching_session_resolution_errors(full, head, expected);
+                assert_two_session_resolution_errors(full, head, expected);
                 ReadResolution::Indeterminate
             }
             (full, head) => panic!(
