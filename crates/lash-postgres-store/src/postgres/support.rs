@@ -1,5 +1,24 @@
 use crate::*;
 
+pub(crate) const BOUNDED_UNBOUND_SESSION_CANDIDATES_SQL: &str = "SELECT session_id FROM (
+         (SELECT session_id FROM lash_sessions LIMIT 2)
+         UNION
+         (SELECT session_id FROM lash_session_meta LIMIT 2)
+     ) AS candidates
+     LIMIT 2";
+
+pub(crate) fn resolve_bounded_session_candidates(
+    session_ids: Vec<String>,
+) -> Result<Option<String>, StoreError> {
+    match session_ids.as_slice() {
+        [] => Ok(None),
+        [session_id] => Ok(Some(session_id.clone())),
+        _ => Err(StoreError::SessionResolutionAmbiguous {
+            session_count: session_ids.len() as u64,
+        }),
+    }
+}
+
 /// Read the authoritative lease clock from PostgreSQL.
 ///
 /// Distributed lease decisions must not depend on the wall clock of whichever
@@ -443,23 +462,14 @@ pub(crate) async fn load_session_head_meta_tx(
 pub(crate) async fn load_unbound_session_head_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
-    let row = sqlx::query(
-        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref, COUNT(*) OVER ()
-         FROM lash_sessions ORDER BY session_id ASC LIMIT 1",
-    )
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    let Some(row) = row else {
+    let session_ids = sqlx::query_scalar(BOUNDED_UNBOUND_SESSION_CANDIDATES_SQL)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let Some(session_id) = resolve_bounded_session_candidates(session_ids)? else {
         return Ok(None);
     };
-    let session_count = u64::try_from(row.get::<i64, _>(4)).map_err(|_| {
-        StoreError::Backend("PostgreSQL returned a negative session count".to_string())
-    })?;
-    if session_count > 1 {
-        return Err(StoreError::SessionResolutionAmbiguous { session_count });
-    }
-    decode_session_head_meta_row(Some(row))
+    load_session_head_meta_tx(tx, &session_id, false).await
 }
 
 fn decode_session_head_meta_row(

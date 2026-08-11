@@ -505,10 +505,24 @@ async fn postgres_unbound_session_reads_resolve_the_same_session_when_configured
         eprintln!("skipping Postgres unbound session reads: database URL is not set");
         return;
     };
-    reset(&storage).await;
-    lash_core::testing::conformance::unbound_session_reads_resolve_the_same_session(|| {
-        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
-    })
+    let storage = Arc::new(storage);
+    lash_core::testing::conformance::unbound_session_reads_resolve_the_same_session(
+        move |_admission_state| {
+            let storage = Arc::clone(&storage);
+            async move {
+                reset(&storage).await;
+                let open_storage = Arc::clone(&storage);
+                lash_core::testing::conformance::UnboundSessionResolutionHandles {
+                    backend_name: "PostgreSQL",
+                    factory: Arc::new(storage.session_store_factory()),
+                    open_unbound: Arc::new(move || {
+                        Arc::new(open_storage.unbound_session_store())
+                            as Arc<dyn RuntimePersistence>
+                    }),
+                }
+            }
+        },
+    )
     .await;
 }
 

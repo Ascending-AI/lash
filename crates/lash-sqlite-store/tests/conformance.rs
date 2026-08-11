@@ -1260,10 +1260,22 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance() {
 #[tokio::test]
 async fn sqlite_unbound_session_reads_resolve_the_same_session() {
     let dir = tempfile::tempdir().expect("unbound-read tempdir");
-    let path = dir.path().join("unbound-session-reads.db");
-    lash_core::testing::conformance::unbound_session_reads_resolve_the_same_session(|| {
-        open_store(&path)
-    })
+    let root = dir.path().to_path_buf();
+    lash_core::testing::conformance::unbound_session_reads_resolve_the_same_session(
+        move |admission_state| {
+            let axis_root = root.join(format!("{admission_state:?}"));
+            async move {
+                std::fs::create_dir_all(&axis_root).expect("create unbound-read axis directory");
+                let factory = Arc::new(SqliteSessionStoreFactory::new(&axis_root));
+                let path = factory.catalog_path();
+                lash_core::testing::conformance::UnboundSessionResolutionHandles {
+                    backend_name: "SQLite",
+                    factory,
+                    open_unbound: Arc::new(move || open_store(&path)),
+                }
+            }
+        },
+    )
     .await;
 }
 

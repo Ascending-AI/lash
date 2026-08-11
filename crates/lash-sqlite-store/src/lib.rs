@@ -348,34 +348,37 @@ impl Store {
         if let Some(session_id) = self.session_id.get() {
             return Ok(Some(session_id.clone()));
         }
-        let (session_count, session_id) = self
+        let session_ids = self
             .conn
             .call(|conn| {
-                conn.query_row(
-                    "SELECT COUNT(*), MIN(session_id) FROM (
-                         SELECT session_id FROM session_head
+                let mut stmt = conn.prepare(
+                    "SELECT session_id FROM (
+                         SELECT session_id FROM (
+                             SELECT session_id FROM session_head
+                             LIMIT 2
+                         )
                          UNION
-                         SELECT session_id FROM session_meta
-                     )",
-                    [],
-                    |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<String>>(1)?)),
-                )
+                         SELECT session_id FROM (
+                             SELECT session_id FROM session_meta
+                             LIMIT 2
+                         )
+                     )
+                     LIMIT 2",
+                )?;
+                stmt.query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()
             })
             .await
             .map_err(sqlite_error)?;
-        match session_count {
-            0 => return Ok(None),
-            1 => {}
-            session_count => {
-                return Err(StoreError::SessionResolutionAmbiguous { session_count });
-            }
+        if session_ids.is_empty() {
+            return Ok(None);
         }
-        let session_id = session_id.ok_or_else(|| {
-            StoreError::Backend(
-                "SQLite durable-core store counted one session without a session id".to_string(),
-            )
-        })?;
-        self.bind_session(&session_id)?;
+        if session_ids.len() > 1 {
+            return Err(StoreError::SessionResolutionAmbiguous {
+                session_count: session_ids.len() as u64,
+            });
+        }
+        self.bind_session(&session_ids[0])?;
         Ok(self.session_id.get().cloned())
     }
 }

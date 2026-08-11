@@ -128,15 +128,45 @@ fn assert_matching_session_resolution_errors(full: StoreError, head: StoreError,
     }
 }
 
+/// Whether a session candidate has only been durably admitted or also has a
+/// committed runtime head.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnboundSessionAdmissionState {
+    AdmittedOnly,
+    Committed,
+}
+
+impl UnboundSessionAdmissionState {
+    fn label(self) -> &'static str {
+        match self {
+            Self::AdmittedOnly => "admitted-only",
+            Self::Committed => "committed",
+        }
+    }
+}
+
+/// One isolated durable substrate used by the unbound-session resolution law.
+#[derive(Clone)]
+pub struct UnboundSessionResolutionHandles {
+    pub backend_name: &'static str,
+    pub factory: Arc<dyn crate::SessionStoreFactory>,
+    pub open_unbound: Arc<dyn Fn() -> Arc<dyn RuntimePersistence> + Send + Sync>,
+}
+
 /// Prove that an unbound handle resolves the same session for both shared
-/// session-read projections as durable storage moves from zero to one to two
-/// persisted sessions.
+/// session-read projections across the full durable candidate matrix:
+/// `{0, 1, 2} sessions x {admitted-only, committed}`.
 ///
-/// Every `open` call must return a newly opened, unbound handle over the same
-/// initially empty durable substrate.
-pub async fn unbound_session_reads_resolve_the_same_session<F>(open: F)
-where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+/// `make_axis` must return a fresh, initially empty durable substrate for each
+/// admission state. Every `open_unbound` call must return a newly opened,
+/// unbound handle over that axis's shared substrate. This law is instantiated
+/// by SQLite and PostgreSQL. The in-memory backend has no global unbound
+/// multi-session handle, so none of these six cells is instantiated there.
+pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFuture>(
+    make_axis: MakeAxis,
+) where
+    MakeAxis: Fn(UnboundSessionAdmissionState) -> MakeAxisFuture,
+    MakeAxisFuture: std::future::Future<Output = UnboundSessionResolutionHandles>,
 {
     #[derive(Debug, PartialEq, Eq)]
     enum ReadResolution {
@@ -145,12 +175,12 @@ where
         Indeterminate,
     }
 
-    async fn assert_reads_agree<F>(open: &F, expected: &str) -> ReadResolution
-    where
-        F: Fn() -> Arc<dyn RuntimePersistence>,
-    {
-        let head = open().load_session_head_meta().await;
-        let full = open().load_session().await;
+    async fn assert_reads_agree(
+        handles: &UnboundSessionResolutionHandles,
+        expected: &str,
+    ) -> ReadResolution {
+        let head = (handles.open_unbound)().load_session_head_meta().await;
+        let full = (handles.open_unbound)().load_session().await;
         match (full, head) {
             (Ok(None), Ok(None)) => ReadResolution::Absent,
             (Ok(Some(full)), Ok(Some(head))) => {
@@ -179,47 +209,87 @@ where
         }
     }
 
-    assert_eq!(
-        assert_reads_agree(&open, "zero persisted sessions").await,
-        ReadResolution::Absent,
-        "an empty store must resolve as absent"
-    );
+    fn request(session_id: &str) -> crate::SessionStoreCreateRequest {
+        crate::SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        }
+    }
 
-    let first = open();
-    let first_state = RuntimeSessionState {
-        session_id: "unbound-resolution-a".to_string(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    commit_runtime_state_for_test(
-        &first,
-        RuntimeCommit::persisted_state_for_test(&first_state, &[]),
-        "unbound-resolution-a",
-    )
-    .await
-    .expect("seed first session through an unbound handle");
-    assert_eq!(
-        assert_reads_agree(&open, "one persisted session").await,
-        ReadResolution::Present,
-        "a sole persisted session must resolve through an unbound reopened handle"
-    );
+    async fn add_session(
+        handles: &UnboundSessionResolutionHandles,
+        admission_state: UnboundSessionAdmissionState,
+        session_id: &str,
+    ) {
+        let store = handles
+            .factory
+            .create_store(&request(session_id))
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{} {admission_state:?}: admit `{session_id}`: {error}",
+                    handles.backend_name
+                )
+            });
+        if admission_state == UnboundSessionAdmissionState::Committed {
+            let state = RuntimeSessionState {
+                session_id: session_id.to_string(),
+                ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+            };
+            commit_runtime_state_for_test(
+                &store,
+                RuntimeCommit::persisted_state_for_test(&state, &[]),
+                session_id,
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!("{}: commit `{session_id}`: {error}", handles.backend_name)
+            });
+        }
+    }
 
-    let second = open();
-    let second_state = RuntimeSessionState {
-        session_id: "unbound-resolution-b".to_string(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    commit_runtime_state_for_test(
-        &second,
-        RuntimeCommit::persisted_state_for_test(&second_state, &[]),
-        "unbound-resolution-b",
-    )
-    .await
-    .expect("seed second session through an unbound handle");
-    assert_eq!(
-        assert_reads_agree(&open, "two persisted sessions").await,
-        ReadResolution::Indeterminate,
-        "two persisted sessions must report indeterminacy"
-    );
+    for admission_state in [
+        UnboundSessionAdmissionState::AdmittedOnly,
+        UnboundSessionAdmissionState::Committed,
+    ] {
+        let handles = make_axis(admission_state).await;
+        let cell = |session_count| {
+            format!(
+                "{} backend, {} sessions, {}",
+                handles.backend_name,
+                session_count,
+                admission_state.label()
+            )
+        };
+
+        assert_eq!(
+            assert_reads_agree(&handles, &cell(0)).await,
+            ReadResolution::Absent,
+            "{} must resolve as absent",
+            cell(0)
+        );
+
+        add_session(&handles, admission_state, "unbound-resolution-a").await;
+        let one_expected = match admission_state {
+            UnboundSessionAdmissionState::AdmittedOnly => ReadResolution::Absent,
+            UnboundSessionAdmissionState::Committed => ReadResolution::Present,
+        };
+        assert_eq!(
+            assert_reads_agree(&handles, &cell(1)).await,
+            one_expected,
+            "{} must have the expected resolution",
+            cell(1)
+        );
+
+        add_session(&handles, admission_state, "unbound-resolution-b").await;
+        assert_eq!(
+            assert_reads_agree(&handles, &cell(2)).await,
+            ReadResolution::Indeterminate,
+            "{} must report typed ambiguity",
+            cell(2)
+        );
+    }
 }
 
 /// A newly minted turn-input identity is store-wide rather than handle-local.
