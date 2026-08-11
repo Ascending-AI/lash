@@ -102,15 +102,15 @@ async fn malformed_durable_rows_surface_typed_corruption() {
 
     raw.execute(
         "INSERT INTO session_meta
-         (session_id, relation_json)
-         VALUES ('corrupt', '{')",
+         (session_id, relation_kind, observer_intent_depth)
+         VALUES ('corrupt', 'corrupt', 0)",
         [],
     )
     .expect("insert malformed relation");
     assert_corrupt(store.load_session_meta().await, "SessionMeta relation");
     raw.execute(
-        "UPDATE session_meta SET relation_json = ?1 WHERE session_id = 'corrupt'",
-        params![serde_json::to_string(&lash_core::SessionRelation::Root).expect("encode relation")],
+        "UPDATE session_meta SET relation_kind = 'root' WHERE session_id = 'corrupt'",
+        [],
     )
     .expect("repair relation");
 

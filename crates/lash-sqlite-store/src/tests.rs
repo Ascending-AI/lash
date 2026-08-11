@@ -429,7 +429,7 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
     drop(store);
     let raw = rusqlite::Connection::open(factory.catalog_path()).expect("open raw catalog");
     raw.execute(
-        "UPDATE session_meta SET relation_json = '{'
+        "UPDATE session_meta SET relation_kind = 'corrupt'
              WHERE session_id = ?1",
         params![request.session_id],
     )

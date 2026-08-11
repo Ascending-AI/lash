@@ -51,24 +51,24 @@ async fn sqlite_durable_fixture_reads_with_identical_semantics() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_v30_session_relation_is_refused_before_row_decode() {
+async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     let fixture_dir = fixture_dir();
     let temp = tempfile::tempdir().expect("SQLite fixture tempdir");
     copy_sqlite_fixture(&fixture_dir, temp.path());
     let durable_core = temp.path().join("durable-core.db");
-    let connection = rusqlite::Connection::open(&durable_core).expect("open copied v30 fixture");
+    let connection = rusqlite::Connection::open(&durable_core).expect("open copied v32 fixture");
     let updated = connection
         .execute(
             "UPDATE session_meta
-             SET relation_json = ?1
+             SET relation_kind = ?1
              WHERE session_id = 'durable-read-fixture'",
-            [r#"{"kind":"child","parent_session_id":"parent","legacy":true}"#],
+            ["legacy"],
         )
-        .expect("inject the previously tolerated nested field");
-    assert_eq!(updated, 1, "the v30 proof must mutate its fixture row");
+        .expect("inject an unknown denormalized relation kind");
+    assert_eq!(updated, 1, "the v32 proof must mutate its fixture row");
     connection
-        .pragma_update(None, "user_version", 30)
-        .expect("stamp the reviewer's v30 fixture");
+        .pragma_update(None, "user_version", 32)
+        .expect("stamp the pre-denormalization v32 fixture");
     drop(connection);
 
     let open_error = match Store::open(&durable_core).await {
@@ -77,20 +77,20 @@ async fn sqlite_v30_session_relation_is_refused_before_row_decode() {
             let decode_error = store
                 .load_session_meta()
                 .await
-                .expect_err("the injected nested field must fail strict row decoding");
+                .expect_err("the unknown relation kind must fail strict row decoding");
             panic!(
-                "SQLite v30 opened before failing later as stored-data corruption: {decode_error}"
+                "SQLite v32 opened before failing later as stored-data corruption: {decode_error}"
             );
         }
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 32"),
+        message.contains("supports schema version 33"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
-        message.contains("reports version 30"),
-        "open refusal must name the stale v30 fixture: {message}"
+        message.contains("reports version 32"),
+        "open refusal must name the stale v32 fixture: {message}"
     );
 }
 

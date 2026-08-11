@@ -77,12 +77,12 @@ fn sqlite_and_postgres_table_sets_are_congruent() {
 
     assert_eq!(
         sqlite.len(),
-        33,
+        36,
         "SQLite schema table count changed; update the explicit cross-backend mapping"
     );
     assert_eq!(
         postgres_raw.len(),
-        34,
+        37,
         "Postgres schema table count changed; update the explicit cross-backend mapping"
     );
     assert!(

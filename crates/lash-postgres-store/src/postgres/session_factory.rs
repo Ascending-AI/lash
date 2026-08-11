@@ -78,16 +78,12 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 session_id: request.session_id.clone(),
             });
         }
-        sqlx::query(
-            "INSERT INTO lash_session_meta (session_id, meta_json)
-             VALUES ($1, $2)
-             ON CONFLICT (session_id) DO NOTHING",
+        crate::session_meta::write_session_meta_tx(
+            &mut tx,
+            &meta,
+            crate::session_meta::SessionMetaWrite::Insert,
         )
-        .bind(&request.session_id)
-        .bind(encode_json(&meta)?)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Arc::new(store))
     }
@@ -468,12 +464,12 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
         };
-        sqlx::query("INSERT INTO lash_session_meta (session_id, meta_json) VALUES ($1, $2)")
-            .bind(&request.session_id)
-            .bind(encode_json(&meta)?)
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        crate::session_meta::write_session_meta_tx(
+            &mut tx,
+            &meta,
+            crate::session_meta::SessionMetaWrite::Insert,
+        )
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core::ForkSessionResult {
             session_id: request.session_id.clone(),

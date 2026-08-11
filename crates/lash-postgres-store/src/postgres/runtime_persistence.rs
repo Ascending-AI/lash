@@ -543,16 +543,12 @@ impl SessionCommitStore for PostgresSessionStore {
             session_id: commit.session_id.clone(),
             relation: lash_core::SessionRelation::Root,
         };
-        sqlx::query(
-            "INSERT INTO lash_session_meta (session_id, meta_json)
-             VALUES ($1, $2)
-             ON CONFLICT (session_id) DO NOTHING",
+        crate::session_meta::write_session_meta_tx(
+            &mut tx,
+            &direct_meta,
+            crate::session_meta::SessionMetaWrite::Insert,
         )
-        .bind(&commit.session_id)
-        .bind(encode_json(&direct_meta)?)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        .await?;
         planner.validate_node_derivation()?;
         {
             let prior = sqlx::query(
@@ -994,18 +990,14 @@ impl SessionCommitStore for PostgresSessionStore {
         };
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        let inserted = sqlx::query(
-            "INSERT INTO lash_session_meta (session_id, meta_json)
-             VALUES ($1, $2)
-             ON CONFLICT (session_id) DO NOTHING",
+        let inserted = crate::session_meta::write_session_meta_tx(
+            &mut tx,
+            &meta,
+            crate::session_meta::SessionMetaWrite::Insert,
         )
-        .bind(session_id)
-        .bind(encode_json(&meta)?)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(if inserted.rows_affected() == 1 {
+        Ok(if inserted {
             lash_core::SessionAdmission::Created
         } else {
             lash_core::SessionAdmission::Rebound
@@ -1016,36 +1008,17 @@ impl SessionCommitStore for PostgresSessionStore {
         self.bind_session_id(&meta.session_id)?;
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &meta.session_id).await?;
-        sqlx::query(
-            "INSERT INTO lash_session_meta (session_id, meta_json)
-             VALUES ($1, $2)
-             ON CONFLICT (session_id) DO UPDATE SET meta_json = EXCLUDED.meta_json",
+        crate::session_meta::write_session_meta_tx(
+            &mut tx,
+            &meta,
+            crate::session_meta::SessionMetaWrite::Replace,
         )
-        .bind(&meta.session_id)
-        .bind(encode_json(&meta)?)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)
     }
 
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
-        let json: Option<String> = if let Some(session_id) = &self.session_id {
-            sqlx::query_scalar("SELECT meta_json FROM lash_session_meta WHERE session_id = $1")
-                .bind(session_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(store_sqlx_error)?
-        } else {
-            sqlx::query_scalar(
-                "SELECT meta_json FROM lash_session_meta ORDER BY session_id ASC LIMIT 1",
-            )
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?
-        };
-        json.map(|json| store_decode_json(&json, "session meta"))
-            .transpose()
+        crate::session_meta::load_session_meta(&self.pool, self.session_id.as_deref()).await
     }
 }
 

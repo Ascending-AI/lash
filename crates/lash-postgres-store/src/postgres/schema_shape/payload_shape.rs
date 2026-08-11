@@ -146,12 +146,14 @@ impl PayloadRegistration {
 }
 
 /// PostgreSQL blob columns selected for Rust-type-derived component-version
-/// gating. The first registered carrier is the concrete FIG-1219 blind spot.
+/// gating.
 ///
 /// Keep this intentionally explicit: registering a column is a durability
 /// decision, and an accidental broad scan of every `*_json` column would mix
 /// versioned records, enums, and intentionally opaque JSON values into this
-/// component-version gate.
+/// component-version gate. The registry may be empty when an enrolled carrier
+/// is replaced by structural columns; the explicit inventory still prevents a
+/// new JSON carrier from bypassing classification.
 pub(super) fn registered_payload_shapes() -> BTreeMap<(String, String), PayloadShape> {
     registered_payloads()
         .into_iter()
@@ -167,21 +169,7 @@ pub(super) fn registered_payload_shapes() -> BTreeMap<(String, String), PayloadS
 }
 
 fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
-    let postgres_carrier =
-        PayloadCarrier::new(PayloadBackend::Postgres, "lash_session_meta", "meta_json");
-    let sqlite_carrier =
-        PayloadCarrier::new(PayloadBackend::Sqlite, "session_meta", "relation_json");
-    let sqlite_registration = PayloadRegistration::of::<lash_core::SessionRelation>();
-    let mut postgres_registration = PayloadRegistration::of::<lash_core::SessionMeta>();
-    postgres_registration
-        .include_persisted_projection(sqlite_carrier, sqlite_registration.shape.clone());
-
-    [
-        (postgres_carrier, postgres_registration),
-        (sqlite_carrier, sqlite_registration),
-    ]
-    .into_iter()
-    .collect()
+    BTreeMap::new()
 }
 
 #[cfg(test)]
@@ -704,32 +692,17 @@ mod tests {
         );
         assert!(shape.entries.contains_key("/required/session_id"));
         assert!(shape.entries.contains_key("/required/relation"));
-        let registered = registered_payload_shapes()
-            .remove(&("lash_session_meta".to_string(), "meta_json".to_string()))
-            .expect("SessionMeta carrier is registered");
-        assert_eq!(
-            registered
-                .entries
-                .get("/persisted-by/sqlite/session_meta.relation_json/rust-type"),
-            Some(&"SessionRelation".to_string())
-        );
     }
 
     #[test]
-    fn registered_carrier_identities_are_explicit_and_independent() {
+    fn denormalized_session_metadata_leaves_no_registered_json_carrier() {
         let identities = registered_payloads()
             .keys()
             .copied()
             .map(PayloadCarrier::artifact_identity)
             .collect::<std::collections::BTreeSet<_>>();
 
-        assert_eq!(
-            identities,
-            std::collections::BTreeSet::from([
-                "postgres lash_session_meta.meta_json".to_string(),
-                "sqlite session_meta.relation_json".to_string(),
-            ])
-        );
+        assert!(identities.is_empty());
     }
 
     #[test]

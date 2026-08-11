@@ -881,45 +881,6 @@ fn session_meta_observation(meta: SessionMeta) -> SessionMetaObservation {
     }
 }
 
-fn read_sqlite_session_meta_observation(
-    connection: &rusqlite::Connection,
-    session_id: &str,
-) -> Option<SessionMetaObservation> {
-    connection
-        .query_row(
-            "SELECT relation_json
-             FROM session_meta WHERE session_id = ?1",
-            [session_id],
-            |row| {
-                let relation_json: Option<String> = row.get(0)?;
-                Ok(SessionMetaObservation {
-                    relation: relation_json
-                        .map(|json| serde_json::from_str(&json).expect("decode SQLite relation"))
-                        .unwrap_or_default(),
-                })
-            },
-        )
-        .optional()
-        .expect("read SQLite session metadata")
-}
-
-async fn read_postgres_session_meta_observation(
-    pool: &PgPool,
-    session_id: &str,
-) -> Option<SessionMetaObservation> {
-    let meta_json: Option<String> =
-        sqlx::query_scalar("SELECT meta_json FROM lash_session_meta WHERE session_id = $1")
-            .bind(session_id)
-            .fetch_optional(pool)
-            .await
-            .expect("read PostgreSQL session metadata");
-    meta_json.map(|json| {
-        session_meta_observation(
-            serde_json::from_str(&json).expect("decode PostgreSQL session metadata"),
-        )
-    })
-}
-
 fn decode_lease_owner(
     owner_id: Option<String>,
     incarnation_id: Option<String>,
@@ -1152,7 +1113,11 @@ async fn read_sqlite_durable_state(
             .collect::<Result<Vec<_>, _>>()
             .expect("decode SQLite usage deltas")
     };
-    let session_meta = read_sqlite_session_meta_observation(&connection, session_id);
+    let session_meta = store
+        .load_session_meta()
+        .await
+        .expect("read SQLite session metadata")
+        .map(session_meta_observation);
     let session_execution_leases = {
         let mut statement = connection
             .prepare(
@@ -2190,22 +2155,10 @@ async fn runners_for_case(
         .create_store(&create_request)
         .await
         .expect("create SQLite differential store");
-    {
-        let connection =
-            rusqlite::Connection::open(&sqlite_path).expect("open SQLite metadata fixture");
-        connection
-            .execute(
-                "UPDATE session_meta
-                 SET relation_json = ?2
-                WHERE session_id = ?1",
-                rusqlite::params![
-                    &expected_meta.session_id,
-                    serde_json::to_string(&expected_meta.relation)
-                        .expect("encode SQLite session relation"),
-                ],
-            )
-            .expect("install deterministic SQLite session metadata");
-    }
+    sqlite_store
+        .save_session_meta(expected_meta.clone())
+        .await
+        .expect("install deterministic SQLite session metadata");
     let sqlite_factory_dyn = Arc::clone(&sqlite_factory) as Arc<dyn SessionStoreFactory>;
 
     let postgres_factory = Arc::new(
@@ -2217,16 +2170,10 @@ async fn runners_for_case(
         .create_store(&create_request)
         .await
         .expect("create Postgres differential store");
-    sqlx::query(
-        "UPDATE lash_session_meta
-         SET meta_json = $2
-         WHERE session_id = $1",
-    )
-    .bind(&session_id)
-    .bind(serde_json::to_string(&expected_meta).expect("encode Postgres session metadata"))
-    .execute(postgres.pool())
-    .await
-    .expect("install deterministic Postgres session metadata");
+    postgres_store
+        .save_session_meta(expected_meta.clone())
+        .await
+        .expect("install deterministic Postgres session metadata");
     let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn SessionStoreFactory>;
 
     vec![

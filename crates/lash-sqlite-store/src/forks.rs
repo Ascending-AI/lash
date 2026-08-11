@@ -430,16 +430,11 @@ pub(super) async fn fork_at_in_catalog(
                 session_id: request.session_id.clone(),
                 relation: request.relation,
             };
-            tx.execute(
-                "INSERT INTO session_meta
-                 (session_id, relation_json)
-                 VALUES (?1, ?2)",
-                 params![
-                     session_meta.session_id,
-                     encode_json(&session_meta.relation)?
-                 ],
-            )
-            .map_err(sqlite_error)?;
+            crate::session_meta::write_session_meta(
+                tx,
+                &session_meta,
+                crate::session_meta::SessionMetaWrite::Insert,
+            )?;
             Ok(lash_core::ForkSessionResult {
                 session_id: request.session_id,
                 node_id: request.node_id,
