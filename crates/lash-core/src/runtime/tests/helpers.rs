@@ -443,9 +443,16 @@ async fn recording_factory_root_set_keeps_committed_blob() {
         .expect("commit attachment ref");
     assert_eq!(store.list_all_refs().unwrap(), vec![attachment.id.clone()]);
 
-    let report = crate::reclaim_unreferenced_attachments(&factory, &*backend, 0)
-        .await
-        .expect("sweep");
+    let report = crate::reclaim_unreferenced_attachments(
+        &factory,
+        &*backend,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
+        },
+    )
+    .await
+    .expect("sweep");
 
     assert_eq!(report.scanned_blob_count, 1);
     assert_eq!(report.reclaimed_count, 0);

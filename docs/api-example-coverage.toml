@@ -11080,6 +11080,33 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionRevision::new. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
+symbol = "lash::persistence::AttachmentReclamationPolicy"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentReclamationPolicy"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentReclamationPolicy to the agent-workbench attachment maintenance example and assert the selected sweep behavior."
+
+[[api]]
+symbol = "lash::persistence::AttachmentReclamationPolicy::empty_root_set"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentReclamationPolicy::empty_root_set"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentReclamationPolicy::empty_root_set to the agent-workbench attachment maintenance example and assert the selected sweep behavior."
+
+[[api]]
+symbol = "lash::persistence::AttachmentReclamationPolicy::grace_period_ms"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentReclamationPolicy::grace_period_ms"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentReclamationPolicy::grace_period_ms to the agent-workbench attachment maintenance example and assert the selected sweep behavior."
+
+[[api]]
 symbol = "lash::persistence::AttachmentReclamationReport"
 kind = "struct"
 availability = "default+all-features"
@@ -11110,6 +11137,14 @@ availability = "default+all-features"
 area = "attachments"
 disposition = "unused-add"
 reason = "Add lash::persistence::AttachmentReclamationReport::reclaimed_count to the agent-workbench attachment upload example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::AttachmentReclamationReport::root_enumeration_failure"
+kind = "field"
+availability = "default+all-features"
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentReclamationReport::root_enumeration_failure to the agent-workbench attachment maintenance example and surface degraded no-candidate sweeps to operators."
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationReport::scanned_blob_count"
@@ -11229,6 +11264,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::AttachmentStoreError::EmptyRootSetRefused"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentStoreError::EmptyRootSetRefused"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentStoreError::EmptyRootSetRefused to the agent-workbench attachment maintenance example and assert the refused sweep outcome."
+
+[[api]]
 symbol = "lash::persistence::AttachmentStoreError::Backend::0"
 kind = "field"
 availability = "default+all-features"
@@ -11330,6 +11374,33 @@ aliases = ["lash_core::AttachmentStorePersistence::Ephemeral"]
 area = "attachments"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::EmptyRootSetPolicy"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::EmptyRootSetPolicy"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::EmptyRootSetPolicy to the agent-workbench attachment maintenance example and assert both safe and authorized outcomes."
+
+[[api]]
+symbol = "lash::persistence::EmptyRootSetPolicy::AuthorizeDeleteAll"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::EmptyRootSetPolicy::AuthorizeDeleteAll to the agent-workbench attachment maintenance example and assert the authorized deletion outcome."
+
+[[api]]
+symbol = "lash::persistence::EmptyRootSetPolicy::Refuse"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::EmptyRootSetPolicy::Refuse"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::EmptyRootSetPolicy::Refuse to the agent-workbench attachment maintenance example and assert the refused deletion outcome."
 
 [[api]]
 symbol = "lash::persistence::BlobRef"

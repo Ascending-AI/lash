@@ -1247,9 +1247,16 @@ mod tests {
         assert_eq!(committed, vec![attachment.id.clone()]);
 
         let roots = FixedAttachmentRoots(committed.into_iter().collect());
-        let report = crate::reclaim_unreferenced_attachments(&roots, &backend, 0)
-            .await
-            .expect("grace-period GC");
+        let report = crate::reclaim_unreferenced_attachments(
+            &roots,
+            &backend,
+            crate::AttachmentReclamationPolicy {
+                grace_period_ms: 0,
+                empty_root_set: crate::EmptyRootSetPolicy::Refuse,
+            },
+        )
+        .await
+        .expect("grace-period GC");
 
         assert_eq!(report.reclaimed_count, 0);
         assert_eq!(

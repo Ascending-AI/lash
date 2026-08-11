@@ -58,9 +58,12 @@ guard and records nothing), so every consumer sees exactly one facade type.
 
 **Layer 3 — lifecycle is host policy, with lash levers and a bundled default.**
 The per-session `reclaim_orphaned_attachments` sweep is deleted. In its place is
-`reclaim_unreferenced_attachments(root_set, backend, grace_period_ms)`:
+`reclaim_unreferenced_attachments(root_set, backend, policy)`:
 mark-and-sweep GC that enumerates every blob via `list`, computes the live root
 set, and deletes every blob no session references. Every committed ref is live.
+The policy names the grace period and refuses an empty root set when any blob is
+deletion-eligible unless the host explicitly authorizes deleting everything
+unreferenced; emptiness cannot itself prove that destructive interpretation.
 An uncommitted intent becomes eligible only when it is older than the retention
 cutoff **and** its durable owner is proven dead: a different, later turn commit
 supersedes a turn owner, and pruning the durable process row kills a process
@@ -102,10 +105,15 @@ past per-blob delete failures**, collecting failed ids into its report rather th
 aborting on the first error.
 The root set is a factory-level lever: every `SessionStoreFactory` must explicitly
 implement `AttachmentRootSet`, so being accepted by the GC is a declaration that
-the factory owns the complete root-set answer. An empty root set asserts that the
-factory owns no attachments. A factory that cannot enumerate its roots must return
-an error from `live_attachment_refs`, which aborts the sweep before any blob is
-listed or deleted; decorators that can answer must deliberately delegate. The
+the factory owns the complete root-set answer. An empty answer is not destructive
+authority by itself: when the backend has a deletion-eligible blob, the policy
+must explicitly authorize the delete-all interpretation. A factory that cannot
+enumerate its roots must return an error from `live_attachment_refs`. The sweep
+then lists the backend only to decide whether anything is past the grace window:
+an eligible blob propagates the enumeration error before any delete, while a
+no-candidate sweep returns a report carrying the failure so hosts can distinguish
+it from a healthy empty sweep. Decorators that can answer must deliberately
+delegate. The
 implementation answers in one transaction on the global manifest table for
 Postgres (conditionally delete aged, owner-dead intents, then read the survivors),
 and in one transaction on SQLite's factory-wide durable-core catalog.

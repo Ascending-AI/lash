@@ -387,7 +387,10 @@ async fn probe_attachment_gc(
     let report = crate::reclaim_unreferenced_attachments(
         handles.session_factory.as_ref(),
         handles.attachment_backend.as_ref(),
-        0,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
     )
     .await
     .map_err(|error| error.to_string())?;

@@ -1249,4 +1249,84 @@ mod tests {
             .await
             .expect("delete checkpoint counter session");
     }
+
+    #[tokio::test]
+    async fn attachment_gc_refuses_an_empty_postgres_root_database() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping empty Postgres attachment-root proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect empty attachment-root database");
+        sqlx::query("DELETE FROM lash_attachment_manifest")
+            .execute(storage.pool())
+            .await
+            .expect("make the configured Postgres manifest empty");
+        let wrong_factory = storage.session_store_factory();
+
+        let live_factory = lash_core::runtime::InMemorySessionStoreFactory::new();
+        let request = SessionStoreCreateRequest {
+            session_id: "postgres-wrong-database-live-attachment".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        };
+        let live_store = live_factory
+            .create_store(&request)
+            .await
+            .expect("create live root authority");
+        let backend = lash_core::attachments::InMemoryAttachmentStore::new();
+        let attachment = lash_core::AttachmentStore::put(
+            &backend,
+            b"postgres-live-committed-blob".to_vec(),
+            lash_sansio::AttachmentCreateMeta::new(
+                lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
+                None,
+                Some("live".to_string()),
+            ),
+        )
+        .await
+        .expect("put shared backend blob");
+        lash_core::AttachmentManifest::record_intent(
+            &*live_store,
+            lash_core::AttachmentIntent {
+                attachment_id: attachment.id.clone(),
+                session_id: request.session_id.clone(),
+                canonical_uri: format!("lash-attachment://sha256/{}", attachment.id),
+                intent_at_epoch_ms: 1,
+                owner_kind: None,
+                owner_id: None,
+            },
+        )
+        .expect("record live attachment intent");
+        lash_core::AttachmentManifest::commit_refs(
+            &*live_store,
+            &request.session_id,
+            std::slice::from_ref(&attachment.id),
+        )
+        .expect("commit live attachment ref");
+
+        let result = lash_core::attachments::reclaim_unreferenced_attachments(
+            &wrong_factory,
+            &backend,
+            lash_core::AttachmentReclamationPolicy {
+                grace_period_ms: 0,
+                empty_root_set: lash_core::EmptyRootSetPolicy::Refuse,
+            },
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(lash_core::AttachmentStoreError::EmptyRootSetRefused)
+            ),
+            "an empty Postgres root database must refuse deletion: {result:?}"
+        );
+        lash_core::AttachmentStore::get(&backend, &attachment.id)
+            .await
+            .expect("live committed blob survives the refused sweep");
+    }
 }

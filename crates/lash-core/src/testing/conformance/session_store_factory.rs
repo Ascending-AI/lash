@@ -674,9 +674,16 @@ pub async fn attachment_ownership_isolation_with_store(
 
     // Sweep: A's and B's committed refs both count as live roots, so the shared
     // blob survives.
-    let report = crate::reclaim_unreferenced_attachments(&*factory, &*backend, 0)
-        .await
-        .expect("sweep with two live refs");
+    let report = crate::reclaim_unreferenced_attachments(
+        &*factory,
+        &*backend,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
+        },
+    )
+    .await
+    .expect("sweep with two live refs");
     assert_eq!(
         report.reclaimed_count, 0,
         "a blob referenced by any session is never swept, got {report:?}"
@@ -688,16 +695,30 @@ pub async fn attachment_ownership_isolation_with_store(
 
     // Session A releases its ref: B's ref still holds the blob.
     session_a.delete(&a_ref.id).await.expect("a releases ref");
-    let report = crate::reclaim_unreferenced_attachments(&*factory, &*backend, 0)
-        .await
-        .expect("sweep with one remaining ref");
+    let report = crate::reclaim_unreferenced_attachments(
+        &*factory,
+        &*backend,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
+        },
+    )
+    .await
+    .expect("sweep with one remaining ref");
     assert_eq!(report.reclaimed_count, 0, "b still references the blob");
 
     // Both sessions release: now unreferenced, GC collects the single blob.
     session_b.delete(&b_ref.id).await.expect("b releases ref");
-    let report = crate::reclaim_unreferenced_attachments(&*factory, &*backend, 0)
-        .await
-        .expect("sweep with no refs");
+    let report = crate::reclaim_unreferenced_attachments(
+        &*factory,
+        &*backend,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
+    )
+    .await
+    .expect("sweep with no refs");
     assert_eq!(report.reclaimed_count, 1, "unreferenced blob is reclaimed");
     assert!(
         matches!(
