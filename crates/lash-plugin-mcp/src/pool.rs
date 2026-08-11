@@ -50,12 +50,17 @@ use crate::naming;
 #[cfg(test)]
 use crate::service_lifecycle::build_http_headers;
 use crate::service_lifecycle::{
-    ConnectedService, McpService, ServiceQuit, StdioChildGuard, cancel_running_service,
-    connect_service, equal_jitter, is_connection_loss, stop_service,
+    ConnectedService, McpService, ServiceQuit, cancel_running_service, connect_service,
+    equal_jitter, is_connection_loss, stop_service,
 };
 
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
 /// session plugin instance.
+///
+/// Hosts must call [`McpConnectionPool::shutdown_all`] before dropping their
+/// last pool handle to fully reclaim stdio children. Dropping a live pool only
+/// sends each child a best-effort kill and logs an error; it does not wait, so
+/// the child remains a zombie until the host process exits.
 pub struct McpConnectionPool {
     entries: RwLock<BTreeMap<String, Arc<McpEntry>>>,
     host_services: McpHostServices,
@@ -162,7 +167,9 @@ impl McpConnectionPool {
     /// in parallel so tools are available immediately when servers are up, but a
     /// connection failure never aborts construction: the entry stays
     /// registered and reconnects in the background. Only configuration errors
-    /// (a misconfigured server, not an outage) fail the build.
+    /// (a misconfigured server, not an outage) fail the build. The host must
+    /// call [`McpConnectionPool::shutdown_all`] to fully reap stdio children;
+    /// dropping the returned pool kills but deliberately does not wait.
     pub async fn connect(
         servers: BTreeMap<String, McpServerConfig>,
     ) -> Result<Arc<Self>, McpError> {
@@ -833,10 +840,7 @@ impl McpEntry {
         } = connected_service;
 
         if self.cancelled.load(Ordering::SeqCst) {
-            cancel_running_service(service).await;
-            if let Some(child) = &stdio_child {
-                child.reap_after_ungraceful_drop();
-            }
+            cancel_running_service(service, stdio_child).await;
             return Err(McpError::Protocol(format!(
                 "MCP connection for `{}` was cancelled during startup",
                 self.server_name
@@ -864,10 +868,7 @@ impl McpEntry {
             },
             () = self.cancelled_notify.notified() => {
                 if self.cancelled.load(Ordering::SeqCst) {
-                    cancel_running_service(service).await;
-                    if let Some(child) = &stdio_child {
-                        child.reap_after_ungraceful_drop();
-                    }
+                    cancel_running_service(service, stdio_child).await;
                     return Err(McpError::Protocol(format!(
                         "MCP connection for `{}` was cancelled during discovery",
                         self.server_name
@@ -879,19 +880,13 @@ impl McpEntry {
         let tools = match tools_result {
             Ok(tools) => tools,
             Err(error) => {
-                cancel_running_service(service).await;
-                if let Some(child) = &stdio_child {
-                    child.reap_after_ungraceful_drop();
-                }
+                cancel_running_service(service, stdio_child).await;
                 return Err(error);
             }
         };
 
         if self.cancelled.load(Ordering::SeqCst) {
-            cancel_running_service(service).await;
-            if let Some(child) = &stdio_child {
-                child.reap_after_ungraceful_drop();
-            }
+            cancel_running_service(service, stdio_child).await;
             return Err(McpError::Protocol(format!(
                 "MCP connection for `{}` was cancelled before installation",
                 self.server_name
@@ -913,20 +908,14 @@ impl McpEntry {
                 request_tasks: Arc::clone(&request_tasks),
                 cancellation: Some(cancellation),
                 quit: Arc::clone(&quit),
-                stdio_child: stdio_child.clone(),
+                stdio_child,
             })
         };
         // A fresh connection starts with a fresh timeout budget.
         self.consecutive_timeouts.store(0, Ordering::SeqCst);
         *self.last_error.write_recover() = None;
         self.reconnect_exhausted.store(false, Ordering::SeqCst);
-        self.spawn_service_watcher(
-            service,
-            next_generation,
-            request_tasks,
-            Arc::clone(&quit),
-            stdio_child,
-        );
+        self.spawn_service_watcher(service, next_generation, request_tasks, Arc::clone(&quit));
         if let Some(previous_service) = previous_service {
             stop_service(previous_service).await;
         }
@@ -939,7 +928,6 @@ impl McpEntry {
         service_generation: u64,
         request_tasks: Arc<McpHostRequestTasks>,
         quit: Arc<ServiceQuit>,
-        stdio_child: Option<Arc<StdioChildGuard>>,
     ) {
         let weak_entry = Arc::downgrade(self);
         tokio::spawn(async move {
@@ -962,9 +950,6 @@ impl McpEntry {
                     waiting.await
                 }
             };
-            if let Some(child) = &stdio_child {
-                child.reap_after_ungraceful_drop();
-            }
             request_tasks.shutdown().await;
             if let Some(entry) = weak_entry.upgrade() {
                 entry.observe_service_quit(service_generation, reason).await;
@@ -978,22 +963,30 @@ impl McpEntry {
         observed_generation: u64,
         reason: Result<QuitReason, tokio::task::JoinError>,
     ) {
-        let disconnected = {
+        let stopped_service = {
             let mut guard = self.service.lock().await;
             if self.service_generation.load(Ordering::SeqCst) != observed_generation
                 || guard.is_none()
             {
-                false
+                None
             } else {
                 self.connected.store(false, Ordering::SeqCst);
                 *self.last_error.write_recover() = Some(format!(
                     "MCP server `{}` service quit: {reason:?}",
                     self.server_name
                 ));
-                guard.take();
-                true
+                guard.take()
             }
         };
+        let disconnected = stopped_service.is_some();
+        if let Some(mut service) = stopped_service {
+            service.cancellation.take();
+            if let Some(child) = service.stdio_child.take()
+                && let Err(error) = child.reap_after_graceful_close().await
+            {
+                tracing::warn!(%error, "failed to reap exited MCP stdio child");
+            }
+        }
         if disconnected && !self.cancelled.load(Ordering::SeqCst) {
             self.spawn_reconnect_loop();
         }
@@ -1562,10 +1555,9 @@ impl Drop for McpConnectionPool {
         for entry in self.entries.get_mut().recover().values() {
             entry.cancel();
         }
-        // We can't .await in Drop. Entry drop cancels every rmcp service; stdio
-        // entries additionally retain their exact child-process handle so
-        // teardown can kill and wait without relying on the dropped runtime.
-        // For graceful shutdown, callers should call `shutdown_all` themselves.
+        // We can't .await in Drop. Entry drop cancels every rmcp service; each
+        // stdio child guard kills before logging and deliberately never waits.
+        // Hosts that need children reaped must call `shutdown_all` first.
     }
 }
 

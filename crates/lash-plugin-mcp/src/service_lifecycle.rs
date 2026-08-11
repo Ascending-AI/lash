@@ -25,7 +25,6 @@ use crate::host::{
 
 struct ManagedChildTransport {
     io: AsyncRwTransport<RoleClient, tokio::fs::File, tokio::fs::File>,
-    child: Arc<StdioChildGuard>,
 }
 
 impl Transport<RoleClient> for ManagedChildTransport {
@@ -43,18 +42,13 @@ impl Transport<RoleClient> for ManagedChildTransport {
     }
 
     fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        let close_io = self.io.close();
-        let child = Arc::clone(&self.child);
-        async move {
-            close_io.await?;
-            child.reap_after_graceful_close().await
-        }
+        self.io.close()
     }
 }
 
 pub(crate) struct ConnectedService {
     pub(crate) running: RunningService<RoleClient, LashMcpClientHandler>,
-    pub(crate) stdio_child: Option<Arc<StdioChildGuard>>,
+    pub(crate) stdio_child: Option<StdioChildGuard>,
 }
 
 pub(crate) async fn connect_service(
@@ -98,13 +92,12 @@ pub(crate) async fn connect_service(
                     "failed to capture stdin for `{command}` MCP server `{server_name}`"
                 ))
             })?;
-            let stdio_child = Arc::new(StdioChildGuard::new(child));
+            let stdio_child = StdioChildGuard::new(server_name, child);
             let transport = ManagedChildTransport {
                 io: AsyncRwTransport::new(
                     tokio::fs::File::from_std(child_stdout_file(stdout)),
                     tokio::fs::File::from_std(child_stdin_file(stdin)),
                 ),
-                child: Arc::clone(&stdio_child),
             };
             let running = client_handler.serve(transport).await.map_err(|err| {
                 McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
@@ -200,7 +193,7 @@ pub(crate) struct McpService {
     pub(crate) request_tasks: Arc<McpHostRequestTasks>,
     pub(crate) cancellation: Option<RunningServiceCancellationToken>,
     pub(crate) quit: Arc<ServiceQuit>,
-    pub(crate) stdio_child: Option<Arc<StdioChildGuard>>,
+    pub(crate) stdio_child: Option<StdioChildGuard>,
 }
 
 impl McpService {
@@ -211,180 +204,70 @@ impl McpService {
 
 impl Drop for McpService {
     fn drop(&mut self) {
+        drop(self.stdio_child.take());
         if let Some(cancellation) = self.cancellation.take() {
             cancellation.cancel();
-        }
-        if let Some(child) = self.stdio_child.take() {
-            child.reap_after_ungraceful_drop();
         }
     }
 }
 
 /// Exact child-process handle retained outside rmcp's async service task.
 ///
-/// Ordinary pool drop can move this owned handle to a plain OS thread and
-/// synchronously kill-and-wait without relying on the Tokio runtime that may be
-/// torn down immediately afterward.
+/// Explicit shutdown closes the child's stdin, gives it a grace period, and
+/// waits to reap it. Dropping the guard without that shutdown only kills and
+/// logs: waiting in `Drop` cannot be made reliably bounded.
 pub(crate) struct StdioChildGuard {
+    server_name: String,
     pid: u32,
-    armed: AtomicBool,
-    terminate: Arc<AtomicBool>,
-    child: std::sync::Mutex<Option<std::process::Child>>,
+    child: std::process::Child,
+    reaped: bool,
 }
 
 impl StdioChildGuard {
-    pub(crate) fn new(child: std::process::Child) -> Self {
+    pub(crate) fn new(server_name: &str, child: std::process::Child) -> Self {
         Self {
+            server_name: server_name.to_string(),
             pid: child.id(),
-            armed: AtomicBool::new(true),
-            terminate: Arc::new(AtomicBool::new(false)),
-            child: std::sync::Mutex::new(Some(child)),
-        }
-    }
-
-    async fn reap_after_graceful_close(&self) -> std::io::Result<()> {
-        let Some(child) = self.take_child() else {
-            return Ok(());
-        };
-        spawn_child_reaper(self.pid, child, false, Arc::clone(&self.terminate))
-            .await
-            .map_err(|_| std::io::Error::other("MCP stdio child reaper exited without a result"))?
-    }
-
-    pub(crate) fn reap_after_ungraceful_drop(&self) {
-        self.terminate.store(true, Ordering::SeqCst);
-        let Some(child) = self.take_child() else {
-            return;
-        };
-        drop(spawn_child_reaper(
-            self.pid,
             child,
-            true,
-            Arc::clone(&self.terminate),
-        ));
+            reaped: false,
+        }
     }
 
-    fn take_child(&self) -> Option<std::process::Child> {
-        use lash_sansio::sync::MutexExt;
-
-        if !self.armed.swap(false, Ordering::SeqCst) {
-            return None;
+    pub(crate) async fn reap_after_graceful_close(mut self) -> std::io::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if self.child.try_wait()?.is_some() {
+                self.reaped = true;
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                let _ = self.child.kill();
+                self.child.wait()?;
+                self.reaped = true;
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        self.child.lock_recover().take()
+    }
+
+    pub(crate) fn kill_and_reap(mut self) -> std::io::Result<()> {
+        let _ = self.child.kill();
+        self.child.wait()?;
+        self.reaped = true;
+        Ok(())
     }
 }
 
 impl Drop for StdioChildGuard {
     fn drop(&mut self) {
-        use lash_sansio::sync::LockResultExt;
-
-        self.terminate.store(true, Ordering::SeqCst);
-        if self.armed.swap(false, Ordering::SeqCst)
-            && let Some(child) = self.child.get_mut().recover().take()
-        {
-            drop(spawn_child_reaper(
-                self.pid,
-                child,
-                true,
-                Arc::clone(&self.terminate),
-            ));
+        if !self.reaped {
+            let _ = self.child.kill();
+            tracing::error!(
+                pid = self.pid,
+                server = %self.server_name,
+                "MCP stdio child killed without explicit pool shutdown; call shutdown_all() to reap it"
+            );
         }
-    }
-}
-
-type ChildReaperTask = Box<dyn FnOnce() + Send + 'static>;
-
-struct ChildReapJob {
-    pid: u32,
-    child: std::sync::Mutex<Option<std::process::Child>>,
-    terminate: Arc<AtomicBool>,
-    completion: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<std::io::Result<()>>>>,
-}
-
-impl ChildReapJob {
-    fn run(&self, kill_immediately: bool) {
-        use lash_sansio::sync::MutexExt;
-
-        let Some(child) = self.child.lock_recover().take() else {
-            return;
-        };
-        let result = reap_child(child, kill_immediately, &self.terminate);
-        if let Err(error) = &result {
-            tracing::warn!(pid = self.pid, %error, "failed to reap MCP stdio child");
-        }
-        if let Some(completion) = self.completion.lock_recover().take() {
-            let _ = completion.send(result);
-        }
-    }
-}
-
-fn spawn_child_reaper(
-    pid: u32,
-    child: std::process::Child,
-    kill_immediately: bool,
-    terminate: Arc<AtomicBool>,
-) -> tokio::sync::oneshot::Receiver<std::io::Result<()>> {
-    spawn_child_reaper_with(pid, child, kill_immediately, terminate, |name, task| {
-        std::thread::Builder::new()
-            .name(name)
-            .spawn(task)
-            .map(|_| ())
-    })
-}
-
-fn spawn_child_reaper_with(
-    pid: u32,
-    child: std::process::Child,
-    kill_immediately: bool,
-    terminate: Arc<AtomicBool>,
-    spawn: impl FnOnce(String, ChildReaperTask) -> std::io::Result<()>,
-) -> tokio::sync::oneshot::Receiver<std::io::Result<()>> {
-    let (completion, completed) = tokio::sync::oneshot::channel();
-    let job = Arc::new(ChildReapJob {
-        pid,
-        child: std::sync::Mutex::new(Some(child)),
-        terminate,
-        completion: std::sync::Mutex::new(Some(completion)),
-    });
-    let thread_job = Arc::clone(&job);
-    if let Err(error) = spawn(
-        format!("lash-mcp-reap-{pid}"),
-        Box::new(move || thread_job.run(kill_immediately)),
-    ) {
-        tracing::error!(
-            pid,
-            %error,
-            "failed to spawn MCP stdio child reaper; terminating child synchronously"
-        );
-        job.run(true);
-    }
-    completed
-}
-
-fn reap_child(
-    mut child: std::process::Child,
-    kill_immediately: bool,
-    terminate: &AtomicBool,
-) -> std::io::Result<()> {
-    if kill_immediately || terminate.load(Ordering::SeqCst) {
-        let _ = child.kill();
-        return child.wait().map(|_| ());
-    }
-
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        if child.try_wait()?.is_some() {
-            return Ok(());
-        }
-        if terminate.load(Ordering::SeqCst) {
-            let _ = child.kill();
-            return child.wait().map(|_| ());
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            return child.wait().map(|_| ());
-        }
-        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -417,13 +300,16 @@ pub(crate) async fn stop_service(mut service: McpService) {
         cancellation.cancel();
     }
     service.quit.wait().await;
-    if let Some(child) = service.stdio_child.take() {
-        child.reap_after_ungraceful_drop();
+    if let Some(child) = service.stdio_child.take()
+        && let Err(error) = child.reap_after_graceful_close().await
+    {
+        tracing::warn!(%error, "failed to reap MCP stdio child during explicit shutdown");
     }
 }
 
 pub(crate) async fn cancel_running_service(
     service: RunningService<RoleClient, LashMcpClientHandler>,
+    stdio_child: Option<StdioChildGuard>,
 ) {
     let request_tasks = service.service().request_tasks();
     request_tasks.shutdown().await;
@@ -431,40 +317,9 @@ pub(crate) async fn cancel_running_service(
     // plus transport-task drain. Errors only surface if the transport already
     // shut down; ignore them.
     let _ = service.cancel().await;
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reaper_spawn_failure_still_reaps_child() {
-        let child = std::process::Command::new("python3")
-            .args(["-c", "import time; time.sleep(0.5)"])
-            .spawn()
-            .expect("spawn test child");
-        let pid = child.id();
-
-        let completed = spawn_child_reaper_with(
-            pid,
-            child,
-            true,
-            Arc::new(AtomicBool::new(false)),
-            |_name, _task| Err(std::io::Error::other("forced reaper spawn failure")),
-        );
-        completed
-            .blocking_recv()
-            .expect("fallback reaper must report completion")
-            .expect("fallback reaper must reap the child");
-
-        let process_path = format!("/proc/{pid}");
-        let deadline = Instant::now() + Duration::from_millis(200);
-        while std::path::Path::new(&process_path).exists() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        assert!(
-            !std::path::Path::new(&process_path).exists(),
-            "stdio child PID {pid} survived a forced reaper thread spawn failure"
-        );
+    if let Some(child) = stdio_child
+        && let Err(error) = child.kill_and_reap()
+    {
+        tracing::warn!(%error, "failed to reap cancelled MCP stdio child");
     }
 }

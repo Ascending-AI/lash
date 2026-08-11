@@ -463,6 +463,7 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
             .contains("reconnect attempts exhausted"),
         "terminal tool-call failure must not claim recovery is active: {terminal:?}"
     );
+    assert_eq!(failure(&terminal).retry, ToolRetryDisposition::Never);
     assert_eq!(starts(root.path()), 2);
     pool.shutdown_all().await;
 }
@@ -734,9 +735,78 @@ async fn dropped_pool_releases_entry_and_keepalive_task() {
     assert!(weak.upgrade().is_none());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
+fn process_state(pid: u32) -> Option<char> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat.rsplit_once(") ")?.1.chars().next()
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_process_state(pid: u32, expected: char, timeout: Duration) -> Option<char> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let state = process_state(pid);
+        if state == Some(expected) || Instant::now() >= deadline {
+            return state;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(target_os = "linux")]
 #[test]
-fn dropping_connected_pool_and_runtime_reaps_stdio_child() {
+fn dropping_connected_pool_kills_misbehaving_stdio_child_and_logs() {
+    let traces = TraceBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(traces.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let root = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let pool = runtime.block_on(connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "ignore_eof",
+            ..MockOptions::default()
+        },
+    ));
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("stdio child must publish its pid")
+        .parse()
+        .expect("numeric child pid");
+
+    drop(pool);
+
+    let state = wait_for_process_state(pid, 'Z', Duration::from_secs(3));
+    if state != Some('Z') {
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+        panic!("stdio child PID {pid} must be killed (zombie), not still running; state={state:?}");
+    }
+    let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
+    assert!(
+        trace.contains(&format!("pid={pid}")),
+        "captured trace: {trace}"
+    );
+    assert!(trace.contains("server=mock"), "captured trace: {trace}");
+    assert!(
+        trace.contains("killed without explicit pool shutdown"),
+        "captured trace: {trace}"
+    );
+
+    drop(runtime);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn shutdown_all_fully_reaps_stdio_child() {
     let root = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -755,20 +825,15 @@ fn dropping_connected_pool_and_runtime_reaps_stdio_child() {
         .parse()
         .expect("numeric child pid");
 
+    runtime.block_on(pool.shutdown_all());
+
+    assert_eq!(
+        process_state(pid),
+        None,
+        "shutdown_all must wait for and fully reap stdio child PID {pid}"
+    );
     drop(pool);
     drop(runtime);
-
-    let process_path = format!("/proc/{pid}");
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while std::path::Path::new(&process_path).exists() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    if std::path::Path::new(&process_path).exists() {
-        let _ = std::process::Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status();
-        panic!("stdio child PID {pid} remained alive after pool and runtime drop");
-    }
 }
 
 #[cfg(unix)]
@@ -806,6 +871,7 @@ fn runtime_drop_does_not_wait_for_in_flight_graceful_child_reap() {
     let started = Instant::now();
     drop(runtime);
     let elapsed = started.elapsed();
+    eprintln!("runtime teardown elapsed: {elapsed:?}");
     assert!(
         elapsed < Duration::from_millis(500),
         "runtime teardown waited for in-flight shutdown's graceful child reaper: {elapsed:?}"

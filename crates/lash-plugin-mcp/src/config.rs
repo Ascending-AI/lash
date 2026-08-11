@@ -679,6 +679,17 @@ mod tests {
         }))
         .unwrap();
         boundary.validate("srv").expect("one millisecond is valid");
+
+        let maximum: McpServerConfig = serde_json::from_value(serde_json::json!({
+            "transport": "stdio",
+            "command": "srv",
+            "reconnect_initial_backoff_ms": u64::MAX,
+            "reconnect_max_backoff_ms": u64::MAX
+        }))
+        .unwrap();
+        maximum
+            .validate("srv")
+            .expect("equal maximum u64 backoffs are valid");
     }
 
     #[test]
