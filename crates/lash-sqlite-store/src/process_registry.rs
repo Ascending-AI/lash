@@ -1226,6 +1226,10 @@ impl ProcessRegistry for SqliteProcessRegistry {
         Ok(ProcessLiveReferenceSummary::from_records(records.iter()))
     }
 
+    async fn count_non_terminal_processes(&self) -> Result<usize, lash_core::PluginError> {
+        worklist::count_non_terminal_processes(self).await
+    }
+
     async fn claim_process_lease(
         &self,
         process_id: &str,

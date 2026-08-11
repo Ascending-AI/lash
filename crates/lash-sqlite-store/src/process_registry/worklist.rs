@@ -1,6 +1,9 @@
 use super::*;
 
 const CURSOR_BACKEND: &str = "sqlite";
+const COUNT_NON_TERMINAL_SQL: &str =
+    "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_live_worklist
+     WHERE status IN ('running', 'waiting')";
 const MAX_WORKLIST_PROCESS_ID_SQL: &str =
     "SELECT MAX(process_id) FROM processes INDEXED BY idx_processes_live_worklist
      WHERE status IN ('running', 'waiting')";
@@ -13,6 +16,27 @@ const CONTINUE_WORKLIST_PAGE_SQL: &str = "SELECT record_json FROM processes
      WHERE status IN ('running', 'waiting')
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3";
+
+pub(super) async fn count_non_terminal_processes(
+    registry: &SqliteProcessRegistry,
+) -> Result<usize, lash_core::PluginError> {
+    registry
+        .conn
+        .call(|conn| {
+            Ok((|| {
+                let count: i64 = conn
+                    .query_row(COUNT_NON_TERMINAL_SQL, [], |row| row.get(0))
+                    .map_err(process_sqlite_error)?;
+                usize::try_from(count).map_err(|_| {
+                    lash_core::PluginError::Session(format!(
+                        "SQLite non-terminal process count {count} does not fit usize"
+                    ))
+                })
+            })())
+        })
+        .await
+        .map_err(process_sqlite_error)?
+}
 
 pub(super) async fn collect_non_terminal_records(
     registry: &SqliteProcessRegistry,
@@ -150,6 +174,7 @@ mod tests {
                         .collect::<Result<Vec<_>, _>>()
                 };
                 Ok([
+                    explain(COUNT_NON_TERMINAL_SQL, &[])?.join(" | "),
                     explain(MAX_WORKLIST_PROCESS_ID_SQL, &[])?.join(" | "),
                     explain(
                         FIRST_WORKLIST_PAGE_SQL,
@@ -172,14 +197,14 @@ mod tests {
             );
         }
         assert!(
-            plans[1].contains("process_id<?"),
+            plans[2].contains("process_id<?"),
             "the first-page bound must be an index range: {}",
-            plans[1]
+            plans[2]
         );
         assert!(
-            plans[2].contains("process_id>?") && plans[2].contains("process_id<?"),
+            plans[3].contains("process_id>?") && plans[3].contains("process_id<?"),
             "both continuation bounds must be index ranges: {}",
-            plans[2]
+            plans[3]
         );
     }
 }

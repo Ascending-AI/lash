@@ -1,6 +1,8 @@
 use super::*;
 
 const CURSOR_BACKEND: &str = "postgres";
+pub(crate) const COUNT_NON_TERMINAL_SQL: &str =
+    "SELECT COUNT(*) FROM lash_processes WHERE status IN ('running', 'waiting')";
 pub(crate) const MAX_WORKLIST_PROCESS_ID_SQL: &str =
     "SELECT MAX(process_id) FROM lash_processes WHERE status IN ('running', 'waiting')";
 pub(crate) const FIRST_WORKLIST_PAGE_SQL: &str = "SELECT record_json FROM lash_processes
@@ -10,6 +12,20 @@ pub(crate) const CONTINUE_WORKLIST_PAGE_SQL: &str = "SELECT record_json FROM las
      WHERE status IN ('running', 'waiting')
        AND process_id <= $1 AND process_id > $2
      ORDER BY process_id ASC LIMIT $3";
+
+pub(super) async fn count_non_terminal_processes(
+    registry: &PostgresProcessRegistry,
+) -> Result<usize, PluginError> {
+    let count = sqlx::query_scalar::<_, i64>(COUNT_NON_TERMINAL_SQL)
+        .fetch_one(&registry.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+    usize::try_from(count).map_err(|_| {
+        PluginError::Session(format!(
+            "PostgreSQL non-terminal process count {count} does not fit usize"
+        ))
+    })
+}
 
 pub(super) async fn collect_non_terminal_records(
     registry: &PostgresProcessRegistry,
@@ -145,11 +161,18 @@ mod tests {
         .await
         .expect("explain PostgreSQL worklist maximum")
         .join(" | ");
+        let count_plan = sqlx::query_scalar::<_, String>(&format!(
+            "EXPLAIN (COSTS OFF) {COUNT_NON_TERMINAL_SQL}"
+        ))
+        .fetch_all(&mut *tx)
+        .await
+        .expect("explain PostgreSQL non-terminal count")
+        .join(" | ");
         let first_plan = explain(&mut tx, FIRST_WORKLIST_PAGE_SQL, &["zz"]).await;
         let continuation_plan = explain(&mut tx, CONTINUE_WORKLIST_PAGE_SQL, &["zz", "aa"]).await;
         tx.rollback().await.expect("rollback explain transaction");
 
-        for plan in [&max_plan, &first_plan, &continuation_plan] {
+        for plan in [&count_plan, &max_plan, &first_plan, &continuation_plan] {
             assert!(
                 plan.contains("idx_lash_processes_live_worklist"),
                 "worklist query must use the partial index: {plan}"

@@ -252,19 +252,30 @@ for session in idle_sessions {
 //    invalidates the old completion. Resolve outstanding durable waits as
 //    `Cancelled` with `session.revoke_durable_waits()`.
 
-// 5. Release provider transports. The default `close()` is a no-op; the
+// 5. Read the deployment's authoritative process status before retiring
+//    an immutable deployment. This is a read, not a drain orchestrator:
+//    keep the old deployment registered while `drained` is false.
+let drain_status = core.drain_status(false).await?;
+if drain_status.drained {
+    // The host may now retire this deployment.
+} else {
+    // Keep it available for the remaining pinned invocations.
+    let _ = drain_status.remaining_invocations;
+}
+
+// 6. Release provider transports. The default `close()` is a no-op; the
 //    Codex provider sends WebSocket Close frames on its cached sessions.
 let _ = provider.close().await;
 
-// 6. Release resources owned by plugin factories. This is not a drain
+// 7. Release resources owned by plugin factories. This is not a drain
 //    orchestrator: intake, ordering, and deadlines remain host policy.
 core.shutdown().await?;
 
-// 7. Flush the trace sink (fsync for JSONL). OTel span-export durability is
+// 8. Flush the trace sink (fsync for JSONL). OTel span-export durability is
 //    the host's duty: `force_flush()`/`shutdown()` your own TracerProvider.
 core.flush_trace_sink()?;
 
-// 8. Exit. Any lease this process still holds now expires on its TTL.
+// 9. Exit. Any lease this process still holds now expires on its TTL.
 Ok(())</code></pre>
       <p>Steps 1 and 2 are pure policy: lash cannot see your ingress or your grace budget, so stopping admission and deciding whether to await or cancel in-flight turns stays with the host. Steps 3 through 7 are the levers: <code>park</code>/<code>close</code>, the claim and wait handbacks, provider <code>close</code>, plugin-factory <code>shutdown</code>, and trace <code>flush</code>. Each is an explicit call with no hidden drain orchestration. Anything lash cannot expose as a lever without becoming an orchestrator (signal handling, drain deadlines, readiness endpoints) is host territory by design.</p>
       <p>The <a href="./example-agent-service.html">agent service</a> example wires the subset a stateless request/response host owns: an axum graceful-shutdown signal stops admission, then the process closes its retained provider handle and flushes its trace sink before exit.</p>

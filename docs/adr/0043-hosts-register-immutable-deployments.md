@@ -63,9 +63,13 @@ lash nondeterminism bugs but are not, and will lose the guarantee that a
 started invocation completes against consistent code. Neither failure names its
 cause today.
 
-Lash does not detect the violation and should not pretend to: a runtime cannot
-distinguish its own nondeterminism from code changing beneath it. The remedy is
-documentation and host-side deployment discipline, not a runtime check.
+Lash does not decide deployment routing or retirement, but it now exposes the
+authoritative `LashCore::drain_status(accepting_new_work)` read. After the host
+closes admission, the read counts every retained non-terminal process row,
+including waiting/suspended and retrying work, and returns `drained` only when
+that count is zero. A host must keep the old deployment registered while the
+read is not drained; the read supplies verification, while deployment
+discipline and retirement timing remain host policy.
 
 Written after three independent reviews of separate subsystems each discovered
 this assumption and none found it stated.

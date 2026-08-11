@@ -8,10 +8,12 @@ use lash_core::runtime::{
 };
 use std::collections::HashSet;
 
+mod drain;
 mod queued_work;
 mod runtime_host_config;
 mod worker_capacity;
 
+pub use drain::DeploymentDrainStatus;
 use queued_work::{InlineQueuedWorkRunConfig, InlineQueuedWorkRunHandle};
 #[derive(Clone)]
 pub struct LashCore {
@@ -293,6 +295,26 @@ impl LashCore {
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             ))
             .plugins(default_runtime_stack())
+    }
+
+    /// Read whether this deployment is safe for a host to retire.
+    ///
+    /// The host owns admission and must pass its current admission state. Lash
+    /// reads the process registry on demand; it does not maintain a counter or
+    /// orchestrate routing, deadlines, worker shutdown, or retirement. A core
+    /// without a process registry reports zero remaining invocations.
+    pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {
+        let remaining_invocations = match self.process_registry() {
+            Some(registry) => registry.count_non_terminal_processes().await?,
+            None => 0,
+        };
+        let checked_at = self.env.core.clock.timestamp_ms();
+        Ok(DeploymentDrainStatus {
+            accepting_new_work,
+            remaining_invocations,
+            checked_at,
+            drained: !accepting_new_work && remaining_invocations == 0,
+        })
     }
 
     /// Sugar entry point: a [`LashCoreBuilder`] pre-seeded with a
