@@ -5,10 +5,10 @@
 //! attempts to connect each server eagerly when constructed, but a server
 //! that is down never fails construction: the entry stays registered and a
 //! background task retries with exponential backoff until it connects (or the
-//! server is detached). A connection that dies mid-life is detected on the
-//! next tool call and re-established the same way. Imported tool definitions
-//! are kept across a disconnect so the tool catalog stays stable; calls to a
-//! disconnected server fail loudly instead.
+//! server is detached). A per-service lifecycle watcher detects a connection
+//! that dies mid-life and re-establishes it the same way. Imported tool
+//! definitions are kept across a disconnect so the tool catalog stays stable;
+//! calls to a disconnected server fail loudly instead.
 //!
 //! The wire-level transport is provided by the official [`rmcp`] SDK.
 
@@ -28,7 +28,7 @@ use rmcp::model::{
     CallToolRequestParams, ClientRequest, Content, PingRequest, ProtocolVersion, RawContent,
     Request, ResourceContents, ServerResult,
 };
-use rmcp::service::{Peer, PeerRequestOptions, RoleClient, RunningService, ServiceExt};
+use rmcp::service::{Peer, PeerRequestOptions, QuitReason, RoleClient, RunningService, ServiceExt};
 use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
@@ -47,8 +47,13 @@ use lash_tool_support::ToolDefinitionLashlangExt;
 use crate::config::McpCallPolicy;
 use crate::config::{McpServerConfig, TimeoutDisconnectPolicy};
 use crate::error::McpError;
-use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
+use crate::host::{
+    LashMcpClientHandler, McpHostRequestTasks, McpHostServices, McpToolListChangedHandler,
+};
 use crate::naming;
+use crate::service_lifecycle::{
+    McpService, ServiceQuit, cancel_running_service, equal_jitter, is_connection_loss, stop_service,
+};
 
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
 /// session plugin instance.
@@ -73,9 +78,9 @@ struct McpEntry {
     server_name: String,
     config: McpServerConfig,
     host_services: McpHostServices,
-    /// `None` while disconnected. Once connected we keep the running service
-    /// handle alive; the transport owns its own process internally.
-    service: tokio::sync::Mutex<Option<RunningService<RoleClient, LashMcpClientHandler>>>,
+    /// `None` while disconnected. Once connected this retains the peer and
+    /// exact-service teardown controls while a watcher owns rmcp's join handle.
+    service: tokio::sync::Mutex<Option<McpService>>,
     /// Cached, prefixed tool definitions for this server, refreshed on every
     /// successful (re)connect and kept across a disconnect so the tool
     /// surface stays stable. Keys are the prefixed names
@@ -87,6 +92,12 @@ struct McpEntry {
     cancelled: AtomicBool,
     /// Guards against spawning concurrent reconnect loops for one entry.
     connecting: AtomicBool,
+    /// Applies randomized delay to the entry-owned reconnect ceiling. Kept as
+    /// a seam so pacing tests can observe ceilings without wall-clock sleeps.
+    reconnect_jitter: Arc<dyn Fn(Duration) -> Duration + Send + Sync>,
+    /// Persists across reconnect tasks so short-lived successful handshakes do
+    /// not restart a crash loop at the initial delay.
+    reconnect_backoff_ms: AtomicU64,
     /// Consecutive idle timeouts since the last successful tool call.
     consecutive_timeouts: AtomicU64,
     /// Monotonically identifies the service currently installed in `service`.
@@ -101,6 +112,8 @@ struct McpEntry {
     cancelled_notify: Arc<tokio::sync::Notify>,
     /// Wakes teardown after a background loop has relinquished the entry.
     reconnect_idle_notify: tokio::sync::Notify,
+    #[cfg(test)]
+    reconnect_publish_hook: Option<Arc<policy_tests::ReconnectPublishHook>>,
 }
 
 struct McpToolListRefresh {
@@ -432,14 +445,21 @@ impl McpConnectionPool {
                             raw: None,
                         });
                     }
-                    let last_error = entry.last_error.read_recover().clone();
-                    let message = McpError::Protocol(match last_error {
-                        Some(last_error) => format!(
-                            "MCP server `{server_name}` is not connected \
-                             (reconnecting in the background; last error: {last_error})"
+                    let previous_error = entry.last_error.read_recover().clone();
+                    let dispatch_error = match previous_error {
+                        Some(previous_error) if previous_error.contains("before tool dispatch") => {
+                            previous_error
+                        }
+                        Some(previous_error) => format!(
+                            "MCP server `{server_name}` was disconnected before tool dispatch \
+                             (reconnecting in the background; last error: {previous_error})"
                         ),
-                        None => format!("MCP server `{server_name}` is not connected"),
-                    });
+                        None => format!(
+                            "MCP server `{server_name}` was disconnected before tool dispatch"
+                        ),
+                    };
+                    *entry.last_error.write_recover() = Some(dispatch_error.clone());
+                    let message = McpError::Protocol(dispatch_error);
                     return ToolResult::retryable_failure(
                         ToolFailureClass::Unavailable,
                         "mcp_server_unavailable",
@@ -648,22 +668,9 @@ fn prefix_collision_message(existing_server: &str, incoming_server: &str, prefix
     )
 }
 
-/// Transport-level failures mean the connection is gone (dead child process,
-/// closed HTTP stream) — reconnect. Protocol-level errors (a tool failing,
-/// an unexpected response) leave the connection usable.
-fn is_connection_loss(err: &ServiceError) -> bool {
-    match err {
-        ServiceError::TransportSend(_) | ServiceError::TransportClosed => true,
-        ServiceError::McpError(_)
-        | ServiceError::UnexpectedResponse
-        | ServiceError::Cancelled { .. }
-        | ServiceError::Timeout { .. } => false,
-        _ => true,
-    }
-}
-
 impl McpEntry {
     fn new(server_name: String, config: McpServerConfig, host_services: McpHostServices) -> Self {
+        let reconnect_backoff_ms = config.reconnect_initial_backoff().as_millis() as u64;
         Self {
             server_name,
             config,
@@ -674,18 +681,81 @@ impl McpEntry {
             last_error: RwLock::new(None),
             cancelled: AtomicBool::new(false),
             connecting: AtomicBool::new(false),
+            reconnect_jitter: Arc::new(equal_jitter),
+            reconnect_backoff_ms: AtomicU64::new(reconnect_backoff_ms),
             consecutive_timeouts: AtomicU64::new(0),
             service_generation: AtomicU64::new(0),
             ping_degrade_warned: AtomicBool::new(false),
             keepalive_started: AtomicBool::new(false),
             cancelled_notify: Arc::new(tokio::sync::Notify::new()),
             reconnect_idle_notify: tokio::sync::Notify::new(),
+            #[cfg(test)]
+            reconnect_publish_hook: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_reconnect_jitter(
+        mut self,
+        reconnect_jitter: Arc<dyn Fn(Duration) -> Duration + Send + Sync>,
+    ) -> Self {
+        self.reconnect_jitter = reconnect_jitter;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_reconnect_publish_hook(
+        mut self,
+        hook: Arc<policy_tests::ReconnectPublishHook>,
+    ) -> Self {
+        self.reconnect_publish_hook = Some(hook);
+        self
+    }
+
+    #[cfg(test)]
+    async fn pause_after_reconnect_publish(&self) {
+        if let Some(hook) = &self.reconnect_publish_hook
+            && hook.armed.swap(false, Ordering::SeqCst)
+        {
+            hook.published.notify_one();
+            hook.release.notified().await;
         }
     }
 
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         self.cancelled_notify.notify_waiters();
+    }
+
+    fn reconnect_backoff(&self) -> Duration {
+        Duration::from_millis(self.reconnect_backoff_ms.load(Ordering::SeqCst))
+    }
+
+    fn advance_reconnect_backoff(&self) {
+        let max_ms = self.config.reconnect_max_backoff().as_millis() as u64;
+        let _ =
+            self.reconnect_backoff_ms
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    Some(current.saturating_mul(2).min(max_ms))
+                });
+    }
+
+    async fn reset_reconnect_backoff_if_current(&self, observed_generation: u64) {
+        let guard = self.service.lock().await;
+        if self.service_generation.load(Ordering::SeqCst) == observed_generation && guard.is_some()
+        {
+            self.reconnect_backoff_ms.store(
+                self.config.reconnect_initial_backoff().as_millis() as u64,
+                Ordering::SeqCst,
+            );
+        }
+    }
+
+    /// A connection earns a backoff reset only after remaining live for the
+    /// host-configured maximum reconnect window. This adds no separate timing
+    /// policy and distinguishes a healthy service from a successful handshake.
+    fn reconnect_healthy_dwell(&self) -> Duration {
+        self.config.reconnect_max_backoff()
     }
 
     /// One connection attempt: handshake, tool discovery, then swap in the
@@ -789,15 +859,92 @@ impl McpEntry {
         }
 
         *self.imported_tools.write_recover() = import_tools(&self.server_name, tools);
-        let mut service_guard = self.service.lock().await;
-        *service_guard = Some(service);
-        self.service_generation
-            .store(next_generation, Ordering::SeqCst);
-        self.connected.store(true, Ordering::SeqCst);
+        let peer = service.peer().clone();
+        let request_tasks = service.service().request_tasks();
+        let cancellation = service.cancellation_token();
+        let quit = Arc::new(ServiceQuit::default());
+        let previous_service = {
+            let mut service_guard = self.service.lock().await;
+            self.service_generation
+                .store(next_generation, Ordering::SeqCst);
+            self.connected.store(true, Ordering::SeqCst);
+            service_guard.replace(McpService {
+                peer,
+                request_tasks: Arc::clone(&request_tasks),
+                cancellation: Some(cancellation),
+                quit: Arc::clone(&quit),
+            })
+        };
         // A fresh connection starts with a fresh timeout budget.
         self.consecutive_timeouts.store(0, Ordering::SeqCst);
         *self.last_error.write_recover() = None;
+        self.spawn_service_watcher(service, next_generation, request_tasks, Arc::clone(&quit));
+        if let Some(previous_service) = previous_service {
+            stop_service(previous_service).await;
+        }
         Ok(())
+    }
+
+    fn spawn_service_watcher(
+        self: &Arc<Self>,
+        service: RunningService<RoleClient, LashMcpClientHandler>,
+        service_generation: u64,
+        request_tasks: Arc<McpHostRequestTasks>,
+        quit: Arc<ServiceQuit>,
+    ) {
+        let weak_entry = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let waiting = service.waiting();
+            tokio::pin!(waiting);
+            let healthy_dwell = tokio::time::sleep(
+                weak_entry
+                    .upgrade()
+                    .map_or(Duration::ZERO, |entry| entry.reconnect_healthy_dwell()),
+            );
+            tokio::pin!(healthy_dwell);
+            let reason = tokio::select! {
+                reason = &mut waiting => reason,
+                () = &mut healthy_dwell => {
+                    if let Some(entry) = weak_entry.upgrade() {
+                        entry
+                            .reset_reconnect_backoff_if_current(service_generation)
+                            .await;
+                    }
+                    waiting.await
+                }
+            };
+            request_tasks.shutdown().await;
+            if let Some(entry) = weak_entry.upgrade() {
+                entry.observe_service_quit(service_generation, reason).await;
+            }
+            quit.finish();
+        });
+    }
+
+    async fn observe_service_quit(
+        self: &Arc<Self>,
+        observed_generation: u64,
+        reason: Result<QuitReason, tokio::task::JoinError>,
+    ) {
+        let disconnected = {
+            let mut guard = self.service.lock().await;
+            if self.service_generation.load(Ordering::SeqCst) != observed_generation
+                || guard.is_none()
+            {
+                false
+            } else {
+                self.connected.store(false, Ordering::SeqCst);
+                *self.last_error.write_recover() = Some(format!(
+                    "MCP server `{}` service quit: {reason:?}",
+                    self.server_name
+                ));
+                guard.take();
+                true
+            }
+        };
+        if disconnected && !self.cancelled.load(Ordering::SeqCst) {
+            self.spawn_reconnect_loop();
+        }
     }
 
     async fn refresh_tools(&self, peer: Peer<RoleClient>, observed_generation: u64) {
@@ -839,26 +986,30 @@ impl McpEntry {
         }
         let entry = Arc::clone(self);
         tokio::spawn(async move {
-            let mut backoff = entry.config.reconnect_initial_backoff();
-            let max_backoff = entry.config.reconnect_max_backoff();
             let max_attempts = entry.config.reconnect_max_attempts();
             let mut attempts = 0_u64;
+            let mut published_service = false;
             loop {
                 let cancelled = entry.cancelled_notify.notified();
                 if entry.cancelled.load(Ordering::SeqCst) {
                     break;
                 }
+                let backoff = entry.reconnect_backoff();
                 tokio::select! {
-                    () = tokio::time::sleep(full_jitter(backoff)) => {}
+                    () = tokio::time::sleep((entry.reconnect_jitter)(backoff)) => {}
                     () = cancelled => {}
                 }
                 if entry.cancelled.load(Ordering::SeqCst) {
                     break;
                 }
                 attempts += 1;
+                entry.advance_reconnect_backoff();
                 match entry.establish().await {
                     Ok(()) => {
+                        published_service = true;
                         tracing::info!(server = %entry.server_name, "MCP server reconnected");
+                        #[cfg(test)]
+                        entry.pause_after_reconnect_publish().await;
                         break;
                     }
                     Err(err) => {
@@ -880,10 +1031,15 @@ impl McpEntry {
                         }
                     }
                 }
-                backoff = (backoff * 2).min(max_backoff);
             }
             entry.connecting.store(false, Ordering::SeqCst);
             entry.reconnect_idle_notify.notify_waiters();
+            if published_service
+                && !entry.connected.load(Ordering::SeqCst)
+                && !entry.cancelled.load(Ordering::SeqCst)
+            {
+                entry.spawn_reconnect_loop();
+            }
         });
     }
 
@@ -902,7 +1058,7 @@ impl McpEntry {
             guard.take()
         };
         if let Some(service) = service {
-            cancel_running_service(service).await;
+            stop_service(service).await;
         }
         if !self.cancelled.load(Ordering::SeqCst) {
             self.spawn_reconnect_loop();
@@ -1145,23 +1301,9 @@ impl McpEntry {
     async fn cancel_service(&self) {
         let service = self.service.lock().await.take();
         if let Some(service) = service {
-            cancel_running_service(service).await;
+            stop_service(service).await;
         }
     }
-}
-
-async fn cancel_running_service(service: RunningService<RoleClient, LashMcpClientHandler>) {
-    let request_tasks = service.service().request_tasks();
-    request_tasks.shutdown().await;
-    // `cancel` consumes the service and waits for rmcp's graceful cancellation
-    // plus transport-task drain. Errors only surface if the transport already
-    // shut down; ignore them.
-    let _ = service.cancel().await;
-}
-
-fn full_jitter(max: Duration) -> Duration {
-    let max_ms = u64::try_from(max.as_millis()).unwrap_or(u64::MAX);
-    Duration::from_millis(fastrand::u64(0..=max_ms))
 }
 
 async fn connect_service(

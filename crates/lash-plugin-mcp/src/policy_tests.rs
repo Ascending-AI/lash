@@ -14,6 +14,22 @@ use serde_json::json;
 
 use super::*;
 
+pub(super) struct ReconnectPublishHook {
+    pub(super) armed: AtomicBool,
+    pub(super) published: tokio::sync::Notify,
+    pub(super) release: tokio::sync::Notify,
+}
+
+impl Default for ReconnectPublishHook {
+    fn default() -> Self {
+        Self {
+            armed: AtomicBool::new(true),
+            published: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        }
+    }
+}
+
 const MOCK_SERVER: &str = r#"
 import json, os, sys, threading, time
 
@@ -31,6 +47,8 @@ except (FileNotFoundError, ValueError):
 with open(starts_path, 'w', encoding='utf-8') as f:
     f.write(str(starts + 1))
 if behavior == 'silent_no_ping_once' and starts > 0:
+    sys.exit(1)
+if behavior == 'fail_once_then_success' and starts < 1:
     sys.exit(1)
 if behavior == 'fail_twice_then_success' and starts < 2:
     sys.exit(1)
@@ -84,7 +102,11 @@ for line in sys.stdin:
             sys.exit(0)
     elif method == 'tools/call':
         call_index += 1
-        threading.Thread(target=run_call, args=(message, call_index), daemon=True).start()
+        if behavior == 'crash_after_call':
+            result(message['id'])
+            sys.exit(0)
+        else:
+            threading.Thread(target=run_call, args=(message, call_index), daemon=True).start()
     elif method == 'ping':
         if behavior == 'ping_error':
             send({'jsonrpc': '2.0', 'id': message['id'],
@@ -108,6 +130,7 @@ struct MockOptions {
     threshold: u64,
     probe_interval_ms: u64,
     reconnect_initial_ms: u64,
+    reconnect_max_ms: Option<u64>,
     reconnect_max_attempts: u64,
 }
 
@@ -124,6 +147,7 @@ impl Default for MockOptions {
             threshold: 3,
             probe_interval_ms: 0,
             reconnect_initial_ms: 5_000,
+            reconnect_max_ms: None,
             reconnect_max_attempts: 1,
         }
     }
@@ -156,7 +180,9 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
             consecutive_timeouts_before_disconnect: options.threshold,
             liveness_probe_interval_ms: options.probe_interval_ms,
             reconnect_initial_backoff_ms: options.reconnect_initial_ms,
-            reconnect_max_backoff_ms: options.reconnect_initial_ms,
+            reconnect_max_backoff_ms: options
+                .reconnect_max_ms
+                .unwrap_or(options.reconnect_initial_ms),
             reconnect_max_attempts: options.reconnect_max_attempts,
         },
         binary_content_attachments: false,
@@ -449,7 +475,7 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
 }
 
 #[tokio::test]
-async fn late_probe_failure_cannot_disconnect_a_replacement_service() {
+async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
     let root = tempfile::tempdir().unwrap();
     let pool = connect_mock(
         root.path(),
@@ -472,14 +498,123 @@ async fn late_probe_failure_cannot_disconnect_a_replacement_service() {
     )
     .await;
 
+    let stale_generation = current_entry.service_generation.load(Ordering::SeqCst);
     current_entry
         .try_connect()
         .await
         .expect("replacement connection");
+    assert!(
+        current_entry.service_generation.load(Ordering::SeqCst) > stale_generation,
+        "replacement connection must publish a new generation"
+    );
     let result = call_task.await.expect("call task");
     assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
     assert!(pool.server_statuses()[0].connected);
     assert_eq!(starts(root.path()), 2);
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn crash_per_call_preserves_backoff_across_successful_respawns() {
+    let root = tempfile::tempdir().unwrap();
+    let observed_ceilings = Arc::new(Mutex::new(Vec::new()));
+    let reconnect_jitter = {
+        let observed_ceilings = Arc::clone(&observed_ceilings);
+        Arc::new(move |ceiling| {
+            observed_ceilings.lock_recover().push(ceiling);
+            Duration::ZERO
+        }) as Arc<dyn Fn(Duration) -> Duration + Send + Sync>
+    };
+    let pool = Arc::new(McpConnectionPool::empty());
+    let entry = Arc::new(
+        McpEntry::new(
+            "mock".to_string(),
+            mock_config(
+                root.path(),
+                MockOptions {
+                    behavior: "crash_after_call",
+                    reconnect_initial_ms: 10,
+                    reconnect_max_ms: Some(1_000),
+                    ..MockOptions::default()
+                },
+            ),
+            McpHostServices::default(),
+        )
+        .with_reconnect_jitter(reconnect_jitter),
+    );
+    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
+    entry.establish().await.expect("initial connection");
+
+    for expected_starts in 2..=4 {
+        let result = call(&pool).await;
+        assert!(result.is_success(), "crash-after-call result: {result:?}");
+        wait_until(
+            || starts(root.path()) >= expected_starts && pool.server_statuses()[0].connected,
+            "crash-per-call server did not reconnect",
+        )
+        .await;
+    }
+
+    assert_eq!(
+        *observed_ceilings.lock_recover(),
+        [
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+            Duration::from_millis(40),
+        ],
+        "short-lived successful connections must not reset reconnect pacing"
+    );
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn disconnect_in_reconnect_publish_window_rearms_after_guard_clear() {
+    let root = tempfile::tempdir().unwrap();
+    let hook = Arc::new(ReconnectPublishHook::default());
+    let pool = Arc::new(McpConnectionPool::empty());
+    let entry = Arc::new(
+        McpEntry::new(
+            "mock".to_string(),
+            mock_config(
+                root.path(),
+                MockOptions {
+                    behavior: "fail_once_then_success",
+                    reconnect_initial_ms: 10,
+                    ..MockOptions::default()
+                },
+            ),
+            McpHostServices::default(),
+        )
+        .with_reconnect_jitter(Arc::new(|_| Duration::ZERO))
+        .with_reconnect_publish_hook(Arc::clone(&hook)),
+    );
+    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
+    entry
+        .establish()
+        .await
+        .expect_err("the eager connection must fail");
+    entry.spawn_reconnect_loop();
+    tokio::time::timeout(Duration::from_secs(3), hook.published.notified())
+        .await
+        .expect("reconnect did not pause after publishing its service");
+    assert!(pool.server_statuses()[0].connected);
+
+    let generation = entry.service_generation.load(Ordering::SeqCst);
+    assert!(
+        entry
+            .mark_disconnected("forced publish-window disconnect".to_string(), generation)
+            .await
+    );
+    assert!(entry.connecting.load(Ordering::SeqCst));
+    assert!(!pool.server_statuses()[0].connected);
+    assert!(entry.service.lock().await.is_none());
+
+    hook.release.notify_one();
+    wait_until(
+        || starts(root.path()) >= 3 && pool.server_statuses()[0].connected,
+        "disconnect in reconnect publish window left the entry wedged",
+    )
+    .await;
     pool.shutdown_all().await;
 }
 
@@ -660,6 +795,46 @@ async fn dead_transport_short_circuits_before_dispatch_timeout() {
 }
 
 #[tokio::test]
+async fn idle_service_death_updates_status_without_a_tool_call() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "exit_after_list",
+            reconnect_initial_ms: 5_000,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let peer = peer(&pool).await;
+    wait_until(
+        || peer.is_transport_closed(),
+        "mock transport did not close",
+    )
+    .await;
+
+    wait_until(
+        || !pool.server_statuses()[0].connected,
+        "idle service death did not update pool status",
+    )
+    .await;
+    let status = &pool.server_statuses()[0];
+    assert!(
+        status
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("service quit")),
+        "idle death must retain its quit reason: {status:?}"
+    );
+    assert_eq!(
+        pool.advertised_tools().len(),
+        1,
+        "idle death must not remove the last discovered tool catalog"
+    );
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
 async fn interval_probe_marks_unresponsive_peer_disconnected() {
     let root = tempfile::tempdir().unwrap();
     let pool = connect_mock(
@@ -687,8 +862,10 @@ async fn interval_probe_marks_unresponsive_peer_disconnected() {
 }
 
 #[test]
-fn full_jitter_stays_within_configured_backoff() {
+fn equal_jitter_stays_in_upper_half_of_configured_backoff() {
     for _ in 0..100 {
-        assert!(full_jitter(Duration::from_millis(25)) <= Duration::from_millis(25));
+        let delay = equal_jitter(Duration::from_millis(25));
+        assert!(delay >= Duration::from_millis(13));
+        assert!(delay <= Duration::from_millis(25));
     }
 }
