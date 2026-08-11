@@ -528,6 +528,8 @@ where
     ))
     .await;
     queued_work_join_groups_by_delivery_policy_and_merge_key(make("queued-join")).await;
+    queued_work_redrive_preserves_interrupted_batch_composition(make("redrive-composition")).await;
+    queued_work_exact_claim_preserves_physical_order_and_key_breaks(make("physical-order")).await;
     wake_turn_policy_controls_coalescing(make("wake-policy-merge")).await;
     process_wakes_batch_by_default(make("process-wakes-batch")).await;
     queued_work_completion_is_lease_guarded(make("root")).await;
@@ -4275,21 +4277,31 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
             .is_none(),
         "exact selection must preserve the delivery boundary gate"
     );
-    assert!(
-        store
-            .claim_ready_queued_work_by_batch_ids(
-                "root",
-                &selected_session_lease.fence(),
-                &lease_owner("owner"),
-                QueuedWorkClaimBoundary::Idle,
-                &[first.batch_id.clone(), second.batch_id.clone()],
-                crate::testing::queued_work_claim_policy(64),
-            )
-            .await
-            .expect("slot-policy-gated exact claim")
-            .is_none(),
-        "exact selection must not combine exclusive batches into one claim"
+    let exclusive_prefix = store
+        .claim_ready_queued_work_by_batch_ids(
+            "root",
+            &selected_session_lease.fence(),
+            &lease_owner("owner"),
+            QueuedWorkClaimBoundary::Idle,
+            &[first.batch_id.clone(), second.batch_id.clone()],
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim exclusive exact prefix")
+        .expect("the first exclusive exact batch is claimable");
+    assert_eq!(
+        exclusive_prefix
+            .batches
+            .iter()
+            .map(|batch| batch.enqueue_seq)
+            .collect::<Vec<_>>(),
+        vec![1],
+        "exact selection must take only the maximal valid physical prefix"
     );
+    store
+        .abandon_queued_work_claim(&exclusive_prefix)
+        .await
+        .expect("abandon exclusive exact-prefix probe");
     let selected = store
         .claim_ready_queued_work_by_batch_ids(
             "root",
@@ -4358,6 +4370,85 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
             .is_empty()
     );
     release_session_execution_lease_for_test(&store, &accepted_session_lease).await;
+}
+
+async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let a1 = store
+        .enqueue_queued_work(
+            queued_draft(
+                "exact-key-break",
+                "a1",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_source_key("exact-a1")
+            .with_merge_key("a"),
+        )
+        .await
+        .expect("enqueue exact A1");
+    let _b1 = store
+        .enqueue_queued_work(
+            queued_draft(
+                "exact-key-break",
+                "b1",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_source_key("exact-b1")
+            .with_merge_key("b"),
+        )
+        .await
+        .expect("enqueue exact B1");
+    let a2 = store
+        .enqueue_queued_work(
+            queued_draft(
+                "exact-key-break",
+                "a2",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_source_key("exact-a2")
+            .with_merge_key("a"),
+        )
+        .await
+        .expect("enqueue exact A2");
+
+    let owner = lease_owner("exact-key-break-owner");
+    let lease =
+        claim_session_execution_lease_for_test(&store, "exact-key-break", &owner.owner_id).await;
+    let claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            "exact-key-break",
+            &lease.fence(),
+            &owner,
+            QueuedWorkClaimBoundary::Idle,
+            &[a2.batch_id, a1.batch_id],
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim reversed exact A rows")
+        .expect("physical prefix contains exact A1");
+
+    assert_eq!(
+        claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("exact-a1"), 1)],
+        "an exact claim must preserve enqueue order and stop at the physical B key break"
+    );
+    assert_eq!(
+        store
+            .list_pending_queued_work("exact-key-break")
+            .await
+            .expect("list exact-key-break remainder")
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("exact-b1"), 2), (Some("exact-a2"), 3)],
+        "the key-break row and later requested row must remain queued in physical order"
+    );
+    release_session_execution_lease_for_test(&store, &lease).await;
 }
 
 async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn RuntimePersistence>) {
@@ -5366,6 +5457,120 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
         .expect("third group claim");
     release_session_execution_lease_for_test(&store, &session_lease).await;
     assert_eq!(third_claim.batches[0].batch_id, different_delivery.batch_id);
+}
+
+async fn queued_work_redrive_preserves_interrupted_batch_composition(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    for (source_key, label) in [("redrive-w1", "w1"), ("redrive-w2", "w2")] {
+        store
+            .enqueue_queued_work(
+                queued_draft(
+                    "interrupted-batch-redrive",
+                    label,
+                    DeliveryPolicy::EarliestSafeBoundary,
+                )
+                .with_source_key(source_key)
+                .with_merge_key("redrive-key"),
+            )
+            .await
+            .expect("enqueue original redrive row");
+    }
+
+    let first_owner = lease_owner("redrive-owner-a");
+    let first_lease = claim_session_execution_lease_for_test(
+        &store,
+        "interrupted-batch-redrive",
+        &first_owner.owner_id,
+    )
+    .await;
+    let first_claim = store
+        .claim_ready_queued_work(
+            "interrupted-batch-redrive",
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim original redrive batch")
+        .expect("original redrive batch exists");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)]
+    );
+
+    // Model an interruption after the claimed composition has escaped to a
+    // journaled command, but before the queue completion commits. Releasing the
+    // session lease makes the intact predecessor claim reclaimable without
+    // abandoning or settling it.
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+    store
+        .enqueue_queued_work(
+            queued_draft(
+                "interrupted-batch-redrive",
+                "w3",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_source_key("redrive-w3")
+            .with_merge_key("redrive-key"),
+        )
+        .await
+        .expect("enqueue post-interruption compatible row");
+
+    let successor_owner = lease_owner("redrive-owner-b");
+    let successor_lease = claim_session_execution_lease_for_test(
+        &store,
+        "interrupted-batch-redrive",
+        &successor_owner.owner_id,
+    )
+    .await;
+    let redriven = store
+        .claim_ready_queued_work(
+            "interrupted-batch-redrive",
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("redrive interrupted claim")
+        .expect("interrupted claim remains reclaimable");
+    assert_eq!(
+        redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)],
+        "redrive must retain the literal predecessor batch composition"
+    );
+
+    let subsequent = store
+        .claim_ready_queued_work(
+            "interrupted-batch-redrive",
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim post-interruption row")
+        .expect("post-interruption row remains separately claimable");
+    assert_eq!(
+        subsequent
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("redrive-w3"), 3)],
+        "new compatible work must wait for a separate successor claim"
+    );
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
 async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) {

@@ -63,11 +63,12 @@ fn sqlite_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> S
     };
     format!(
         "queued_work_head_candidate AS (
-            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy
+            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
             FROM (
                 SELECT enqueue_seq AS head_enqueue_seq,
                        batch_id AS head_batch_id,
-                       delivery_policy AS head_delivery_policy
+                       delivery_policy AS head_delivery_policy,
+                       claim_id AS head_claim_id
                 FROM queued_work_batches
                 WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
                 ORDER BY enqueue_seq ASC
@@ -85,12 +86,16 @@ fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) ->
          SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                 work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                 claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
          FROM queued_work_batches
          CROSS JOIN queued_work_head_candidate
          WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+           AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
          ORDER BY enqueue_seq ASC
-         LIMIT ?4"
+         LIMIT COALESCE((
+             SELECT CASE WHEN head_claim_id IS NULL THEN ?4 ELSE 9223372036854775807 END
+             FROM queued_work_head_candidate
+         ), 0)"
     )
 }
 
@@ -1733,52 +1738,87 @@ impl QueuedWorkStore for Store {
                 let outcome: Result<Option<QueuedWorkClaim>, StoreError> = (|| {
                     ensure_session_execution_lease_conn(tx, &session_id, &fence, now)?;
                     let generation = fence.fencing_token;
-                    let mut rows = Vec::new();
-                    let mut batches = Vec::new();
-                    for batch_id in &batch_ids {
-                        let row = tx
-                            .query_row(
+                    let requested_ids = batch_ids
+                        .iter()
+                        .cloned()
+                        .collect::<std::collections::BTreeSet<_>>();
+                    if requested_ids.len() != batch_ids.len() {
+                        return Ok(None);
+                    }
+                    let candidate_rows = {
+                        let mut stmt = tx
+                            .prepare(
                                 "SELECT enqueue_seq, batch_id, session_id, source_key,
                                         delivery_policy, work_kind, authority_json, merge_key,
                                         available_at_ms, enqueued_at_ms, claim_fencing_token,
                                         claim_owner_id, claim_owner_incarnation_id,
                                         claim_owner_liveness_json, claim_token,
-                                        claim_session_lease_generation
+                                        claim_session_lease_generation, claim_id
                                  FROM queued_work_batches
-                                 WHERE session_id = ?1 AND batch_id = ?2
-                                   AND available_at_ms <= ?3
+                                 WHERE session_id = ?1 AND available_at_ms <= ?2
                                    AND (claim_token IS NULL
-                                        OR claim_session_lease_generation <> ?4)",
+                                        OR claim_session_lease_generation <> ?3)
+                                 ORDER BY enqueue_seq ASC",
+                            )
+                            .map_err(sqlite_error)?;
+                        let rows = stmt
+                            .query_map(
                                 params![
                                     session_id,
-                                    batch_id,
                                     now as i64,
                                     sql_session_lease_generation(generation)?,
                                 ],
                                 queued_batch_row_from_sql,
                             )
-                            .optional()
                             .map_err(sqlite_error)?;
-                        let Some(row) = row else {
-                            return Ok(None);
-                        };
+                        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
+                    };
+                    let mut requested_batches = std::collections::BTreeMap::new();
+                    for row in candidate_rows
+                        .iter()
+                        .filter(|row| requested_ids.contains(&row.batch_id))
+                    {
                         let batch = queued_work_batch_from_conn(tx, row.clone())?;
                         if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
                             return Ok(None);
                         }
-                        rows.push(row);
-                        batches.push(batch);
+                        requested_batches.insert(row.batch_id.clone(), batch);
                     }
+                    if requested_batches.len() != requested_ids.len() {
+                        return Ok(None);
+                    }
+                    let Some(first_position) = candidate_rows
+                        .iter()
+                        .position(|row| requested_ids.contains(&row.batch_id))
+                    else {
+                        return Ok(None);
+                    };
+                    let mut rows = candidate_rows[first_position..]
+                        .iter()
+                        .take_while(|row| requested_ids.contains(&row.batch_id))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    let mut batches = rows
+                        .iter()
+                        .map(|row| {
+                            requested_batches
+                                .get(&row.batch_id)
+                                .expect("contiguous exact row was validated")
+                                .clone()
+                        })
+                        .collect::<Vec<_>>();
                     let candidates = rows
                         .iter()
                         .zip(batches.iter())
                         .map(|(row, batch)| claim_candidate_from_row(row, batch))
                         .collect::<Result<Vec<_>, StoreError>>()?;
-                    if select_turn_work_claim_prefix(&candidates, boundary, policy, now)?
-                        != candidates.len()
-                    {
+                    let selected_len =
+                        select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
+                    if selected_len == 0 {
                         return Ok(None);
                     }
+                    rows.truncate(selected_len);
+                    batches.truncate(selected_len);
                     let lease = WorkClaimLease::derive_queued_work(
                         &candidates[0],
                         &session_id,
@@ -1917,7 +1957,7 @@ impl QueuedWorkStore for Store {
                             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                                     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                                    claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
                              FROM queued_work_batches
                              WHERE session_id = ?1
                                AND batch_id = ?2
@@ -1975,7 +2015,7 @@ impl QueuedWorkStore for Store {
                                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                                         work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                                         claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                                        claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
                                  FROM queued_work_batches
                                  WHERE session_id = ?1
                                  ORDER BY enqueue_seq ASC",
@@ -2011,7 +2051,7 @@ impl QueuedWorkStore for Store {
                                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                                         work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                                         claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                                        claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
                                  FROM queued_work_batches
                                  WHERE session_id = ?1
                                    AND (claim_token IS NULL OR NOT EXISTS (

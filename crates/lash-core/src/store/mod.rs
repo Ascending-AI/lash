@@ -1382,6 +1382,9 @@ pub trait QueuedWorkStore: Send + Sync {
     /// batch is classified as [`QueuedWorkClass::TurnWork`].
     /// Earlier ready session commands are not skipped and are never
     /// materialized as turn input.
+    /// When the head belongs to an interrupted predecessor-generation claim,
+    /// the successor reclaims exactly the rows carrying that durable claim id;
+    /// later compatible rows wait for a subsequent claim.
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
@@ -1424,6 +1427,10 @@ pub trait QueuedWorkStore: Send + Sync {
     /// This selection is intentionally allowed to bypass earlier unrelated
     /// ready work. The logical-turn driver uses it to reclaim an atomic outbox
     /// handoff immediately, preserving foreground frame-chain ordering.
+    /// Requested ids are interpreted in durable `enqueue_seq` order. A claim
+    /// returns their maximal physically contiguous prefix that satisfies the
+    /// ordinary key/boundary/budget law; an unrequested physical row is a
+    /// barrier, and requested rows after it remain queued.
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,

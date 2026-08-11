@@ -62,6 +62,10 @@ pub fn derive_claim_id(dialect: ClaimIdDialect, enqueue_seq: u64, fencing_token:
 pub struct ClaimCandidate {
     pub enqueue_seq: u64,
     pub claim_fencing_token: u64,
+    /// Durable claim identity left by an interrupted predecessor generation.
+    /// Matching identities describe the exact batch composition that already
+    /// escaped into that generation's journaled command.
+    pub prior_claim_id: Option<String>,
     pub work_class: QueuedWorkClass,
     pub delivery_policy: DeliveryPolicy,
     pub kind: QueuedWorkKind,
@@ -73,7 +77,11 @@ pub struct ClaimCandidate {
 }
 
 impl ClaimCandidate {
-    pub fn from_batch(batch: &QueuedWorkBatch, claim_fencing_token: u64) -> Self {
+    pub fn from_batch(
+        batch: &QueuedWorkBatch,
+        claim_fencing_token: u64,
+        prior_claim_id: Option<String>,
+    ) -> Self {
         let mut turn_causes = Vec::new();
         let mut input_texts = Vec::new();
         for item in &batch.items {
@@ -88,6 +96,7 @@ impl ClaimCandidate {
         Self {
             enqueue_seq: batch.enqueue_seq,
             claim_fencing_token,
+            prior_claim_id,
             work_class: batch.work_class().unwrap_or(QueuedWorkClass::TurnWork),
             delivery_policy: batch.delivery_policy,
             kind: batch.kind,
@@ -168,6 +177,21 @@ pub fn select_turn_work_claim_prefix(
             "empty",
         ));
     };
+    if let Some(prior_claim_id) = first.prior_claim_id.as_deref() {
+        let selected = candidates
+            .iter()
+            .take_while(|candidate| candidate.prior_claim_id.as_deref() == Some(prior_claim_id))
+            .count();
+        return Ok(record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            selected,
+            rendered_token_upper_bound(&candidates[..selected]),
+            "interrupted_claim_redrive",
+        ));
+    }
     if first.work_class != QueuedWorkClass::TurnWork {
         return Ok(record_turn_claim_decision(
             candidates,
@@ -446,6 +470,7 @@ mod tests {
         ClaimCandidate {
             enqueue_seq,
             claim_fencing_token: 0,
+            prior_claim_id: None,
             work_class: QueuedWorkClass::TurnWork,
             delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
             kind: QueuedWorkKind::Turn,
@@ -674,6 +699,7 @@ mod tests {
         let head = ClaimCandidate {
             enqueue_seq: 7,
             claim_fencing_token: 2,
+            prior_claim_id: None,
             work_class: QueuedWorkClass::TurnWork,
             delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
             kind: QueuedWorkKind::Turn,

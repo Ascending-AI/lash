@@ -489,6 +489,40 @@ def check_schema_version_claims(errors: list[str]) -> None:
                 )
 
 
+def check_remote_protocol_version(errors: list[str]) -> None:
+    """Keep the canonical remote-protocol page aligned with exact negotiation."""
+    source = ROOT / "crates" / "lash-remote-protocol" / "src" / "lib.rs"
+    doc = DOCS / "remote-protocol.html"
+    source_matches = re.findall(
+        r"(?m)^pub const REMOTE_PROTOCOL_VERSION:\s*u32\s*=\s*(\d+);$",
+        source.read_text(encoding="utf-8"),
+    )
+    if len(source_matches) != 1:
+        errors.append(
+            "crates/lash-remote-protocol/src/lib.rs: expected exactly one u32 "
+            f"REMOTE_PROTOCOL_VERSION, found {len(source_matches)}"
+        )
+        return
+    documented = re.findall(
+        r"REMOTE_PROTOCOL_VERSION\s*==\s*(\d+)",
+        doc.read_text(encoding="utf-8"),
+    )
+    if len(documented) != 1:
+        errors.append(
+            "docs/remote-protocol.html: expected exactly one documented "
+            f"REMOTE_PROTOCOL_VERSION literal, found {len(documented)}"
+        )
+        return
+    expected = int(source_matches[0])
+    actual = int(documented[0])
+    if actual != expected:
+        errors.append(
+            "docs/remote-protocol.html: remote protocol version "
+            f"{actual} does not match crates/lash-remote-protocol/src/lib.rs "
+            f"REMOTE_PROTOCOL_VERSION ({expected})"
+        )
+
+
 def check_quickstart_contract(errors: list[str]) -> None:
     """Keep the quickstart aligned with the compiled in-repo facade."""
     quickstart = (DOCS / "quickstart.html").read_text(encoding="utf-8")
@@ -668,6 +702,7 @@ def main() -> int:
     check_bold_cross_refs(errors, pages)
     check_release_version_pins(errors)
     check_schema_version_claims(errors)
+    check_remote_protocol_version(errors)
     check_quickstart_contract(errors)
     check_code_snippets(errors, fix)
     if errors:

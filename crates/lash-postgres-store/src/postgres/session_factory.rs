@@ -895,6 +895,7 @@ pub(crate) struct QueuedBatchRow {
     available_at_ms: u64,
     enqueued_at_ms: u64,
     pub(crate) claim_fencing_token: u64,
+    pub(crate) claim_id: Option<String>,
     pub(crate) claim_token: Option<String>,
     pub(crate) claim_session_lease_generation: u64,
 }
@@ -909,7 +910,11 @@ pub(crate) fn claim_candidate_from_row(
             batch.batch_id
         ))
     })?;
-    Ok(ClaimCandidate::from_batch(batch, row.claim_fencing_token))
+    Ok(ClaimCandidate::from_batch(
+        batch,
+        row.claim_fencing_token,
+        row.claim_id.clone(),
+    ))
 }
 
 pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError> {
@@ -945,6 +950,7 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
             "claim_fencing_token",
             row.get("claim_fencing_token"),
         )?,
+        claim_id: row.get("claim_id"),
         claim_token: row.get("claim_token"),
         claim_session_lease_generation: u64_from_sql(
             "QueuedWorkBatch",
@@ -962,7 +968,7 @@ pub(crate) async fn load_queued_batch(
         "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                 work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                 claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
          FROM lash_queued_work_batches
          WHERE batch_id = $1",
     )

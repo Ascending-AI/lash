@@ -42,6 +42,8 @@ use sqlx::{Connection, PgConnection, PgPool};
 
 #[path = "cross_backend_store_differential/checkpoint_cases.rs"]
 mod checkpoint_cases;
+#[path = "cross_backend_store_differential/coalesced_batch_oracles.rs"]
+mod coalesced_batch_oracles;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
 mod generated_surface;
 #[path = "cross_backend_store_differential/observations.rs"]

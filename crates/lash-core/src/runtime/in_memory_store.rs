@@ -498,6 +498,7 @@ impl InMemorySessionStore {
                 Ok(crate::store::queued_work::ClaimCandidate::from_batch(
                     batch,
                     queued[*index].claim_fencing_token,
+                    queued[*index].claim_id.clone(),
                 ))
             })
             .collect::<Result<Vec<_>, crate::store::StoreError>>()?;
