@@ -214,7 +214,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
@@ -362,7 +362,7 @@ jobs:
 
   confidence-fast-summary:
     name: Confidence fast summary
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: always()
     needs:
       - confidence-fast
@@ -544,7 +544,7 @@ jobs:
 
   stack-budget:
     name: Stack budget
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
@@ -684,11 +684,11 @@ jobs:
           - name: agent-workbench
             recipe: agent-workbench-restate-e2e
             node: false
-            runner: blacksmith-8vcpu-ubuntu-2404
+            runner: blacksmith-16vcpu-ubuntu-2404
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
             node: true
-            runner: blacksmith-2vcpu-ubuntu-2404
+            runner: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
