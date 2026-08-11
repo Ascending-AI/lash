@@ -18,7 +18,7 @@
 //! | `session_execution_lease.renewal_failed` | WARN | the holder | renewal stopped on a transient error; the lease is still ours to release |
 //! | `session_execution_lease.busy` | DEBUG | the claimant | the claim observed a named live holder and did not acquire the lane |
 //! | `session_execution_lease.busy_advisory` | DEBUG | the turn claimant | a turn proceeds lane-lessly because the head CAS is the authority |
-//! | `session_execution_lease.successor_busy_advisory` | INFO | the persistence claimant | a different incarnation of the same logical owner commits lane-lessly under the head CAS |
+//! | `session_execution_lease.commit_busy_advisory` | INFO | the persistence claimant | a lane-less commit proceeds despite a live holder because the head CAS is the authority |
 //! | `session_execution_lease.commit_cas_rejected` | WARN | the losing writer | the commit's head CAS lost to a concurrent writer |
 //!
 //! **`taken_over` is the winner's event, emitted atomically with the claim that
@@ -387,9 +387,8 @@ impl SessionExecutionLeaseGuard {
     }
 }
 
-/// Three outcomes: an acquired lane commits and releases; a same-owner successor commits lane-lessly;
-/// any other busy holder is refused. The successor neither displaces nor releases the predecessor,
-/// whose lane TTLs out untouched; head CAS is sole authority. The name is historical for that arm.
+/// An acquired lane commits and releases. A busy claimant commits lane-lessly without displacing
+/// or releasing the holder, whose lane remains untouched; the head CAS is sole authority.
 pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     store: Arc<dyn RuntimePersistence>,
     commit: RuntimeCommit,
@@ -408,11 +407,8 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     .await?;
     let lease = match acquisition {
         SessionExecutionLeaseGuardAcquisition::Acquired(lease) => lease,
-        SessionExecutionLeaseGuardAcquisition::Busy(holder)
-            if holder.owner.same_owner_other_incarnation(owner) =>
-        {
-            // Same-incarnation claims rotate upstream; this clause guards nonconformant backends.
-            observability::trace_successor_busy_advisory(&session_id, &holder);
+        SessionExecutionLeaseGuardAcquisition::Busy(holder) => {
+            observability::trace_commit_busy_advisory(&session_id, &holder);
             return match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
                 Ok(result) => Ok(result),
                 Err(error) => {
@@ -420,12 +416,6 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
                     Err(error)
                 }
             };
-        }
-        SessionExecutionLeaseGuardAcquisition::Busy(_) => {
-            // Multi-tab runbook Phase 6 gates here; widening requires the FIG-1133 owner ruling.
-            return Err(StoreError::Backend(format!(
-                "session execution lease for session `{session_id}` is busy"
-            )));
         }
     };
     let evidence = lease.commit_evidence();

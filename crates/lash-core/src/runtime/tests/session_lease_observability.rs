@@ -466,11 +466,11 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
     assert_eq!(rejected.field("actual_head_revision"), "4");
 }
 
-/// Two live successor incarnations may both pass the same-owner advisory, but
-/// only one can publish. Neither attempt may rotate, release, renew, or displace
-/// the predecessor row, and an unrelated owner must still stop at the lease.
+/// Every live-holder claimant reaches the head CAS, regardless of owner shape.
+/// A stale head loses without a partial write, while a current head publishes.
+/// No lane-less attempt may rotate, release, renew, or displace the holder row.
 #[tokio::test]
-async fn successor_incarnations_race_only_at_head_cas_without_touching_predecessor_lane() {
+async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
     let session_id = "lease-successor-incarnation-race";
     let clock = Arc::new(crate::testing::TestClock::new(1_000));
     let store: Arc<dyn crate::store::RuntimePersistence> = Arc::new(
@@ -532,22 +532,20 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
             "the rejected successor must write nothing"
         );
 
-        let foreign_refusal = commit_runtime_state_with_fresh_session_execution_lease(
+        let foreign_publication = commit_runtime_state_with_fresh_session_execution_lease(
             Arc::clone(&store),
             generation_commit(session_id, 13, 1),
             &foreign,
             LeaseTimings::default(),
             clock.clone(),
         )
-        .await;
-        assert!(
-            matches!(foreign_refusal, Err(StoreError::Backend(ref message)) if message.contains("is busy")),
-            "a different owner must retain the hard busy refusal: {foreign_refusal:?}"
-        );
+        .await
+        .expect("a different owner with the current head publishes under the CAS");
+        assert_eq!(foreign_publication.head_revision, 2);
         assert_eq!(
             published_generation(&store).await,
-            (1, Some(11)),
-            "the different-owner refusal must write nothing"
+            (2, Some(13)),
+            "the different-owner append must publish exactly once"
         );
         assert_eq!(
             store
@@ -560,11 +558,13 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
     })
     .await;
 
-    let advisories = capture.named("session_execution_lease.successor_busy_advisory");
+    let busy_events = capture.named("session_execution_lease.busy");
+    assert_eq!(busy_events.len(), 3, "every busy claim remains observable");
+    let advisories = capture.named("session_execution_lease.commit_busy_advisory");
     assert_eq!(
         advisories.len(),
-        2,
-        "both successor incarnations use the advisory arm"
+        3,
+        "every lane-less persistence claimant uses the advisory arm"
     );
     let expected_owner_sha = crate::stable_hash::sha256_hex(predecessor.owner_id.as_bytes());
     let expected_incarnation_sha =
@@ -579,7 +579,7 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
         );
         assert_eq!(
             advisory.field("message"),
-            "same logical owner, different incarnation: proceeding under the commit CAS fence"
+            "live lease holder observed: proceeding under the commit CAS fence"
         );
         assert_eq!(
             advisory.field_count(),
@@ -663,7 +663,7 @@ async fn pre_ttl_advisory_and_post_ttl_displacement_converge_on_publication() {
     );
     assert_eq!(
         pre_capture
-            .named("session_execution_lease.successor_busy_advisory")
+            .named("session_execution_lease.commit_busy_advisory")
             .len(),
         1,
         "before TTL the successor uses the lane-less advisory arm"
@@ -675,7 +675,7 @@ async fn pre_ttl_advisory_and_post_ttl_displacement_converge_on_publication() {
     );
     assert!(
         post_capture
-            .named("session_execution_lease.successor_busy_advisory")
+            .named("session_execution_lease.commit_busy_advisory")
             .is_empty()
     );
     assert_eq!(
