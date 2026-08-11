@@ -412,7 +412,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         lint = workflow_job_block(workflow, "lint")
 
-        self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", lint)
+        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", lint)
         # PR-time smoke enforces the machine-independent inventory only;
         # duration/allocation ceilings are calibrated on the release profile
         # and enforced by --enforce-budgets in perf.yml and the Release job.
