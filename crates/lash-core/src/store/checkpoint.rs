@@ -1,7 +1,7 @@
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 2;
 
 /// Encoding implemented for checkpoint-component logical bytes in this build.
-pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 1;
+pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 2;
 /// Well-known component key used by the runtime's tool registry snapshot.
 pub const TOOL_STATE_CHECKPOINT_COMPONENT: &str = "tool_state";
 /// Well-known component key used by the runtime's plugin-session snapshot.

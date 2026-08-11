@@ -718,7 +718,8 @@ mod tests {
                     lash_core::HydratedCheckpointComponent::unchanged(
                         &lash_core::CheckpointComponentDescriptor {
                             blob_ref: lash_core::BlobRef(key.clone()),
-                            encoding_version: 1,
+                            encoding_version:
+                                lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
                         },
                     )
                 }

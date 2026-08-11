@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 11,
+  "fixture_schema_version": 12,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
@@ -175,7 +175,7 @@
       "components": {
         "execution_state": {
           "Changed": {
-            "encoding_version": 1,
+            "encoding_version": 2,
             "body": [
               70,
               73,
@@ -188,7 +188,7 @@
         },
         "plugin_snapshot": {
           "Changed": {
-            "encoding_version": 1,
+            "encoding_version": 2,
             "body": [
               129,
               167,
@@ -402,7 +402,7 @@
         },
         "tool_state": {
           "Changed": {
-            "encoding_version": 1,
+            "encoding_version": 2,
             "body": [
               130,
               170,

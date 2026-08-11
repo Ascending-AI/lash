@@ -1,9 +1,8 @@
 use thiserror::Error;
 
-// v7 cuts persisted execution state over from one envelope to a canonical
-// typed root plus content-addressed value/file leaves. Older snapshots are
-// rejected, never compatibility-decoded.
-pub(super) const RLM_SNAPSHOT_VERSION: u32 = 7;
+// v8 applies the inline-versus-leaf size line to globals and files alike.
+// Older snapshots are rejected, never compatibility-decoded.
+pub(super) const RLM_SNAPSHOT_VERSION: u32 = 8;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

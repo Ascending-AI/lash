@@ -27,6 +27,247 @@ fn hydrate(
     }
 }
 
+fn measure_snapshot(
+    snapshot: &lash_core::plugin::ExecutionStateSnapshot,
+) -> lash_core::testing::RuntimeCommitBudgetMeasurement {
+    let state = lash_core::RuntimeSessionState {
+        session_id: "fig-1257-snapshot-budget".to_string(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.checkpoint.components.insert(
+        "execution_state".to_string(),
+        lash_core::HydratedCheckpointComponent::changed(
+            snapshot.root.clone().expect("snapshot root"),
+        ),
+    );
+    for (key, component) in &snapshot.components {
+        let component = match component {
+            lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                lash_core::HydratedCheckpointComponent::changed(body.clone())
+            }
+            lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                lash_core::HydratedCheckpointComponent::unchanged(
+                    &lash_core::CheckpointComponentDescriptor {
+                        blob_ref: lash_core::BlobRef(key.clone()),
+                        encoding_version: lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                    },
+                )
+            }
+        };
+        commit.checkpoint.components.insert(key.clone(), component);
+    }
+    lash_core::testing::measure_runtime_commit_budget(&commit)
+        .expect("measure RLM runtime commit budget")
+}
+
+#[test]
+fn large_scalar_edit_commits_changed_state_not_retained_session() {
+    let mut state = RlmExecutionState::new().expect("state");
+    let mut runtime = state.rlm.snapshot();
+    for index in 0..50 {
+        runtime.globals.insert(
+            format!("page_{index}"),
+            FlowValue::String(format!("page-{index}-{}", "x".repeat(100 * 1024)).into()),
+        );
+    }
+    state.rlm = FlowState::from_snapshot(runtime);
+    state.mark_execution_started();
+    let initial = state.snapshot_execution_state().expect("initial snapshot");
+    state.acknowledge_execution_state_capture();
+
+    let mut runtime = state.rlm.snapshot();
+    runtime.globals.insert(
+        "page_0".to_string(),
+        FlowValue::String(format!("changed-{}", "y".repeat(100 * 1024)).into()),
+    );
+    state.rlm = FlowState::from_snapshot(runtime);
+    state.dirty_globals.insert("page_0".to_string());
+    state.root_dirty = true;
+    let changed = state.snapshot_execution_state().expect("changed snapshot");
+    let retained_bytes = state
+        .rlm
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("retained canonical state")
+        .len();
+    let changed_bytes = measure_snapshot(&changed).checkpoint_bytes;
+    let initial_leaves = initial.components.len();
+    let changed_bodies = changed
+        .components
+        .values()
+        .filter(|component| {
+            matches!(
+                component,
+                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+            )
+        })
+        .count();
+    println!(
+        "FIG1257_LARGE_SCALAR retained_bytes={retained_bytes} changed_commit_bytes={changed_bytes} initial_leaves={initial_leaves} changed_bodies={changed_bodies}"
+    );
+
+    assert_eq!(initial_leaves, 50, "every large scalar must become a leaf");
+    assert_eq!(changed_bodies, 1, "only the edited scalar submits bytes");
+    assert!(
+        changed_bytes * 10 < retained_bytes,
+        "one scalar edit must be proportional to the changed value: changed={changed_bytes}, retained={retained_bytes}"
+    );
+}
+
+#[test]
+fn tiny_files_inline_and_avoid_per_file_leaf_overhead() {
+    let mut state = RlmExecutionState::new().expect("state");
+    for index in 0..500 {
+        let body = format!("file-{index:03}-{}", "x".repeat(41));
+        assert_eq!(body.len(), 50);
+        state
+            .write_scratch_file(&format!("scratch-{index:03}.txt"), body.as_bytes())
+            .expect("write tiny scratch file");
+    }
+    let mut runtime = state.rlm.snapshot();
+    runtime
+        .globals
+        .insert("revision".to_string(), FlowValue::Number(1.0));
+    state.rlm = FlowState::from_snapshot(runtime);
+    state.mark_execution_started();
+    let initial = state.snapshot_execution_state().expect("initial snapshot");
+    state.acknowledge_execution_state_capture();
+
+    let mut runtime = state.rlm.snapshot();
+    runtime
+        .globals
+        .insert("revision".to_string(), FlowValue::Number(2.0));
+    state.rlm = FlowState::from_snapshot(runtime);
+    state.dirty_globals.insert("revision".to_string());
+    state.root_dirty = true;
+    let changed = state.snapshot_execution_state().expect("changed snapshot");
+    let changed_bytes = measure_snapshot(&changed).checkpoint_bytes;
+    println!(
+        "FIG1257_TINY_FILES data_bytes={} changed_commit_bytes={changed_bytes} initial_leaves={} retained_leaf_refs={}",
+        500 * 50,
+        initial.components.len(),
+        changed.components.len()
+    );
+
+    assert!(
+        initial.components.is_empty(),
+        "sub-threshold files must inline instead of minting {} leaves",
+        initial.components.len()
+    );
+    assert!(
+        changed.components.is_empty(),
+        "an unrelated edit must not carry per-file leaf manifest rows"
+    );
+    assert!(
+        changed_bytes < 64 * 1024,
+        "500 tiny files must not impose six-figure checkpoint overhead: {changed_bytes}"
+    );
+}
+
+fn retained_file_commit_bytes(body_len: usize, leaf: bool) -> usize {
+    let body = vec![b'x'; body_len];
+    let persisted = if leaf {
+        PersistedValue::Leaf {
+            component: leaf_component_key(&body),
+        }
+    } else {
+        PersistedValue::Inline { body: body.clone() }
+    };
+    let root = RlmSnapshotRoot {
+        version: RLM_SNAPSHOT_VERSION,
+        engine: "lashlang".to_string(),
+        globals: BTreeMap::new(),
+        files: [("scratch.bin".to_string(), persisted)]
+            .into_iter()
+            .collect(),
+        deferred_resolutions: Default::default(),
+    };
+    let encoded = rmp_serde::to_vec_named(&root).expect("encode measured root");
+    validate_canonical_root(&encoded).expect("measured root is canonical");
+    let mut snapshot = lash_core::plugin::ExecutionStateSnapshot::from_root(Some(encoded));
+    if leaf {
+        snapshot.unchanged_component(leaf_component_key(&body));
+    }
+    measure_snapshot(&snapshot).checkpoint_bytes
+}
+
+#[test]
+fn measured_file_break_even_stays_near_the_profile_line_basis() {
+    let empty_bytes = retained_file_commit_bytes(0, false);
+    let break_even = (0..=1024)
+        .find(|body_len| {
+            retained_file_commit_bytes(*body_len, false)
+                >= retained_file_commit_bytes(*body_len, true)
+        })
+        .expect("inline and leaf layouts must cross");
+    let inline_bytes = retained_file_commit_bytes(break_even, false);
+    let leaf_bytes = retained_file_commit_bytes(break_even, true);
+    let leaf_fixed_overhead = leaf_bytes - empty_bytes;
+    println!(
+        "FIG1257_FILE_BREAK_EVEN body_bytes={break_even} inline_commit_bytes={inline_bytes} leaf_commit_bytes={leaf_bytes} leaf_fixed_overhead_bytes={leaf_fixed_overhead}"
+    );
+
+    assert!(
+        (200..=300).contains(&break_even),
+        "measured file break-even moved away from the expected ~250-byte region: {break_even}"
+    );
+    assert!(
+        lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES > break_even,
+        "the profile line must remain above marginal break-even"
+    );
+}
+
+fn measured_file_edit_commits(initial_len: usize, edit_lengths: &[usize]) -> Vec<usize> {
+    let mut state = RlmExecutionState::new().expect("state");
+    state
+        .write_scratch_file("straddle.bin", &vec![0; initial_len])
+        .expect("initial file");
+    let _ = state.snapshot_execution_state().expect("initial snapshot");
+    state.acknowledge_execution_state_capture();
+
+    edit_lengths
+        .iter()
+        .enumerate()
+        .map(|(turn, body_len)| {
+            state
+                .write_scratch_file("straddle.bin", &vec![(turn + 1) as u8; *body_len])
+                .expect("edit file");
+            let snapshot = state.snapshot_execution_state().expect("edit snapshot");
+            let bytes = measure_snapshot(&snapshot).checkpoint_bytes;
+            state.acknowledge_execution_state_capture();
+            bytes
+        })
+        .collect()
+}
+
+#[test]
+fn threshold_straddling_has_no_material_churn_premium() {
+    let line = lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES;
+    let crossing = measured_file_edit_commits(line - 1, &[line, line - 1, line, line - 1]);
+    let stays_inline =
+        measured_file_edit_commits(line - 2, &[line - 1, line - 2, line - 1, line - 2]);
+    let stays_leaf = measured_file_edit_commits(line, &[line + 1, line, line + 1, line]);
+    let average = |values: &[usize]| values.iter().sum::<usize>() / values.len();
+    let crossing_average = average(&crossing);
+    let inline_average = average(&stays_inline);
+    let leaf_average = average(&stays_leaf);
+    println!(
+        "FIG1257_THRESHOLD_STRADDLING line={line} crossing={crossing:?} crossing_average={crossing_average} stays_inline={stays_inline:?} inline_average={inline_average} stays_leaf={stays_leaf:?} leaf_average={leaf_average}"
+    );
+
+    assert!(
+        crossing_average <= leaf_average,
+        "classification changes must not cost more than ordinary near-line leaf edits"
+    );
+    assert!(
+        crossing_average >= inline_average,
+        "crossing should sit between the two ordinary representation costs"
+    );
+}
+
 #[test]
 fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
     let old_snapshot = serde_json::to_vec(&json!({
@@ -57,6 +298,13 @@ fn canonical_root_recognizes_quoted_global_keys_as_direct_children() {
     assert!(is_global_location(r#"root.globals["x].y"]"#));
     assert!(is_global_location("root.globals.ordinary"));
     assert!(!is_global_location(r#"root.globals["x].y"].component"#));
+}
+
+#[test]
+fn canonical_root_recognizes_quoted_file_paths_as_direct_children() {
+    assert!(is_file_location(r#"root.files["x.y/bin"]"#));
+    assert!(is_file_location("root.files.ordinary"));
+    assert!(!is_file_location(r#"root.files["x.y/bin"].component"#));
 }
 
 #[test]
@@ -101,7 +349,7 @@ fn old_snapshot_version_is_typed_rejection_with_cutover_remedy() {
     assert!(message.contains("recreate development/test stores"));
 }
 
-/// Fixed-byte authority for the version-7 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-8 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -112,16 +360,18 @@ fn old_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_7_root_encodes_to_golden_bytes() {
+fn version_8_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "85a776657273696f6e07a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f736361",
+        "85a776657273696f6e08a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f736361",
         "6c617282a46b696e64a6696e6c696e65a4626f6479c43581a7676c6f62616c739182a46e616d65a576616c7565a5",
         "76616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f736974",
         "6582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f736861323536",
         "2f656532323763393032306136386534653737316262633439346266643563313635316262366461393265363363",
-        "31313235376534393435366534333864666137a566696c657381b16e6f7465732f736372617463682e747874d957",
-        "657865637574696f6e5f73746174652f7368613235362f6137666631373032643137376130623466346532646131",
-        "3361313262316138353735323536613864343031633238363731623833623331383063323237643838b464656665",
+        "31313235376534393435366534333864666137a566696c657382b06e6f7465732f696e6c696e652e62696e82a46b",
+        "696e64a6696e6c696e65a4626f6479c402ff00af6e6f7465732f6c617267652e62696e82a46b696e64a46c656166",
+        "a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f7368613235362f613766663137303264313737",
+        "6130623466346532646131336131326231613835373532353661386434303163323836373162383362333138306332",
+        "3237643838b464656665",
         "727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657986aa73657373696f6e5f6964ae73657373696f6e",
         "2d676f6c64656ea77475726e5f6964a67475726e2d37aa7475726e5f696e64657803b270726f746f636f6c5f6974",
         "65726174696f6e02a96566666563745f6964a86566666563742d39aa7265706c61795f6b6579a87265706c61792d",
@@ -156,13 +406,13 @@ fn version_7_root_encodes_to_golden_bytes() {
     let mut globals = BTreeMap::new();
     globals.insert(
         "inline_scalar".to_string(),
-        PersistedGlobal::Inline {
+        PersistedValue::Inline {
             body: snapshot_runtime_value(&FlowValue::String("small".into())).expect("inline body"),
         },
     );
     globals.insert(
         "leafed_composite".to_string(),
-        PersistedGlobal::Leaf {
+        PersistedValue::Leaf {
             component: leaf_component_key(b"composite-body"),
         },
     );
@@ -170,10 +420,20 @@ fn version_7_root_encodes_to_golden_bytes() {
         version: RLM_SNAPSHOT_VERSION,
         engine: "lashlang".to_string(),
         globals,
-        files: [(
-            "notes/scratch.txt".to_string(),
-            leaf_component_key(b"file-body"),
-        )]
+        files: [
+            (
+                "notes/inline.bin".to_string(),
+                PersistedValue::Inline {
+                    body: vec![0xff, 0x00],
+                },
+            ),
+            (
+                "notes/large.bin".to_string(),
+                PersistedValue::Leaf {
+                    component: leaf_component_key(b"file-body"),
+                },
+            ),
+        ]
         .into_iter()
         .collect(),
         deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord {
@@ -197,7 +457,7 @@ fn version_7_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-7 root encoding changed; decide on a version bump before updating the golden"
+        "the version-8 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =
@@ -255,7 +515,12 @@ fn cold_reopen_restores_binary_scratch_files_byte_exactly() {
         .write_scratch_file("nested/embedded-nul.dat", embedded_nul)
         .expect("write embedded-NUL scratch file");
 
-    let snapshot = hydrate(source.snapshot_execution_state().expect("snapshot"));
+    let snapshot = source.snapshot_execution_state().expect("snapshot");
+    assert!(
+        snapshot.components.is_empty(),
+        "both sub-threshold binary files must be inlined into the typed root"
+    );
+    let snapshot = hydrate(snapshot);
     let mut reopened = RlmExecutionState::new().expect("reopened state");
     reopened
         .restore_execution_state(&snapshot)
@@ -493,8 +758,9 @@ fn failed_file_collection_keeps_dirty_globals_retryable() {
 #[test]
 fn same_size_scratch_file_rewrite_emits_a_changed_leaf() {
     let mut state = RlmExecutionState::new().expect("state");
+    let body_len = lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES;
     state
-        .write_scratch_file("same-size.bin", b"aaa")
+        .write_scratch_file("same-size.bin", &vec![b'a'; body_len])
         .expect("initial file");
     let initial = state.snapshot_execution_state().expect("initial snapshot");
     assert_eq!(
@@ -510,7 +776,7 @@ fn same_size_scratch_file_rewrite_emits_a_changed_leaf() {
     );
     state.acknowledge_execution_state_capture();
     state
-        .write_scratch_file("same-size.bin", b"bbb")
+        .write_scratch_file("same-size.bin", &vec![b'b'; body_len])
         .expect("rewrite file");
     let changed = state.snapshot_execution_state().expect("changed snapshot");
     assert_eq!(
