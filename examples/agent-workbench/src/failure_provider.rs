@@ -5,10 +5,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use lash::direct::{LlmOutputPart, LlmStreamEvent};
+use lash::direct::{LlmOutputPart, LlmStreamEvent, LlmUsage};
 use lash::provider::{
-    LlmRequest, LlmResponse, LlmTransportError, Provider, ProviderComponents, ProviderHandle,
-    ProviderOptions, ProviderReliability,
+    LlmRequest, LlmResponse, LlmTransportError, Provider, ProviderComponents, ProviderFailureKind,
+    ProviderHandle, ProviderOptions, ProviderReliability,
 };
 
 pub(crate) const DEV_PROVIDER_SCENARIO_ENV: &str = "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO";
@@ -17,6 +17,7 @@ pub(crate) const DEV_PROVIDER_SCENARIO_ENV: &str = "AGENT_WORKBENCH_DEV_PROVIDER
 pub(crate) enum DevProviderScenario {
     AuthFailureOnce,
     RateLimitOnce,
+    PartialOutputFailure,
     FailedProcess,
     ExecBlocked,
 }
@@ -33,11 +34,13 @@ impl DevProviderScenario {
         let scenario = match value {
             "auth-failure-once" => Self::AuthFailureOnce,
             "rate-limit-once" => Self::RateLimitOnce,
+            "partial-output-failure" => Self::PartialOutputFailure,
             "failed-process" => Self::FailedProcess,
             "exec-blocked" => Self::ExecBlocked,
             other => bail!(
                 "invalid {DEV_PROVIDER_SCENARIO_ENV} `{other}`; expected one of: \
-                 auth-failure-once, rate-limit-once, failed-process, exec-blocked"
+                 auth-failure-once, rate-limit-once, partial-output-failure, failed-process, \
+                 exec-blocked"
             ),
         };
         Ok(Some(scenario))
@@ -47,6 +50,7 @@ impl DevProviderScenario {
         match self {
             Self::AuthFailureOnce => "auth-failure-once",
             Self::RateLimitOnce => "rate-limit-once",
+            Self::PartialOutputFailure => "partial-output-failure",
             Self::FailedProcess => "failed-process",
             Self::ExecBlocked => "exec-blocked",
         }
@@ -114,19 +118,44 @@ impl Provider for DevFailureProvider {
                 &request,
                 "<lashlang>\nfinish \"session recovered after provider auth failure\"\n</lashlang>",
             )),
-            DevProviderScenario::RateLimitOnce if call == 0 => {
-                // Cross the RLM prose boundary before failing so the retry
-                // reset has visible first-attempt output to retract.
-                send_delta(&request, "retry observer single-copy marker\n<lashlang>\n");
-                Err(
-                    LlmTransportError::new("development provider rate limit; retry is safe")
-                        .with_status(429)
-                        .with_code("dev_rate_limited"),
-                )
-            }
+            DevProviderScenario::RateLimitOnce if call == 0 => Err(LlmTransportError::new(
+                "development provider rate limit; retry is safe",
+            )
+            .with_status(429)
+            .with_retry_after(std::time::Duration::ZERO)
+            .with_code("dev_rate_limited")),
             DevProviderScenario::RateLimitOnce => Ok(streamed_response(
                 &request,
                 "retry observer single-copy marker\n<lashlang>\nfinish \"provider retry succeeded\"\n</lashlang>",
+            )),
+            DevProviderScenario::PartialOutputFailure if call == 0 => {
+                let partial = "paid partial output marker";
+                send_delta(&request, partial);
+                Err(
+                    LlmTransportError::new("development provider interrupted after paid output")
+                        .with_kind(ProviderFailureKind::Stream)
+                        .with_code("dev_paid_output_interrupted")
+                        .retryable(true)
+                        .with_output_started(true)
+                        .with_partial_response(LlmResponse {
+                            full_text: partial.to_string(),
+                            parts: vec![LlmOutputPart::Text {
+                                text: partial.to_string(),
+                                response_meta: None,
+                            }],
+                            usage: LlmUsage {
+                                output_tokens: 4,
+                                ..LlmUsage::default()
+                            },
+                            provider_usage: Some(serde_json::json!({ "output_tokens": 4 })),
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        }),
+                )
+            }
+            DevProviderScenario::PartialOutputFailure => Ok(streamed_response(
+                &request,
+                "<lashlang>\nfinish \"UNSAFE second generation was purchased\"\n</lashlang>",
             )),
             DevProviderScenario::FailedProcess => Ok(streamed_response(
                 &request,

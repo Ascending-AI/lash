@@ -8459,8 +8459,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:175#events.send(LlmStreamEvent::Delta(text.to_string()));"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:175, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:204#events.send(LlmStreamEvent::Delta(text.to_string()));"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::direct::LlmEventSender::new"
@@ -8476,8 +8476,8 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:175#events.send(LlmStreamEvent::Delta(text.to_string()));"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:175, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:204#events.send(LlmStreamEvent::Delta(text.to_string()));"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart"
@@ -8486,7 +8486,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:8#use lash::direct::{LlmOutputPart, LlmStreamEvent};"
+usage = "examples/agent-workbench/src/failure_provider.rs:8#use lash::direct::{LlmOutputPart, LlmStreamEvent, LlmUsage};"
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Reasoning"
@@ -8612,8 +8612,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:175#events.send(LlmStreamEvent::Delta(text.to_string()));"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:175, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:204#events.send(LlmStreamEvent::Delta(text.to_string()));"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::direct::LlmStreamEvent::Delta::0"
@@ -29102,7 +29102,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:10#LlmRequest, LlmResponse, LlmTransportError, Provider, ProviderComponents, ProviderHandle,"
+usage = "examples/agent-workbench/src/failure_provider.rs:10#LlmRequest, LlmResponse, LlmTransportError, Provider, ProviderComponents, ProviderFailureKind,"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::agent_frame_id"
@@ -29643,6 +29643,38 @@ usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:88#ass
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:88#assert!(unsupported.message.contains(\"Unsupported effort `ultra`\"));"
 
 [[api]]
+symbol = "lash::provider::GenerationRetryGuarantee"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::GenerationRetryGuarantee to the agent-workbench provider setup example and assert whether retrying an interrupted generation is permitted."
+
+[[api]]
+symbol = "lash::provider::GenerationRetryGuarantee::Idempotent"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::GenerationRetryGuarantee::Idempotent to an agent-workbench provider example and assert that replay returns the same generation."
+
+[[api]]
+symbol = "lash::provider::GenerationRetryGuarantee::None"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::GenerationRetryGuarantee::None to an agent-workbench provider example and assert that output-started retry is refused."
+
+[[api]]
+symbol = "lash::provider::GenerationRetryGuarantee::Resumable"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::GenerationRetryGuarantee::Resumable to an agent-workbench provider example and assert that the interrupted generation resumes without replacement."
+
+[[api]]
 symbol = "lash::provider::Provider"
 kind = "trait"
 availability = "default+all-features"
@@ -29673,6 +29705,14 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::provider::Provider::complete to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::provider::Provider::generation_retry_guarantee"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::Provider::generation_retry_guarantee to an agent-workbench provider example and assert the retry ladder honors the declared guarantee."
 
 [[api]]
 symbol = "lash::provider::Provider::kind"
@@ -29721,7 +29761,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderComponents"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::provider::ProviderComponents` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::provider::handle::ProviderHandle::new` because its canonical identity is the lash-core one. Consumer class: the agent-workbench example host and the first-party provider crates -- this type is exercised in-repo at examples/agent-workbench/src/failure_provider.rs:10, examples/agent-workbench/src/failure_provider.rs:56. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+reason = "Facade contract surface, not a closure-only discovery: `lash::provider::ProviderComponents` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::provider::handle::ProviderHandle::new` because its canonical identity is the lash-core one. Consumer class: the agent-workbench example host and the first-party provider crates -- this type is exercised in-repo at examples/agent-workbench/src/failure_provider.rs:10, examples/agent-workbench/src/failure_provider.rs:60. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::failure_classifier"
@@ -29748,8 +29788,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderComponents::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:56#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:56, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:60#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::provider"
@@ -29993,8 +30033,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderHandle::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:56#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:56, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:60#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::options"
@@ -30123,8 +30163,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::reliability"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:60#reliability: ProviderReliability::default()"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:64#reliability: ProviderReliability::default()"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:64, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::response_metadata_body_paths"
@@ -30305,8 +30345,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::max_attempts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:61#.max_attempts(2)"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:61, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:65#.max_attempts(2)"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:65, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::max_concurrency"

@@ -112,7 +112,8 @@ Configuration is read from `.env` or the process environment:
   the UI to send no variant for models without configurable thinking.
 - `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO`: development-only deterministic provider;
   unset in normal use. Accepted values are `auth-failure-once` (one non-retryable 401,
-  then recovery), `rate-limit-once` (one retryable 429, then success), `failed-process`
+  then recovery), `rate-limit-once` (one pre-output 429 with `Retry-After`, then success),
+  `partial-output-failure` (paid partial output followed by a retryable stream failure), `failed-process`
   (starts a Runtime Process that reports a deterministic failure), and `exec-blocked`
   (parks the first foreground Lashlang execution for break-glass practice, then lets the
   next turn prove recovery). These scenarios make

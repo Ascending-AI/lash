@@ -479,6 +479,18 @@ pub(crate) fn plugin_session_with_tools(
 
 pub(crate) struct EmptyTools;
 
+pub(crate) fn test_commit_budget() -> crate::CommitBudget {
+    crate::CommitBudget::bounded(1024 * 1024, 512)
+}
+
+pub(crate) fn runtime_host_config_with_provider(
+    provider: crate::ProviderHandle,
+) -> RuntimeHostConfig {
+    let mut config = RuntimeHostConfig::in_memory(test_commit_budget());
+    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
+    config
+}
+
 #[async_trait::async_trait]
 impl crate::ToolProvider for EmptyTools {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {

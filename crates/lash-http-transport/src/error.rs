@@ -19,6 +19,10 @@ pub struct HttpTransportError {
     pub headers: Box<Vec<(String, String)>>,
     pub retry_after: Option<std::time::Duration>,
     pub request_body: Option<String>,
+    /// The adapter observed provider-generated output before this failure,
+    /// including output that cannot yet be projected into an [`LlmResponse`]
+    /// part (for example unfinished tool arguments or opaque reasoning).
+    pub output_started: bool,
     /// Provider output observed before this failure. It is diagnostic and
     /// accounting evidence, never a successful response.
     pub partial_response: Option<Box<LlmResponse>>,
@@ -37,6 +41,7 @@ impl HttpTransportError {
             headers: Box::default(),
             retry_after: None,
             request_body: None,
+            output_started: false,
             partial_response: None,
         }
     }
@@ -97,6 +102,11 @@ impl HttpTransportError {
 
     pub fn with_request_body(mut self, request_body: impl Into<String>) -> Self {
         self.request_body = Some(request_body.into());
+        self
+    }
+
+    pub fn with_output_started(mut self, output_started: bool) -> Self {
+        self.output_started |= output_started;
         self
     }
 

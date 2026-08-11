@@ -9,7 +9,8 @@ use lash_core::llm::types::{
     LlmRole, LlmTerminalReason, LlmToolChoice, LlmToolSpec, ResponseTextMeta,
 };
 use lash_core::provider::{
-    ModelCapability, Provider, ReasoningCapability, RequestTimeout, StreamTermination,
+    ModelCapability, Provider, ProviderHandle, ReasoningCapability, RequestTimeout,
+    StreamTermination,
 };
 use lash_llm_transport::openai_terminal_reason_from_response_value;
 use lash_sansio::sync::MutexExt;
@@ -1353,6 +1354,52 @@ async fn codex_scripted_websocket_idle_after_output_is_terminal_error() {
     assert_eq!(err.code.as_deref(), Some("websocket_idle_timeout"));
     assert_eq!(http.captured_len(), 0);
     assert_eq!(ws.captured().len(), 1);
+}
+
+#[tokio::test]
+async fn codex_websocket_output_started_error_stops_provider_handle_retry() {
+    let ws = spawn_scripted_websocket(vec![
+        ScriptedWsAction::IdleAfterStart {
+            message_id: "msg_paid",
+            text: "paid partial",
+        },
+        ScriptedWsAction::Complete {
+            response_id: "resp_second",
+            message_id: "msg_second",
+            text: "second generation",
+        },
+    ])
+    .await;
+    let http = spawn_http_sse("resp_http", "msg_http", "fallback").await;
+    let provider =
+        websocket_test_provider(CodexTransport::Websocket, http.url.clone(), ws.url.clone())
+            .with_options(ProviderOptions {
+                reliability: ProviderReliability::codex()
+                    .request_timeout(Some(RequestTimeout::Millis(5_000)))
+                    .stream_chunk_timeout_ms(Some(50))
+                    .max_attempts(2)
+                    .base_delay_ms(0)
+                    .max_delay_ms(0),
+                ..ProviderOptions::default()
+            });
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let result = handle
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .await;
+
+    assert_eq!(
+        ws.captured().len(),
+        1,
+        "paid WebSocket output must not be re-bought"
+    );
+    let failure = result.expect_err("output-started WebSocket failure must stop the ladder");
+    assert_eq!(
+        failure.code.as_deref(),
+        Some("unsafe_retry_after_output_started")
+    );
+    assert!(!failure.retryable);
+    assert_eq!(http.captured_len(), 0);
 }
 
 #[tokio::test]

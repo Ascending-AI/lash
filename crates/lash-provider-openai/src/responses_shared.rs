@@ -882,6 +882,17 @@ pub struct ResponsesStreamState {
 }
 
 impl ResponsesStreamState {
+    /// Whether the provider has generated output, even when the accumulator
+    /// cannot yet project that output into a complete response part.
+    pub fn output_started(&self) -> bool {
+        self.streamed_item_content_received
+            || !self.parts.is_empty()
+            || !self.full_text.is_empty()
+            || !self.pending_text_deltas.is_empty()
+            || !self.reasoning_deltas.is_empty()
+            || !self.tool_calls.is_empty()
+    }
+
     pub fn begin_message(&mut self, item: Option<&Value>, output_index: Option<usize>) {
         let item_id = item
             .and_then(|item| item.get("id").and_then(|v| v.as_str()))

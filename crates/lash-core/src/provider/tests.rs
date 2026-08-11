@@ -28,6 +28,11 @@ struct TerminalProvider {
 #[derive(Clone, Debug)]
 struct PartialStreamFailureProvider;
 
+#[derive(Clone, Debug)]
+struct CountedPartialStreamFailureProvider {
+    attempts: Arc<AtomicUsize>,
+}
+
 #[async_trait::async_trait]
 impl Provider for PartialStreamFailureProvider {
     fn kind(&self) -> &'static str {
@@ -68,6 +73,42 @@ impl Provider for PartialStreamFailureProvider {
                     ..ExecutionEvidence::default()
                 }),
                 response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }))
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for CountedPartialStreamFailureProvider {
+    fn kind(&self) -> &'static str {
+        "counted-partial-stream-failure"
+    }
+
+    fn options(&self) -> ProviderOptions {
+        ProviderOptions {
+            reliability: ProviderReliability::default().max_attempts(1),
+            ..ProviderOptions::default()
+        }
+    }
+
+    fn set_options(&mut self, _options: ProviderOptions) {}
+
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
+    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        Err(LlmTransportError::new("stream truncated")
+            .with_kind(ProviderFailureKind::Stream)
+            .with_code("stream_ended_before_terminal")
+            .retryable(true)
+            .with_partial_response(LlmResponse {
+                full_text: "paid partial".to_string(),
                 ..LlmResponse::default()
             }))
     }
@@ -718,6 +759,130 @@ async fn failed_stream_attempt_retains_observed_usage_and_evidence_in_ledger() {
     );
 }
 
+#[tokio::test]
+async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(
+        CountedPartialStreamFailureProvider {
+            attempts: Arc::clone(&attempts),
+        },
+    )));
+
+    let failure = handle
+        .complete(empty_request())
+        .await
+        .expect_err("paid output cannot be safely retried by the host");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        failure.code.as_deref(),
+        Some("unsafe_retry_after_output_started")
+    );
+    assert!(!failure.retryable);
+    assert_eq!(
+        failure.call_record.attempts[0]
+            .retry_decision
+            .as_ref()
+            .and_then(|decision| decision.reason.as_deref()),
+        Some("output_started_without_retry_guarantee")
+    );
+}
+
+#[test]
+fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
+    let no_response = LlmTransportError::new("connect failed")
+        .with_kind(ProviderFailureKind::Transport)
+        .retryable(true);
+    assert_eq!(
+        automatic_retry_class(
+            &no_response,
+            failure_protocol_position(&no_response),
+            GenerationRetryGuarantee::None,
+        ),
+        Some(AutomaticRetryClass::NoResponse)
+    );
+
+    let rejected = LlmTransportError::new("throttled")
+        .with_status(429)
+        .with_retry_after(Duration::from_secs(1));
+    let rejected = DefaultProviderFailureClassifier.classify(rejected);
+    assert_eq!(
+        automatic_retry_class(
+            &rejected,
+            failure_protocol_position(&rejected),
+            GenerationRetryGuarantee::None,
+        ),
+        Some(AutomaticRetryClass::RejectedHttpResponse)
+    );
+
+    // The sole retained status-only class is a classified 429 carrying
+    // Retry-After: it explicitly says admission was throttled and when the
+    // rejected request may be resubmitted. Timeout, conflict, early-data, and
+    // server/gateway statuses cannot prove that an upstream generation never
+    // started, so they must not authorize another purchase.
+    for status in [408, 409, 425, 500, 502, 503, 504] {
+        let failure = DefaultProviderFailureClassifier
+            .classify(LlmTransportError::new("ambiguous rejection").with_status(status));
+        assert_eq!(
+            automatic_retry_class(
+                &failure,
+                failure_protocol_position(&failure),
+                GenerationRetryGuarantee::None,
+            ),
+            None,
+            "HTTP {status} cannot prove generation did not start"
+        );
+    }
+    let retry_after_absent = DefaultProviderFailureClassifier
+        .classify(LlmTransportError::new("throttled").with_status(429));
+    assert_eq!(
+        automatic_retry_class(
+            &retry_after_absent,
+            failure_protocol_position(&retry_after_absent),
+            GenerationRetryGuarantee::None,
+        ),
+        None,
+        "429 without Retry-After lacks the retained rejection proof"
+    );
+
+    let empty_partial = LlmTransportError::new("stream disconnected")
+        .with_kind(ProviderFailureKind::Stream)
+        .retryable(true)
+        .with_partial_response(LlmResponse::default());
+    assert_eq!(
+        automatic_retry_class(
+            &empty_partial,
+            failure_protocol_position(&empty_partial),
+            GenerationRetryGuarantee::None,
+        ),
+        Some(AutomaticRetryClass::EmptyStreamPartial)
+    );
+
+    let output_started = LlmTransportError::new("stream disconnected")
+        .with_kind(ProviderFailureKind::Stream)
+        .retryable(true)
+        .with_partial_response(LlmResponse {
+            full_text: "paid output".to_string(),
+            ..LlmResponse::default()
+        });
+    let position = failure_protocol_position(&output_started);
+    assert_eq!(position, ProtocolPosition::OutputStarted);
+    assert_eq!(
+        automatic_retry_class(&output_started, position, GenerationRetryGuarantee::None,),
+        None
+    );
+    assert_eq!(
+        automatic_retry_class(
+            &output_started,
+            position,
+            GenerationRetryGuarantee::Idempotent,
+        ),
+        Some(AutomaticRetryClass::ProviderGuarantee(
+            GenerationRetryGuarantee::Idempotent
+        ))
+    );
+}
+
 #[test]
 fn attempt_diagnostics_are_redacted_and_bounded() {
     let message = format!("Bearer sk-secret api_key=also-secret {}", "x".repeat(2_000));
@@ -993,7 +1158,7 @@ async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting
 }
 
 #[tokio::test]
-async fn provider_handle_throttle_without_retry_after_consumes_attempts() {
+async fn provider_handle_throttle_without_retry_after_is_not_retried() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = StatusFailingProvider {
         options: ProviderOptions {
@@ -1015,12 +1180,17 @@ async fn provider_handle_throttle_without_retry_after_consumes_attempts() {
         .await
         .expect_err("no server-stated wait, so the normal ladder applies");
 
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert_eq!(err.kind, ProviderFailureKind::Quota);
+    assert_eq!(
+        err.code.as_deref(),
+        Some("unsafe_retry_after_response_observed")
+    );
+    assert!(!err.retryable);
 }
 
 #[tokio::test]
-async fn provider_handle_server_error_with_retry_after_still_consumes_attempts() {
+async fn provider_handle_server_error_with_retry_after_is_not_retried() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = StatusFailingProvider {
         options: ProviderOptions {
@@ -1043,9 +1213,13 @@ async fn provider_handle_server_error_with_retry_after_still_consumes_attempts()
         .await
         .expect_err("5xx is a failure, not a throttle");
 
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    assert!(err.retryable);
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert!(!err.retryable);
     assert_eq!(err.kind, ProviderFailureKind::Http);
+    assert_eq!(
+        err.code.as_deref(),
+        Some("unsafe_retry_after_response_observed")
+    );
 }
 
 #[test]

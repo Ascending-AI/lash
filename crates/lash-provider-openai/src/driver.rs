@@ -313,6 +313,7 @@ fn complete_buffered_responses(
     if stream_termination == Some(StreamTermination::RequireTerminalEvidence)
         && !terminal_event_seen
     {
+        let output_started = state.output_started();
         let mut partial = shared_response_from_state(
             state,
             CompletionEndpoint::Responses.http_summary(&url, false),
@@ -324,6 +325,7 @@ fn complete_buffered_responses(
         .with_kind(ProviderFailureKind::Stream)
         .with_code("stream_ended_before_terminal_response")
         .retryable(true)
+        .with_output_started(output_started)
         .with_partial_response(partial));
     }
     let parts = state.response_parts();
@@ -553,17 +555,21 @@ async fn drive_streaming_responses(
     .await;
 
     if let Err(error) = stream_result {
+        let output_started = state.output_started();
         let mut partial = shared_response_from_state(
             state.clone(),
             CompletionEndpoint::Responses.http_summary(&url, true),
         );
         partial.terminal_reason = LlmTerminalReason::Unknown;
-        return Err(error.with_partial_response(partial));
+        return Err(error
+            .with_output_started(output_started)
+            .with_partial_response(partial));
     }
 
     if stream_termination == StreamTermination::RequireTerminalEvidence
         && !state.terminal_event_seen
     {
+        let output_started = state.output_started();
         let mut partial = shared_response_from_state(
             state.clone(),
             CompletionEndpoint::Responses.http_summary(&url, true),
@@ -575,6 +581,7 @@ async fn drive_streaming_responses(
         .with_kind(ProviderFailureKind::Stream)
         .with_code("stream_ended_before_terminal_response")
         .retryable(true)
+        .with_output_started(output_started)
         .with_partial_response(partial));
     }
 

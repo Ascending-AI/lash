@@ -180,9 +180,9 @@ async fn every_retry_attempt_reapplies_the_sampling_controls() {
         bodies: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(VecDeque::from([
             (
-                503,
-                Vec::new(),
-                r#"{"error":{"message":"temporarily unavailable"}}"#,
+                429,
+                vec![("retry-after".to_string(), "0".to_string())],
+                r#"{"error":{"message":"temporarily throttled"}}"#,
             ),
             (
                 200,

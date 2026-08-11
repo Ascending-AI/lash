@@ -21,6 +21,13 @@ type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);
 #[derive(Debug)]
 struct ScriptedHttpTransport {
     responses: std::sync::Mutex<VecDeque<ScriptedHttpResponse>>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl ScriptedHttpTransport {
+    fn calls(&self) -> usize {
+        self.calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 #[async_trait]
@@ -30,6 +37,7 @@ impl LlmHttpTransport for ScriptedHttpTransport {
         _request: LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
     ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (status, headers, body) = self
             .responses
             .lock_recover()
@@ -1969,9 +1977,12 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
     let transport = Arc::new(ScriptedHttpTransport {
         responses: std::sync::Mutex::new(VecDeque::from([
             (
-                503,
-                vec![("x-request-id".to_string(), "req-failed".to_string())],
-                r#"{"error":{"message":"temporarily unavailable"}}"#,
+                429,
+                vec![
+                    ("x-request-id".to_string(), "req-failed".to_string()),
+                    ("retry-after".to_string(), "0".to_string()),
+                ],
+                r#"{"error":{"message":"temporarily throttled"}}"#,
             ),
             (
                 200,
@@ -1979,6 +1990,7 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
                 r#"{"id":"gen-123","model":"anthropic/claude-sonnet-4.5","choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"completion_tokens_details":{"reasoning_tokens":0}}}"#,
             ),
         ])),
+        calls: std::sync::atomic::AtomicUsize::new(0),
     });
     let provider = openrouter_provider()
         .with_options(ProviderOptions {
@@ -2006,7 +2018,7 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
             .as_deref(),
         Some("req-failed")
     );
-    assert_eq!(failed.error.as_ref().unwrap().http_status, Some(503));
+    assert_eq!(failed.error.as_ref().unwrap().http_status, Some(429));
     assert_eq!(
         failed
             .evidence
@@ -2098,7 +2110,106 @@ fn single_stream_transport(body: &'static str) -> Arc<ScriptedHttpTransport> {
             vec![("content-type".to_string(), "text/event-stream".to_string())],
             body,
         )])),
+        calls: std::sync::atomic::AtomicUsize::new(0),
     })
+}
+
+const TERMINAL_RESPONSES_STREAM: &str = concat!(
+    "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"second generation\"}\n\n",
+    "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_second\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"msg_second\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"second generation\"}]}]}}\n\n"
+);
+
+fn two_responses_streams(first: &'static str) -> Arc<ScriptedHttpTransport> {
+    Arc::new(ScriptedHttpTransport {
+        responses: std::sync::Mutex::new(VecDeque::from([
+            (
+                200,
+                vec![("content-type".to_string(), "text/event-stream".to_string())],
+                first,
+            ),
+            (
+                200,
+                vec![("content-type".to_string(), "text/event-stream".to_string())],
+                TERMINAL_RESPONSES_STREAM,
+            ),
+        ])),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    })
+}
+
+#[tokio::test]
+async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
+    let first = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_partial\",\"call_id\":\"call_partial\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n",
+        r#"data: {"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_partial","delta":"{\"q\":\"paid\"}"}"#,
+        "\n\n"
+    );
+    let transport = two_responses_streams(first);
+    let provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            reliability: ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..ProviderOptions::default()
+        })
+        .with_transport(Arc::clone(&transport) as _);
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let result = handle
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
+        .await;
+
+    assert_eq!(
+        transport.calls(),
+        1,
+        "paid tool output must not be re-bought"
+    );
+    let failure = result.expect_err("unfinished paid tool output must stop the ladder");
+    assert_eq!(
+        failure.code.as_deref(),
+        Some("unsafe_retry_after_output_started")
+    );
+    assert!(!failure.retryable);
+}
+
+#[tokio::test]
+async fn responses_handle_does_not_retry_opaque_reasoning_output() {
+    let first = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_paid\"}}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_paid\",\"summary\":[],\"encrypted_content\":\"opaque-paid-reasoning\"}}\n\n"
+    );
+    let transport = two_responses_streams(first);
+    let provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            reliability: ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..ProviderOptions::default()
+        })
+        .with_transport(Arc::clone(&transport) as _);
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let result = handle
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
+        .await;
+
+    assert_eq!(
+        transport.calls(),
+        1,
+        "paid opaque reasoning must not be re-bought"
+    );
+    let failure = result.expect_err("opaque paid reasoning must stop the ladder");
+    assert_eq!(
+        failure.code.as_deref(),
+        Some("unsafe_retry_after_output_started")
+    );
+    assert!(!failure.retryable);
 }
 
 #[tokio::test]

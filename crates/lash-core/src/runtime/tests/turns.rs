@@ -5414,6 +5414,7 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
     let transport = TestProvider::builder()
         .kind("openai-compatible")
         .requires_streaming(true)
+        .generation_retry_guarantee(crate::provider::GenerationRetryGuarantee::Idempotent)
         .options(crate::ProviderOptions {
             reliability: crate::provider::ProviderReliability::default()
                 .max_attempts(2)
@@ -5506,6 +5507,151 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
             .as_ref()
             .map(|usage| usage.input_tokens),
         Some(11)
+    );
+}
+
+#[tokio::test]
+async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let lost_text = std::iter::repeat_n("discarded", 256)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let transport = TestProvider::builder()
+        .kind("openai-compatible")
+        .requires_streaming(true)
+        .options(crate::ProviderOptions {
+            reliability: crate::provider::ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..crate::ProviderOptions::default()
+        })
+        .complete({
+            let provider_calls = Arc::clone(&provider_calls);
+            let lost_text = lost_text.clone();
+            move |request| {
+                let call = provider_calls.fetch_add(1, Ordering::SeqCst);
+                let lost_text = lost_text.clone();
+                async move {
+                    let stream = request.stream_events.expect("stream events");
+                    if call == 0 {
+                        stream.send(LlmStreamEvent::Delta(lost_text.clone()));
+                        let usage = LlmUsage {
+                            input_tokens: 32,
+                            output_tokens: 256,
+                            ..LlmUsage::default()
+                        };
+                        stream.send(LlmStreamEvent::Usage(usage.clone()));
+                        return Err(LlmTransportError::new(
+                            "stream ended before terminal evidence",
+                        )
+                        .with_kind(crate::ProviderFailureKind::Stream)
+                        .with_code("stream_ended_before_terminal_response")
+                        .retryable(true)
+                        .with_partial_response(LlmResponse {
+                            full_text: lost_text,
+                            usage,
+                            provider_usage: Some(serde_json::json!({
+                                "prompt_tokens": 32,
+                                "completion_tokens": 256
+                            })),
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        }));
+                    }
+
+                    stream.send(LlmStreamEvent::Delta("replacement".to_string()));
+                    Ok(LlmResponse {
+                        full_text: "replacement".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "replacement".to_string(),
+                            response_meta: None,
+                        }],
+                        terminal_reason: crate::LlmTerminalReason::Stop,
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build();
+    let mut runtime = standard_runtime_with_transport(transport).await;
+    let turn_events = RecordingTurnEvents::default();
+
+    let assembled = runtime
+        .stream_turn(
+            TurnInput::text("retry after paid output"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "paid-output-retry"),
+            )
+            .with_turn_events(&turn_events),
+        )
+        .await
+        .expect("provider failure is returned as an assembled turn");
+
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        assembled.outcome,
+        TurnOutcome::Stopped(TurnStop::ProviderError)
+    ));
+    assert!(assembled.assistant_output.safe_text.is_empty());
+    assert!(assembled.assistant_output.raw_text.is_empty());
+    let activities = turn_events.snapshot();
+    assert!(activities.iter().any(|activity| matches!(
+        &activity.event,
+        TurnEvent::AssistantProseDelta { text } if text.as_ref() == lost_text
+    )));
+    assert!(
+        activities
+            .iter()
+            .all(|activity| !matches!(activity.event, TurnEvent::ModelAttemptReset { .. }))
+    );
+    assert!(
+        active_conversation_messages(&assembled.state)
+            .iter()
+            .flat_map(|message| message.parts.iter())
+            .all(|part| !part.content.contains("discarded")),
+        "a failed partial response remains preview output, not committed history"
+    );
+    let calls = &assembled.llm_calls;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].attempts.len(), 1);
+    let preserved_attempt = &calls[0].attempts[0];
+    assert_eq!(
+        preserved_attempt.protocol_position,
+        crate::ProtocolPosition::OutputStarted
+    );
+    assert_eq!(
+        preserved_attempt
+            .usage
+            .as_ref()
+            .map(|usage| usage.output_tokens),
+        Some(256)
+    );
+    assert_eq!(
+        preserved_attempt
+            .retry_decision
+            .as_ref()
+            .map(|decision| decision.scheduled),
+        Some(false)
+    );
+    assert_eq!(
+        preserved_attempt
+            .retry_decision
+            .as_ref()
+            .and_then(|decision| decision.reason.as_deref()),
+        Some("output_started_without_retry_guarantee")
+    );
+    let issue = assembled.errors.first().expect("typed provider issue");
+    assert_eq!(
+        issue.code.as_deref(),
+        Some("unsafe_retry_after_output_started")
+    );
+    assert_eq!(issue.retryable, Some(false));
+    assert!(
+        issue.message.contains("already paid for")
+            && issue.message.contains("cannot be safely regenerated")
     );
 }
 

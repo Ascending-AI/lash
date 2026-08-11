@@ -128,10 +128,7 @@ impl CodexProvider {
     }
 
     fn response_state_started_output(state: &shared::ResponsesStreamState) -> bool {
-        !state.parts.is_empty()
-            || !state.full_text.is_empty()
-            || !state.pending_text_deltas.is_empty()
-            || !state.reasoning_deltas.is_empty()
+        state.output_started()
     }
 
     fn is_stale_previous_response_error(error: &LlmTransportError) -> bool {
@@ -633,7 +630,7 @@ impl Provider for CodexProvider {
                     }
                     Err(err) => {
                         self.clear_continuation(&req);
-                        return Err(err.error);
+                        return Err(err.error.with_output_started(err.output_started));
                     }
                 }
             }
@@ -871,6 +868,7 @@ impl Provider for CodexProvider {
         .await;
 
         if let Err(error) = stream_result {
+            let output_started = state.output_started();
             let mut partial = shared::response_from_stream_state(
                 state.clone(),
                 request_body.clone(),
@@ -879,12 +877,15 @@ impl Provider for CodexProvider {
             partial.terminal_reason = LlmTerminalReason::Unknown;
             partial.generation_disposition = generation_disposition;
             partial.response_metadata = response_metadata.into_metadata();
-            return Err(error.with_partial_response(partial));
+            return Err(error
+                .with_output_started(output_started)
+                .with_partial_response(partial));
         }
 
         if stream_termination == StreamTermination::RequireTerminalEvidence
             && !state.terminal_event_seen
         {
+            let output_started = state.output_started();
             let mut partial = shared::response_from_stream_state(
                 state.clone(),
                 request_body.clone(),
@@ -899,6 +900,7 @@ impl Provider for CodexProvider {
             .with_kind(ProviderFailureKind::Stream)
             .with_code("stream_ended_before_terminal_response")
             .retryable(true)
+            .with_output_started(output_started)
             .with_partial_response(partial));
         }
 
