@@ -63,6 +63,7 @@ log_path = os.environ['LOG_PATH']
 starts_path = os.environ['STARTS_PATH']
 pid_path = os.environ.get('PID_PATH')
 eof_path = os.environ.get('EOF_PATH')
+close_path = os.environ.get('CLOSE_PATH')
 if pid_path:
     with open(pid_path, 'w', encoding='utf-8') as f:
         f.write(str(os.getpid()))
@@ -135,7 +136,9 @@ for line in sys.stdin:
             sys.exit(0)
         if behavior == 'reset_attempts_after_success' and starts == 1:
             sys.exit(0)
-        if behavior == 'close_streams_after_list':
+        if behavior == 'close_streams_when_triggered_after_list':
+            while not os.path.exists(close_path):
+                time.sleep(0.001)
             os.close(sys.stdin.fileno())
             os.close(sys.stdout.fileno())
             time.sleep(30)
@@ -221,6 +224,10 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
             (
                 "EOF_PATH".to_string(),
                 root.join("eof").display().to_string(),
+            ),
+            (
+                "CLOSE_PATH".to_string(),
+                root.join("close").display().to_string(),
             ),
         ]),
         cwd: None,
@@ -1030,7 +1037,7 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
     let pool = connect_mock(
         root.path(),
         MockOptions {
-            behavior: "close_streams_after_list",
+            behavior: "close_streams_when_triggered_after_list",
             ..MockOptions::default()
         },
     )
@@ -1041,6 +1048,9 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
         .expect("numeric child pid");
     let entry = Arc::clone(pool.entries.read_recover().get("mock").expect("mock entry"));
 
+    let started = Instant::now();
+    std::fs::write(root.path().join("close"), "close")
+        .expect("release mock to close its transport streams");
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             if entry.service_snapshot().is_none() {
@@ -1052,12 +1062,11 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
     .await
     .expect("actor must unpublish the service during graceful reap");
     assert_eq!(
-        process_state(pid),
+        wait_for_process_state(pid, 'S', Duration::from_secs(2)),
         Some('S'),
         "actor must own a still-running child during graceful reap"
     );
 
-    let started = Instant::now();
     pool.shutdown_all().await;
     let elapsed = started.elapsed();
     eprintln!("actor-reap shutdown elapsed: {elapsed:?}");
@@ -1867,6 +1876,55 @@ async fn idle_service_death_updates_status_without_a_tool_call() {
         "idle death must not remove the last discovered tool catalog"
     );
     pool.shutdown_all().await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "close_streams_when_triggered_after_list",
+            reconnect_initial_ms: 5_000,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("stdio child must publish its pid")
+        .parse()
+        .expect("numeric child pid");
+    assert!(pool.server_statuses()[0].connected);
+
+    std::fs::write(root.path().join("close"), "close")
+        .expect("release mock to close its transport streams");
+    wait_until(
+        || !pool.server_statuses()[0].connected,
+        "service quit did not unpublish the connection",
+    )
+    .await;
+    let status_during_cleanup = pool.server_statuses()[0].clone();
+    let process_state_during_cleanup = wait_for_process_state(pid, 'S', Duration::from_secs(2));
+
+    pool.shutdown_all().await;
+
+    assert!(!status_during_cleanup.connected);
+    assert_eq!(
+        status_during_cleanup.last_error,
+        Some("MCP server `mock` service quit: Ok(Closed)".to_string()),
+        "service quit cause must be visible throughout bounded child cleanup"
+    );
+    assert_eq!(
+        process_state_during_cleanup,
+        Some('S'),
+        "status must be sampled while the close-ignoring child is still alive"
+    );
+    assert_eq!(
+        process_state(pid),
+        None,
+        "shutdown_all must fully reap stdio child PID {pid}"
+    );
 }
 
 #[tokio::test]

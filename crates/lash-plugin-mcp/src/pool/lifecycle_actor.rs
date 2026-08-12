@@ -261,6 +261,7 @@ impl LifecycleActor {
                         Ok(Ok(tools)) => tools,
                         Ok(Err(error)) => {
                             let error = McpError::Protocol(format!("list_tools failed: {error}"));
+                            self.record_error(error.to_string());
                             let shutdown = self.cancel_and_reap(
                                 &server_name,
                                 &request_tasks,
@@ -272,7 +273,6 @@ impl LifecycleActor {
                                 send_shutdown(initial_reply);
                                 return ConnectionExit::Shutdown;
                             }
-                            self.record_error(error.to_string());
                             send_result(initial_reply, Err(error));
                             return ConnectionExit::Failed;
                         }
@@ -281,6 +281,7 @@ impl LifecycleActor {
                                 server: server_name.clone(),
                                 timeout_ms: startup_timeout.as_millis() as u64,
                             };
+                            self.record_error(error.to_string());
                             let shutdown = self.cancel_and_reap(
                                 &server_name,
                                 &request_tasks,
@@ -292,7 +293,6 @@ impl LifecycleActor {
                                 send_shutdown(initial_reply);
                                 return ConnectionExit::Shutdown;
                             }
-                            self.record_error(error.to_string());
                             send_result(initial_reply, Err(error));
                             return ConnectionExit::Failed;
                         }
@@ -300,6 +300,7 @@ impl LifecycleActor {
                 }
                 reason = &mut waiting => {
                     let cause = format!("MCP server `{server_name}` service quit during discovery: {reason:?}");
+                    self.record_error(cause.clone());
                     let shutdown = self.cancel_and_reap(
                         &server_name,
                         &request_tasks,
@@ -311,7 +312,6 @@ impl LifecycleActor {
                         send_shutdown(initial_reply);
                         return ConnectionExit::Shutdown;
                     }
-                    self.record_error(cause.clone());
                     send_result(initial_reply, Err(McpError::Protocol(cause)));
                     return ConnectionExit::Failed;
                 }
@@ -377,6 +377,8 @@ impl LifecycleActor {
             let keepalive_at = self.keepalive_at;
             tokio::select! {
                 reason = &mut waiting => {
+                    let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
+                    self.record_error(cause);
                     self.unpublish(generation);
                     let shutdown = self.cancel_and_reap(
                         &server_name,
@@ -386,8 +388,6 @@ impl LifecycleActor {
                         stdio_child.take(),
                     ).await;
                     self.maybe_panic_on_service_quit();
-                    let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
-                    self.record_error(cause);
                     return if shutdown {
                         ConnectionExit::Shutdown
                     } else {
