@@ -55,6 +55,30 @@ async fn configured_storage(test_name: &str) -> Option<(SharedDatabaseLock, Post
     Some((lock, storage))
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_queued_work_redrive_selects_claim_identity_across_ready_gap_when_configured() {
+    let Some((_lock, storage)) = configured_storage("PostgreSQL ready-gap law").await else {
+        return;
+    };
+    let session_id = "interrupted-batch-ready-gap";
+    sqlx::query("TRUNCATE lash_queued_work_batches RESTART IDENTITY CASCADE")
+        .execute(storage.pool())
+        .await
+        .expect("reset ready-gap law queue rows and enqueue sequence");
+    for table in ["lash_session_execution_leases", "lash_session_meta"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE session_id = $1"))
+            .bind(session_id)
+            .execute(storage.pool())
+            .await
+            .expect("reset ready-gap law rows");
+    }
+    lash_core::testing::conformance::queued_work_redrive_selects_claim_identity_across_ready_gap(
+        Arc::new(storage.session_store(session_id)),
+        &lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
+    )
+    .await;
+}
+
 fn source_region<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     let start_index = source
         .find(start)

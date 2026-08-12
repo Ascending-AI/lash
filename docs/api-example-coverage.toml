@@ -2931,7 +2931,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1120#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1139#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -3309,8 +3309,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::QueuedTurnBuilder", "lash::turn::QueuedTurnBuilder"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:68#.batch_ids(self.batch_ids.iter().cloned())"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/restate.rs:63, inside `queued_turn`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/queued_work.rs:322 asserts an unrelated expression in `targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery`, and `queued_turn` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/restate.rs:62#pub(crate) fn queued_turn(&self, session: &lash::LashSession) -> lash::QueuedTurnBuilder {"
+reason = "Used by the agent-workbench example inside `queued_turn`, but the constructor contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::QueuedTurnBuilder::advanced"
@@ -3328,8 +3328,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::QueuedTurnBuilder::batch_ids", "lash::turn::QueuedTurnBuilder::batch_ids"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:68#.batch_ids(self.batch_ids.iter().cloned())"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/restate.rs:63, inside `queued_turn`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/queued_work.rs:322 asserts an unrelated expression in `targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery`, and `queued_turn` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/restate.rs:78#.batch_ids(self.batch_ids.iter().cloned())"
+reason = "Used by the agent-workbench example inside `selected_queued_turn`, but the constructor contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::QueuedTurnBuilder::cancel"
@@ -70879,7 +70879,7 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:65#) -> lash::SelectedQueuedTurnBuilder {"
+usage = "examples/agent-workbench/src/restate.rs:74#) -> lash::SelectedQueuedTurnBuilder {"
 reason = "The agent-workbench selected-drain workflow returns this builder directly; its run outcome is asserted separately by selected_queued_turn_reports_claimed_now_and_already_satisfied_ids."
 
 [[api]]
@@ -70916,7 +70916,7 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::drain_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:69#.drain_id("
+usage = "examples/agent-workbench/src/restate.rs:79#.drain_id("
 reason = "The Restate workbench supplies a stable selected-drain idempotency key; the scope identity is internal and has no direct host-visible assertion in that constructor."
 
 [[api]]
@@ -70926,7 +70926,7 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::effects"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:999#.effects(controller)"
+usage = "examples/agent-workbench/src/restate.rs:1017#.effects(controller)"
 reason = "The Restate selected-drain workflow binds its durable effect controller before streaming; controller ownership is verified by the workflow integration tests rather than at this call site."
 
 [[api]]
@@ -71152,7 +71152,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:999#.effects(controller)"
+usage = "examples/agent-workbench/src/restate.rs:1017#.effects(controller)"
 reason = "The Restate workbench selected drain uses the controller-scoped builder; its workflow outcome is checked by higher-level integration coverage."
 
 [[api]]
@@ -71193,7 +71193,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1000#.stream_to(&ui_events)"
+usage = "examples/agent-workbench/src/restate.rs:1018#.stream_to(&ui_events)"
 reason = "The Restate workbench streams a controller-scoped selected drain into its UI sink; higher-level workflow tests validate the emitted reply."
 
 [[api]]

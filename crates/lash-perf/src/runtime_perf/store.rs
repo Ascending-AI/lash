@@ -1307,14 +1307,11 @@ impl QueuedWorkStore for RuntimePerfStore {
         let now = current_epoch_ms();
         let mut queued = self.queued_work.lock_recover();
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
-        let Some(queued_work::SelectedBatchPresence {
+        let queued_work::SelectedBatchPresence {
             requested_ids,
             present_ids,
             already_satisfied_batch_ids,
-        }) = queued_work::selected_batch_presence(&queued, session_id, batch_ids)
-        else {
-            return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
-        };
+        } = queued_work::selected_batch_presence(&queued, session_id, batch_ids);
         if present_ids.is_empty() {
             return Ok(SelectedQueuedWorkClaimOutcome::new(
                 None,

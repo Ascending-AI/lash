@@ -23,11 +23,8 @@ pub(super) fn selected_batch_presence(
     queued: &[RuntimePerfQueuedBatch],
     session_id: &str,
     batch_ids: &[String],
-) -> Option<SelectedBatchPresence> {
+) -> SelectedBatchPresence {
     let requested_ids = batch_ids.iter().cloned().collect::<BTreeSet<_>>();
-    if requested_ids.len() != batch_ids.len() {
-        return None;
-    }
     let present_ids = queued
         .iter()
         .filter(|entry| {
@@ -40,9 +37,9 @@ pub(super) fn selected_batch_presence(
         .filter(|batch_id| !present_ids.contains(batch_id.as_str()))
         .cloned()
         .collect();
-    Some(SelectedBatchPresence {
+    SelectedBatchPresence {
         requested_ids,
         present_ids,
         already_satisfied_batch_ids,
-    })
+    }
 }

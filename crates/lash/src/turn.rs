@@ -872,16 +872,8 @@ impl SelectedQueuedTurnBuilder {
         } = builder;
         let _cancel_guard = cancels.register(cancel.clone(), cancel_origin_hint.clone());
         if batch_ids.is_empty() {
-            let turn = stream_next_queued_prepared_turn(
-                &runtime,
-                TurnSinks::turn(events),
-                scoped_effect_controller,
-                cancel,
-                cancel_origin_hint,
-            )
-            .await?;
             return Ok(SelectedQueuedWorkDrainOutcome {
-                turn,
+                turn: None,
                 satisfied: Vec::new(),
             });
         }

@@ -1511,41 +1511,47 @@ impl LashRuntime {
         opts: TurnOptions<'_>,
         selected_batch_ids: Option<&[String]>,
     ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>, SelectedQueuedWorkDrainError> {
+        let selected_batch_ids = selected_batch_ids.map(|batch_ids| {
+            let mut seen = std::collections::BTreeSet::new();
+            batch_ids
+                .iter()
+                .filter(|batch_id| seen.insert(batch_id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+        let selected_batch_ids = selected_batch_ids.as_deref();
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
         let Some(session_execution_lease) = self.claim_session_execution_lease().await? else {
-            if let Some(batch_ids) = selected_batch_ids {
-                let unique_ids = batch_ids.iter().collect::<std::collections::BTreeSet<_>>();
-                if unique_ids.len() == batch_ids.len()
-                    && let Some(store) = self
-                        .session
-                        .as_ref()
-                        .and_then(|session| session.history_store())
+            if let Some(batch_ids) = selected_batch_ids
+                && let Some(store) = self
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.history_store())
+            {
+                let present_ids = store
+                    .list_queued_work(&self.state.session_id)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?
+                    .into_iter()
+                    .map(|batch| batch.batch_id)
+                    .collect::<std::collections::BTreeSet<_>>();
+                if batch_ids
+                    .iter()
+                    .all(|batch_id| !present_ids.contains(batch_id))
                 {
-                    let present_ids = store
-                        .list_queued_work(&self.state.session_id)
-                        .await
-                        .map_err(super::runtime_error_from_store_commit)?
-                        .into_iter()
-                        .map(|batch| batch.batch_id)
-                        .collect::<std::collections::BTreeSet<_>>();
-                    if batch_ids
-                        .iter()
-                        .all(|batch_id| !present_ids.contains(batch_id))
-                    {
-                        return Ok(SelectedQueuedWorkDrainOutcome::new(
-                            None,
-                            batch_ids
-                                .iter()
-                                .cloned()
-                                .map(|batch_id| {
-                                    SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
-                                        batch_id,
-                                    }
-                                })
-                                .collect(),
-                        ));
-                    }
+                    return Ok(SelectedQueuedWorkDrainOutcome::new(
+                        None,
+                        batch_ids
+                            .iter()
+                            .cloned()
+                            .map(
+                                |batch_id| SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                                    batch_id,
+                                },
+                            )
+                            .collect(),
+                    ));
                 }
             }
             return if selected_batch_ids.is_some() {

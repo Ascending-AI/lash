@@ -1276,6 +1276,176 @@ async fn selected_queued_turn_reports_claimed_now_and_already_satisfied_ids() ->
 }
 
 #[tokio::test]
+async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_busy_lane() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-duplicate-absent")
+        .complete(move |_| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("absent selection must not execute"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-duplicate-absent";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+
+    let expected = vec![
+        crate::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+            batch_id: "absent-batch".to_string(),
+        },
+    ];
+    let lane_free = session
+        .queued_turn()
+        .batch_ids(["absent-batch", "absent-batch"])
+        .run()
+        .await?;
+    assert!(lane_free.turn.is_none());
+    assert_eq!(lane_free.satisfied, expected);
+
+    let held_owner = lash_core::LeaseOwnerIdentity::opaque(
+        "selected-duplicate-absent-holder",
+        "selected-duplicate-absent-holder:incarnation",
+    );
+    let held_lease = store
+        .try_claim_session_execution_lease(session_id, &held_owner, 60_000)
+        .await
+        .expect("claim held session execution lease")
+        .acquired()
+        .expect("session execution lane is initially free");
+    let lane_busy = session
+        .queued_turn()
+        .batch_ids(["absent-batch", "absent-batch"])
+        .run()
+        .await?;
+    assert!(lane_busy.turn.is_none());
+    assert_eq!(lane_busy.satisfied, expected);
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    store
+        .release_session_execution_lease(&held_lease.completion())
+        .await
+        .expect("release held session execution lease");
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_deduplicates_present_claimable_id() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-duplicate-present")
+        .complete(move |_| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("selected duplicate present outcome"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-duplicate-present";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    let batch = store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id,
+                lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    "selected-duplicate-present-frame",
+                    "selected-duplicate-present-task",
+                    None,
+                )],
+            )
+            .with_source_key("selected-duplicate-present-source"),
+        )
+        .await
+        .expect("enqueue duplicate-selected row");
+
+    let outcome = session
+        .queued_turn()
+        .batch_ids([batch.batch_id.clone(), batch.batch_id.clone()])
+        .run()
+        .await?;
+    assert!(outcome.turn.is_some());
+    assert_eq!(
+        outcome.satisfied,
+        vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+            batch_id: batch.batch_id,
+        }]
+    );
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_empty_selection_is_satisfied_noop() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-empty-noop")
+        .complete(move |_| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("empty selection must not execute"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory)
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session("selected-empty-noop").open().await?;
+    session
+        .enqueue(TurnInput::text("must remain queued"))
+        .id("selected-empty-noop-input")
+        .send()
+        .await?;
+
+    let outcome = session
+        .queued_turn()
+        .batch_ids(std::iter::empty::<String>())
+        .run()
+        .await?;
+    assert!(outcome.turn.is_none());
+    assert_eq!(outcome.satisfied, Vec::new());
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert!(
+        session.queued_turn().run().await?.is_some(),
+        "the empty selection must leave unrestricted queued input pending"
+    );
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn selected_queued_turn_validates_every_interrupted_composition_before_mutating() -> Result<()>
 {
     let provider_calls = Arc::new(AtomicUsize::new(0));

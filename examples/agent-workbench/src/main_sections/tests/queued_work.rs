@@ -416,7 +416,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             drain_id: Some("workbench-targeted-later-drain".to_string()),
         };
         let later_output = later_request
-            .queued_turn(&session)
+            .selected_queued_turn(&session)
             .run()
             .await
             .expect("run only later workbench batch")
@@ -666,7 +666,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         };
         assert!(
             stale_selection
-                .queued_turn(&session)
+                .selected_queued_turn(&session)
                 .run()
                 .await
                 .expect("a selection naming an already-drained batch is a no-op, not an error")
@@ -696,7 +696,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         };
         assert!(
             earlier_request
-                .queued_turn(&session)
+                .selected_queued_turn(&session)
                 .run()
                 .await
                 .expect("run earlier workbench batch after later")

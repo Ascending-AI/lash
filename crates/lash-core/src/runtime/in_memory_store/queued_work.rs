@@ -253,9 +253,6 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let mut queued = self.queued_work.lock_recover();
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         let requested_ids = batch_ids.iter().collect::<std::collections::BTreeSet<_>>();
-        if requested_ids.len() != batch_ids.len() {
-            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
-        }
         let present_ids = queued
             .iter()
             .filter(|entry| {

@@ -17,6 +17,8 @@ const REALTIME_SCAFFOLDING_LEASE_TTL_MS: u64 = 50;
 const REALTIME_LEASE_STALL_ALLOWANCE: std::time::Duration = std::time::Duration::from_secs(5);
 const REALTIME_LEASE_OBSERVATION_ATTEMPTS: usize = 3;
 const REALTIME_LEASE_EXPIRY_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+const REALTIME_DELAYED_QUEUE_ROW_GAP_MS: u64 = 500;
+const REALTIME_DELAYED_QUEUE_ROW_CROSSING_MARGIN_MS: u64 = 50;
 
 /// How runtime-persistence conformance drives session-lease expiry.
 #[derive(Clone)]
@@ -70,7 +72,7 @@ impl RuntimePersistenceLeaseTiming {
                     .duration_since(std::time::UNIX_EPOCH)
                     .expect("system clock is after Unix epoch")
                     .as_millis() as u64
-                    + 100
+                    + REALTIME_DELAYED_QUEUE_ROW_GAP_MS
             }
             Self::Controlled(_) => 4_102_444_800_000,
         }
@@ -78,7 +80,13 @@ impl RuntimePersistenceLeaseTiming {
 
     async fn cross_delayed_queue_row_boundary(&self) {
         match self {
-            Self::Realtime => tokio::time::sleep(std::time::Duration::from_millis(150)).await,
+            Self::Realtime => {
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    REALTIME_DELAYED_QUEUE_ROW_GAP_MS
+                        + REALTIME_DELAYED_QUEUE_ROW_CROSSING_MARGIN_MS,
+                ))
+                .await
+            }
             Self::Controlled(advance) => advance(4_102_444_800_000),
         }
     }
@@ -5660,7 +5668,8 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
     release_session_execution_lease_for_test(&store, &third_lease).await;
 }
 
-async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
+#[doc(hidden)]
+pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
 ) {

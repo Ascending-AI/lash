@@ -1787,9 +1787,6 @@ impl QueuedWorkStore for Store {
                         .iter()
                         .cloned()
                         .collect::<std::collections::BTreeSet<_>>();
-                    if requested_ids.len() != batch_ids.len() {
-                        return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
-                    }
                     let present_ids = {
                         let mut sql = "SELECT batch_id FROM queued_work_batches
                                        WHERE session_id = ? AND batch_id IN ("

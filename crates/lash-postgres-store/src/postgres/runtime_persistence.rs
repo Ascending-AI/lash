@@ -1765,13 +1765,6 @@ impl QueuedWorkStore for PostgresSessionStore {
             .iter()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
-        if requested_ids.len() != batch_ids.len() {
-            tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
-                None,
-                Vec::new(),
-            ));
-        }
         let present_ids = sqlx::query_scalar::<_, String>(
             "SELECT batch_id
              FROM lash_queued_work_batches
