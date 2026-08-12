@@ -125,7 +125,9 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
     );
 
     let crashed_context = context.clone();
-    let crashed = tokio::spawn(async move { run_fixed_intent_attempt(&crashed_context).await });
+    let crashed = crate::task::spawn(async move {
+        run_fixed_intent_attempt(&crashed_context).await
+    });
     controller.wait_until_paused().await;
     crashed.abort();
     assert!(
@@ -419,7 +421,7 @@ async fn cancellation_before_result_commit_executes_no_intents() {
             serde_json::Value::Null,
         )],
     );
-    let run = tokio::spawn(async move {
+    let run = crate::task::spawn(async move {
         execution
             .execute_prepared_tool_batch_launches(
                 batch,
@@ -471,7 +473,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
             serde_json::Value::Null,
         )],
     );
-    let run = tokio::spawn(async move {
+    let run = crate::task::spawn(async move {
         execution
             .execute_prepared_tool_batch_launches(
                 batch,
