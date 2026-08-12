@@ -40,8 +40,8 @@ use super::schema::{
 };
 use super::value::ProjectedValue;
 use super::{
-    Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap, ImageValue,
-    Instruction, InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap, HeapObject,
+    ImageValue, Instruction, InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
     LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, ProfileAccumulator,
     ProfileReport, ProjectedBindings, ResourceHandle, RuntimeError, State, Value,
     add_assign_index_number, add_values, as_number, assign_path, eval_binary_values,
@@ -230,6 +230,9 @@ pub struct Vm<'a, H> {
     active_execution_elapsed: Duration,
     pub(crate) heap: Heap,
     heap_initialized: bool,
+    /// Whether the extra-globals record has been imported into the heap. It is
+    /// written once, when the VM is built or restored, and only read after that.
+    extras_heapified: bool,
     assigned_globals: std::collections::BTreeSet<String>,
     #[cfg(test)]
     test_suspension: TestSuspension,
@@ -746,29 +749,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     self.add_assign_index_number(slot, &index, right)?;
                 }
             }
-            Instruction::AppendAssign(slot) => {
-                let item = self.pop_stack()?;
-                let slot_name = &self.chunk.slot_names[slot];
-                self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-                let current =
-                    self.slots
-                        .get_mut(slot)
-                        .ok_or_else(|| RuntimeError::UndefinedVariable {
-                            name: slot_name.text.to_string(),
-                        })?;
-                let value = if let Value::List(items) = current {
-                    let values = items.make_mut();
-                    if values.len() == values.capacity() {
-                        values.reserve(1);
-                    }
-                    values.push(item);
-                    Value::List(items.clone())
-                } else {
-                    add_values(current.clone(), Value::List(vec![item].into()))?
-                };
-                self.record_assignment(slot);
-                self.last_value = Some(value);
-            }
+            Instruction::AppendAssign(slot) => self.append_assign(slot)?,
             Instruction::Finish => return Ok(Some(VmStep::Effect(VmEffect::Finish))),
             Instruction::SleepFor => {
                 return Ok(Some(VmStep::Effect(VmEffect::Sleep(SleepKind::For))));
@@ -848,6 +829,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     },
                     binding,
                     restore: self.slots.capture_temporary(binding),
+                    heapified: false,
                 });
             }
             Instruction::IterNext { jump_to } => {
@@ -925,93 +907,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 "fast path re-dispatch with resolved operands must complete the opcode"
             ),
         }
-    }
-
-    #[inline(always)]
-    fn add_assign_value(&mut self, slot: usize, right: Value) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-        let value = {
-            let left = self
-                .slots
-                .get_mut(slot)
-                .ok_or_else(|| RuntimeError::UndefinedVariable {
-                    name: slot_name.text.to_string(),
-                })?;
-            match (left, right) {
-                (Value::Number(left), Value::Number(right)) => {
-                    *left += right;
-                    Value::Number(*left)
-                }
-                (left, right) => {
-                    let value = add_values(left.clone(), right)?;
-                    *left = value.clone();
-                    value
-                }
-            }
-        };
-        self.record_assignment(slot);
-        self.last_value = Some(value);
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn add_assign_number(&mut self, slot: usize, right: f64) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-        let value = {
-            let left = self
-                .slots
-                .get_mut(slot)
-                .ok_or_else(|| RuntimeError::UndefinedVariable {
-                    name: slot_name.text.to_string(),
-                })?;
-            match left {
-                Value::Number(left) => {
-                    *left += right;
-                    Value::Number(*left)
-                }
-                left => {
-                    let value = add_values(left.clone(), Value::Number(right))?;
-                    *left = value.clone();
-                    value
-                }
-            }
-        };
-        self.record_assignment(slot);
-        self.last_value = Some(value);
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn add_assign_slot(&mut self, slot: usize, right: usize) -> Result<(), RuntimeError> {
-        let right = self.load_slot(right)?;
-        if let Value::Number(right) = right {
-            return self.add_assign_number(slot, *right);
-        }
-        let right = right.clone();
-        self.add_assign_value(slot, right)
-    }
-
-    #[inline(always)]
-    fn add_assign_index_number(
-        &mut self,
-        slot: usize,
-        index: &Value,
-        right: f64,
-    ) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-        let root = self
-            .slots
-            .get_mut(slot)
-            .ok_or_else(|| RuntimeError::UndefinedVariable {
-                name: slot_name.text.to_string(),
-            })?;
-        let value = add_assign_index_number(root, index, right)?;
-        self.record_assignment(slot);
-        self.last_value = Some(value);
-        Ok(())
     }
 
     /// Async slow path for the run loop. The synchronous `step_instruction_fast`
@@ -1237,6 +1132,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     cursor: IterCursor::List { values, index: 0 },
                     binding,
                     restore: self.slots.capture_temporary(binding),
+                    heapified: false,
                 });
             }
             Instruction::BeginRangeIter { binding, argc } => {
@@ -1255,6 +1151,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     },
                     binding,
                     restore: self.slots.capture_temporary(binding),
+                    heapified: false,
                 });
             }
             Instruction::ResolveTypeRef(slot) => {
@@ -1596,4 +1493,5 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     }
 }
 
+include!("assignment.rs");
 include!("iteration.rs");

@@ -29,6 +29,28 @@ pub const CANONICAL_MESSAGEPACK_DEPTH_LIMIT: usize = MAX_FIXED_SNAPSHOT_WRAPPER_
     + MESSAGEPACK_CONTAINERS_PER_VALUE_LEVEL * MAX_SNAPSHOT_VALUE_DEPTH;
 const MAX_SNAPSHOT_MESSAGEPACK_DEPTH: usize = CANONICAL_MESSAGEPACK_DEPTH_LIMIT;
 
+/// One operation in a [`State::patch_globals`] batch.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GlobalPatch {
+    /// Binds `name`, replacing any existing value.
+    Insert { name: String, value: Value },
+    /// Binds `name` only when it is currently unbound.
+    SetDefault { name: String, value: Value },
+    /// Unbinds `name` when it is bound.
+    Remove { name: String },
+}
+
+/// What a committed [`State::patch_globals`] batch changed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GlobalPatchOutcome {
+    /// Names this batch bound or rebound, in batch order.
+    pub inserted: Vec<String>,
+    /// Names this batch unbound, in batch order.
+    pub removed: Vec<String>,
+    /// Defaults this batch skipped because the name was already bound.
+    pub unchanged: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct State {
     pub(super) globals: Record,
@@ -58,12 +80,11 @@ impl State {
         name: impl Into<String>,
         value: Value,
     ) -> Result<bool, RuntimeError> {
-        let name = name.into();
-        if self.globals.get(&name).is_some() {
-            return Ok(false);
-        }
-        self.insert_global(name, value)?;
-        Ok(true)
+        let outcome = self.patch_globals([GlobalPatch::SetDefault {
+            name: name.into(),
+            value,
+        }])?;
+        Ok(!outcome.inserted.is_empty())
     }
 
     pub fn insert_global(
@@ -72,32 +93,75 @@ impl State {
         value: Value,
     ) -> Result<Option<Value>, RuntimeError> {
         let name = name.into();
-        if self.runtime_globals.is_empty() && !self.heap.has_runtime_state() {
-            return Ok(self.globals.insert(name, value));
-        }
-
-        let mut heap = self.heap.clone();
-        let mut runtime_globals = self.runtime_globals.clone();
-        runtime_globals.remove(&name);
-        let roots = runtime_globals.values().cloned().collect::<Vec<_>>();
-        heap.collect(roots.iter());
-        let runtime_value = heap.import(value.clone())?;
-        runtime_globals.insert(name.clone(), runtime_value);
-        let previous = self.globals.insert(name, value);
-        self.runtime_globals = runtime_globals;
-        self.heap = heap;
+        let previous = self.globals.get(&name).cloned();
+        self.patch_globals([GlobalPatch::Insert { name, value }])?;
         Ok(previous)
     }
 
     pub fn remove_global(&mut self, name: &str) -> Option<Value> {
-        let previous = self.globals.remove(name);
-        if self.runtime_globals.is_empty() && !self.heap.has_runtime_state() {
-            return previous;
-        }
-        self.runtime_globals.remove(name);
-        let roots = self.runtime_globals.values().cloned().collect::<Vec<_>>();
-        self.heap.collect(roots.iter());
+        let previous = self.globals.get(name).cloned();
+        self.patch_globals([GlobalPatch::Remove {
+            name: name.to_string(),
+        }])
+        .expect("removing a global cannot exceed the heap bound");
         previous
+    }
+
+    /// Applies a batch of global patches as one transaction.
+    ///
+    /// The whole batch is staged against copies of the visible globals, the
+    /// runtime roots, and the heap; nothing is published until every operation
+    /// has succeeded. A rejected batch therefore leaves the state byte-identical
+    /// rather than partially applied, and the caller's own bookkeeping can be
+    /// committed together with it. The heap is cloned once and collected once
+    /// per batch instead of once per key.
+    pub fn patch_globals(
+        &mut self,
+        patch: impl IntoIterator<Item = GlobalPatch>,
+    ) -> Result<GlobalPatchOutcome, RuntimeError> {
+        let patch = patch.into_iter().collect::<Vec<_>>();
+        if patch.is_empty() {
+            return Ok(GlobalPatchOutcome::default());
+        }
+        let heap_backed = !self.runtime_globals.is_empty() || self.heap.has_runtime_state();
+        let mut globals = self.globals.clone();
+        let mut runtime_globals = self.runtime_globals.clone();
+        let mut heap = self.heap.clone();
+        let mut outcome = GlobalPatchOutcome::default();
+        for operation in patch {
+            match operation {
+                GlobalPatch::SetDefault { name, value } if globals.get(&name).is_some() => {
+                    outcome.unchanged.push(name);
+                    let _ = value;
+                }
+                GlobalPatch::Insert { name, value } | GlobalPatch::SetDefault { name, value } => {
+                    if heap_backed {
+                        runtime_globals.remove(&name);
+                        let runtime_value = heap.isolate_value(&value)?;
+                        runtime_globals.insert(name.clone(), runtime_value);
+                    }
+                    globals.insert(name.clone(), value);
+                    outcome.inserted.push(name);
+                }
+                GlobalPatch::Remove { name } => {
+                    let existed = globals.remove(&name).is_some();
+                    if heap_backed {
+                        runtime_globals.remove(&name);
+                    }
+                    if existed {
+                        outcome.removed.push(name);
+                    }
+                }
+            }
+        }
+        if heap_backed {
+            let roots = runtime_globals.values().cloned().collect::<Vec<_>>();
+            heap.collect(roots.iter());
+        }
+        self.globals = globals;
+        self.runtime_globals = runtime_globals;
+        self.heap = heap;
+        Ok(outcome)
     }
 
     pub fn snapshot(&self) -> Snapshot {

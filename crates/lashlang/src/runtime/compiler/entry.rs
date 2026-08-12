@@ -452,7 +452,11 @@ impl Compiler {
                 if let Expr::List(items) = right.as_ref()
                     && items.len() == 1
                 {
+                    // The optimized single-item concat is an insertion like any
+                    // other: the entering item is isolated before it joins the
+                    // accumulator.
                     self.compile_expr(&items[0]);
+                    self.code.push(Instruction::DeepCopy);
                     self.code.push(Instruction::AppendAssign(slot));
                     self.set_const_slot(slot, None);
                     self.push_null_if(leave_value);
@@ -471,7 +475,10 @@ impl Compiler {
                     self.push_null_if(leave_value);
                     return;
                 }
+                // A general concat copies the right operand's members into the
+                // accumulator, so the operand is isolated first.
                 self.compile_expr(right);
+                self.code.push(Instruction::DeepCopy);
                 self.code.push(Instruction::AddAssign(slot));
                 self.set_const_slot(slot, None);
                 self.push_null_if(leave_value);
@@ -504,7 +511,9 @@ impl Compiler {
             }
 
             self.compile_expr(expr);
-            self.code.push(Instruction::DeepCopy);
+            if store_needs_isolation(expr) {
+                self.code.push(Instruction::DeepCopy);
+            }
             self.code.push(Instruction::StoreName(slot));
             self.set_const_slot(slot, const_value);
             self.push_null_if(leave_value);

@@ -89,7 +89,7 @@ pub use state::LASHLANG_SNAPSHOT_VERSION;
 pub use state::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, validate_canonical_messagepack_structure,
 };
-pub use state::{Snapshot, SnapshotDecodeError, State};
+pub use state::{GlobalPatch, GlobalPatchOutcome, Snapshot, SnapshotDecodeError, State};
 pub use value::{
     ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY,
     LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,

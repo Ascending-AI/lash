@@ -239,6 +239,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 instruction,
                 super::Instruction::AddAssignIndexNumber { .. }
                     | super::Instruction::AddAssignIndexSlotNumber { .. }
+                    | super::Instruction::AppendAssign(_)
             ) || matches!(
                 instruction,
                 super::Instruction::Binary(BinaryOp::Equal | BinaryOp::NotEqual)
@@ -426,8 +427,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             | super::Instruction::ResolveTypeRef(slot) => self.materialize_slot(slot)?,
             super::Instruction::PathAssign { slot, .. }
             | super::Instruction::AddAssign(slot)
-            | super::Instruction::AddAssignNumber { slot, .. }
-            | super::Instruction::AppendAssign(slot) => self.materialize_mutable_slot(slot)?,
+            | super::Instruction::AddAssignNumber { slot, .. } => {
+                self.materialize_mutable_slot(slot)?;
+            }
             super::Instruction::AddAssignSlot { slot, right } => {
                 self.materialize_mutable_slot(slot)?;
                 self.materialize_slot(right)?;
@@ -444,7 +446,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    fn materialize_mutable_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
+    pub(super) fn materialize_mutable_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
         if let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) {
             *value = self.heap.export_for_mutation(value)?;
         }
@@ -475,14 +477,31 @@ impl<H: ExecutionHost> Vm<'_, H> {
             if let Some(value) = &mut iterator.restore.previous {
                 *value = self.heap.export_for_instruction(value)?;
             }
+            iterator.heapified = false;
         }
+        self.extras_heapified = false;
         Ok(())
     }
 
+    /// Imports every inline compound left in VM state into the heap.
+    ///
+    /// This runs after each instruction, so its cost has to be proportional to
+    /// what the instruction could have changed, not to the data the VM happens
+    /// to hold. The operand stack and the slot table are bounded by the
+    /// program's shape, but iterator cursors and the extra-globals record are
+    /// not: both are written once and then only read, so each carries a flag and
+    /// is scanned exactly once.
     fn heapify_vm_state(&mut self) -> Result<(), RuntimeError> {
         if self.heap.allocation_scope_needs_roots() {
             self.heap.begin_allocation_scope(self.heap_roots());
         }
+        let pending_iterators = self
+            .iter_stack
+            .iter()
+            .enumerate()
+            .filter_map(|(index, iterator)| (!iterator.heapified).then_some(index))
+            .collect::<Vec<_>>();
+        let scan_extras = !self.extras_heapified;
         let mut values = Vec::new();
         values.extend(
             self.stack
@@ -504,14 +523,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .filter(|value| needs_heap_import(value))
                 .cloned(),
         );
-        values.extend(
-            self.slots
-                .extras
-                .values()
-                .filter(|value| needs_heap_import(value))
-                .cloned(),
-        );
-        for iterator in &self.iter_stack {
+        if scan_extras {
+            values.extend(
+                self.slots
+                    .extras
+                    .values()
+                    .filter(|value| needs_heap_import(value))
+                    .cloned(),
+            );
+        }
+        for index in &pending_iterators {
+            let iterator = &self.iter_stack[*index];
             if let super::IterCursor::List {
                 values: iterator_values,
                 ..
@@ -534,36 +556,47 @@ impl<H: ExecutionHost> Vm<'_, H> {
             );
         }
 
-        let imported = self.heap.import_values(values);
-        self.heap.end_allocation_scope();
-        let mut imported = imported?.into_iter();
-        for value in &mut self.stack {
-            replace_imported_value(value, &mut imported);
-        }
-        if let Some(value) = &mut self.last_value {
-            replace_imported_value(value, &mut imported);
-        }
-        for value in self.slots.values.iter_mut().flatten() {
-            replace_imported_value(value, &mut imported);
-        }
-        for entry in &mut self.slots.extras.entries {
-            replace_imported_value(&mut entry.value, &mut imported);
-        }
-        for iterator in &mut self.iter_stack {
-            if let super::IterCursor::List {
-                values: iterator_values,
-                ..
-            } = &mut iterator.cursor
-            {
-                for value in iterator_values.make_mut() {
+        if !values.is_empty() {
+            let imported = self.heap.import_values(values);
+            self.heap.end_allocation_scope();
+            let mut imported = imported?.into_iter();
+            for value in &mut self.stack {
+                replace_imported_value(value, &mut imported);
+            }
+            if let Some(value) = &mut self.last_value {
+                replace_imported_value(value, &mut imported);
+            }
+            for value in self.slots.values.iter_mut().flatten() {
+                replace_imported_value(value, &mut imported);
+            }
+            if scan_extras {
+                for entry in &mut self.slots.extras.entries {
+                    replace_imported_value(&mut entry.value, &mut imported);
+                }
+            }
+            for index in &pending_iterators {
+                let iterator = &mut self.iter_stack[*index];
+                if let super::IterCursor::List {
+                    values: iterator_values,
+                    ..
+                } = &mut iterator.cursor
+                {
+                    for value in iterator_values.make_mut() {
+                        replace_imported_value(value, &mut imported);
+                    }
+                }
+                if let Some(value) = &mut iterator.restore.previous {
                     replace_imported_value(value, &mut imported);
                 }
             }
-            if let Some(value) = &mut iterator.restore.previous {
-                replace_imported_value(value, &mut imported);
-            }
+            debug_assert!(imported.next().is_none());
+        } else {
+            self.heap.end_allocation_scope();
         }
-        debug_assert!(imported.next().is_none());
+        for index in pending_iterators {
+            self.iter_stack[index].heapified = true;
+        }
+        self.extras_heapified = true;
         if self.heap.needs_collection() {
             let roots = self.heap_roots();
             self.heap.collect(roots.iter());

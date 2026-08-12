@@ -3,6 +3,15 @@ pub(crate) struct IterState {
     cursor: IterCursor,
     binding: usize,
     restore: LoopRestore,
+    /// Whether this iterator's captured values have already been imported into
+    /// the heap.
+    ///
+    /// A cursor's values are written exactly once, when the iterator is created
+    /// or restored from a continuation; stepping only advances an index. Once
+    /// the values have been heapified they can never regress to inline
+    /// compounds, so later instructions skip them instead of rescanning the
+    /// whole sequence — which is what made iterating a long list quadratic.
+    heapified: bool,
 }
 
 #[derive(Clone)]

@@ -409,10 +409,32 @@
             .expect_err("dangling root must be rejected");
         assert!(error.to_string().contains("dangling heap reference 99"));
 
-        let object = super::super::heap::HeapObject::List(vec![Value::List(
+        let member_object =
+            super::super::heap::HeapObject::List(vec![Value::Ref(HeapId::from_counter(99))]);
+        let dangling_member = canonical_heap_with(
+            Vec::new(),
+            vec![CanonicalHeapEntry {
+                id: HeapId::from_counter(1),
+                object: CanonicalHeapObject::List {
+                    items: vec![CanonicalValue::Ref {
+                        value: HeapId::from_counter(99),
+                    }],
+                },
+            }],
+            2,
+            1,
+            member_object.logical_bytes(),
+        );
+        let error = Snapshot::from_canonical_bytes(&named_bytes(&dangling_member))
+            .expect_err("dangling member ref must be rejected");
+        assert!(error.to_string().contains("dangling heap reference 99"));
+
+        // An inline compound inside a heap object is rejected outright, so a
+        // reference can never hide below the member level in an accepted wire.
+        let nested_object = super::super::heap::HeapObject::List(vec![Value::List(
             vec![Value::Ref(HeapId::from_counter(99))].into(),
         )]);
-        let dangling_nested = canonical_heap_with(
+        let inline_compound_member = canonical_heap_with(
             Vec::new(),
             vec![CanonicalHeapEntry {
                 id: HeapId::from_counter(1),
@@ -426,11 +448,15 @@
             }],
             2,
             1,
-            object.logical_bytes(),
+            nested_object.logical_bytes(),
         );
-        let error = Snapshot::from_canonical_bytes(&named_bytes(&dangling_nested))
-            .expect_err("nested dangling ref must be rejected");
-        assert!(error.to_string().contains("dangling heap reference 99"));
+        let error = Snapshot::from_canonical_bytes(&named_bytes(&inline_compound_member))
+            .expect_err("inline compound members must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("heap object members must be scalars or heap references")
+        );
     }
 
     #[test]

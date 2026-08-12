@@ -811,6 +811,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_execution_elapsed: std::time::Duration::ZERO,
             heap: Self::new_heap(host),
             heap_initialized: false,
+            extras_heapified: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -841,6 +842,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_execution_elapsed: std::time::Duration::ZERO,
             heap: Self::new_heap(host),
             heap_initialized: false,
+            extras_heapified: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -995,6 +997,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 restore: LoopRestore {
                     previous: iterator.restore_value,
                 },
+                heapified: false,
             })
             .collect();
         Ok(Self {
@@ -1027,6 +1030,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 heap
             },
             heap_initialized: true,
+            extras_heapified: false,
             // A resumed VM records assignments from here on. Continuations are
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are

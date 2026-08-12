@@ -54,11 +54,22 @@ impl HeapObject {
         OBJECT_HEADER_BYTES.saturating_add(payload)
     }
 
-    fn children(&self) -> impl Iterator<Item = HeapId> + '_ {
-        self.values().filter_map(|value| match value {
-            Value::Ref(id) => Some(*id),
-            _ => None,
-        })
+    /// The single source of truth for child discovery.
+    ///
+    /// Every consumer — allocation bookkeeping, reverse parent edges, mark and
+    /// sweep, wire validation, and root traversal — resolves children through
+    /// this one recursive enumerator, so no caller can accidentally see a
+    /// shallower answer than another. Members are normally scalars or
+    /// references (`Heap::from_wire` rejects anything else, and every in-process
+    /// insertion path imports compounds into their own objects), but the
+    /// enumerator still descends into inline compounds so a future member shape
+    /// cannot silently hide a reference.
+    pub(crate) fn child_refs(&self) -> Vec<HeapId> {
+        let mut refs = Vec::new();
+        for value in self.values() {
+            collect_value_refs(value, &mut refs);
+        }
+        refs
     }
 
     fn values(&self) -> Box<dyn Iterator<Item = &Value> + '_> {
@@ -118,7 +129,11 @@ pub(crate) struct Heap {
     next_collection_at: u64,
     collect_every_allocation: bool,
     stress_pins: Vec<Value>,
-    boundary_refs: Vec<((u8, usize), HeapId)>,
+    // Boundary identity is indexed both ways: exported tree identity to object
+    // for import lookups, and object to identity so `forget` is a constant-time
+    // removal instead of a scan.
+    boundary_refs: FxHashMap<(u8, usize), HeapId>,
+    boundary_identities: FxHashMap<HeapId, (u8, usize)>,
     materialized: FxHashMap<HeapId, Value>,
     logical_byte_limit: u64,
 }
@@ -145,7 +160,8 @@ impl Default for Heap {
             next_collection_at: HEAP_GC_ALLOCATION_INTERVAL,
             collect_every_allocation: false,
             stress_pins: Vec::new(),
-            boundary_refs: Vec::new(),
+            boundary_refs: FxHashMap::default(),
+            boundary_identities: FxHashMap::default(),
             materialized: FxHashMap::default(),
             logical_byte_limit: DEFAULT_HEAP_LOGICAL_BYTE_LIMIT,
         }
@@ -192,6 +208,9 @@ impl Heap {
                 );
             }
             prior_id = Some(id);
+            for value in object.values() {
+                validate_object_member(value)?;
+            }
             let logical_bytes = object.logical_bytes();
             heap.live_logical_bytes = heap
                 .live_logical_bytes
@@ -431,7 +450,7 @@ impl Heap {
         self.next_id += 1;
         self.allocations = self.allocations.saturating_add(1);
         self.live_logical_bytes = self.live_logical_bytes.saturating_add(logical_bytes);
-        let children = object.children().collect::<Vec<_>>();
+        let children = object.child_refs();
         let entry = HeapEntry {
             id,
             object,
@@ -603,7 +622,7 @@ impl Heap {
             if !visited.insert(id) {
                 continue;
             }
-            pending.extend(self.get(id)?.children());
+            pending.extend(self.get(id)?.child_refs());
             self.forget(id);
         }
         Ok(())
@@ -665,20 +684,19 @@ impl Heap {
     }
 
     fn boundary_id(&self, identity: (u8, usize)) -> Option<HeapId> {
-        self.boundary_refs
-            .iter()
-            .find_map(|(candidate, id)| (*candidate == identity).then_some(*id))
+        self.boundary_refs.get(&identity).copied()
     }
 
     fn cache_boundary(&mut self, identity: (u8, usize), id: HeapId) {
-        if let Some((_, cached_id)) = self
-            .boundary_refs
-            .iter_mut()
-            .find(|(candidate, _)| *candidate == identity)
+        if let Some(previous) = self.boundary_refs.insert(identity, id)
+            && previous != id
         {
-            *cached_id = id;
-        } else {
-            self.boundary_refs.push((identity, id));
+            self.boundary_identities.remove(&previous);
+        }
+        if let Some(previous_identity) = self.boundary_identities.insert(id, identity)
+            && previous_identity != identity
+        {
+            self.boundary_refs.remove(&previous_identity);
         }
     }
 
@@ -688,11 +706,53 @@ impl Heap {
 
     fn forget(&mut self, id: HeapId) {
         self.materialized.remove(&id);
-        self.boundary_refs.retain(|(_, cached_id)| *cached_id != id);
+        if let Some(identity) = self.boundary_identities.remove(&id) {
+            self.boundary_refs.remove(&identity);
+        }
         self.debug_assert_boundary_cache_invariant();
     }
 
+    /// Moves `parent`'s outgoing edges from `old_children` to `new_children`.
+    ///
+    /// The reverse-edge map is exact rather than an over-approximation: a member
+    /// overwrite drops the replaced child's edge in the same step that adds the
+    /// new one, so nothing waits for the next sweep.
+    fn retarget_parent_edges(
+        &mut self,
+        parent: HeapId,
+        old_children: &[HeapId],
+        new_children: &[HeapId],
+    ) {
+        for child in old_children {
+            if new_children.contains(child) {
+                continue;
+            }
+            if let Some(parents) = self.parents.get_mut(child) {
+                parents.retain(|candidate| *candidate != parent);
+                if parents.is_empty() {
+                    self.parents.remove(child);
+                }
+            }
+        }
+        for child in new_children {
+            if old_children.contains(child) {
+                continue;
+            }
+            let parents = self.parents.entry(*child).or_default();
+            if !parents.contains(&parent) {
+                parents.push(parent);
+            }
+        }
+    }
+
     fn invalidate_materialized_reaching(&mut self, mutated: HeapId) {
+        // Nothing is materialized, so no ancestor can hold a stale export and
+        // the reverse-edge walk has nothing to find. This is the common case
+        // right after `export_for_mutation`, which drops the whole reachable
+        // cache before mutating.
+        if self.materialized.is_empty() {
+            return;
+        }
         let mut pending = vec![mutated];
         let mut visited = BTreeSet::new();
         while let Some(id) = pending.pop() {
@@ -710,7 +770,12 @@ impl Heap {
         self.parents.clear();
         let edges = self
             .objects_in_id_order()
-            .flat_map(|(parent, object)| object.children().map(move |child| (parent, child)))
+            .flat_map(|(parent, object)| {
+                object
+                    .child_refs()
+                    .into_iter()
+                    .map(move |child| (parent, child))
+            })
             .collect::<Vec<_>>();
         for (parent, child) in edges {
             let parents = self.parents.entry(child).or_default();
@@ -721,9 +786,12 @@ impl Heap {
     }
 
     fn debug_assert_boundary_cache_invariant(&self) {
-        debug_assert!(self.boundary_refs.iter().all(|(_, id)| {
-            self.materialized.contains_key(id) && self.id_to_slot.contains_key(id)
+        debug_assert!(self.boundary_refs.iter().all(|(identity, id)| {
+            self.materialized.contains_key(id)
+                && self.id_to_slot.contains_key(id)
+                && self.boundary_identities.get(id) == Some(identity)
         }));
+        debug_assert_eq!(self.boundary_refs.len(), self.boundary_identities.len());
     }
 
     fn export_inner(
@@ -768,25 +836,161 @@ impl Heap {
         Ok(exported)
     }
 
-    #[cfg(test)]
-    pub(crate) fn deep_copy(&mut self, value: &Value) -> Result<Value, RuntimeError> {
-        let mut copied = FxHashMap::default();
-        self.deep_copy_inner(value, &mut copied)
+    /// Copies `value` into a freshly allocated, exclusively owned object graph.
+    ///
+    /// This is the one isolation operation every durable store uses. It is
+    /// recursive by construction: the whole graph reachable from `value` is
+    /// reallocated under fresh IDs, so the result can never share an object with
+    /// any other root or container member. It deliberately ignores the boundary
+    /// materialization cache — that cache exists to make an export/import round
+    /// trip identity-preserving, which is exactly the sharing an isolation must
+    /// not reintroduce.
+    ///
+    /// Staging keeps the operation atomic: IDs are reserved and objects built
+    /// before anything is charged or committed, so a rejected copy leaves the
+    /// heap byte-identical.
+    pub(crate) fn isolate_value(&mut self, value: &Value) -> Result<Value, RuntimeError> {
+        let mut staging = IsolationStaging {
+            base: self.next_id,
+            objects: Vec::new(),
+            mapping: FxHashMap::default(),
+        };
+        let root = self.stage_isolation(value, &mut staging)?;
+        if staging.objects.is_empty() {
+            return Ok(root);
+        }
+        let objects = staging
+            .objects
+            .into_iter()
+            .map(|object| object.expect("every reserved isolation ID is filled"))
+            .collect::<Vec<_>>();
+        let staged_bytes = objects.iter().fold(0_u64, |total, object| {
+            total.saturating_add(object.logical_bytes())
+        });
+        let attempted = self.live_logical_bytes.saturating_add(staged_bytes);
+        if attempted > self.logical_byte_limit {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: self.logical_byte_limit,
+                attempted,
+            });
+        }
+        for (offset, object) in objects.into_iter().enumerate() {
+            let logical_bytes = object.logical_bytes();
+            let committed = self.commit_precharged_object(object, logical_bytes);
+            debug_assert_eq!(
+                committed,
+                Value::Ref(HeapId::from_counter(staging.base + offset as u64))
+            );
+        }
+        Ok(root)
     }
 
-    pub(crate) fn isolate_value(&mut self, value: &Value) -> Result<Value, RuntimeError> {
+    fn stage_isolation(
+        &self,
+        value: &Value,
+        staging: &mut IsolationStaging,
+    ) -> Result<Value, RuntimeError> {
         match value {
-            Value::Ref(id) => self.allocate(self.get(*id)?.clone()),
-            Value::Tuple(_) | Value::List(_) | Value::Record(_) => self.import(value.clone()),
+            Value::Ref(id) => {
+                if let Some(copy) = staging.mapping.get(id) {
+                    return Ok(Value::Ref(*copy));
+                }
+                // Reserve before recursing so a cyclic graph terminates and both
+                // ends of the cycle name the same copy.
+                let copy = staging.reserve()?;
+                staging.mapping.insert(*id, copy);
+                let object = self.stage_isolated_object(self.get(*id)?, staging)?;
+                staging.fill(copy, object);
+                Ok(Value::Ref(copy))
+            }
+            Value::Tuple(_) | Value::List(_) | Value::Record(_) => {
+                let copy = staging.reserve()?;
+                let object = self.stage_isolated_inline(value, staging)?;
+                staging.fill(copy, object);
+                Ok(Value::Ref(copy))
+            }
             value => Ok(value.clone()),
         }
+    }
+
+    fn stage_isolated_object(
+        &self,
+        object: &HeapObject,
+        staging: &mut IsolationStaging,
+    ) -> Result<HeapObject, RuntimeError> {
+        Ok(match object {
+            HeapObject::Tuple(values) => HeapObject::Tuple(
+                values
+                    .iter()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .collect::<Result<_, _>>()?,
+            ),
+            HeapObject::List(values) => HeapObject::List(
+                values
+                    .iter()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .collect::<Result<_, _>>()?,
+            ),
+            HeapObject::Record(record) => {
+                let mut copied = record_with_capacity(record.len());
+                for entry in record.entries.iter() {
+                    copied.insert_symbolized(
+                        entry.symbol,
+                        entry.name.clone(),
+                        self.stage_isolation(&entry.value, staging)?,
+                    );
+                }
+                HeapObject::Record(Box::new(copied))
+            }
+        })
+    }
+
+    fn stage_isolated_inline(
+        &self,
+        value: &Value,
+        staging: &mut IsolationStaging,
+    ) -> Result<HeapObject, RuntimeError> {
+        Ok(match value {
+            Value::Tuple(values) => HeapObject::Tuple(
+                values
+                    .iter()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Value::List(values) => HeapObject::List(
+                values
+                    .iter()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Value::Record(record) => {
+                let mut copied = record_with_capacity(record.len());
+                for entry in record.entries.iter() {
+                    copied.insert_symbolized(
+                        entry.symbol,
+                        entry.name.clone(),
+                        self.stage_isolation(&entry.value, staging)?,
+                    );
+                }
+                HeapObject::Record(Box::new(copied))
+            }
+            _ => unreachable!("inline isolation only reaches compound values"),
+        })
     }
 
     pub(crate) fn push_list(&mut self, target: &Value, item: Value) -> Result<Value, RuntimeError> {
         let Value::Ref(id) = target else {
             return Err(RuntimeError::PushUnsupported);
         };
-        let item = self.import(item)?;
+        // Insertions hold an exclusively owned copy like every other durable
+        // store. A reference has already been isolated by the lowering that
+        // produced it; an inline compound is isolated here so it can never enter
+        // a container while another root still holds the same object.
+        let item = if matches!(item, Value::Ref(_)) {
+            self.import(item)?
+        } else {
+            self.isolate_value(&item)?
+        };
         let children = value_refs(&item);
         let added_bytes = value_logical_bytes(&item);
         let next_live = self.live_logical_bytes.saturating_add(added_bytes);
@@ -883,6 +1087,7 @@ impl Heap {
             }
             HeapObject::Tuple(_) => return Err(RuntimeError::ImmutableTupleIndexes),
         };
+        let current_member = current.clone();
         let value = match current {
             Value::Number(left) => Value::Number(left + right),
             left => add_values(left, Value::Number(right))?,
@@ -917,6 +1122,10 @@ impl Heap {
                 attempted: next_live,
             });
         }
+        let mut replaced_children = Vec::new();
+        collect_value_refs(&current_member, &mut replaced_children);
+        let mut added_children = Vec::new();
+        collect_value_refs(&value, &mut added_children);
         match (
             &mut self.slots[slot].as_mut().expect("heap slot exists").object,
             target_kind,
@@ -929,6 +1138,7 @@ impl Heap {
             }
             _ => unreachable!("object kind was checked"),
         }
+        self.retarget_parent_edges(*id, &replaced_children, &added_children);
         let entry = self.slots[slot].as_mut().expect("heap slot exists");
         entry.logical_bytes = entry_bytes;
         self.live_logical_bytes = next_live;
@@ -984,57 +1194,6 @@ impl Heap {
     }
 
     #[cfg(test)]
-    fn deep_copy_inner(
-        &mut self,
-        value: &Value,
-        copied: &mut FxHashMap<HeapId, HeapId>,
-    ) -> Result<Value, RuntimeError> {
-        let Value::Ref(id) = value else {
-            return self.import(value.clone());
-        };
-        if let Some(copy) = copied.get(id) {
-            return Ok(Value::Ref(*copy));
-        }
-        let object = self.get(*id)?.clone();
-        let placeholder = match &object {
-            HeapObject::Tuple(_) => HeapObject::Tuple(Vec::new()),
-            HeapObject::List(_) => HeapObject::List(Vec::new()),
-            HeapObject::Record(_) => HeapObject::Record(Box::default()),
-        };
-        let Value::Ref(copy_id) = self.allocate(placeholder)? else {
-            unreachable!("heap allocation always returns a reference")
-        };
-        copied.insert(*id, copy_id);
-        let copied_object = match object {
-            HeapObject::Tuple(values) => HeapObject::Tuple(
-                values
-                    .iter()
-                    .map(|value| self.deep_copy_inner(value, copied))
-                    .collect::<Result<_, _>>()?,
-            ),
-            HeapObject::List(values) => HeapObject::List(
-                values
-                    .iter()
-                    .map(|value| self.deep_copy_inner(value, copied))
-                    .collect::<Result<_, _>>()?,
-            ),
-            HeapObject::Record(record) => {
-                let mut output = record_with_capacity(record.len());
-                for entry in record.entries.iter() {
-                    output.insert_symbolized(
-                        entry.symbol,
-                        entry.name.clone(),
-                        self.deep_copy_inner(&entry.value, copied)?,
-                    );
-                }
-                HeapObject::Record(Box::new(output))
-            }
-        };
-        self.replace_object(copy_id, copied_object)?;
-        Ok(Value::Ref(copy_id))
-    }
-
-    #[cfg(test)]
     pub(crate) fn replace_object(
         &mut self,
         id: HeapId,
@@ -1065,25 +1224,12 @@ impl Heap {
         let entry = self.slots[slot]
             .as_mut()
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        let old_children = entry.object.children().collect::<Vec<_>>();
-        let new_children = object.children().collect::<Vec<_>>();
+        let old_children = entry.object.child_refs();
+        let new_children = object.child_refs();
         entry.object = object;
         entry.logical_bytes = new_bytes;
         self.live_logical_bytes = next_live;
-        for child in old_children {
-            if let Some(parents) = self.parents.get_mut(&child) {
-                parents.retain(|parent| *parent != id);
-            }
-            if self.parents.get(&child).is_some_and(Vec::is_empty) {
-                self.parents.remove(&child);
-            }
-        }
-        for child in new_children {
-            let parents = self.parents.entry(child).or_default();
-            if !parents.contains(&id) {
-                parents.push(id);
-            }
-        }
+        self.retarget_parent_edges(id, &old_children, &new_children);
         self.invalidate_materialized_reaching(id);
         Ok(())
     }
@@ -1092,14 +1238,14 @@ impl Heap {
         let mut marked = BTreeSet::new();
         let mut pending = Vec::new();
         for root in roots {
-            append_root_heap_ids(root, &mut pending);
+            collect_value_refs(root, &mut pending);
         }
         while let Some(id) = pending.pop() {
             if !marked.insert(id) {
                 continue;
             }
             if let Ok(object) = self.get(id) {
-                pending.extend(object.children());
+                pending.extend(object.child_refs());
             }
         }
         for slot in 0..self.slots.len() {
@@ -1110,14 +1256,7 @@ impl Heap {
                 continue;
             }
             let entry = self.slots[slot].take().expect("live heap slot was checked");
-            for child in entry.object.children() {
-                if let Some(parents) = self.parents.get_mut(&child) {
-                    parents.retain(|parent| *parent != entry.id);
-                }
-                if self.parents.get(&child).is_some_and(Vec::is_empty) {
-                    self.parents.remove(&child);
-                }
-            }
+            self.retarget_parent_edges(entry.id, &entry.object.child_refs(), &[]);
             self.parents.remove(&entry.id);
             self.id_to_slot.remove(&entry.id);
             self.forget(entry.id);
@@ -1147,6 +1286,40 @@ impl Heap {
             .and_then(|period| period.checked_add(1))
             .and_then(|period| period.checked_mul(HEAP_GC_ALLOCATION_INTERVAL))
             .unwrap_or(u64::MAX);
+    }
+}
+
+/// Reserved IDs and their objects for one in-flight isolation.
+struct IsolationStaging {
+    base: u64,
+    objects: Vec<Option<HeapObject>>,
+    mapping: FxHashMap<HeapId, HeapId>,
+}
+
+impl IsolationStaging {
+    fn reserve(&mut self) -> Result<HeapId, RuntimeError> {
+        let id = self
+            .base
+            .checked_add(self.objects.len() as u64)
+            .ok_or(RuntimeError::HeapIdExhausted)?;
+        id.checked_add(1).ok_or(RuntimeError::HeapIdExhausted)?;
+        self.objects.push(None);
+        Ok(HeapId::from_counter(id))
+    }
+
+    fn fill(&mut self, id: HeapId, object: HeapObject) {
+        let offset = (id.get() - self.base) as usize;
+        self.objects[offset] = Some(object);
+    }
+}
+
+fn validate_object_member(value: &Value) -> Result<(), String> {
+    match value {
+        Value::Tuple(_) | Value::List(_) | Value::Record(_) => Err(
+            "heap object members must be scalars or heap references, not inline compounds"
+                .to_string(),
+        ),
+        _ => Ok(()),
     }
 }
 
@@ -1187,22 +1360,30 @@ impl Clone for Heap {
             next_collection_at: self.next_collection_at,
             collect_every_allocation: self.collect_every_allocation,
             stress_pins: Vec::new(),
-            boundary_refs: Vec::new(),
+            boundary_refs: FxHashMap::default(),
+            boundary_identities: FxHashMap::default(),
             materialized: FxHashMap::default(),
             logical_byte_limit: self.logical_byte_limit,
         }
     }
 }
 
+/// Two heaps are equal when they hold the same live objects under the same IDs
+/// and the same meters.
+///
+/// Storage layout — which slot an object occupies, which slots are vacant, and
+/// the free list — is a private allocation detail that a decode/encode round
+/// trip legitimately compacts, so it is deliberately excluded. Including it made
+/// `decode(encode(state)) == state` fail for any program that ever allocated a
+/// temporary.
 impl PartialEq for Heap {
     fn eq(&self, other: &Self) -> bool {
-        self.slots == other.slots
-            && self.id_to_slot == other.id_to_slot
-            && self.free_slots == other.free_slots
-            && self.next_id == other.next_id
+        self.next_id == other.next_id
             && self.allocations == other.allocations
             && self.live_logical_bytes == other.live_logical_bytes
             && self.schedule_version == other.schedule_version
+            && self.id_to_slot.len() == other.id_to_slot.len()
+            && self.objects_in_id_order().eq(other.objects_in_id_order())
     }
 }
 
@@ -1212,23 +1393,6 @@ fn compound_identity(value: &Value) -> Option<(u8, usize)> {
         Value::List(values) => Some((1, values.identity())),
         Value::Record(record) => Some((2, std::sync::Arc::as_ptr(record) as usize)),
         _ => None,
-    }
-}
-
-fn append_root_heap_ids(value: &Value, pending: &mut Vec<HeapId>) {
-    match value {
-        Value::Ref(id) => pending.push(*id),
-        Value::Tuple(values) | Value::List(values) => {
-            for value in values.iter() {
-                append_root_heap_ids(value, pending);
-            }
-        }
-        Value::Record(record) => {
-            for value in record.values() {
-                append_root_heap_ids(value, pending);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1260,7 +1424,7 @@ mod tests {
     }
 
     #[test]
-    fn deep_copy_preserves_cycles_with_fresh_ids() {
+    fn isolation_preserves_cycles_with_fresh_ids() {
         let mut heap = Heap::default();
         let Value::Ref(original) = heap
             .allocate(HeapObject::List(Vec::new()))
@@ -1270,7 +1434,10 @@ mod tests {
         };
         heap.replace_object(original, HeapObject::List(vec![Value::Ref(original)]))
             .expect("cycle");
-        let Value::Ref(copy) = heap.deep_copy(&Value::Ref(original)).expect("deep copy") else {
+        let Value::Ref(copy) = heap
+            .isolate_value(&Value::Ref(original))
+            .expect("deep copy")
+        else {
             unreachable!()
         };
         assert_ne!(copy, original);
