@@ -186,9 +186,9 @@ pub(super) struct SessionExecutionLeaseObservation {
     pub(super) fencing_token: u64,
     // PostgreSQL uses database-authoritative wall time while local stores use
     // the injected clock. Compare the durable temporal contract (claimed and
-    // TTL) rather than incomparable clock-domain epoch values.
+    // the store-authored term) rather than incomparable clock-domain epoch values.
     pub(super) claimed: bool,
-    pub(super) ttl_ms: Option<u64>,
+    pub(super) lease_term_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

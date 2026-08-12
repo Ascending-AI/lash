@@ -43,6 +43,7 @@ fn test_session_execution_lease(
         ),
         fencing_token,
         claimed_at_epoch_ms,
+        lease_term_ms: lease_ttl_ms,
         expires_at_epoch_ms: claimed_at_epoch_ms.saturating_add(lease_ttl_ms),
     }
 }

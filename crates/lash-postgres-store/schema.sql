@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS lash_session_execution_leases (
     lease_token TEXT,
     lease_fencing_token BIGINT NOT NULL DEFAULT 0,
     lease_claimed_at_ms BIGINT NOT NULL DEFAULT 0,
+    lease_term_ms BIGINT NOT NULL DEFAULT 0,
     lease_expires_at_ms BIGINT NOT NULL DEFAULT 0
 );
 

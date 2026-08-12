@@ -243,6 +243,7 @@ table lash_session_execution_leases
   column lease_owner_id text nullable
   column lease_owner_incarnation_id text nullable
   column lease_owner_liveness_json text nullable
+  column lease_term_ms bigint not-null default
   column lease_token text nullable
   column session_id text not-null
   primary-key (session_id)

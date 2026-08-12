@@ -666,6 +666,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     assert_eq!(session_lease.fencing_token, 2);
     assert_eq!(session_lease.claimed_at_epoch_ms, FIXTURE_WRITE_MS);
+    assert_eq!(session_lease.lease_term_ms, 100);
     assert_eq!(session_lease.expires_at_epoch_ms, FIXTURE_WRITE_MS + 100);
     assert!(
         session_lease.expires_at_epoch_ms <= FIXTURE_READ_MS,

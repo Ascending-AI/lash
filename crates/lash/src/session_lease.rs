@@ -258,6 +258,7 @@ mod tests {
                 lease_token: "token".to_string(),
                 fencing_token: 9,
                 claimed_at_epoch_ms: 4_000,
+                lease_term_ms: 5_000,
                 expires_at_epoch_ms: 9_000,
             }),
         );

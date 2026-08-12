@@ -138,11 +138,12 @@ impl InMemorySessionStore {
                     .get(record_id)
                     .expect("session-lease counter snapshot row");
                 format!(
-                    "{}:{:?}:{:?}:{}:{}",
+                    "{}:{:?}:{:?}:{}:{}:{}",
                     row.fencing_token,
                     row.owner,
                     row.lease_token,
                     row.claimed_at_epoch_ms,
+                    row.lease_term_ms,
                     row.expires_at_epoch_ms
                 )
             }

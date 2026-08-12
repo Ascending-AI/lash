@@ -21,10 +21,10 @@ use crate::store::{RuntimePersistence, SessionExecutionLeaseClaimOutcome};
 /// Drive the durable queued-drain wait policy against `store`.
 ///
 /// Vector 1 (crashed holder): a foreign holder that never renews is waited out
-/// and then displaced, within the policy's own budget of twice the observed TTL.
-/// Vector 2 (live holder): a holder that renews is detected as alive on the very
-/// next observation, the drain gives up, and the holder row is left byte-identical
-/// to the renewal the holder itself installed.
+/// and then displaced, within twice the first observed row's persisted lease term.
+/// Vector 2 (live holder): the first observed row has already renewed three
+/// times, then one more renewal is detected as alive on the next observation;
+/// the drain gives up and leaves the holder row byte-identical to that renewal.
 pub async fn durable_queued_drain_wait_contract(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -50,13 +50,7 @@ async fn waits_out_a_crashed_holder_then_claims(
         .expect("the crashed holder takes the lane");
 
     let mut wait = QueuedLaneWait::default();
-    let mut rounds = 0_usize;
     let acquisition = loop {
-        rounds += 1;
-        assert!(
-            rounds <= 16,
-            "the crashed-holder wait must terminate; it ran {rounds} rounds"
-        );
         match store
             .try_claim_session_execution_lease(session_id, &drain, "drain-executor", ttl_ms)
             .await
@@ -64,6 +58,12 @@ async fn waits_out_a_crashed_holder_then_claims(
         {
             SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => break acquisition,
             SessionExecutionLeaseClaimOutcome::Busy { holder: observed } => {
+                assert!(
+                    wait.budget_ms() == 0 || wait.waited_ms() < wait.budget_ms(),
+                    "the crashed-holder wait must terminate inside its budget; waited {}ms of {}ms",
+                    wait.waited_ms(),
+                    wait.budget_ms()
+                );
                 assert_eq!(observed.executor_id, "crashed-holder-executor");
                 match wait.observe(&observed) {
                     QueuedLaneWaitStep::Wait { slice_ms } => {
@@ -105,12 +105,24 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
     let session_id = "durable-queued-drain-wait-live";
     let live = crate::LeaseOwnerIdentity::opaque("live-host", "live-host:boot");
     let drain = crate::LeaseOwnerIdentity::opaque("drain-host", "drain-host:boot");
-    let holder = store
+    let mut holder = store
         .try_claim_session_execution_lease(session_id, &live, "live-holder-executor", ttl_ms)
         .await
         .expect("claim the live holder's lane")
         .acquired()
         .expect("the live holder takes the lane");
+
+    for _ in 0..3 {
+        lease_timing.pass_wait_slice(25).await;
+        holder = store
+            .renew_session_execution_lease(&holder.fence(), ttl_ms)
+            .await
+            .expect("the live holder renews before its first observation");
+    }
+    match lease_timing {
+        RuntimePersistenceLeaseTiming::Realtime => assert_eq!(holder.lease_term_ms, 500),
+        RuntimePersistenceLeaseTiming::Controlled(_) => assert_eq!(holder.lease_term_ms, 50),
+    }
 
     let mut wait = QueuedLaneWait::default();
     let first = busy_holder(store, session_id, &drain, ttl_ms).await;

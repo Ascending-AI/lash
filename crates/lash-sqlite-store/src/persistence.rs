@@ -1103,14 +1103,23 @@ impl SessionExecutionLeaseStore for Store {
                                 "session_execution_lease_expires_at_ms",
                                 expires_at,
                             )?;
+                            let sql_lease_term =
+                                sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
                             let claimed_at = current.claimed_at_ms;
                             tx.execute(
                                 "UPDATE session_execution_leases
                                  SET lease_token = ?2,
                                      lease_claimed_at_ms = ?3,
-                                     lease_expires_at_ms = ?4
+                                     lease_expires_at_ms = ?4,
+                                     lease_term_ms = ?5
                                  WHERE session_id = ?1",
-                                params![session_id, lease_token, claimed_at as i64, sql_expires_at],
+                                params![
+                                    session_id,
+                                    lease_token,
+                                    claimed_at as i64,
+                                    sql_expires_at,
+                                    sql_lease_term
+                                ],
                             )
                             .map_err(sqlite_error)?;
                             // Reentry advances no generation: nobody is displaced.
@@ -1122,6 +1131,7 @@ impl SessionExecutionLeaseStore for Store {
                                     lease_token,
                                     fencing_token: current.fencing_token,
                                     claimed_at_epoch_ms: claimed_at,
+                                    lease_term_ms: lease_ttl_ms,
                                     expires_at_epoch_ms: expires_at,
                                 }),
                             ));
@@ -1239,9 +1249,14 @@ impl SessionExecutionLeaseStore for Store {
                         "session_execution_lease_expires_at_ms",
                         expires_at,
                     )?;
+                    let sql_lease_term = sql_counter_value(
+                        "session_execution_lease_term_ms",
+                        lease_ttl_ms,
+                    )?;
                     let renewed = tx.execute(
                         "UPDATE session_execution_leases
-                         SET lease_expires_at_ms = ?6
+                         SET lease_expires_at_ms = ?6,
+                             lease_term_ms = ?7
                          WHERE session_id = ?1
                            AND lease_owner_id = ?2
                            AND lease_owner_incarnation_id = ?3
@@ -1253,7 +1268,8 @@ impl SessionExecutionLeaseStore for Store {
                             fence.owner.incarnation_id,
                             fence.executor_id,
                             fence.lease_token,
-                            sql_expires_at
+                            sql_expires_at,
+                            sql_lease_term
                         ],
                     )
                     .map_err(sqlite_error)?;
@@ -1280,6 +1296,7 @@ impl SessionExecutionLeaseStore for Store {
                         lease_token: fence.lease_token,
                         fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_ms,
+                        lease_term_ms: lease_ttl_ms,
                         expires_at_epoch_ms: expires_at,
                     })
                 })();
@@ -3413,6 +3430,7 @@ struct SessionExecutionLeaseRow {
     lease_token: Option<String>,
     fencing_token: u64,
     claimed_at_ms: u64,
+    lease_term_ms: u64,
     expires_at_ms: u64,
 }
 
@@ -3425,7 +3443,7 @@ fn load_session_execution_lease_row_conn(
             "SELECT lease_owner_id, lease_token, lease_fencing_token,
                     lease_claimed_at_ms, lease_expires_at_ms,
                     lease_owner_incarnation_id, lease_owner_liveness_json,
-                    lease_executor_id
+                    lease_executor_id, lease_term_ms
              FROM session_execution_leases
              WHERE session_id = ?1",
             params![session_id],
@@ -3446,6 +3464,11 @@ fn load_session_execution_lease_row_conn(
                         "SessionExecutionLease",
                         "claimed_at_ms",
                         row.get(3)?,
+                    )?,
+                    lease_term_ms: u64_from_sql(
+                        "SessionExecutionLease",
+                        "lease_term_ms",
+                        row.get(8)?,
                     )?,
                     expires_at_ms: u64_from_sql(
                         "SessionExecutionLease",
@@ -3488,6 +3511,7 @@ fn row_to_session_execution_lease(
         })?,
         fencing_token: row.fencing_token,
         claimed_at_epoch_ms: row.claimed_at_ms,
+        lease_term_ms: row.lease_term_ms,
         expires_at_epoch_ms: row.expires_at_ms,
     })
 }
@@ -3516,13 +3540,14 @@ fn acquire_session_execution_lease_conn(
     )?;
     let expires_at = now.saturating_add(lease_ttl_ms);
     let sql_expires_at = sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
+    let sql_lease_term = sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
     conn.execute(
         "INSERT INTO session_execution_leases (
             session_id, lease_owner_id, lease_owner_incarnation_id, lease_executor_id,
             lease_owner_liveness_json, lease_token, lease_fencing_token,
-            lease_claimed_at_ms, lease_expires_at_ms
+            lease_claimed_at_ms, lease_expires_at_ms, lease_term_ms
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(session_id) DO UPDATE SET
             lease_owner_id = excluded.lease_owner_id,
             lease_owner_incarnation_id = excluded.lease_owner_incarnation_id,
@@ -3531,7 +3556,8 @@ fn acquire_session_execution_lease_conn(
             lease_token = excluded.lease_token,
             lease_fencing_token = excluded.lease_fencing_token,
             lease_claimed_at_ms = excluded.lease_claimed_at_ms,
-            lease_expires_at_ms = excluded.lease_expires_at_ms",
+            lease_expires_at_ms = excluded.lease_expires_at_ms,
+            lease_term_ms = excluded.lease_term_ms",
         params![
             session_id,
             owner.owner_id,
@@ -3541,7 +3567,8 @@ fn acquire_session_execution_lease_conn(
             lease_token,
             sql_fencing_token,
             now as i64,
-            sql_expires_at
+            sql_expires_at,
+            sql_lease_term
         ],
     )
     .map_err(sqlite_error)?;
@@ -3552,6 +3579,7 @@ fn acquire_session_execution_lease_conn(
         lease_token: lease_token.to_string(),
         fencing_token,
         claimed_at_epoch_ms: now,
+        lease_term_ms: lease_ttl_ms,
         expires_at_epoch_ms: expires_at,
     })
 }
@@ -3592,6 +3620,7 @@ fn release_session_execution_lease_conn(
              lease_owner_liveness_json = NULL,
              lease_token = NULL,
              lease_claimed_at_ms = 0,
+             lease_term_ms = 0,
              lease_expires_at_ms = 0
          WHERE session_id = ?1
            AND lease_owner_id = ?2

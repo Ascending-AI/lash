@@ -359,6 +359,14 @@ match session.turn(input).run().await {
         retry_or_report(err, session)?;
     }
     Err(lash::EmbedError::Runtime(err))
+        if err.code == RuntimeErrorCode::SessionExecutionLaneBusy =&gt;
+    {
+        // A durable workflow controller's queued drain found the lane held by
+        // a live executor and stopped waiting: nothing was consumed, so let
+        // the engine's retry policy re-drive this invocation unchanged.
+        retry_later(err)?;
+    }
+    Err(lash::EmbedError::Runtime(err))
         if err.code == RuntimeErrorCode::StoreCommitContended =&gt;
     {
         // The failed commit published nothing: retry the same operation unchanged.
@@ -371,6 +379,7 @@ match session.turn(input).run().await {
     }
     Err(other) =&gt; bail!(other),
 }</code></pre>
+      <p>The retry ladder distinguishes authority loss from safe redrive: <code>session_execution_lease_lost</code> requires reopening durable state, while <code>session_execution_lane_busy</code> means a durable queued drain consumed nothing and left its row pending, so the workflow engine may retry the same invocation unchanged. <code>store_commit_contended</code> is likewise safe to retry unchanged; an ambiguous <code>store_commit_failed</code> requires reload before retry.</p>
       <p>Hosts expecting concurrent access should serialize at their layer or re-open the session after conflict and decide how to merge intent.</p>
     </div>
 

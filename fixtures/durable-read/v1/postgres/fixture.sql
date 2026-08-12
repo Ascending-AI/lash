@@ -9,7 +9,7 @@
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET client_encoding = 'UTF8';
+SET client_encoding = 'SQL_ASCII';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -446,6 +446,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_execution_leases (
     lease_token text,
     lease_fencing_token bigint DEFAULT 0 NOT NULL,
     lease_claimed_at_ms bigint DEFAULT 0 NOT NULL,
+    lease_term_ms bigint DEFAULT 0 NOT NULL,
     lease_expires_at_ms bigint DEFAULT 0 NOT NULL
 );
 
@@ -852,7 +853,7 @@ INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgre
 -- Data for Name: lash_session_execution_leases; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('durable-read-fixture', 'durable-read-session-owner', 'durable-read-session-incarnation', 'durable-read-retained-executor', NULL, 'durable-read-retained-session-lease', 2, 1700000000000, 1700000000100);
+INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('durable-read-fixture', 'durable-read-session-owner', 'durable-read-session-incarnation', 'durable-read-retained-executor', NULL, 'durable-read-retained-session-lease', 2, 1700000000000, 100, 1700000000100);
 
 
 --

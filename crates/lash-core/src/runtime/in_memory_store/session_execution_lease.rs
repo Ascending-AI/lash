@@ -32,6 +32,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 if current.lease_token.as_deref() != Some(lease_token) {
                     current.lease_token = Some(lease_token.to_string());
                 }
+                current.lease_term_ms = lease_ttl_ms;
                 current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
                 // Reentry advances no generation, so it displaces nobody.
                 return Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
@@ -163,6 +164,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 },
             );
         }
+        current.lease_term_ms = lease_ttl_ms;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         let renewed = crate::SessionExecutionLease {
             session_id: fence.session_id.clone(),
@@ -171,6 +173,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             lease_token: fence.lease_token.clone(),
             fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+            lease_term_ms: current.lease_term_ms,
             expires_at_epoch_ms: current.expires_at_epoch_ms,
         };
         #[cfg(test)]

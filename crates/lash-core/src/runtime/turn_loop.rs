@@ -901,7 +901,22 @@ impl LashRuntime {
                         .sleep(std::time::Duration::from_millis(slice_ms));
                     tokio::select! {
                         () = sleep => {}
-                        () = opts.cancel.cancelled() => return Ok(None),
+                        () = opts.cancel.cancelled() => {
+                            let give_up = queued_lane_wait::QueuedLaneGiveUp::CancelledWhileWaiting;
+                            let waited_ms = wait.waited_ms();
+                            queued_lane_wait::trace_busy_gave_up(
+                                &self.state.session_id,
+                                &holder,
+                                give_up,
+                                waited_ms,
+                            );
+                            return Err(queued_lane_wait::lane_busy_error(
+                                &self.state.session_id,
+                                &holder,
+                                give_up,
+                                waited_ms,
+                            ));
+                        },
                     }
                 }
             }

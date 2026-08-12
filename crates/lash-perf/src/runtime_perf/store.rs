@@ -109,6 +109,7 @@ struct RuntimePerfSessionExecutionLease {
     lease_token: Option<String>,
     fencing_token: u64,
     claimed_at_epoch_ms: u64,
+    lease_term_ms: u64,
     expires_at_epoch_ms: u64,
 }
 
@@ -235,6 +236,7 @@ impl RuntimePerfStore {
             current.executor_id = None;
             current.lease_token = None;
             current.claimed_at_epoch_ms = 0;
+            current.lease_term_ms = 0;
             current.expires_at_epoch_ms = 0;
             true
         } else {
@@ -847,6 +849,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 if current.lease_token.as_deref() != Some(lease_token) {
                     current.lease_token = Some(lease_token.to_string());
                 }
+                current.lease_term_ms = lease_ttl_ms;
                 current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
                     SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
@@ -856,6 +859,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                         lease_token: current.lease_token.clone().expect("live lease token set"),
                         fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+                        lease_term_ms: current.lease_term_ms,
                         expires_at_epoch_ms: current.expires_at_epoch_ms,
                     }),
                 ));
@@ -871,6 +875,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                     lease_token: current.lease_token.clone().expect("live lease token set"),
                     fencing_token: current.fencing_token,
                     claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+                    lease_term_ms: current.lease_term_ms,
                     expires_at_epoch_ms: current.expires_at_epoch_ms,
                 },
             });
@@ -900,6 +905,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         current.executor_id = Some(executor_id.to_string());
         current.lease_token = Some(lease_token.to_string());
         current.claimed_at_epoch_ms = now;
+        current.lease_term_ms = lease_ttl_ms;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         let lease = SessionExecutionLease {
             session_id: session_id.to_string(),
@@ -908,6 +914,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
             lease_token: current.lease_token.clone().expect("lease token set"),
             fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+            lease_term_ms: current.lease_term_ms,
             expires_at_epoch_ms: current.expires_at_epoch_ms,
         };
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
@@ -962,6 +969,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 session_id: fence.session_id.clone(),
             });
         }
+        current.lease_term_ms = lease_ttl_ms;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         Ok(SessionExecutionLease {
             session_id: fence.session_id.clone(),
@@ -970,6 +978,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
             lease_token: fence.lease_token.clone(),
             fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+            lease_term_ms: current.lease_term_ms,
             expires_at_epoch_ms: current.expires_at_epoch_ms,
         })
     }
@@ -1003,6 +1012,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 lease_token,
                 fencing_token: current.fencing_token,
                 claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+                lease_term_ms: current.lease_term_ms,
                 expires_at_epoch_ms: current.expires_at_epoch_ms,
             })
         }))

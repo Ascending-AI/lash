@@ -121,6 +121,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
                 lease_token: claim_nonce.as_str().to_string(),
                 fencing_token: 1,
                 claimed_at_epoch_ms: 0,
+                lease_term_ms: lease_ttl_ms,
                 expires_at_epoch_ms: lease_ttl_ms,
             }),
         ))
@@ -138,6 +139,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
             lease_token: fence.lease_token.clone(),
             fencing_token: fence.fencing_token,
             claimed_at_epoch_ms: 0,
+            lease_term_ms: lease_ttl_ms,
             expires_at_epoch_ms: lease_ttl_ms,
         })
     }

@@ -276,6 +276,7 @@ impl InMemorySessionStore {
                 lease_token: lease.lease_token.clone(),
                 fencing_token: lease.fencing_token,
                 claimed_at_epoch_ms: lease.claimed_at_epoch_ms,
+                lease_term_ms: lease.lease_term_ms,
                 expires_at_epoch_ms: lease.expires_at_epoch_ms,
             })
             .collect::<Vec<_>>();
@@ -298,6 +299,7 @@ pub struct RawSessionExecutionLeaseRow {
     pub lease_token: Option<String>,
     pub fencing_token: u64,
     pub claimed_at_epoch_ms: u64,
+    pub lease_term_ms: u64,
     pub expires_at_epoch_ms: u64,
 }
 

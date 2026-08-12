@@ -243,12 +243,13 @@ async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) 
     .expect("normalize server-authoritative fixture process lease");
     sqlx::query(
         "UPDATE lash_session_execution_leases
-         SET lease_claimed_at_ms = $2, lease_expires_at_ms = $3
+         SET lease_claimed_at_ms = $2, lease_expires_at_ms = $3, lease_term_ms = $4
          WHERE session_id = $1",
     )
     .bind(fixture::SESSION_ID)
     .bind(fixture::FIXTURE_WRITE_MS as i64)
     .bind((fixture::FIXTURE_WRITE_MS + 100) as i64)
+    .bind(100_i64)
     .execute(storage.pool())
     .await
     .expect("normalize server-authoritative fixture session lease");

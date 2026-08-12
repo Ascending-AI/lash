@@ -2818,6 +2818,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .acquired()
         .expect("fresh retry claim acquired");
     assert_eq!(fresh_retry.lease_token, fresh_retry_nonce.as_str());
+    assert_eq!(fresh_retry.lease_term_ms, 120_000);
     let fresh_retried = store
         .try_claim_session_execution_lease_with_token(
             "fresh-retry",
@@ -2910,7 +2911,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
             &owner_a,
             "owner-a-executor",
             &reentry_nonce,
-            120_000,
+            130_000,
         )
         .await
         .expect("same incarnation may re-enter live session lease")
@@ -2922,6 +2923,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     );
     assert_eq!(reentered.fencing_token, first.fencing_token);
     assert_eq!(reentered.lease_token, reentry_nonce.as_str());
+    assert_eq!(reentered.lease_term_ms, 130_000);
     assert_eq!(
         reentered.claimed_at_epoch_ms, first.claimed_at_epoch_ms,
         "same-incarnation rotation preserves when the lane was first acquired"
@@ -2933,7 +2935,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
             &owner_a,
             "owner-a-executor",
             &reentry_nonce,
-            120_000,
+            140_000,
         )
         .await
         .expect("retry same claim attempt")
@@ -2942,6 +2944,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     assert_eq!(retried.lease_token, reentered.lease_token);
     assert_eq!(retried.fencing_token, reentered.fencing_token);
     assert_eq!(retried.claimed_at_epoch_ms, reentered.claimed_at_epoch_ms);
+    assert_eq!(retried.lease_term_ms, 140_000);
     assert!(
         matches!(
             store
@@ -2973,13 +2976,14 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         "a live session execution lease must exclude concurrent owners"
     );
     let renewed = store
-        .renew_session_execution_lease(&reentered.fence(), 120_000)
+        .renew_session_execution_lease(&reentered.fence(), 150_000)
         .await
         .expect("renew live session lease");
     assert_eq!(renewed.session_id, reentered.session_id);
     assert_eq!(renewed.owner, reentered.owner);
     assert_eq!(renewed.lease_token, reentered.lease_token);
     assert_eq!(renewed.fencing_token, reentered.fencing_token);
+    assert_eq!(renewed.lease_term_ms, 150_000);
     assert!(renewed.expires_at_epoch_ms >= reentered.expires_at_epoch_ms);
     let mut lock_lifecycle_authority = reentered.fence();
     lock_lifecycle_authority.fencing_token = lock_lifecycle_authority

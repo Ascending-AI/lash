@@ -288,6 +288,8 @@ pub struct SessionExecutionLease {
     pub lease_token: String,
     pub fencing_token: u64,
     pub claimed_at_epoch_ms: u64,
+    /// Store-authored duration installed by the most recent claim, reentry, or renewal.
+    pub lease_term_ms: u64,
     pub expires_at_epoch_ms: u64,
 }
 

@@ -6098,6 +6098,88 @@ async fn durable_controller_reports_a_retryable_busy_lane_when_the_holder_is_ali
     );
 }
 
+/// Cancellation cannot report an empty queue while a durable queued row is
+/// still pending. It returns the same typed retryable lane signal so teardown
+/// and redrive leave settlement to the engine.
+#[tokio::test]
+async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pending() {
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        mock_provider(Vec::new()),
+        store_clock,
+    )
+    .await;
+    runtime.host.core.clock = clock;
+    enqueue_idle_turn_input(store.as_ref(), "root", "queued during cancellation").await;
+    let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        "root",
+        &lease_owner("cancelled-wait-holder"),
+        "cancelled-wait-holder-executor",
+        100,
+    )
+    .await
+    .expect("claim cancellation test holder lease")
+    .acquired()
+    .expect("cancellation test holder owns the lane");
+
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default()
+            .with_controller_owned_replay()
+            .with_durable_workflow_controller(),
+    );
+    let scope = crate::ScopedEffectController::shared(
+        controller,
+        crate::ExecutionScope::turn("root", "queued-cancelled-wait"),
+    )
+    .expect("durable queued cancellation scope");
+    let cancel = CancellationToken::new();
+    let drain_cancel = cancel.clone();
+    let drain = crate::task::spawn(async move {
+        runtime
+            .stream_next_queued_work(TurnOptions::new(drain_cancel, scope))
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    cancel.cancel();
+
+    let error = drain
+        .await
+        .expect("join cancelled durable queued drain")
+        .expect_err("cancellation while waiting must remain retryable");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::SessionExecutionLaneBusy
+    );
+    assert_eq!(
+        error.message,
+        "session execution lane for session `root` is held by owner `cancelled-wait-holder` \
+         incarnation `cancelled-wait-holder:incarnation` executor \
+         `cancelled-wait-holder-executor` (fencing generation 1, expires at 1100); \
+         stopped waiting after 25ms because the queued drain was cancelled while waiting"
+    );
+    assert!(error.is_retryable());
+    assert!(!error.is_terminal());
+    assert_eq!(
+        crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
+            store.as_ref(),
+            "root",
+        )
+        .await
+        .expect("read holder after cancellation")
+        .expect("holder remains installed"),
+        held_lease
+    );
+    assert_eq!(
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+            .await
+            .expect("list pending input after cancellation")
+            .len(),
+        1
+    );
+}
+
 /// The backstop: a holder whose expiry never moves and never lapses (a frozen
 /// clock) must not become an unbounded block. Waiting stops at twice the
 /// observed TTL with the same typed retryable error.
