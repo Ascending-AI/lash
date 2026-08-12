@@ -3108,8 +3108,12 @@ mod tests {
             );
             assert_eq!(changed.components.len(), 0);
             // 200 leaves would charge ~200 root refs plus ~200 manifest rows on
-            // every commit; inline short values charge their own bytes once.
-            assert_eq!(commit_bytes, 31_227);
+            // every commit. Inline values now include the fixed versioned heap
+            // envelope, but still avoid that recurring manifest-row cost.
+            assert!(
+                commit_bytes < 96 * 1024,
+                "many short bindings must keep the per-commit floor low: {commit_bytes}"
+            );
         });
     }
 

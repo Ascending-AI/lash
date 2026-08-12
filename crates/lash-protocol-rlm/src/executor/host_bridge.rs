@@ -1283,6 +1283,9 @@ fn collect_printed_images_inner<'a>(
             | FlowValue::Number(_)
             | FlowValue::String(_)
             | FlowValue::Resource(_) => {}
+            FlowValue::Ref(_) => {
+                unreachable!("VM heap references must be materialized before host rendering")
+            }
         }
         Ok(())
     })

@@ -117,6 +117,7 @@ fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
         SnapshotDecodeError::InvalidEncoding(details) => {
             RlmSnapshotError::FormatMismatch { details }
         }
+        error @ SnapshotDecodeError::VersionMismatch { .. } => RlmSnapshotError::Lashlang(error),
     })
 }
 
@@ -308,9 +309,8 @@ fn is_root_json_location(location: &str) -> bool {
 }
 
 fn snapshot_runtime_value(value: &FlowValue) -> Result<Vec<u8>, lashlang::ContinuationError> {
-    let snapshot = lashlang::Snapshot {
-        globals: [("value".to_string(), value.clone())].into_iter().collect(),
-    };
+    let snapshot =
+        lashlang::Snapshot::new([("value".to_string(), value.clone())].into_iter().collect());
     snapshot.to_canonical_bytes()
 }
 
@@ -923,7 +923,7 @@ impl RlmExecutionState {
             };
             globals.insert(name.clone(), restore_runtime_value(body)?);
         }
-        let mut next_rlm = FlowState::from_snapshot(lashlang::Snapshot { globals });
+        let mut next_rlm = FlowState::from_snapshot(lashlang::Snapshot::new(globals));
         prune_reserved_projected_bindings(&mut next_rlm);
 
         let mut files = BTreeMap::new();

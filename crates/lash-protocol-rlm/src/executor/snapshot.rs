@@ -1,8 +1,11 @@
 use thiserror::Error;
 
-// v8 applies the inline-versus-leaf size line to globals and files alike.
-// Older snapshots are rejected, never compatibility-decoded.
-pub(super) const RLM_SNAPSHOT_VERSION: u32 = 8;
+// v9 is one shape carrying two changes that each claimed v8 independently:
+// the inline-versus-leaf size line applies to globals and files alike, and a
+// persisted value body is the canonical Lashlang envelope, which now carries
+// heap meters. Neither v8 is decodable — a store written by either one drains
+// or is recreated, like every version boundary before it.
+pub(super) const RLM_SNAPSHOT_VERSION: u32 = 9;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

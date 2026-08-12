@@ -303,7 +303,7 @@ pub async fn run_lashlang_process(
         for (name, value) in input.args {
             globals.insert(name, lashlang::from_json(value));
         }
-        let state = lashlang::State::from_snapshot(lashlang::Snapshot { globals });
+        let state = lashlang::State::from_snapshot(lashlang::Snapshot::new(globals));
         (ctx, guard, state)
     };
     if let Some(segment_state) = segment_state.as_ref() {

@@ -42159,6 +42159,14 @@ disposition = "unused-add"
 reason = "Add an RLM host example that inspects the configured instruction budget and asserts its wire value."
 
 [[api]]
+symbol = "lash::rlm::ExecutionBounds::memory_limit"
+kind = "field"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that inspects the configured logical heap limit and asserts a typed memory-exhaustion outcome."
+
+[[api]]
 symbol = "lash::rlm::ExecutionBounds::new"
 kind = "function"
 availability = "all-features"
@@ -42173,6 +42181,14 @@ availability = "all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add an RLM host example that opts out of both execution bounds and asserts that independent host safeguards remain active."
+
+[[api]]
+symbol = "lash::rlm::ExecutionBounds::with_memory_limit"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that sets a finite logical heap limit and asserts a typed memory-exhaustion outcome."
 
 [[api]]
 symbol = "lash::rlm::LASHLANG_SURFACE_EXTENSION_ID"
@@ -43206,6 +43222,14 @@ availability = "all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::rlm::RlmProtocolPluginConfig::max_output_chars to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfig::memory_limit"
+kind = "field"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM protocol example that configures a finite logical heap limit and asserts the public exhaustion result."
 
 [[api]]
 symbol = "lash::rlm::RlmProtocolPluginConfig::new"

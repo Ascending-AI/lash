@@ -115,6 +115,7 @@ impl<'de> serde::Deserialize<'de> for ExecutionBound<Duration> {
 pub struct ExecutionBounds {
     pub instruction_budget: ExecutionBound<NonZeroU64>,
     pub deadline: ExecutionBound<Duration>,
+    pub memory_limit: ExecutionBound<NonZeroU64>,
 }
 
 impl ExecutionBounds {
@@ -125,11 +126,18 @@ impl ExecutionBounds {
         Self {
             instruction_budget,
             deadline,
+            memory_limit: ExecutionBound::instructions(lashlang::DEFAULT_HEAP_LOGICAL_BYTE_LIMIT),
         }
+    }
+
+    pub const fn with_memory_limit(mut self, memory_limit: ExecutionBound<NonZeroU64>) -> Self {
+        self.memory_limit = memory_limit;
+        self
     }
 
     pub const fn unbounded() -> Self {
         Self::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded)
+            .with_memory_limit(ExecutionBound::Unbounded)
     }
 
     pub(crate) fn into_engine(self) -> lashlang::ExecutionBounds {
@@ -137,6 +145,7 @@ impl ExecutionBounds {
             self.instruction_budget.into_engine(),
             self.deadline.into_engine(),
         )
+        .with_memory_limit(self.memory_limit.into_engine())
     }
 }
 

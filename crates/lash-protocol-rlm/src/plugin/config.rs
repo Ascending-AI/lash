@@ -7,6 +7,8 @@ use super::{ExecutionBound, ExecutionBounds, RlmAbilities, RlmLanguageFeatures};
 pub struct RlmProtocolPluginConfig {
     pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
     pub deadline: ExecutionBound<std::time::Duration>,
+    #[serde(default = "default_memory_limit")]
+    pub memory_limit: ExecutionBound<std::num::NonZeroU64>,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     #[serde(default)]
@@ -40,6 +42,7 @@ impl RlmProtocolPluginConfig {
         Self {
             instruction_budget: instruction_budget.into(),
             deadline: deadline.into(),
+            memory_limit: default_memory_limit(),
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_abilities: RlmAbilities::default(),
             lashlang_language_features: RlmLanguageFeatures::default(),
@@ -51,6 +54,7 @@ impl RlmProtocolPluginConfig {
 
     pub(crate) fn execution_bounds(&self) -> ExecutionBounds {
         ExecutionBounds::new(self.instruction_budget, self.deadline)
+            .with_memory_limit(self.memory_limit)
     }
 
     pub fn with_lashlang_abilities(mut self, abilities: impl Into<RlmAbilities>) -> Self {
@@ -71,6 +75,10 @@ impl RlmProtocolPluginConfig {
         self.redaction_roots = Some(roots);
         self
     }
+}
+
+fn default_memory_limit() -> ExecutionBound<std::num::NonZeroU64> {
+    ExecutionBound::instructions(lashlang::DEFAULT_HEAP_LOGICAL_BYTE_LIMIT)
 }
 
 #[cfg(test)]

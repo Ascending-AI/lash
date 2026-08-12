@@ -171,6 +171,9 @@ pub(crate) fn flow_to_json_value<'a>(value: &'a FlowValue) -> ProjectedFuture<'a
                 obj.insert(PROJECTED_JSON_TAG.to_string(), inner);
                 Value::Object(obj)
             }
+            FlowValue::Ref(_) => {
+                unreachable!("VM heap references must be materialized before JSON rendering")
+            }
         }
     })
 }
@@ -307,6 +310,9 @@ fn rehydrate_projected_value<'a>(
             | FlowValue::String(_)
             | FlowValue::Resource(_)
             | FlowValue::Image(_) => Ok(false),
+            FlowValue::Ref(_) => {
+                unreachable!("VM heap references must be materialized before projection restore")
+            }
         }
     })
 }
