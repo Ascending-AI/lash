@@ -66,8 +66,9 @@ use endpoint_protocol::{
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
     invoke_endpoint_with_named_call_and_invocation_responses,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
-    invoke_process_workflow_endpoint, restate_call_frames, restate_error_message,
-    restate_message_types, restate_output_failure_message, restate_output_json,
+    invoke_process_workflow_endpoint, restate_call_frames, restate_command_frame_types,
+    restate_error_message, restate_message_types, restate_output_failure_message,
+    restate_output_json,
 };
 
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
@@ -811,6 +812,16 @@ enum Fig1127NestedRoute {
     Processes,
     Triggers,
     Sessions,
+    /// FIG-1127 review finding F1: sibling `processes()` routes that the
+    /// original inventory declared complete. Unguarded; see
+    /// `fig1127_unguarded_sibling_route_*` for their pinned RT0016
+    /// reproductions.
+    ProcessesCancel,
+    ProcessesSignal,
+    ProcessesAwait,
+    /// Crosses the controller but the Restate controller serves `List` from the
+    /// process registry, issuing no `ctx` command.
+    ProcessesList,
 }
 
 impl Fig1127NestedRoute {
@@ -819,6 +830,10 @@ impl Fig1127NestedRoute {
             Self::Processes => "processes",
             Self::Triggers => "triggers",
             Self::Sessions => "sessions",
+            Self::ProcessesCancel => "processes_cancel",
+            Self::ProcessesSignal => "processes_signal",
+            Self::ProcessesAwait => "processes_await",
+            Self::ProcessesList => "processes_list",
         }
     }
 
@@ -833,7 +848,60 @@ impl Fig1127NestedRoute {
             Self::Sessions => {
                 "ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt"
             }
+            Self::ProcessesCancel
+            | Self::ProcessesSignal
+            | Self::ProcessesAwait
+            | Self::ProcessesList => {
+                unreachable!("unguarded sibling routes produce no refusal")
+            }
         }
+    }
+
+    /// Scripted handler responses for the nested calls this route makes, plus
+    /// the trailing sink call every route makes.
+    fn named_responses(self) -> Vec<(String, serde_json::Value)> {
+        let mut responses = vec![
+            ("is_revoked".to_string(), serde_json::json!(false)),
+            ("is_revoked".to_string(), serde_json::json!(false)),
+            ("complete".to_string(), serde_json::json!(false)),
+        ];
+        if let Some((handler, response)) = self.nested_call_response() {
+            responses.push((handler.to_string(), response));
+        }
+        responses
+    }
+
+    /// The nested `ctx` call an unguarded sibling route issues from inside the
+    /// recorded attempt, with the response shape its client expects:
+    /// `cancel` returns `Json<()>`, `await_terminal` returns
+    /// `Json<ProcessAwaitOutput>` (`#[serde(tag = "type")]`), and the durable
+    /// wait index's `resolve` returns `Json<ResolveOutcome>`
+    /// (`#[serde(tag = "status")]`).
+    fn nested_call_response(self) -> Option<(&'static str, serde_json::Value)> {
+        match self {
+            Self::ProcessesCancel => Some(("cancel", serde_json::Value::Null)),
+            Self::ProcessesAwait => Some((
+                "await_terminal",
+                serde_json::json!({"type": "success", "value": "done"}),
+            )),
+            Self::ProcessesSignal => Some(("resolve", serde_json::json!({"status": "accepted"}))),
+            Self::Processes | Self::Triggers | Self::Sessions | Self::ProcessesList => None,
+        }
+    }
+
+    /// Completions for the captured commands on redrive, in captured-command
+    /// order: the nested call (when the route makes one) then the sink call.
+    fn replay_call_completions(self) -> Vec<serde_json::Value> {
+        let mut completions = Vec::new();
+        if let Some((_, response)) = self.nested_call_response() {
+            completions.push(response);
+        }
+        completions.extend([
+            serde_json::json!(false),
+            serde_json::json!(false),
+            serde_json::json!(false),
+        ]);
+        completions
     }
 }
 
@@ -1009,6 +1077,30 @@ impl Fig1127NestedRouteRedrive for Fig1127NestedRouteRedriveImpl {
                             )
                             .await
                             .map(|_| ()),
+                        Fig1127NestedRoute::ProcessesCancel => tool_context
+                            .processes()
+                            .cancel(FIG1127_LIVE_PROCESS)
+                            .await
+                            .map(|_| ()),
+                        Fig1127NestedRoute::ProcessesSignal => tool_context
+                            .processes()
+                            .signal(
+                                FIG1127_LIVE_PROCESS,
+                                "resume",
+                                serde_json::json!({"go": true}),
+                            )
+                            .await
+                            .map(|_| ()),
+                        Fig1127NestedRoute::ProcessesAwait => tool_context
+                            .processes()
+                            .await_process(FIG1127_TERMINAL_PROCESS)
+                            .await
+                            .map(|_| ()),
+                        Fig1127NestedRoute::ProcessesList => tool_context
+                            .processes()
+                            .list_handles_filtered(&lash_core::ProcessListFilter::default())
+                            .await
+                            .map(|_| ()),
                     };
                     let output = match result {
                         Ok(()) => lash_core::ToolCallOutput::success(serde_json::json!("ok")),
@@ -1057,6 +1149,76 @@ impl Fig1127NestedRouteRedrive for Fig1127NestedRouteRedriveImpl {
     }
 }
 
+const FIG1127_LIVE_PROCESS: &str = "fig1127-live-process";
+const FIG1127_TERMINAL_PROCESS: &str = "fig1127-terminal-process";
+
+/// Seeds the process rows the sibling `processes()` routes operate on: one live
+/// row (cancel, signal, list) and one terminal row (await).
+async fn fig1127_seed_processes(registry: &Arc<dyn ProcessRegistry>) {
+    let event_types = vec![lash_core::ProcessEventType {
+        name: "signal.resume".to_string(),
+        payload_schema: lash_core::LashSchema::any(),
+        semantics: lash_core::ProcessEventSemanticsSpec::default(),
+    }];
+    for (id, disposition) in [
+        (
+            FIG1127_LIVE_PROCESS,
+            lash_core::RecoveryDisposition::Rerunnable,
+        ),
+        (
+            FIG1127_TERMINAL_PROCESS,
+            lash_core::RecoveryDisposition::ExternallyOwned,
+        ),
+    ] {
+        registry
+            .register_process_with_observers(
+                ProcessRegistration::new(
+                    id,
+                    ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    disposition,
+                    lash_core::ProcessProvenance::host(),
+                )
+                .with_extra_event_types(event_types.clone()),
+                &["atomic-tool-test-session".to_string()],
+            )
+            .await
+            .expect("register FIG-1127 sibling-route process");
+    }
+    registry
+        .complete_process(
+            FIG1127_TERMINAL_PROCESS,
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::json!("done"),
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete the FIG-1127 terminal process");
+    let owner = lash_core::LeaseOwnerIdentity::opaque("fig1127", "incarnation");
+    let lease = registry
+        .claim_process_lease(FIG1127_LIVE_PROCESS, &owner, 60_000)
+        .await
+        .expect("claim the FIG-1127 live process lease")
+        .acquired()
+        .expect("FIG-1127 live process lease");
+    registry
+        .record_first_started_with_authority(
+            FIG1127_LIVE_PROCESS,
+            lash_core::ProcessStarted {
+                owner,
+                fencing_token: lease.fencing_token,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+            &lash_core::ProcessExecutionWriteAuthority::lease(lease),
+        )
+        .await
+        .expect("start the FIG-1127 live process");
+}
+
 async fn fig1127_endpoint() -> (Endpoint, Arc<AtomicUsize>) {
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     store
@@ -1084,6 +1246,7 @@ async fn fig1127_endpoint() -> (Endpoint, Arc<AtomicUsize>) {
         .expect("register FIG-1127 trigger subscription")
         .expect("FIG-1127 trigger registration outcome");
     let registry = process_registry();
+    fig1127_seed_processes(&registry).await;
     let trigger_router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn TriggerStore>,
         Some(Arc::clone(&registry)),
@@ -1103,6 +1266,60 @@ async fn fig1127_endpoint() -> (Endpoint, Arc<AtomicUsize>) {
     (endpoint, tool_body_runs)
 }
 
+/// The result of running one route through a real first execution and a redrive
+/// of that execution's captured command journal.
+struct Fig1127Redrive {
+    /// Restate's error message on the redriven invocation, if any. An `RT0016`
+    /// ordinal mismatch surfaces here.
+    error: Option<String>,
+    /// Terminal output of the first execution.
+    first_output: Option<String>,
+    /// Terminal output of the redriven invocation.
+    redriven_output: Option<String>,
+    /// Journal command frame types the redriven invocation emitted, in order.
+    redriven_command_frames: Vec<u16>,
+    /// How many times the recorded `ToolAttempt` body ran across both
+    /// invocations.
+    body_runs: usize,
+}
+
+async fn fig1127_redrive(route: Fig1127NestedRoute) -> Fig1127Redrive {
+    let (endpoint, tool_body_runs) = fig1127_endpoint().await;
+    let workflow_key = format!("fig1127-{}-redrive", route.label());
+    let input = Fig1127NestedRouteInput { route };
+    let invocation_ids = vec![format!("inv_fig1127_{}_nested", route.label())];
+    let call_completions = route.replay_call_completions();
+    let first = invoke_endpoint_with_named_call_and_invocation_responses(
+        &endpoint,
+        "Fig1127NestedRouteRedrive",
+        "run",
+        &workflow_key,
+        &input,
+        invocation_ids.clone(),
+        route.named_responses(),
+    )
+    .await
+    .expect("first FIG-1127 attempt must complete");
+    let replay = encode_captured_run_command_replay(
+        &workflow_key,
+        &input,
+        &first,
+        &invocation_ids,
+        &call_completions,
+    )
+    .expect("capture the exact FIG-1127 first-attempt command journal");
+    let redriven = invoke_endpoint_body(&endpoint, "Fig1127NestedRouteRedrive", "run", replay)
+        .await
+        .expect("redrive the FIG-1127 command journal");
+    Fig1127Redrive {
+        error: restate_error_message(&redriven),
+        first_output: restate_output_json::<String>(&first),
+        redriven_output: restate_output_json::<String>(&redriven),
+        redriven_command_frames: restate_command_frame_types(&redriven),
+        body_runs: tool_body_runs.load(Ordering::SeqCst),
+    }
+}
+
 #[tokio::test]
 async fn fig1127_nested_tool_routes_refuse_and_redrive_without_ordinal_shift() {
     for route in [
@@ -1110,49 +1327,15 @@ async fn fig1127_nested_tool_routes_refuse_and_redrive_without_ordinal_shift() {
         Fig1127NestedRoute::Triggers,
         Fig1127NestedRoute::Sessions,
     ] {
-        let (endpoint, tool_body_runs) = fig1127_endpoint().await;
-        let workflow_key = format!("fig1127-{}-redrive", route.label());
-        let input = Fig1127NestedRouteInput { route };
-        let invocation_ids = vec![format!("inv_fig1127_{}_nested", route.label())];
-        let call_completions = vec![
-            serde_json::json!(false),
-            serde_json::json!(false),
-            serde_json::json!(false),
-        ];
-        let first = invoke_endpoint_with_named_call_and_invocation_responses(
-            &endpoint,
-            "Fig1127NestedRouteRedrive",
-            "run",
-            &workflow_key,
-            &input,
-            invocation_ids.clone(),
-            vec![
-                ("is_revoked".to_string(), serde_json::json!(false)),
-                ("is_revoked".to_string(), serde_json::json!(false)),
-                ("complete".to_string(), serde_json::json!(false)),
-            ],
-        )
-        .await
-        .expect("first FIG-1127 attempt must complete");
-        let replay = encode_captured_run_command_replay(
-            &workflow_key,
-            &input,
-            &first,
-            &invocation_ids,
-            &call_completions,
-        )
-        .expect("capture the exact FIG-1127 first-attempt command journal");
-
-        let redriven = invoke_endpoint_body(&endpoint, "Fig1127NestedRouteRedrive", "run", replay)
-            .await
-            .expect("redrive the FIG-1127 command journal");
+        let run = fig1127_redrive(route).await;
         assert!(
-            restate_error_message(&redriven).is_none(),
+            run.error.is_none(),
             "{} route redrive shifted onto a nested command (RT0016): {:?}",
             route.label(),
-            restate_error_message(&redriven)
+            run.error
         );
-        let refusal = restate_output_json::<String>(&redriven)
+        let refusal = run
+            .redriven_output
             .unwrap_or_else(|| panic!("decode {} route refusal", route.label()));
         assert!(
             refusal.contains(route.expected_refusal()),
@@ -1160,12 +1343,127 @@ async fn fig1127_nested_tool_routes_refuse_and_redrive_without_ordinal_shift() {
             route.label()
         );
         assert_eq!(
-            tool_body_runs.load(Ordering::SeqCst),
+            run.body_runs,
             1,
             "{} route replay must not re-enter the ToolAttempt body",
             route.label()
         );
     }
+}
+
+/// The structurally-safe crossing, proven rather than assumed:
+/// `processes().list_handles_filtered()` reaches the controller from inside a
+/// recorded attempt, the Restate controller serves the `List` command from the
+/// process registry, and the redrive re-issues no journal command at all — the
+/// captured journal replays exactly, with identical terminal output and no
+/// ordinal shift.
+#[tokio::test]
+async fn fig1127_processes_list_route_redrives_without_reissuing_any_nested_command() {
+    let run = fig1127_redrive(Fig1127NestedRoute::ProcessesList).await;
+    assert_eq!(
+        run.error, None,
+        "the registry-served process list must not shift a journal ordinal"
+    );
+    assert_eq!(
+        run.first_output.as_deref(),
+        Some("\"ok\""),
+        "first execution completes the tool successfully"
+    );
+    assert_eq!(
+        run.redriven_output.as_deref(),
+        Some("\"ok\""),
+        "redrive replays the identical terminal output"
+    );
+    assert_eq!(
+        run.redriven_command_frames,
+        Vec::<u16>::new(),
+        "redrive re-issues no journal command at all: every command in the \
+         captured journal — the recorded attempt and the post-attempt sink call \
+         — replays from the journal, so no ordinal can shift"
+    );
+    assert_eq!(
+        run.body_runs, 1,
+        "redrive must not re-enter the ToolAttempt body"
+    );
+}
+
+// FIG-1127 review finding F1: three sibling `processes()` routes emit a nested
+// journal command from inside a recorded `ToolAttempt` and are **not** guarded.
+// Each test below is a full RT0016 reproduction, kept `#[ignore]` so CI stays
+// green while the defect stays impossible to forget. Closing the routes is a
+// separate ruled decision (guard at `ProcessCommandRunner::run` versus per-route
+// guards versus narrowing the predicate to ordinal-addressed journals); until
+// that ruling lands these are the red proof. Un-ignore them when the guard
+// ships — they then assert the refusal instead.
+//
+// The green counterpart that keeps the defect visible in every CI run is
+// `lash-core`'s `attempt_atomicity_row_processes_{cancel,signal,await_process}`:
+// those rows are classified `RedPinnedNestedCommand` and assert that the nested
+// command really does cross the controller.
+
+async fn assert_fig1127_unguarded_route_reproduces_rt0016(
+    route: Fig1127NestedRoute,
+    expected_service_difference: &str,
+    expected_handler_difference: &str,
+) {
+    let run = fig1127_redrive(route).await;
+    let error = run.error.unwrap_or_else(|| {
+        panic!(
+            "{} route was expected to reproduce RT0016; it did not",
+            route.label()
+        )
+    });
+    for expected in [
+        "Found a mismatch between the code paths taken during the previous execution",
+        "The mismatch happened while executing 'call' (index '2')",
+        expected_service_difference,
+        expected_handler_difference,
+    ] {
+        assert!(
+            error.contains(expected),
+            "{} route redrive did not report `{expected}`: {error}",
+            route.label()
+        );
+    }
+    assert_eq!(
+        run.body_runs,
+        1,
+        "{} route replay must not re-enter the ToolAttempt body",
+        route.label()
+    );
+}
+
+#[tokio::test]
+#[ignore = "FIG-1127: unguarded route, pending ruling — reproduces RT0016 by design"]
+async fn fig1127_unguarded_sibling_route_cancel_reproduces_rt0016() {
+    assert_fig1127_unguarded_route_reproduces_rt0016(
+        Fig1127NestedRoute::ProcessesCancel,
+        "service_name: LashProcessWorkflow != Fig1127NestedRouteSink",
+        "handler_name: cancel != complete",
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "FIG-1127: unguarded route, pending ruling — reproduces RT0016 by design"]
+async fn fig1127_unguarded_sibling_route_signal_reproduces_rt0016() {
+    assert_fig1127_unguarded_route_reproduces_rt0016(
+        Fig1127NestedRoute::ProcessesSignal,
+        "service_name: LashDurableWaitIndex != Fig1127NestedRouteSink",
+        "handler_name: resolve != complete",
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "FIG-1127: unguarded route, pending ruling — reproduces RT0016 by design"]
+async fn fig1127_unguarded_sibling_route_await_process_reproduces_rt0016() {
+    assert_fig1127_unguarded_route_reproduces_rt0016(
+        Fig1127NestedRoute::ProcessesAwait,
+        "service_name: LashProcessWorkflow != Fig1127NestedRouteSink",
+        "handler_name: await_terminal != complete",
+    )
+    .await;
 }
 
 #[tokio::test]

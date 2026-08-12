@@ -10,6 +10,7 @@ use lash_sansio::sync::MutexExt;
 // rustdoc then resolves the whole merged doc — including the submodule's own
 // intra-doc links — against *this* module's scope, where none of the linked
 // items exist.
+pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod checkpoint_observer;
 pub mod conformance;
@@ -394,7 +395,7 @@ where
     )
 }
 
-struct EmptyToolProvider;
+pub struct EmptyToolProvider;
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for EmptyToolProvider {
@@ -628,6 +629,16 @@ pub fn atomic_tool_context_with_services<'run>(
     crate::ToolContext::from_dispatch(dispatch).build()
 }
 
+/// A `ProcessService` that routes **every** `ProcessCommand` through the
+/// operation scope's effect controller, exactly as the production
+/// `ProcessCommandRunner` does.
+///
+/// The FIG-1127 review found that stubbing the sibling routes here made the
+/// harness structurally incapable of reaching `await_process`, `cancel`,
+/// `signal`, `list_visible` and `transfer` — the routes that turned out to be
+/// unguarded. The stubs are gone: this service now mirrors the production
+/// routing decision per method, so a route that journals in production journals
+/// here too.
 struct EffectBackedProcessService {
     registry: Arc<dyn crate::ProcessRegistry>,
 }
@@ -639,16 +650,20 @@ impl EffectBackedProcessService {
         command: crate::ProcessCommand,
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
         let effect_id = command.effect_id();
+        // Production derives the nested invocation from the parent invocation
+        // the ToolContext carries (`process_effect_invocation`), so a nested
+        // command inherits the attempt's replay-key lineage. Use the same
+        // helper, not a lookalike.
+        let invocation = crate::runtime::causal::process_effect_invocation(
+            "atomic-tool-test-session",
+            scope.parent_invocation.clone(),
+            &effect_id,
+        );
         let outcome = scope
             .controller()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
-                    crate::RuntimeInvocation::effect(
-                        crate::RuntimeScope::new("atomic-tool-test-session"),
-                        effect_id.clone(),
-                        crate::RuntimeEffectKind::Process,
-                        effect_id,
-                    ),
+                    invocation,
                     crate::RuntimeEffectCommand::process(command),
                 ),
                 crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None),
@@ -703,73 +718,130 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
+    /// Production writes the terminal through the registry, not the controller
+    /// (`complete_external_process`), so this route journals nothing.
+    async fn complete_external(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        await_output: crate::ProcessAwaitOutput,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
+        self.registry
+            .complete_process(
+                process_id,
+                await_output,
+                crate::ProcessCompletionAuthority::ExternalOwner,
+            )
+            .await
+    }
+
     async fn await_process(
         &self,
-        _process_id: &str,
-        _scope: crate::ProcessOpScope<'_>,
+        process_id: &str,
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "process awaiting is unavailable in this test service".to_string(),
-        ))
+        let command = crate::ProcessCommand::Await {
+            process_id: process_id.to_string(),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Await { output } => Ok(*output),
+            _ => unreachable!("await command returns await outcome"),
+        }
     }
 
     async fn list_visible(
         &self,
-        _session_id: &str,
-        _mode: crate::ProcessListMode,
-        _scope: crate::ProcessOpScope<'_>,
+        session_id: &str,
+        mode: crate::ProcessListMode,
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "process listing is unavailable in this test service".to_string(),
-        ))
+        let command = crate::ProcessCommand::List {
+            session_scope: crate::SessionScope::new(session_id),
+            mode,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::List { entries } => Ok(entries),
+            _ => unreachable!("list command returns list outcome"),
+        }
     }
 
+    /// Production authorizes visibility with a registry observer read
+    /// (`validate_process_handles_observed_inner`), so this route journals
+    /// nothing.
     async fn validate_visible(
         &self,
-        _session_id: &str,
-        _process_ids: &[String],
+        session_id: &str,
+        process_ids: &[String],
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "process visibility is unavailable in this test service".to_string(),
-        ))
+        for process_id in process_ids {
+            if !self.registry.is_observer(session_id, process_id).await? {
+                return Err(crate::PluginError::Session(format!(
+                    "process handle `{process_id}` is not visible in this session"
+                )));
+            }
+        }
+        Ok(())
     }
 
     async fn cancel(
         &self,
         _session_id: &str,
-        _process_id: &str,
-        _scope: crate::ProcessOpScope<'_>,
+        process_id: &str,
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "process cancellation is unavailable in this test service".to_string(),
-        ))
+        let command = crate::ProcessCommand::Cancel {
+            process_id: process_id.to_string(),
+            reason: Some("requested by tool".to_string()),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            _ => unreachable!("cancel command returns cancel outcome"),
+        }
     }
 
     async fn signal(
         &self,
         _session_id: &str,
-        _process_id: &str,
-        _signal_name: String,
-        _signal_id: String,
-        _payload: serde_json::Value,
-        _scope: crate::ProcessOpScope<'_>,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "process signaling is unavailable in this test service".to_string(),
-        ))
+        let event_type = crate::process_signal_event_type(&signal_name)?;
+        let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
+            format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
+        );
+        let command = crate::ProcessCommand::Signal {
+            process_id: process_id.to_string(),
+            signal_name,
+            signal_id,
+            request,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
+            _ => unreachable!("signal command returns signal outcome"),
+        }
     }
 
     async fn transfer(
         &self,
-        _from_session_id: &str,
-        _to_session_id: &str,
-        _process_ids: Vec<String>,
-        _scope: crate::ProcessOpScope<'_>,
+        from_session_id: &str,
+        to_session_id: &str,
+        process_ids: Vec<String>,
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "process transfer is unavailable in this test service".to_string(),
-        ))
+        let command = crate::ProcessCommand::Transfer {
+            from_scope: crate::SessionScope::new(from_session_id),
+            to_scope: crate::SessionScope::new(to_session_id),
+            process_ids,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Transfer => Ok(()),
+            _ => unreachable!("transfer command returns transfer outcome"),
+        }
     }
 }
 

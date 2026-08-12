@@ -15,6 +15,7 @@ pub(crate) mod helpers;
 use helpers::*;
 
 mod assembler;
+mod attempt_atomicity;
 mod child_sessions;
 mod core_contracts;
 mod effect;
