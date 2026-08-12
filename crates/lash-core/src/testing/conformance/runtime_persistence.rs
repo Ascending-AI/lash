@@ -81,10 +81,10 @@ impl RuntimePersistenceLeaseTiming {
 /// Effect-host workflow history is deliberately outside this suite.
 pub async fn runtime_persistence<F>(make: F, lease_timing: RuntimePersistenceLeaseTiming)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
-    let first = make();
-    let second = make();
+    let first = make("fresh-instance-probe");
+    let second = make("fresh-instance-probe");
     assert_fresh_instances(&first, &second, "runtime_persistence");
     drop((first, second));
     runtime_persistence_suite(make, &lease_timing).await;
@@ -93,9 +93,9 @@ where
 /// Run the full [`RuntimePersistence`] suite plus durable reopen checks.
 pub async fn runtime_persistence_reopenable<F>(make: F, lease_timing: RuntimePersistenceLeaseTiming)
 where
-    F: Fn() -> ReopenableRuntimePersistence,
+    F: Fn(&str) -> ReopenableRuntimePersistence,
 {
-    let probe = make();
+    let probe = make("pending-turn-input-multi-store-mint");
     assert_fresh_instances(&probe.open, &probe.reopen, "runtime_persistence_reopenable");
     pending_turn_input_mint_is_unique_across_store_instances(
         probe.open.as_ref(),
@@ -103,10 +103,10 @@ where
     )
     .await;
     drop(probe);
-    runtime_persistence_suite(|| make().open, &lease_timing).await;
-    gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make().open).await;
-    append_receipt_survives_reopen(make()).await;
-    runtime_persistence_survives_reopen(make()).await;
+    runtime_persistence_suite(|session_id| make(session_id).open, &lease_timing).await;
+    gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make("gc-blobs").open).await;
+    append_receipt_survives_reopen(make("root")).await;
+    runtime_persistence_survives_reopen(make("root")).await;
 }
 
 fn assert_two_session_resolution_errors(full: StoreError, head: StoreError, expected: &str) {
@@ -166,8 +166,9 @@ pub struct UnboundSessionResolutionHandles {
 /// `make_axis` must return a fresh, initially empty durable substrate for each
 /// admission state. Every `open_unbound` call must return a newly opened,
 /// unbound handle over that axis's shared substrate. This law is instantiated
-/// by SQLite and PostgreSQL. The in-memory backend has no global unbound
-/// multi-session handle, so none of these six cells is instantiated there.
+/// by SQLite. Neither the in-memory nor the PostgreSQL backend has a global
+/// unbound multi-session handle — a PostgreSQL session store is constructed
+/// with its session id — so none of these six cells is instantiated there.
 pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFuture>(
     make_axis: MakeAxis,
 ) where
@@ -442,87 +443,110 @@ pub async fn runtime_persistence_clock_expiry(
 
 async fn runtime_persistence_suite<F>(make: F, lease_timing: &RuntimePersistenceLeaseTiming)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     // [`SessionCommitStore`]: atomic head commits, reads, metadata, the
     // attachment write-ahead manifest, and turn-commit idempotency.
-    commit_increments_head_and_round_trips_agent_frames(make()).await;
-    concurrent_head_revision_cas_applies_exactly_once(make()).await;
-    commit_rejects_a_different_session_id(make()).await;
-    commit_rejects_carried_nondefault_node_budget(make()).await;
-    commit_rejects_carried_nondefault_byte_budget(make()).await;
-    load_hydrates_checkpoint_and_usage(make()).await;
-    load_retains_reasoning_only_usage(make()).await;
-    checkpoint_restore_rejects_turn_index_without_increment_headroom(make()).await;
-    checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(make()).await;
-    load_rejects_token_usage_overflow(make()).await;
-    usage_delta_identity_is_idempotent_across_commits(make()).await;
-    usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make()).await;
-    execution_state_replace_then_clear_removes_the_live_checkpoint_ref(make()).await;
-    checkpoint_rejects_unknown_component_ref(make()).await;
-    session_read_loads_persisted_history(make()).await;
-    session_metadata_round_trips(make()).await;
-    attachment_manifest_records_intent_and_commit_stamps(make()).await;
-    attachment_manifest_keeps_same_content_ownership_per_session(make()).await;
-    attachment_manifest_reference_tracking_and_gc_root_set(make()).await;
-    final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(make()).await;
-    append_request_receipt_replays_after_head_advance(make()).await;
-    append_request_receipt_rejects_changed_content(make()).await;
-    append_request_exact_hash_rejects_changed_ancestor(make()).await;
-    append_request_receipt_rejects_corrupt_node_count(make()).await;
-    concurrent_same_append_operation_applies_exactly_once(make()).await;
-    legacy_append_receipt_keeps_exact_hash_semantics(make()).await;
-    append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(make()).await;
-    append_receipt_and_graph_append_are_atomic(make()).await;
-    fresh_append_receipt_enforces_ancestor_precondition(make()).await;
-    store_computed_hash_rejects_mutated_commit(make()).await;
-    commit_rejects_non_derived_append_node_ids(make()).await;
-    append_rejects_duplicate_batch_node_ids(make()).await;
-    append_rejects_existing_node_id_collision(make()).await;
-    head_retirement_gate_distinguishes_leaf_change_from_same_leaf(make()).await;
-    commit_rejects_unresolvable_leaf(make()).await;
-    commit_rejects_missing_leaf(make()).await;
-    empty_append_cannot_move_the_head(make()).await;
-    commit_rejects_leaf_without_frame_open_ancestor(make()).await;
+    commit_increments_head_and_round_trips_agent_frames(make("root")).await;
+    concurrent_head_revision_cas_applies_exactly_once(make("concurrent-head-cas")).await;
+    commit_rejects_a_different_session_id(make("alpha")).await;
+    commit_rejects_carried_nondefault_node_budget(make("root")).await;
+    commit_rejects_carried_nondefault_byte_budget(make("root")).await;
+    load_hydrates_checkpoint_and_usage(make("hydrated")).await;
+    load_retains_reasoning_only_usage(make("root")).await;
+    checkpoint_restore_rejects_turn_index_without_increment_headroom(make("root")).await;
+    checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(make("root")).await;
+    load_rejects_token_usage_overflow(make("root")).await;
+    usage_delta_identity_is_idempotent_across_commits(make("root")).await;
+    usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make("root")).await;
+    execution_state_replace_then_clear_removes_the_live_checkpoint_ref(make(
+        "execution-state-replace-then-clear",
+    ))
+    .await;
+    checkpoint_rejects_unknown_component_ref(make("checkpoint-unknown-ref")).await;
+    session_read_loads_persisted_history(make("branchy")).await;
+    session_metadata_round_trips(make("root")).await;
+    attachment_manifest_records_intent_and_commit_stamps(make("root")).await;
+    attachment_manifest_keeps_same_content_ownership_per_session(make("root")).await;
+    attachment_manifest_reference_tracking_and_gc_root_set(make("root")).await;
+    final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(make("root")).await;
+    append_request_receipt_replays_after_head_advance(make("root")).await;
+    append_request_receipt_rejects_changed_content(make("root")).await;
+    append_request_exact_hash_rejects_changed_ancestor(make("root")).await;
+    append_request_receipt_rejects_corrupt_node_count(make("root")).await;
+    concurrent_same_append_operation_applies_exactly_once(make("root")).await;
+    legacy_append_receipt_keeps_exact_hash_semantics(make("root")).await;
+    append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(make("root")).await;
+    append_receipt_and_graph_append_are_atomic(make("root")).await;
+    fresh_append_receipt_enforces_ancestor_precondition(make("root")).await;
+    store_computed_hash_rejects_mutated_commit(make("root")).await;
+    commit_rejects_non_derived_append_node_ids(make("root")).await;
+    append_rejects_duplicate_batch_node_ids(make("root")).await;
+    append_rejects_existing_node_id_collision(make("root")).await;
+    head_retirement_gate_distinguishes_leaf_change_from_same_leaf(make("root")).await;
+    commit_rejects_unresolvable_leaf(make("root")).await;
+    commit_rejects_missing_leaf(make("root")).await;
+    empty_append_cannot_move_the_head(make("empty-append-head-move")).await;
+    commit_rejects_leaf_without_frame_open_ancestor(make("missing-frame-root")).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
-    session_execution_lease_contract(make()).await;
-    borrowed_session_execution_lease_commit_contract(make()).await;
-    same_incarnation_rotation_gates_claims_not_commits(make()).await;
-    session_execution_lease_fence_authority(make().as_ref()).await;
-    concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(make()).await;
-    session_execution_lease_expires_by_ttl_contract(&make, lease_timing).await;
-    session_execution_lease_diagnostic_read_contract(make()).await;
-    session_execution_lease_displacement_contract(make()).await;
+    session_execution_lease_contract(make("root")).await;
+    borrowed_session_execution_lease_commit_contract(make("borrowed-commit-fence")).await;
+    same_incarnation_rotation_gates_claims_not_commits(make("root")).await;
+    session_execution_lease_fence_authority(make("lease-fence-authority").as_ref()).await;
+    concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(make(
+        "concurrent-rotation-renewal",
+    ))
+    .await;
+    session_execution_lease_expires_by_ttl_contract(&|| make("ttl-expiry"), lease_timing).await;
+    session_execution_lease_diagnostic_read_contract(make("lease-diagnostic")).await;
+    session_execution_lease_displacement_contract(make("lease-displacement")).await;
     // [`QueuedWorkStore`]: durable queued-work ingress, ordering, and claim
     // leases, plus the commit-side completion atomicity it shares with
     // [`SessionCommitStore`].
-    queued_work_source_keys_are_idempotent_and_list_ordered(make()).await;
-    concurrent_queue_and_turn_input_claims_have_one_owner(make()).await;
-    checkpoint_work_claims_both_families_once(make()).await;
-    queued_work_cancel_removes_only_unclaimed_batches(make()).await;
-    queued_work_exact_claim_uses_selected_batch_ids(make()).await;
-    queued_work_classes_gate_command_and_turn_claims(make()).await;
-    queued_work_claims_respect_boundaries_abandon_and_stale_completion(make()).await;
-    queued_work_claims_supersede_across_session_lease_generations_with_timing(make(), lease_timing)
-        .await;
-    claim_liveness_for_lease_less_paths_tracks_session_generations(make(), lease_timing).await;
-    same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(make()).await;
-    queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions(make()).await;
-    queued_work_join_groups_by_delivery_policy_and_merge_key(make()).await;
-    wake_turn_policy_controls_coalescing(make()).await;
-    queued_work_completion_is_lease_guarded(make()).await;
-    queued_wake_delivery_is_source_key_idempotent_and_claimed_once(make()).await;
-    queue_completion_and_turn_commit_stamp_are_atomic(make()).await;
+    queued_work_source_keys_are_idempotent_and_list_ordered(make("queued-work-source-keys")).await;
+    concurrent_queue_and_turn_input_claims_have_one_owner(make("concurrent-queue-input")).await;
+    checkpoint_work_claims_both_families_once(make("checkpoint-work")).await;
+    queued_work_cancel_removes_only_unclaimed_batches(make("queued-work-cancel")).await;
+    queued_work_exact_claim_uses_selected_batch_ids(make("root")).await;
+    queued_work_classes_gate_command_and_turn_claims(make("root")).await;
+    queued_work_claims_respect_boundaries_abandon_and_stale_completion(make("root")).await;
+    queued_work_claims_supersede_across_session_lease_generations_with_timing(
+        make("root"),
+        lease_timing,
+    )
+    .await;
+    claim_liveness_for_lease_less_paths_tracks_session_generations(
+        make("claim-liveness"),
+        lease_timing,
+    )
+    .await;
+    same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(make("claim-scan")).await;
+    queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions(make(
+        "queued-membership",
+    ))
+    .await;
+    queued_work_join_groups_by_delivery_policy_and_merge_key(make("queued-join")).await;
+    wake_turn_policy_controls_coalescing(make("wake-policy-merge")).await;
+    queued_work_completion_is_lease_guarded(make("root")).await;
+    queued_wake_delivery_is_source_key_idempotent_and_claimed_once(make("root")).await;
+    queue_completion_and_turn_commit_stamp_are_atomic(make("root")).await;
     // [`TurnInputStore`]: pending turn-input lifecycle.
-    pending_turn_inputs_source_keys_order_cancel_and_cross_session(make()).await;
-    pending_turn_input_bulk_and_suffix_cancellation(make()).await;
-    pending_turn_input_claims_reclaim_complete_and_fence(make()).await;
-    turn_input_application_identity_survives_pending_tombstone_vacuum(make()).await;
-    turn_input_claims_supersede_across_session_lease_generations_with_timing(make(), lease_timing)
+    pending_turn_inputs_source_keys_order_cancel_and_cross_session(make("root")).await;
+    pending_turn_input_bulk_and_suffix_cancellation(make("pending-bulk-cancel")).await;
+    pending_turn_input_claims_reclaim_complete_and_fence(make("root")).await;
+    turn_input_application_identity_survives_pending_tombstone_vacuum(make(
+        "turn-input-application",
+    ))
+    .await;
+    turn_input_claims_supersede_across_session_lease_generations_with_timing(
+        make("root"),
+        lease_timing,
+    )
+    .await;
+    active_turn_input_claim_reacquires_after_unrecorded_checkpoint(make("fig905-active-reacquire"))
         .await;
-    active_turn_input_claim_reacquires_after_unrecorded_checkpoint(make()).await;
-    pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
-    pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
+    pending_turn_input_cancel_covers_active_and_deferred_states(make("root")).await;
+    pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make("root")).await;
 }
 
 async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(

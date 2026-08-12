@@ -375,7 +375,7 @@ async fn postgres_fence_integrity_conformance_when_configured() {
         eprintln!("skipping Postgres fence-integrity conformance: database is not configured");
         return;
     };
-    lash_core::testing::conformance::fence_integrity_conformance(|_| {
+    lash_core::testing::conformance::fence_integrity_conformance(|session_id| {
         let database_url = database_url.clone();
         async move {
             let database_lock = SharedDatabaseLock::acquire(&database_url).await;
@@ -386,7 +386,7 @@ async fn postgres_fence_integrity_conformance_when_configured() {
             );
             reset(&storage).await;
             FenceIntegrityHandles {
-                runtime: Arc::new(storage.unbound_session_store()),
+                runtime: Arc::new(storage.session_store(session_id)),
                 triggers: Arc::new(storage.trigger_store()),
                 injector: Arc::new(PostgresFenceIntegrityInjector {
                     _database_lock: database_lock,
@@ -406,7 +406,7 @@ async fn postgres_signed_counter_write_domain_conformance_when_configured() {
     };
     reset(&storage).await;
     lash_core::testing::conformance::signed_counter_write_domain_conformance(Arc::new(
-        storage.unbound_session_store(),
+        storage.session_store("signed-write-available"),
     ))
     .await;
 }
@@ -468,10 +468,11 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
     let database_url = database_url().expect("configured Postgres database URL");
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     lash_core::testing::conformance::runtime_persistence_reopenable(
-        || {
+        |session_id| {
             let storage = Arc::clone(&storage);
             let database_url = database_url.clone();
             let clock = Arc::clone(&clock);
+            let session_id = session_id.to_string();
             sync_await(async move {
                 reset(&storage).await;
                 let open_storage = PostgresStorage::connect(&database_url)
@@ -480,18 +481,27 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
                 let reopen_storage = PostgresStorage::connect(&database_url)
                     .await
                     .expect("open independent Postgres conformance pool");
-                ReopenableRuntimePersistence {
-                    open: Arc::new(
-                        open_storage
-                            .unbound_session_store()
-                            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
-                    ),
-                    reopen: Arc::new(
-                        reopen_storage
-                            .unbound_session_store()
-                            .with_clock(clock as Arc<dyn lash_core::Clock>),
-                    ),
-                }
+                let request = lash_core::SessionStoreCreateRequest {
+                    session_id,
+                    relation: lash_core::SessionRelation::Root,
+                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                };
+                let open_factory = open_storage
+                    .session_store_factory()
+                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>);
+                let reopen_factory = reopen_storage
+                    .session_store_factory()
+                    .with_clock(clock as Arc<dyn lash_core::Clock>);
+                let open = open_factory
+                    .create_store(&request)
+                    .await
+                    .expect("create explicitly bound Postgres conformance store");
+                let reopen = reopen_factory
+                    .open_existing_store(&request)
+                    .await
+                    .expect("open explicit Postgres conformance store")
+                    .expect("created Postgres conformance store exists");
+                ReopenableRuntimePersistence { open, reopen }
             })
         },
         lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
@@ -577,7 +587,7 @@ async fn postgres_store_enforces_core_lease_fence_authority_when_configured() {
         return;
     };
     reset(&storage).await;
-    let store = storage.unbound_session_store();
+    let store = storage.session_store("lease-fence-authority");
     lash_core::testing::conformance::session_execution_lease_fence_authority(&store).await;
 }
 
@@ -592,8 +602,8 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
         return;
     };
     reset(&storage).await;
-    let store = Arc::new(storage.unbound_session_store());
     let session_id = "postgres-concurrent-renewal-rotation";
+    let store = Arc::new(storage.session_store(session_id));
     let owner = lash_core::LeaseOwnerIdentity::opaque("renewal-owner", "renewal-incarnation");
     let predecessor = store
         .try_claim_session_execution_lease(session_id, &owner, 120_000)
@@ -675,14 +685,15 @@ async fn postgres_runtime_persistence_recovery_laws_when_configured() {
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_core::testing::conformance::runtime_persistence_recovery_laws(|_| {
+    lash_core::testing::conformance::runtime_persistence_recovery_laws(|session_id| {
         let database_url = database_url.clone();
+        let session_id = session_id.to_string();
         let storage = sync_await(async move {
             PostgresStorage::connect(&database_url)
                 .await
                 .expect("construct fresh Postgres store-recovery pool")
         });
-        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
+        Arc::new(storage.session_store(session_id)) as Arc<dyn RuntimePersistence>
     })
     .await;
 }
@@ -730,7 +741,7 @@ async fn postgres_complete_runtime_checkpoint_component_set_survives_cold_reopen
                 .await
                 .expect("construct post-write Postgres checkpoint pool")
         });
-        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
+        Arc::new(storage.session_store("checkpoint-component-refs")) as Arc<dyn RuntimePersistence>
     })
     .await;
 }
@@ -772,7 +783,7 @@ async fn postgres_append_receipt_replays_after_ancestor_superseded_when_configur
     reset(&storage).await;
     let pool = storage.pool().clone();
     lash_core::testing::conformance::append_request_receipt_replays_after_ancestor_superseded(
-        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         move |leaf_node_id| async move {
             sqlx::query(
                 "UPDATE lash_sessions
@@ -797,7 +808,7 @@ async fn postgres_inactive_append_ancestor_precedes_stale_head_when_configured()
     reset(&storage).await;
     let pool = storage.pool().clone();
     lash_core::testing::conformance::inactive_append_ancestor_precedes_stale_head(
-        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         move |leaf_node_id| async move {
             sqlx::query(
                 "UPDATE lash_sessions
@@ -822,7 +833,7 @@ async fn postgres_tombstoned_old_leaf_is_rejected_when_configured() {
     reset(&storage).await;
     let pool = storage.pool().clone();
     lash_core::testing::conformance::tombstoned_old_leaf_is_rejected(
-        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         move |node_id| async move {
             sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
                 .bind(node_id)
@@ -844,7 +855,7 @@ async fn postgres_append_receipt_restores_mixed_usage_envelope_when_configured()
     };
     reset(&storage).await;
     lash_core::testing::conformance::append_receipt_mixed_usage_envelope(Arc::new(
-        storage.unbound_session_store(),
+        storage.session_store("root"),
     ))
     .await;
 }
@@ -858,7 +869,7 @@ async fn postgres_old_format_append_receipt_returns_public_leaf_when_configured(
     reset(&storage).await;
     let pool = storage.pool().clone();
     lash_core::testing::conformance::old_format_append_receipt_returns_public_leaf(
-        Arc::new(storage.unbound_session_store()),
+        Arc::new(storage.session_store("root")),
         move || async move {
             sqlx::query(
                 "UPDATE lash_runtime_turn_commits
@@ -932,16 +943,28 @@ async fn postgres_session_store_factory_satisfies_conformance_when_configured() 
         return;
     };
     let storage = Arc::new(storage);
-    lash_core::testing::conformance::session_store_factory(
-        || {
-            let storage = Arc::clone(&storage);
-            sync_await(async move {
-                reset(&storage).await;
-                Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
-            })
-        },
-        || Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
-    )
+    lash_core::testing::conformance::session_store_factory(|| {
+        let storage = Arc::clone(&storage);
+        sync_await(async move {
+            reset(&storage).await;
+            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+        })
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_fresh_session_admission_returns_created_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres fresh-admission conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::fresh_session_admission_returns_created(|session_id| {
+        Arc::new(storage.session_store(session_id)) as Arc<dyn RuntimePersistence>
+    })
     .await;
 }
 
@@ -1193,7 +1216,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     )
     .await
     .expect("connect storage with short lock timeout");
-    let bounded_store = bounded_storage.unbound_session_store();
+    let bounded_store = bounded_storage.session_store(session_id);
     let mut timeout_wake = wake;
     timeout_wake.wake_id = "wake:source-lock-timeout".to_string();
     timeout_wake.sequence = 2;
@@ -2235,16 +2258,20 @@ async fn postgres_store_contract_state_machine_properties_when_configured() {
         return;
     };
     let storage = Arc::new(storage);
-    lash_core::testing::conformance::store_contract_state_machine("postgres", move |_| {
-        let storage = Arc::clone(&storage);
-        async move {
-            reset(&storage).await;
-            lash_core::testing::conformance::StoreContractHandles {
-                registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
-                runtime: Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+    lash_core::testing::conformance::store_contract_state_machine(
+        "postgres",
+        move |_, session_id| {
+            let storage = Arc::clone(&storage);
+            async move {
+                reset(&storage).await;
+                lash_core::testing::conformance::StoreContractHandles {
+                    registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
+                    runtime: Arc::new(storage.session_store(session_id))
+                        as Arc<dyn RuntimePersistence>,
+                }
             }
-        }
-    })
+        },
+    )
     .await;
 }
 

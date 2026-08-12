@@ -6,16 +6,16 @@ use super::*;
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.
-pub async fn session_store_factory<F, S>(make: F, make_unbound_store: S)
+pub async fn session_store_factory<F>(make: F)
 where
     F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
-    S: Fn() -> Arc<dyn crate::RuntimePersistence>,
 {
     let first = make();
     let second = make();
     assert_fresh_instances(&first, &second, "session_store_factory");
     drop((first, second));
-    session_admission_contract(make(), make_unbound_store()).await;
+    session_admission_contract(make()).await;
+    session_store_binding_is_catalog_cardinality_independent(&make).await;
     session_store_factory_open_missing_returns_none(make()).await;
     session_store_factory_create_seeds_and_reopens_meta(make()).await;
     session_store_factory_round_trips_every_relation_shape(make()).await;
@@ -29,6 +29,33 @@ where
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
+}
+
+/// Assert that the first admission through a fresh session handle creates the
+/// session's durable metadata.
+///
+/// `make` must return a fresh handle bound (when the backend requires explicit
+/// identity binding) to the supplied session id, without admitting that id.
+pub async fn fresh_session_admission_returns_created<F>(make: F)
+where
+    F: FnOnce(&str) -> Arc<dyn crate::RuntimePersistence>,
+{
+    let binding = crate::SessionBinding {
+        session_id: "fresh-admission-created".to_string(),
+        relation: crate::SessionRelation::Child {
+            parent_session_id: "fresh-admission-parent".to_string(),
+            caused_by: None,
+        },
+    };
+    let store = make(&binding.session_id);
+
+    assert_eq!(
+        store
+            .admit_and_bind_session(&binding)
+            .await
+            .expect("admit a fresh session"),
+        crate::SessionAdmission::Created
+    );
 }
 
 /// The notification fast path reads durable claimable work without creating a
@@ -758,36 +785,40 @@ fn assert_meta_matches_request(meta: &SessionMeta, request: &crate::SessionStore
     assert_eq!(meta.relation, request.relation);
 }
 
-async fn session_admission_contract(
-    factory: Arc<dyn crate::SessionStoreFactory>,
-    unbound: Arc<dyn crate::RuntimePersistence>,
-) {
+async fn session_admission_contract(factory: Arc<dyn crate::SessionStoreFactory>) {
+    let request = session_store_request(
+        "admission-created",
+        "admission-model",
+        crate::SessionRelation::Child {
+            parent_session_id: "admission-parent".to_string(),
+            caused_by: None,
+        },
+    );
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create explicitly bound admission store");
     let empty = crate::SessionBinding::root("");
     assert!(matches!(
-        unbound
+        store
             .admit_and_bind_session(&empty)
             .await
             .expect_err("empty session id must be rejected"),
         crate::StoreError::InvalidSessionId { .. }
     ));
 
-    let relation = crate::SessionRelation::Child {
-        parent_session_id: "admission-parent".to_string(),
-        caused_by: None,
-    };
-    let request = session_store_request("admission-created", "admission-model", relation.clone());
     let binding = crate::SessionBinding {
         session_id: request.session_id.clone(),
-        relation,
+        relation: request.relation.clone(),
     };
     assert_eq!(
-        unbound
+        store
             .admit_and_bind_session(&binding)
             .await
-            .expect("admit fresh session"),
-        crate::SessionAdmission::Created
+            .expect("admit factory-created session"),
+        crate::SessionAdmission::Rebound
     );
-    let created_meta = unbound
+    let created_meta = store
         .load_session_meta()
         .await
         .expect("load admitted metadata")
@@ -800,14 +831,14 @@ async fn session_admission_contract(
         ..binding.clone()
     };
     assert_eq!(
-        unbound
+        store
             .admit_and_bind_session(&changed_binding)
             .await
             .expect("rebind same session"),
         crate::SessionAdmission::Rebound
     );
     assert_eq!(
-        unbound
+        store
             .load_session_meta()
             .await
             .expect("reload rebound metadata")
@@ -821,7 +852,7 @@ async fn session_admission_contract(
         ..binding
     };
     assert!(matches!(
-        unbound
+        store
             .admit_and_bind_session(&cross_session)
             .await
             .expect_err("cross-session handle reuse must fail"),
@@ -860,6 +891,71 @@ async fn session_admission_contract(
             .expect_err("vacuum must preserve admission tombstone"),
         &deleted_request.session_id,
     );
+}
+
+/// A session handle's identity is explicit and independent of how many other
+/// sessions exist in the durable catalog.
+async fn session_store_binding_is_catalog_cardinality_independent<F>(make: &F)
+where
+    F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+{
+    let empty_factory = make();
+    let missing = session_store_request(
+        "binding-cardinality-b",
+        "binding-cardinality-model",
+        crate::SessionRelation::Root,
+    );
+    assert!(
+        empty_factory
+            .open_existing_store(&missing)
+            .await
+            .expect("query an empty session catalog")
+            .is_none(),
+        "zero-session catalogs must not invent a session identity"
+    );
+
+    for earlier_session_count in 0..=1 {
+        let factory = make();
+        if earlier_session_count == 1 {
+            let earlier = session_store_request(
+                "binding-cardinality-a",
+                "binding-cardinality-model",
+                crate::SessionRelation::Root,
+            );
+            factory
+                .create_store(&earlier)
+                .await
+                .expect("seed the lexicographically earlier session");
+        }
+
+        let target = session_store_request(
+            "binding-cardinality-b",
+            "binding-cardinality-model",
+            crate::SessionRelation::Root,
+        );
+        let store = factory
+            .create_store(&target)
+            .await
+            .expect("create the explicitly bound target store");
+        assert_eq!(
+            store
+                .admit_and_bind_session(&crate::SessionBinding::from_create_request(&target))
+                .await
+                .expect("write-bind the target session"),
+            crate::SessionAdmission::Rebound
+        );
+        let loaded = store
+            .load_session_meta()
+            .await
+            .expect("read through the same explicitly bound handle")
+            .expect("write-bound target metadata exists");
+        assert_eq!(
+            loaded.session_id,
+            "binding-cardinality-b",
+            "a write-bound B handle must read B from a catalog containing {} session(s)",
+            earlier_session_count + 1
+        );
+    }
 }
 
 async fn session_store_factory_never_used_delete_is_noop(

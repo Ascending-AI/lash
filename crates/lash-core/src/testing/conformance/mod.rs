@@ -378,7 +378,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn in_memory_store_contract_state_machine_properties() {
-        store_contract_state_machine("in-memory", |_| async {
+        store_contract_state_machine("in-memory", |_, _| async {
             StoreContractHandles {
                 registry: Arc::new(crate::TestLocalProcessRegistry::default())
                     as Arc<dyn ProcessRegistry>,
@@ -495,16 +495,18 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_session_store_factory_satisfies_conformance() {
-        session_store_factory(
-            || {
-                Arc::new(crate::InMemorySessionStoreFactory::new())
-                    as Arc<dyn crate::SessionStoreFactory>
-            },
-            || {
-                Arc::new(crate::InMemorySessionStore::default())
-                    as Arc<dyn crate::RuntimePersistence>
-            },
-        )
+        session_store_factory(|| {
+            Arc::new(crate::InMemorySessionStoreFactory::new())
+                as Arc<dyn crate::SessionStoreFactory>
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_fresh_session_admission_returns_created() {
+        fresh_session_admission_returns_created(|_| {
+            Arc::new(crate::InMemorySessionStore::default()) as Arc<dyn crate::RuntimePersistence>
+        })
         .await;
     }
 

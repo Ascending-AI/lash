@@ -40,13 +40,13 @@ where
     Make: Fn(&'static str) -> Fut,
     Fut: Future<Output = FenceIntegrityHandles>,
 {
-    negative_claim_fence(make("negative-claim-fence").await).await;
-    negative_session_head_revision(make("negative-session-head").await).await;
-    negative_session_lease_fence(make("negative-session-lease").await).await;
-    divergent_claim_fences_advance_per_row(make("divergent-claim-fences").await).await;
-    exhausted_claim_fence(make("exhausted-head-claim").await, true).await;
-    exhausted_claim_fence(make("exhausted-non-head-claim").await, false).await;
-    exhausted_trigger_revision(make("exhausted-trigger-revision").await).await;
+    negative_claim_fence(make("fence-negative-claim").await).await;
+    negative_session_head_revision(make("fence-negative-head").await).await;
+    negative_session_lease_fence(make("fence-negative-lease").await).await;
+    divergent_claim_fences_advance_per_row(make("fence-divergent-rows").await).await;
+    exhausted_claim_fence(make("fence-exhausted-head").await, true).await;
+    exhausted_claim_fence(make("fence-exhausted-tail").await, false).await;
+    exhausted_trigger_revision(make("fence-exhausted-trigger").await).await;
 }
 
 /// SQL-only write-direction checks for public `u64` values that must fit the

@@ -51472,7 +51472,7 @@ kind = "enum"
 availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+reason = "Backend conformance law seam: the SQLite store test suite supplies unbound handles to the shared session-resolution ambiguity law."
 
 [[api]]
 symbol = "lash::testing::conformance::UnboundSessionAdmissionState::AdmittedOnly"
@@ -51480,7 +51480,7 @@ kind = "variant"
 availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+reason = "Backend conformance law seam: the SQLite store test suite supplies unbound handles to the shared session-resolution ambiguity law."
 
 [[api]]
 symbol = "lash::testing::conformance::UnboundSessionAdmissionState::Committed"
@@ -51488,7 +51488,7 @@ kind = "variant"
 availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+reason = "Backend conformance law seam: the SQLite store test suite supplies unbound handles to the shared session-resolution ambiguity law."
 
 [[api]]
 symbol = "lash::testing::conformance::UnboundSessionResolutionHandles"
@@ -51496,7 +51496,7 @@ kind = "struct"
 availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+reason = "Backend conformance law seam: the SQLite store test suite supplies unbound handles to the shared session-resolution ambiguity law."
 
 [[api]]
 symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::backend_name"
@@ -51504,7 +51504,7 @@ kind = "field"
 availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+reason = "Backend conformance law seam: the SQLite store test suite supplies unbound handles to the shared session-resolution ambiguity law."
 
 [[api]]
 symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::factory"
@@ -51512,7 +51512,7 @@ kind = "field"
 availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+reason = "Backend conformance law seam: the SQLite store test suite supplies unbound handles to the shared session-resolution ambiguity law."
 
 [[api]]
 symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::open_unbound"
@@ -51520,7 +51520,7 @@ kind = "field"
 availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+reason = "Backend conformance law seam: the SQLite store test suite supplies unbound handles to the shared session-resolution ambiguity law."
 
 [[api]]
 symbol = "lash::testing::conformance::session_execution_lease_zero_row_renewal_is_refused"
@@ -52571,6 +52571,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::fork_observer_intent_transient_failure to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::fresh_session_admission_returns_created"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: conformance-suite embedders (ADR 0051). This executable law proves every RuntimePersistence backend and in-process double returns SessionAdmission::Created for the first admission through a fresh handle; backend conformance tests are its integrator-class home rather than a host example."
+
+[[api]]
 symbol = "lash::testing::conformance::inactive_append_ancestor_precedes_stale_head"
 kind = "function"
 availability = "all-features"
@@ -52888,7 +52896,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Backend conformance law is executed by the in-memory, SQLite, and PostgreSQL store test suites."
+reason = "Backend conformance law is executed by the SQLite store test suite; no other backend exposes a global unbound multi-session handle."
 
 [[api]]
 symbol = "lash::testing::conformance::wake_delivery_crash_matrix"

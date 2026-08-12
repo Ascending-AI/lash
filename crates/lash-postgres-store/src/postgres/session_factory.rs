@@ -50,8 +50,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let store = PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::clone(&self.clock),
-            session_id: Some(request.session_id.clone()),
-            bound_session: Arc::new(OnceLock::new()),
+            session_id: request.session_id.clone(),
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
@@ -95,8 +94,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let store = PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::clone(&self.clock),
-            session_id: Some(request.session_id.clone()),
-            bound_session: Arc::new(OnceLock::new()),
+            session_id: request.session_id.clone(),
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]

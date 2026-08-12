@@ -29,7 +29,7 @@
 //! [`PostgresStorage::schema_advisory_lock_key`] publishes the key so a host's
 //! migrations can participate.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::runtime::{
@@ -188,14 +188,7 @@ pub struct PostgresSessionStoreFactory {
 pub struct PostgresSessionStore {
     pool: PgPool,
     clock: Arc<dyn lash_core::Clock>,
-    /// Explicit session binding for handles created via the factory.
-    session_id: Option<String>,
-    /// In-memory bind-on-first-commit for an *unbound* handle. A session-store
-    /// handle commits to exactly one session; an unbound handle latches the first
-    /// session it commits and rejects others (Postgres is multi-session per
-    /// database, so this can't be inferred from a singleton head row the way the
-    /// single-file SQLite store does). Shared across clones via `Arc`.
-    bound_session: Arc<OnceLock<String>>,
+    session_id: String,
     #[cfg(test)]
     checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -583,25 +576,20 @@ impl PostgresStorage {
         }
     }
 
+    /// Construct a handle bound to `session_id` without validating that the
+    /// session already exists.
+    ///
+    /// Construction binds identity; it does not validate existence. Reads of a
+    /// nonexistent session return `Ok(None)`, and a later admission or commit
+    /// may create that id. Consequently, a mistyped id produces a valid absent
+    /// handle that can subsequently create the mistyped session. Call
+    /// [`SessionStoreFactory::open_existing_store`](lash_core::SessionStoreFactory::open_existing_store)
+    /// through [`Self::session_store_factory`] when existence must be checked.
     pub fn session_store(&self, session_id: impl Into<String>) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::new(lash_core::facade_support::SystemClock),
-            session_id: Some(session_id.into()),
-            bound_session: Arc::new(OnceLock::new()),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        }
-    }
-
-    pub fn unbound_session_store(&self) -> PostgresSessionStore {
-        PostgresSessionStore {
-            pool: self.pool.clone(),
-            clock: Arc::new(lash_core::facade_support::SystemClock),
-            session_id: None,
-            bound_session: Arc::new(OnceLock::new()),
+            session_id: session_id.into(),
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
@@ -682,10 +670,6 @@ fn warn_postgres_process_registry_not_wired() {
 }
 
 impl PostgresSessionStore {
-    pub fn unbound(storage: &PostgresStorage) -> Self {
-        storage.unbound_session_store()
-    }
-
     /// Bind this handle to an explicit clock for deterministic embedding and tests.
     pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
         self.clock = clock;
@@ -703,40 +687,14 @@ impl PostgresSessionStore {
     }
 
     fn bind_session_id(&self, attempted_session_id: &str) -> Result<(), StoreError> {
-        if let Some(bound_session_id) = &self.session_id {
-            return if bound_session_id == attempted_session_id {
-                Ok(())
-            } else {
-                Err(StoreError::SessionBindingMismatch {
-                    bound_session_id: bound_session_id.clone(),
-                    attempted_session_id: attempted_session_id.to_string(),
-                })
-            };
-        }
-
-        let _ = self.bound_session.set(attempted_session_id.to_string());
-        let bound_session_id = self
-            .bound_session
-            .get()
-            .expect("OnceLock contains either this session or the concurrent winner");
-        if bound_session_id == attempted_session_id {
+        if self.session_id == attempted_session_id {
             Ok(())
         } else {
             Err(StoreError::SessionBindingMismatch {
-                bound_session_id: bound_session_id.clone(),
+                bound_session_id: self.session_id.clone(),
                 attempted_session_id: attempted_session_id.to_string(),
             })
         }
-    }
-
-    async fn selected_session_id(&self) -> Result<Option<String>, StoreError> {
-        if let Some(session_id) = &self.session_id {
-            return Ok(Some(session_id.clone()));
-        }
-        sqlx::query_scalar("SELECT session_id FROM lash_sessions ORDER BY session_id ASC LIMIT 1")
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)
     }
 }
 
@@ -799,7 +757,6 @@ mod postgres_test_support;
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -833,37 +790,42 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn unbound_session_store_concurrent_binding_has_exactly_one_winner() {
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://postgres:postgres@127.0.0.1/lash")
-            .expect("lazy test pool");
-        let store = PostgresSessionStore {
-            pool,
-            clock: Arc::new(lash_core::facade_support::SystemClock),
-            session_id: None,
-            bound_session: Arc::new(OnceLock::new()),
-            checkpoint_probe_count: Arc::new(AtomicUsize::new(0)),
-            checkpoint_write_transaction_count: Arc::new(AtomicUsize::new(0)),
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn direct_session_store_defers_missing_identity_validation() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping direct-session-store contract: database URL is not set");
+            return;
         };
-        let barrier = Arc::new(Barrier::new(2));
-        let attempts = ["alpha", "beta"].map(|session_id| {
-            let store = store.clone();
-            let barrier = Arc::clone(&barrier);
-            std::thread::spawn(move || {
-                barrier.wait();
-                store.bind_session_id(session_id)
-            })
-        });
-        let results = attempts.map(|attempt| attempt.join().expect("binding thread"));
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect direct-session-store contract storage");
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT tablename FROM pg_tables
+             WHERE schemaname = 'public'
+               AND tablename LIKE 'lash\\_%'
+               AND tablename NOT IN ('lash_schema_versions', 'lash_await_event_meta')
+             ORDER BY tablename",
+        )
+        .fetch_all(storage.pool())
+        .await
+        .expect("list Lash tables for direct-constructor test reset");
+        let truncate = format!("TRUNCATE {} RESTART IDENTITY CASCADE", tables.join(", "));
+        sqlx::query(&truncate)
+            .execute(storage.pool())
+            .await
+            .expect("reset direct-constructor test tables");
+        let store = storage.session_store("missing");
 
-        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert!(matches!(store.load_session_head_meta().await, Ok(None)));
+        assert!(matches!(store.load_session_meta().await, Ok(None)));
         assert_eq!(
-            results
-                .iter()
-                .filter(|result| matches!(result, Err(StoreError::SessionBindingMismatch { .. })))
-                .count(),
-            1
+            store
+                .admit_and_bind_session(&lash_core::SessionBinding::root("missing"))
+                .await
+                .expect("admit missing direct-constructor session"),
+            lash_core::SessionAdmission::Created
         );
     }
 

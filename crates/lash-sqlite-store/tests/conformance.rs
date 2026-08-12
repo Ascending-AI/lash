@@ -230,18 +230,6 @@ fn open_store(path: &Path) -> Arc<dyn RuntimePersistence> {
     })) as Arc<dyn RuntimePersistence>
 }
 
-fn open_store_with_clock(
-    path: &Path,
-    clock: Arc<dyn lash_core::Clock>,
-) -> Arc<dyn RuntimePersistence> {
-    let path = path.to_path_buf();
-    Arc::new(sync_await(async move {
-        Store::open_with_clock(&path, clock)
-            .await
-            .expect("file store with conformance clock")
-    })) as Arc<dyn RuntimePersistence>
-}
-
 struct SqliteSessionExecutionLeaseRenewalZeroRowInjector {
     path: PathBuf,
     _dir: TempDir,
@@ -843,7 +831,7 @@ async fn sqlite_process_trigger_retention_satisfies_conformance() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_store_contract_state_machine_properties() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_core::testing::conformance::store_contract_state_machine("sqlite", move |seed| {
+    lash_core::testing::conformance::store_contract_state_machine("sqlite", move |seed, _| {
         let dirs = Arc::clone(&dirs);
         async move {
             let dir = tempfile::tempdir().expect("store-contract tempdir");
@@ -977,19 +965,22 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
 #[tokio::test]
 async fn sqlite_session_store_factory_satisfies_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_core::testing::conformance::session_store_factory(
-        || {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
-                as Arc<dyn SessionStoreFactory>;
-            dirs.lock_recover().push(dir);
-            factory
-        },
-        || {
-            Arc::new(sync_await(Store::memory()).expect("in-memory SQLite store"))
-                as Arc<dyn RuntimePersistence>
-        },
-    )
+    lash_core::testing::conformance::session_store_factory(|| {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory =
+            Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
+        dirs.lock_recover().push(dir);
+        factory
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_fresh_session_admission_returns_created() {
+    lash_core::testing::conformance::fresh_session_admission_returns_created(|_| {
+        Arc::new(sync_await(Store::memory()).expect("in-memory SQLite store"))
+            as Arc<dyn RuntimePersistence>
+    })
     .await;
 }
 
@@ -1242,12 +1233,32 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance() {
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
     lash_core::testing::conformance::runtime_persistence_reopenable(
-        move || {
-            let path = fresh_db_path(&dirs, "session.db");
-            ReopenableRuntimePersistence {
-                open: open_store_with_clock(&path, store_clock.clone()),
-                reopen: open_store_with_clock(&path, store_clock.clone()),
-            }
+        move |session_id| {
+            let dir = tempfile::tempdir().expect("runtime-persistence conformance tempdir");
+            let factory_dir = dir.path().to_path_buf();
+            let session_id = session_id.to_string();
+            let clock = store_clock.clone();
+            let (open, reopen) = sync_await(async move {
+                let factory = SqliteSessionStoreFactory::new(factory_dir)
+                    .with_clock(clock as Arc<dyn lash_core::Clock>);
+                let request = lash_core::SessionStoreCreateRequest {
+                    session_id,
+                    relation: lash_core::SessionRelation::Root,
+                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                };
+                let open = factory
+                    .create_store(&request)
+                    .await
+                    .expect("create explicitly bound SQLite conformance store");
+                let reopen = factory
+                    .open_existing_store(&request)
+                    .await
+                    .expect("open explicit SQLite conformance store")
+                    .expect("created SQLite conformance store exists");
+                (open, reopen)
+            });
+            dirs.lock_recover().push(dir);
+            ReopenableRuntimePersistence { open, reopen }
         },
         lash_core::testing::conformance::RuntimePersistenceLeaseTiming::controlled({
             let clock = Arc::clone(&clock);

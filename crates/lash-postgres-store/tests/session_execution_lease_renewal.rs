@@ -68,7 +68,8 @@ async fn postgres_zero_row_session_execution_lease_renewal_is_refused_when_confi
     );
     lash_core::testing::conformance::session_execution_lease_zero_row_renewal_is_refused(
         SessionExecutionLeaseRenewalZeroRowHandles {
-            store: Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+            store: Arc::new(storage.session_store("zero-row-session-lease-renewal"))
+                as Arc<dyn RuntimePersistence>,
             injector: Arc::new(PostgresSessionExecutionLeaseRenewalZeroRowInjector { storage }),
         },
     )

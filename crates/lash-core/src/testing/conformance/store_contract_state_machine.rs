@@ -224,11 +224,11 @@ impl ModelProcess {
 /// unavailable.
 pub async fn store_contract_state_machine<F, Fut>(backend: &'static str, make: F)
 where
-    F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
+    F: Fn(u64, String) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = StoreContractHandles> + Send + 'static,
 {
-    let first = make(u64::MAX - 2).await;
-    let second = make(u64::MAX - 2).await;
+    let first = make(u64::MAX - 2, "prop-runtime-session".to_string()).await;
+    let second = make(u64::MAX - 2, "prop-runtime-session".to_string()).await;
     assert!(
         !Arc::ptr_eq(&first.registry, &second.registry),
         "store_contract_state_machine reused one process-registry Arc"
@@ -267,7 +267,7 @@ where
         let mut runner = TestRunner::new(config);
         runner.run(&generated_case(), |case| {
             runtime.block_on(async {
-                let handles = make(case.seed).await;
+                let handles = make(case.seed, "prop-runtime-session".to_string()).await;
                 let shape = replay_case(handles, &case.operations).await?;
                 prop_assert!(
                     shape.consumes_committed > 0,
@@ -443,14 +443,14 @@ async fn replay_case(
 
 async fn replay_regression_corpus<F, Fut>(make: &F) -> Result<(), TestCaseError>
 where
-    F: Fn(u64) -> Fut,
+    F: Fn(u64, String) -> Fut,
     Fut: Future<Output = StoreContractHandles>,
 {
     let cases: Vec<GeneratedCase> =
         serde_json::from_str(include_str!("store_contract_regressions.json"))
             .map_err(|error| TestCaseError::fail(format!("invalid regression corpus: {error}")))?;
     for (index, case) in cases.iter().enumerate() {
-        let handles = make(case.seed).await;
+        let handles = make(case.seed, "prop-runtime-session".to_string()).await;
         replay_case(handles, &case.operations)
             .await
             .map_err(|reason| TestCaseError::fail(format!("regression case {index}: {reason}")))?;
@@ -460,38 +460,38 @@ where
 
 async fn assert_dedicated_laws<F, Fut>(make: &F, seed: u64) -> Result<(), TestCaseError>
 where
-    F: Fn(u64) -> Fut,
+    F: Fn(u64, String) -> Fut,
     Fut: Future<Output = StoreContractHandles>,
 {
-    assert_on_fresh_handles(make, seed, |handles| async move {
+    assert_on_fresh_handles(make, seed, "prop-runtime-session", |handles| async move {
         assert_replay_key_idempotency(&handles.registry).await
     })
     .await?;
-    assert_on_fresh_handles(make, seed, |handles| async move {
+    assert_on_fresh_handles(make, seed, "prop-runtime-session", |handles| async move {
         assert_attempt_monotonicity_and_budget(&handles.registry).await
     })
     .await?;
-    assert_on_fresh_handles(make, seed, |handles| async move {
+    assert_on_fresh_handles(make, seed, "prop-runtime-session", |handles| async move {
         assert_stale_authority_non_mutation(&handles.registry).await
     })
     .await?;
-    assert_on_fresh_handles(make, seed, |handles| async move {
+    assert_on_fresh_handles(make, seed, "prop-runtime-session", |handles| async move {
         assert_wake_group_order_and_claim_ownership(&handles.registry).await
     })
     .await?;
-    assert_on_fresh_handles(make, seed, |handles| async move {
+    assert_on_fresh_handles(make, seed, "law-high-water", |handles| async move {
         assert_enqueued_wake_high_water_safety(&handles.runtime).await
     })
     .await?;
-    assert_on_fresh_handles(make, seed, |handles| async move {
+    assert_on_fresh_handles(make, seed, "law-prune-wake", |handles| async move {
         assert_prune_reregister_wake_fence(&handles).await
     })
     .await?;
-    assert_on_fresh_handles(make, seed, |handles| async move {
+    assert_on_fresh_handles(make, seed, "prop-runtime-session", |handles| async move {
         assert_prune_tombstone_watermark_safety(&handles.registry).await
     })
     .await?;
-    assert_on_fresh_handles(make, seed, |handles| async move {
+    assert_on_fresh_handles(make, seed, "prop-runtime-session", |handles| async move {
         assert_prune_reregister_registry_state_is_fresh(&handles.registry).await
     })
     .await
@@ -500,16 +500,17 @@ where
 async fn assert_on_fresh_handles<F, Fut, Law, LawFut>(
     make: &F,
     seed: u64,
+    session_id: &str,
     law: Law,
 ) -> Result<(), TestCaseError>
 where
-    F: Fn(u64) -> Fut,
+    F: Fn(u64, String) -> Fut,
     Fut: Future<Output = StoreContractHandles>,
     Law: FnOnce(StoreContractHandles) -> LawFut,
     LawFut: Future<Output = Result<(), TestCaseError>>,
 {
     // Dedicated laws always construct handles here; generated-run handles never enter this path.
-    law(make(seed).await).await
+    law(make(seed, session_id.to_string()).await).await
 }
 
 fn process_id(index: u8) -> String {
@@ -1916,7 +1917,7 @@ async fn assert_enqueued_wake_high_water_safety(
 async fn assert_prune_reregister_wake_fence(
     handles: &StoreContractHandles,
 ) -> Result<(), TestCaseError> {
-    let session = "law-prune-reregister-wake-session";
+    let session = "law-prune-wake";
     let process = "law-prune-reregister-wake-process";
     handles
         .registry
