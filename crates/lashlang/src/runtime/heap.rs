@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -109,6 +109,7 @@ pub(crate) struct HeapEntry {
 pub(crate) struct Heap {
     pub(crate) slots: Vec<Option<HeapEntry>>,
     pub(crate) id_to_slot: BTreeMap<HeapId, usize>,
+    parents: FxHashMap<HeapId, Vec<HeapId>>,
     pub(crate) free_slots: Vec<usize>,
     pub(crate) next_id: u64,
     pub(crate) allocations: u64,
@@ -135,6 +136,7 @@ impl Default for Heap {
         Self {
             slots: Vec::new(),
             id_to_slot: BTreeMap::new(),
+            parents: FxHashMap::default(),
             free_slots: Vec::new(),
             next_id: 1,
             allocations: 0,
@@ -212,6 +214,7 @@ impl Heap {
                 heap.validate_resolvable_refs(value)?;
             }
         }
+        heap.rebuild_parents();
         heap.restore_collection_schedule();
         Ok(heap)
     }
@@ -426,6 +429,7 @@ impl Heap {
         self.next_id += 1;
         self.allocations = self.allocations.saturating_add(1);
         self.live_logical_bytes = self.live_logical_bytes.saturating_add(logical_bytes);
+        let children = object.children().collect::<Vec<_>>();
         let entry = HeapEntry {
             id,
             object,
@@ -439,6 +443,12 @@ impl Heap {
             self.slots.len() - 1
         };
         self.id_to_slot.insert(id, slot);
+        for child in children {
+            let parents = self.parents.entry(child).or_default();
+            if !parents.contains(&id) {
+                parents.push(id);
+            }
+        }
         if self.collect_every_allocation {
             let allocated = Value::Ref(id);
             self.stress_pins.push(allocated.clone());
@@ -449,8 +459,45 @@ impl Heap {
     }
 
     pub(crate) fn import(&mut self, value: Value) -> Result<Value, RuntimeError> {
-        let mut values = self.import_values(vec![value])?;
-        Ok(values.pop().expect("single import returns one value"))
+        if let Some(identity) = compound_identity(&value)
+            && let Some(id) = self.boundary_id(identity)
+        {
+            return Ok(Value::Ref(id));
+        }
+        match value {
+            Value::Tuple(values) => {
+                let values = values
+                    .into_vec()
+                    .into_iter()
+                    .map(|value| self.import(value))
+                    .collect::<Result<_, _>>()?;
+                self.allocate(HeapObject::Tuple(values))
+            }
+            Value::List(values) => {
+                let values = values
+                    .into_vec()
+                    .into_iter()
+                    .map(|value| self.import(value))
+                    .collect::<Result<_, _>>()?;
+                self.allocate(HeapObject::List(values))
+            }
+            Value::Record(record) => {
+                let mut imported = record_with_capacity(record.len());
+                for entry in record.entries.iter() {
+                    imported.insert_symbolized(
+                        entry.symbol,
+                        entry.name.clone(),
+                        self.import(entry.value.clone())?,
+                    );
+                }
+                self.allocate(HeapObject::Record(Box::new(imported)))
+            }
+            Value::Ref(id) => {
+                self.get(id)?;
+                Ok(Value::Ref(id))
+            }
+            value => Ok(value),
+        }
     }
 
     pub(crate) fn import_values(&mut self, values: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
@@ -549,7 +596,7 @@ impl Heap {
 
     fn uncache_reachable(&mut self, root: HeapId) -> Result<(), RuntimeError> {
         let mut pending = vec![root];
-        let mut visited = BTreeSet::new();
+        let mut visited = FxHashSet::default();
         while let Some(id) = pending.pop() {
             if !visited.insert(id) {
                 continue;
@@ -643,10 +690,32 @@ impl Heap {
         self.debug_assert_boundary_cache_invariant();
     }
 
-    pub(crate) fn clear_boundary_cache(&mut self) {
-        self.materialized.clear();
-        self.boundary_refs.clear();
+    fn invalidate_materialized_reaching(&mut self, mutated: HeapId) {
+        let mut pending = vec![mutated];
+        let mut visited = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if visited.insert(id) {
+                pending.extend(self.parents.get(&id).into_iter().flatten().copied());
+            }
+        }
+        for id in visited {
+            self.forget(id);
+        }
         self.debug_assert_boundary_cache_invariant();
+    }
+
+    fn rebuild_parents(&mut self) {
+        self.parents.clear();
+        let edges = self
+            .objects_in_id_order()
+            .flat_map(|(parent, object)| object.children().map(move |child| (parent, child)))
+            .collect::<Vec<_>>();
+        for (parent, child) in edges {
+            let parents = self.parents.entry(child).or_default();
+            if !parents.contains(&parent) {
+                parents.push(parent);
+            }
+        }
     }
 
     fn debug_assert_boundary_cache_invariant(&self) {
@@ -703,16 +772,11 @@ impl Heap {
         self.deep_copy_inner(value, &mut copied)
     }
 
-    /// Isolate a value at a Lashlang assignment/container boundary.
-    ///
-    /// Heap mutations replace or materialize the root they target, so cloning
-    /// the root object is sufficient to establish copy-on-write value
-    /// semantics. Child references remain shared until a later path mutation
-    /// materializes that root as a fresh tree.
     pub(crate) fn isolate_value(&mut self, value: &Value) -> Result<Value, RuntimeError> {
         match value {
             Value::Ref(id) => self.allocate(self.get(*id)?.clone()),
-            value => self.import(value.clone()),
+            Value::Tuple(_) | Value::List(_) | Value::Record(_) => self.import(value.clone()),
+            value => Ok(value.clone()),
         }
     }
 
@@ -721,6 +785,7 @@ impl Heap {
             return Err(RuntimeError::PushUnsupported);
         };
         let item = self.import(item)?;
+        let children = value_refs(&item);
         let added_bytes = value_logical_bytes(&item);
         let next_live = self.live_logical_bytes.saturating_add(added_bytes);
         if next_live > self.logical_byte_limit {
@@ -741,9 +806,15 @@ impl Heap {
             return Err(RuntimeError::PushUnsupported);
         };
         values.push(item);
+        for child in children {
+            let parents = self.parents.entry(child).or_default();
+            if !parents.contains(id) {
+                parents.push(*id);
+            }
+        }
         entry.logical_bytes = entry.logical_bytes.saturating_add(added_bytes);
         self.live_logical_bytes = next_live;
-        self.clear_boundary_cache();
+        self.invalidate_materialized_reaching(*id);
         Ok(Value::Ref(*id))
     }
 
@@ -859,7 +930,7 @@ impl Heap {
         let entry = self.slots[slot].as_mut().expect("heap slot exists");
         entry.logical_bytes = entry_bytes;
         self.live_logical_bytes = next_live;
-        self.clear_boundary_cache();
+        self.invalidate_materialized_reaching(*id);
         Ok(value)
     }
 
@@ -992,10 +1063,26 @@ impl Heap {
         let entry = self.slots[slot]
             .as_mut()
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let old_children = entry.object.children().collect::<Vec<_>>();
+        let new_children = object.children().collect::<Vec<_>>();
         entry.object = object;
         entry.logical_bytes = new_bytes;
         self.live_logical_bytes = next_live;
-        self.clear_boundary_cache();
+        for child in old_children {
+            if let Some(parents) = self.parents.get_mut(&child) {
+                parents.retain(|parent| *parent != id);
+            }
+            if self.parents.get(&child).is_some_and(Vec::is_empty) {
+                self.parents.remove(&child);
+            }
+        }
+        for child in new_children {
+            let parents = self.parents.entry(child).or_default();
+            if !parents.contains(&id) {
+                parents.push(id);
+            }
+        }
+        self.invalidate_materialized_reaching(id);
         Ok(())
     }
 
@@ -1021,6 +1108,15 @@ impl Heap {
                 continue;
             }
             let entry = self.slots[slot].take().expect("live heap slot was checked");
+            for child in entry.object.children() {
+                if let Some(parents) = self.parents.get_mut(&child) {
+                    parents.retain(|parent| *parent != entry.id);
+                }
+                if self.parents.get(&child).is_some_and(Vec::is_empty) {
+                    self.parents.remove(&child);
+                }
+            }
+            self.parents.remove(&entry.id);
             self.id_to_slot.remove(&entry.id);
             self.forget(entry.id);
             self.live_logical_bytes = self.live_logical_bytes.saturating_sub(entry.logical_bytes);
@@ -1069,11 +1165,18 @@ fn collect_value_refs(value: &Value, refs: &mut Vec<HeapId>) {
     }
 }
 
+fn value_refs(value: &Value) -> Vec<HeapId> {
+    let mut refs = Vec::new();
+    collect_value_refs(value, &mut refs);
+    refs
+}
+
 impl Clone for Heap {
     fn clone(&self) -> Self {
         Self {
             slots: self.slots.clone(),
             id_to_slot: self.id_to_slot.clone(),
+            parents: self.parents.clone(),
             free_slots: self.free_slots.clone(),
             next_id: self.next_id,
             allocations: self.allocations,

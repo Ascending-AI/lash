@@ -483,38 +483,71 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if self.heap.allocation_scope_needs_roots() {
             self.heap.begin_allocation_scope(self.heap_roots());
         }
-        self.heap.clear_boundary_cache();
-
         let mut values = Vec::new();
-        values.extend(self.stack.iter().cloned());
-        values.extend(self.last_value.iter().cloned());
-        values.extend(self.slots.values.iter().flatten().cloned());
-        values.extend(self.slots.extras.values().cloned());
+        values.extend(
+            self.stack
+                .iter()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
+        values.extend(
+            self.last_value
+                .iter()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
+        values.extend(
+            self.slots
+                .values
+                .iter()
+                .flatten()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
+        values.extend(
+            self.slots
+                .extras
+                .values()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
         for iterator in &self.iter_stack {
             if let super::IterCursor::List {
                 values: iterator_values,
                 ..
             } = &iterator.cursor
             {
-                values.extend(iterator_values.iter().cloned());
+                values.extend(
+                    iterator_values
+                        .iter()
+                        .filter(|value| needs_heap_import(value))
+                        .cloned(),
+                );
             }
-            values.extend(iterator.restore.previous.iter().cloned());
+            values.extend(
+                iterator
+                    .restore
+                    .previous
+                    .iter()
+                    .filter(|value| needs_heap_import(value))
+                    .cloned(),
+            );
         }
 
         let imported = self.heap.import_values(values);
         self.heap.end_allocation_scope();
         let mut imported = imported?.into_iter();
         for value in &mut self.stack {
-            *value = imported.next().expect("stack import count matches");
+            replace_imported_value(value, &mut imported);
         }
         if let Some(value) = &mut self.last_value {
-            *value = imported.next().expect("last-value import count matches");
+            replace_imported_value(value, &mut imported);
         }
         for value in self.slots.values.iter_mut().flatten() {
-            *value = imported.next().expect("slot import count matches");
+            replace_imported_value(value, &mut imported);
         }
         for entry in &mut self.slots.extras.entries {
-            entry.value = imported.next().expect("extra import count matches");
+            replace_imported_value(&mut entry.value, &mut imported);
         }
         for iterator in &mut self.iter_stack {
             if let super::IterCursor::List {
@@ -523,11 +556,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             } = &mut iterator.cursor
             {
                 for value in iterator_values.make_mut() {
-                    *value = imported.next().expect("iterator import count matches");
+                    replace_imported_value(value, &mut imported);
                 }
             }
             if let Some(value) = &mut iterator.restore.previous {
-                *value = imported.next().expect("restore import count matches");
+                replace_imported_value(value, &mut imported);
             }
         }
         debug_assert!(imported.next().is_none());
@@ -550,5 +583,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             roots.extend(iterator.restore.previous.iter().cloned());
         }
         roots
+    }
+}
+
+fn needs_heap_import(value: &Value) -> bool {
+    matches!(value, Value::Tuple(_) | Value::List(_) | Value::Record(_))
+}
+
+fn replace_imported_value(value: &mut Value, imported: &mut impl Iterator<Item = Value>) {
+    if needs_heap_import(value) {
+        *value = imported.next().expect("heap import count matches");
     }
 }

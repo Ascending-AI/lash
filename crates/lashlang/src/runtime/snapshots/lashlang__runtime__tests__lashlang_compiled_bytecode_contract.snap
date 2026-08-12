@@ -43,8 +43,11 @@ code:
   0026: deep_copy
   0027: store_name 6:Payload
   0028: load_name 2:beta_index
-  0029: load_name 3:matches
-  0030: load_name 4:counts
-  0031: build_record [beta_index, matches, counts]
-  0032: intrinsic validate_compiled schema#0
-  0033: finish
+  0029: deep_copy
+  0030: load_name 3:matches
+  0031: deep_copy
+  0032: load_name 4:counts
+  0033: deep_copy
+  0034: build_record [beta_index, matches, counts]
+  0035: intrinsic validate_compiled schema#0
+  0036: finish
