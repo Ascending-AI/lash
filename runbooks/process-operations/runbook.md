@@ -36,6 +36,11 @@ artifacts are the backend truth for this judged runbook.
 5. **Retention never guesses.** Trigger mutation receipts survive process pruning. Delivery rows
    are deleted only after their process tombstone proves pruning, and an outstanding delivery
    prevents tombstone compaction.
+6. **The Restate tool rail fails closed inside atomic attempts.** In the agent workbench,
+   `shell.start` (tracked or detached), `shell.write`, `spawn_agent`, and `processes.cancel`
+   return typed ordinal-tier refusals; drive those operations from explicit process steps or use
+   the host rail exercised by this runbook. `processes.list` remains available, and PostgreSQL's
+   key-addressed effect tier retains all process commands.
 
 ## Phase 0 — Boot and establish durable geometry
 

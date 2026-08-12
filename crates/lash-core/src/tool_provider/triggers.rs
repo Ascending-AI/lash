@@ -23,11 +23,11 @@ impl<'run> ToolTriggerClient<'run> {
                 .context
                 .effect_controller
                 .controller()
-                .replay_ownership()
-                == crate::EffectReplayOwnership::Controller
+                .journal_addressing()
+                == crate::EffectJournalAddressing::OrdinalAddressed
         {
             return Err(PluginError::Session(
-                "ToolContext::triggers().emit() is unavailable inside an atomic tool attempt; emit the trigger from a process step"
+                "ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; emit the trigger from a process step; a first-class intent protocol is pending"
                     .to_string(),
             ));
         }
@@ -68,6 +68,10 @@ mod tests {
     impl crate::AwaitEventResolver for ControllerOwnedReplay {
         fn replay_ownership(&self) -> crate::EffectReplayOwnership {
             crate::EffectReplayOwnership::Controller
+        }
+
+        fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+            crate::EffectJournalAddressing::OrdinalAddressed
         }
     }
 
@@ -118,7 +122,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "plugin session error: ToolContext::triggers().emit() is unavailable inside an atomic tool attempt; emit the trigger from a process step"
+            "plugin session error: ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; emit the trigger from a process step; a first-class intent protocol is pending"
         );
     }
 }

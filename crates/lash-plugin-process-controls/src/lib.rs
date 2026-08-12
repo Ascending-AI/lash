@@ -125,7 +125,7 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:cancel_process",
         "cancel_process",
-        "Request cancellation for a durable process, including a running `shell.start` process, by `process_id`.",
+        "Request cancellation for a durable process, including a running `shell.start` process, by `process_id`. On ordinal-addressed Restate tiers this returns a typed refusal inside an atomic tool attempt; cancel from an explicit process step. Runtime-owned and key-addressed tiers are unaffected.",
         serde_json::json!({
             "type": "object",
             "properties": {

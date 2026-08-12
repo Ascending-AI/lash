@@ -445,6 +445,10 @@ where
         true
     }
 
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::OrdinalAddressed
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         true
     }

@@ -2,7 +2,7 @@
 //! inside a controller-owned recorded `ToolAttempt`, against the
 //! [attempt-atomicity sentinel](crate::testing::attempt_sentinel).
 //!
-//! A controller-owned tier records a whole tool attempt as one journal entry
+//! An ordinal-addressed controller tier records a whole tool attempt as one journal entry
 //! and replays that entry on redrive *without re-entering the body*. Any
 //! journal command the body emitted while it ran therefore sits in the journal
 //! unre-issued, and the handler's next command meets it at the wrong ordinal
@@ -20,7 +20,8 @@
 //! engine command* is a tier fact: the Restate controller serves `List` and
 //! `Transfer` from the registry and derives await-event keys purely (FIG-1126),
 //! while `Start`, `Await`, `Cancel`, `Signal` and trigger emission issue real
-//! `ctx` commands. The ordinal-shift question itself is settled against real
+//! `ctx` commands. Key-addressed tiers can replay those nested commands by
+//! stable key and therefore retain them. The ordinal-shift question itself is settled against real
 //! captured journal bytes in `lash-restate`'s endpoint-protocol suite; this
 //! matrix is what makes the *inventory* structural rather than enumerated:
 //! [`sentinel_allows_no_undeclared_crossing_from_inside_an_attempt`] fails the
@@ -40,21 +41,36 @@ const LIVE_PROCESS: &str = "attempt-atomicity-live";
 const TERMINAL_PROCESS: &str = "attempt-atomicity-terminal";
 const EXTERNAL_PROCESS: &str = "attempt-atomicity-external";
 
-/// A controller-owned, ordinal-addressed tier stand-in.
-///
-/// Reports [`crate::EffectReplayOwnership::Controller`] — the predicate the
-/// shipped guards key on — while executing effects through the inline
-/// controller so the routes under test do real work instead of hitting a
-/// panicking stub.
-#[derive(Default)]
+/// A controller-owned tier stand-in with an explicit journal-addressing model.
 struct ControllerOwnedTier {
     inner: crate::InlineRuntimeEffectController,
+    addressing: crate::EffectJournalAddressing,
+}
+
+impl ControllerOwnedTier {
+    fn ordinal_addressed() -> Self {
+        Self {
+            inner: crate::InlineRuntimeEffectController::default(),
+            addressing: crate::EffectJournalAddressing::OrdinalAddressed,
+        }
+    }
+
+    fn key_addressed() -> Self {
+        Self {
+            inner: crate::InlineRuntimeEffectController::default(),
+            addressing: crate::EffectJournalAddressing::KeyAddressed,
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for ControllerOwnedTier {
     fn replay_ownership(&self) -> crate::EffectReplayOwnership {
         crate::EffectReplayOwnership::Controller
+    }
+
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        self.addressing
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {
@@ -102,9 +118,6 @@ enum Classification {
     /// Crosses the controller, and the Restate controller serves the crossing
     /// without issuing an engine command (proven at the endpoint tier).
     JournalNeutralCrossing,
-    /// Crosses the controller with a real engine command. Unguarded: the
-    /// RT0016 reproduction is pinned in `lash-restate`.
-    RedPinnedNestedCommand,
 }
 
 #[derive(Clone, Copy)]
@@ -116,6 +129,7 @@ enum Route {
     ProcessSignal,
     ProcessList,
     ProcessCompleteExternal,
+    ProcessTransfer,
     TriggerEmit,
     SessionStartTurn,
     SessionCreateClose,
@@ -141,8 +155,8 @@ struct MatrixRow {
     crossings: &'static [&'static str],
 }
 
-/// The 19-row FIG-1127 route inventory. One row per `ToolContext` capability
-/// family; adding a capability without adding a row trips
+/// The 19-row `ToolContext` inventory plus the internal `Transfer` command at
+/// the shared process-command choke point. Adding a capability without adding a row trips
 /// [`sentinel_allows_no_undeclared_crossing_from_inside_an_attempt`].
 const ROUTE_MATRIX: &[MatrixRow] = &[
     MatrixRow {
@@ -156,31 +170,29 @@ const ROUTE_MATRIX: &[MatrixRow] = &[
         route: Route::ProcessStart,
         label: "processes().start()",
         classification: Classification::Guarded,
-        outcome: "plugin session error: ToolContext::processes().start() is unavailable inside an atomic tool attempt; decompose the process start into a process step",
+        outcome: "plugin session error: ToolContext::processes().start() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
         crossings: &[],
     },
     MatrixRow {
         route: Route::ProcessAwait,
         label: "processes().await_process()",
-        classification: Classification::RedPinnedNestedCommand,
-        outcome: "await ok",
-        crossings: &["execute_effect:process:process:await:attempt-atomicity-terminal"],
+        classification: Classification::Guarded,
+        outcome: "plugin session error: ToolContext::processes().await_process() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        crossings: &[],
     },
     MatrixRow {
         route: Route::ProcessCancel,
         label: "processes().cancel()",
-        classification: Classification::RedPinnedNestedCommand,
-        outcome: "cancel ok",
-        crossings: &["execute_effect:process:process:cancel:attempt-atomicity-live"],
+        classification: Classification::Guarded,
+        outcome: "plugin session error: ToolContext::processes().cancel() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        crossings: &[],
     },
     MatrixRow {
         route: Route::ProcessSignal,
         label: "processes().signal()",
-        classification: Classification::RedPinnedNestedCommand,
-        outcome: "signal ok",
-        crossings: &[
-            "execute_effect:process:process:signal:attempt-atomicity-live:signal.resume:attempt-atomicity-call",
-        ],
+        classification: Classification::Guarded,
+        outcome: "plugin session error: ToolContext::processes().signal() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        crossings: &[],
     },
     MatrixRow {
         route: Route::ProcessList,
@@ -197,17 +209,24 @@ const ROUTE_MATRIX: &[MatrixRow] = &[
         crossings: &[],
     },
     MatrixRow {
+        route: Route::ProcessTransfer,
+        label: "ProcessCommand::Transfer",
+        classification: Classification::Guarded,
+        outcome: "plugin session error: ToolContext::processes().transfer() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        crossings: &[],
+    },
+    MatrixRow {
         route: Route::TriggerEmit,
         label: "triggers().emit()",
         classification: Classification::Guarded,
-        outcome: "plugin session error: ToolContext::triggers().emit() is unavailable inside an atomic tool attempt; emit the trigger from a process step",
+        outcome: "plugin session error: ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; emit the trigger from a process step; a first-class intent protocol is pending",
         crossings: &[],
     },
     MatrixRow {
         route: Route::SessionStartTurn,
         label: "sessions().start_turn()",
         classification: Classification::Guarded,
-        outcome: "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt; start the nested turn from a process step",
+        outcome: "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; start the nested turn from a process step; a first-class intent protocol is pending",
         crossings: &[],
     },
     MatrixRow {
@@ -555,6 +574,20 @@ async fn invoke(route: Route, context: &crate::ToolContext<'_>, fixtures: &Fixtu
             Ok(_) => "complete_external ok".to_string(),
             Err(error) => error.to_string(),
         },
+        Route::ProcessTransfer => match context
+            .processes
+            .transfer(
+                SESSION,
+                "attempt-atomicity-transfer-target",
+                vec![LIVE_PROCESS.to_string()],
+                crate::ProcessOpScope::new(context.effect_controller.scoped())
+                    .with_parent_invocation(context.parent_invocation.clone()),
+            )
+            .await
+        {
+            Ok(()) => "transfer ok".to_string(),
+            Err(error) => error.to_string(),
+        },
         Route::TriggerEmit => match context
             .triggers()
             .emit(crate::TriggerOccurrenceRequest::new(
@@ -728,11 +761,10 @@ struct AttemptRun {
 
 /// Executes `route` inside a real controller-owned recorded `ToolAttempt`,
 /// through the sentinel, and reports what the sentinel saw.
-async fn run_route(route: Route) -> AttemptRun {
+async fn run_route_on_tier(route: Route, tier: &ControllerOwnedTier) -> AttemptRun {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::default();
     let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let sentinel = AttemptAtomicitySentinel::new(tier, Arc::clone(&ledger));
     let scoped = crate::ScopedEffectController::borrowed(
         &sentinel,
         crate::ExecutionScope::turn(SESSION, TURN),
@@ -792,6 +824,10 @@ async fn run_route(route: Route) -> AttemptRun {
     }
 }
 
+async fn run_route(route: Route) -> AttemptRun {
+    run_route_on_tier(route, &ControllerOwnedTier::ordinal_addressed()).await
+}
+
 async fn assert_row(row: &MatrixRow) -> AttemptRun {
     let run = run_route(row.route).await;
     assert_eq!(
@@ -820,7 +856,7 @@ async fn assert_row(row: &MatrixRow) -> AttemptRun {
             "{}: a guarded or non-crossing route must declare no crossing",
             row.label
         ),
-        Classification::JournalNeutralCrossing | Classification::RedPinnedNestedCommand => assert!(
+        Classification::JournalNeutralCrossing => assert!(
             !row.crossings.is_empty(),
             "{}: a crossing classification must declare its crossings",
             row.label
@@ -833,28 +869,122 @@ async fn assert_row(row: &MatrixRow) -> AttemptRun {
 async fn attempt_atomicity_matrix_covers_the_whole_tool_context_inventory() {
     assert_eq!(
         ROUTE_MATRIX.len(),
-        19,
-        "the matrix must carry every row of the FIG-1127 route inventory"
+        20,
+        "the matrix must carry the 19 ToolContext rows plus ProcessCommand::Transfer"
     );
     let mut labels = ROUTE_MATRIX.iter().map(|row| row.label).collect::<Vec<_>>();
     labels.sort_unstable();
     labels.dedup();
-    assert_eq!(labels.len(), 19, "every inventory row must be distinct");
+    assert_eq!(labels.len(), 20, "every inventory row must be distinct");
     assert_eq!(
         ROUTE_MATRIX
             .iter()
             .filter(|row| row.classification == Classification::Guarded)
             .count(),
-        4,
-        "four routes are guarded: batch dispatch plus the three FIG-1127 guards"
+        8,
+        "eight routes are guarded: batch dispatch, five process commands, trigger emission, and nested turns"
     );
+}
+
+fn key_addressed_expected(route: Route) -> (&'static str, &'static [&'static str]) {
+    match route {
+        Route::DispatchBatch => (
+            "nested tool batch dispatch is unavailable inside an atomic tool attempt; decompose the work into process steps",
+            &[],
+        ),
+        Route::ProcessStart => (
+            "start ok",
+            &["execute_effect:process:process:start:attempt-atomicity-nested"],
+        ),
+        Route::ProcessAwait => (
+            "await ok",
+            &["execute_effect:process:process:await:attempt-atomicity-terminal"],
+        ),
+        Route::ProcessCancel => (
+            "cancel ok",
+            &["execute_effect:process:process:cancel:attempt-atomicity-live"],
+        ),
+        Route::ProcessSignal => (
+            "signal ok",
+            &[
+                "execute_effect:process:process:signal:attempt-atomicity-live:signal.resume:attempt-atomicity-call",
+            ],
+        ),
+        Route::ProcessList => (
+            "list ok",
+            &["execute_effect:process:process:list:session:atomic-tool-test-session:live"],
+        ),
+        Route::ProcessCompleteExternal => ("complete_external ok", &[]),
+        Route::ProcessTransfer => (
+            "transfer ok",
+            &[
+                "execute_effect:process:process:transfer:session:atomic-tool-test-session:session:attempt-atomicity-transfer-target:process-transfer-set:v1:sha256:fba3e8dcf737aa169c5c5d1b3f322b19effdf791ee16cbe675356c6765ac1187",
+            ],
+        ),
+        Route::TriggerEmit => ("trigger ok", &[]),
+        Route::SessionStartTurn => ("start_turn ok", &[]),
+        Route::SessionCreateClose => ("create/close ok", &[]),
+        Route::SessionReads => (
+            "plugin session error: unknown tool `attempt-atomicity-tool`",
+            &[],
+        ),
+        Route::DirectCompletion => ("direct ok", &[]),
+        Route::AttachmentPut => ("attachment ok", &[]),
+        Route::ProcessEventEmit => ("process events emitted", &[]),
+        Route::ProcessEventWait => ("wait ok", &[]),
+        Route::CompletionKey => (
+            "completion key ok",
+            &["await_event_key:attempt-atomicity-turn"],
+        ),
+        Route::EmitChildProcessStarted => ("child process started hook fired once", &[]),
+        Route::NamedPhase => ("named phase ok", &[]),
+        Route::Accessors => ("accessors ok", &[]),
+    }
+}
+
+#[tokio::test]
+async fn key_addressed_controller_preserves_the_full_tool_context_matrix() {
+    let tier = ControllerOwnedTier::key_addressed();
+    let mut process_routes_succeeded = 0;
+    for row in ROUTE_MATRIX {
+        let run = run_route_on_tier(row.route, &tier).await;
+        let (outcome, crossings) = key_addressed_expected(row.route);
+        assert_eq!(
+            run.attempt_bodies_opened, 1,
+            "{}: attempt opened",
+            row.label
+        );
+        assert_eq!(run.body_runs, 1, "{}: body ran once", row.label);
+        assert_eq!(run.outcome, outcome, "{}: key-tier outcome", row.label);
+        assert_eq!(
+            run.crossings,
+            crossings
+                .iter()
+                .map(|crossing| (*crossing).to_string())
+                .collect::<Vec<_>>(),
+            "{}: key-tier crossings",
+            row.label
+        );
+        if matches!(
+            row.route,
+            Route::ProcessStart
+                | Route::ProcessAwait
+                | Route::ProcessCancel
+                | Route::ProcessSignal
+                | Route::ProcessList
+                | Route::ProcessTransfer
+        ) {
+            assert!(
+                run.outcome.ends_with(" ok"),
+                "{}: key-addressed process route must succeed",
+                row.label
+            );
+            process_routes_succeeded += 1;
+        }
+    }
     assert_eq!(
-        ROUTE_MATRIX
-            .iter()
-            .filter(|row| row.classification == Classification::RedPinnedNestedCommand)
-            .count(),
-        3,
-        "three routes remain unguarded and red-pinned pending the FIG-1127 ruling"
+        process_routes_succeeded, 6,
+        "all six ToolContext process routes succeed on key-addressed tiers"
     );
 }
 
@@ -874,18 +1004,19 @@ matrix_row_test!(attempt_atomicity_row_processes_cancel, 3);
 matrix_row_test!(attempt_atomicity_row_processes_signal, 4);
 matrix_row_test!(attempt_atomicity_row_processes_list_handles_filtered, 5);
 matrix_row_test!(attempt_atomicity_row_processes_complete_external, 6);
-matrix_row_test!(attempt_atomicity_row_triggers_emit, 7);
-matrix_row_test!(attempt_atomicity_row_sessions_start_turn, 8);
-matrix_row_test!(attempt_atomicity_row_sessions_create_close, 9);
-matrix_row_test!(attempt_atomicity_row_sessions_reads, 10);
-matrix_row_test!(attempt_atomicity_row_direct_completions_complete, 11);
-matrix_row_test!(attempt_atomicity_row_attachments_put, 12);
-matrix_row_test!(attempt_atomicity_row_process_events_emit, 13);
-matrix_row_test!(attempt_atomicity_row_process_events_wait_event_after, 14);
-matrix_row_test!(attempt_atomicity_row_completion_key, 15);
-matrix_row_test!(attempt_atomicity_row_emit_child_process_started, 16);
-matrix_row_test!(attempt_atomicity_row_named_phase, 17);
-matrix_row_test!(attempt_atomicity_row_accessors, 18);
+matrix_row_test!(attempt_atomicity_row_processes_transfer, 7);
+matrix_row_test!(attempt_atomicity_row_triggers_emit, 8);
+matrix_row_test!(attempt_atomicity_row_sessions_start_turn, 9);
+matrix_row_test!(attempt_atomicity_row_sessions_create_close, 10);
+matrix_row_test!(attempt_atomicity_row_sessions_reads, 11);
+matrix_row_test!(attempt_atomicity_row_direct_completions_complete, 12);
+matrix_row_test!(attempt_atomicity_row_attachments_put, 13);
+matrix_row_test!(attempt_atomicity_row_process_events_emit, 14);
+matrix_row_test!(attempt_atomicity_row_process_events_wait_event_after, 15);
+matrix_row_test!(attempt_atomicity_row_completion_key, 16);
+matrix_row_test!(attempt_atomicity_row_emit_child_process_started, 17);
+matrix_row_test!(attempt_atomicity_row_named_phase, 18);
+matrix_row_test!(attempt_atomicity_row_accessors, 19);
 
 /// The catch-all. Every crossing any capability makes from inside a recorded
 /// attempt must appear in a declared row's crossing list. A new `ToolContext`
@@ -909,9 +1040,8 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
     );
     assert_eq!(
         declared.len(),
-        5,
-        "five declared crossings: three red-pinned process commands, the \
-         registry-served process list, and the pure await-event key derivation"
+        2,
+        "two declared ordinal-tier crossings: the registry-served process list and the pure await-event key derivation"
     );
 }
 
@@ -921,7 +1051,7 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
 #[tokio::test]
 async fn sentinel_discriminates_inside_and_outside_a_recorded_attempt() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::default();
+    let tier = ControllerOwnedTier::ordinal_addressed();
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let command = crate::ProcessCommand::Cancel {
@@ -954,7 +1084,8 @@ async fn sentinel_discriminates_inside_and_outside_a_recorded_attempt() {
         "no crossings are recorded outside a recorded attempt"
     );
 
-    let inside = run_route(Route::ProcessCancel).await;
+    let inside =
+        run_route_on_tier(Route::ProcessCancel, &ControllerOwnedTier::key_addressed()).await;
     assert_eq!(
         inside.crossings,
         vec!["execute_effect:process:process:cancel:attempt-atomicity-live".to_string()],

@@ -629,9 +629,9 @@ pub fn atomic_tool_context_with_services<'run>(
     crate::ToolContext::from_dispatch(dispatch).build()
 }
 
-/// A `ProcessService` that routes **every** `ProcessCommand` through the
-/// operation scope's effect controller, exactly as the production
-/// `ProcessCommandRunner` does.
+/// A `ProcessService` that applies the production command-runner guard, then
+/// routes **every** `ProcessCommand` through the operation scope's effect
+/// controller exactly as `ProcessCommandRunner` does.
 ///
 /// The FIG-1127 review found that stubbing the sibling routes here made the
 /// harness structurally incapable of reaching `await_process`, `cancel`,
@@ -649,6 +649,11 @@ impl EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
         command: crate::ProcessCommand,
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
+        crate::runtime::guard_process_command_in_recorded_body(
+            scope.parent_invocation.as_ref(),
+            scope.controller(),
+            &command,
+        )?;
         let effect_id = command.effect_id();
         // Production derives the nested invocation from the parent invocation
         // the ToolContext carries (`process_effect_invocation`), so a nested

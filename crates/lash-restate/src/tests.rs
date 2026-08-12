@@ -1,4 +1,9 @@
 //! Tests for the Restate adapter (extracted from lib.rs).
+//!
+//! FIG-1127 mutation proof: temporarily neutralize the ordinal-addressed guard
+//! in `ProcessCommandRunner::run`, run
+//! `cargo test -p lash-restate fig1127 -- --test-threads=1`, then restore the
+//! guard. The guarded endpoint laws must fail with RT0016 before restoration.
 
 use super::*;
 use crate::controller::context::guard_restate_context_future;
@@ -813,9 +818,8 @@ enum Fig1127NestedRoute {
     Triggers,
     Sessions,
     /// FIG-1127 review finding F1: sibling `processes()` routes that the
-    /// original inventory declared complete. Unguarded; see
-    /// `fig1127_unguarded_sibling_route_*` for their pinned RT0016
-    /// reproductions.
+    /// original inventory declared complete. Active guarded endpoint laws
+    /// below preserve their former RT0016 setup.
     ProcessesCancel,
     ProcessesSignal,
     ProcessesAwait,
@@ -840,20 +844,24 @@ impl Fig1127NestedRoute {
     fn expected_refusal(self) -> &'static str {
         match self {
             Self::Processes => {
-                "ToolContext::processes().start() is unavailable inside an atomic tool attempt"
+                "plugin session error: ToolContext::processes().start() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
             }
             Self::Triggers => {
-                "ToolContext::triggers().emit() is unavailable inside an atomic tool attempt"
+                "plugin session error: ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; emit the trigger from a process step; a first-class intent protocol is pending"
             }
             Self::Sessions => {
-                "ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt"
+                "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; start the nested turn from a process step; a first-class intent protocol is pending"
             }
-            Self::ProcessesCancel
-            | Self::ProcessesSignal
-            | Self::ProcessesAwait
-            | Self::ProcessesList => {
-                unreachable!("unguarded sibling routes produce no refusal")
+            Self::ProcessesCancel => {
+                "plugin session error: ToolContext::processes().cancel() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
             }
+            Self::ProcessesSignal => {
+                "plugin session error: ToolContext::processes().signal() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
+            }
+            Self::ProcessesAwait => {
+                "plugin session error: ToolContext::processes().await_process() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
+            }
+            Self::ProcessesList => unreachable!("process list remains available"),
         }
     }
 
@@ -871,8 +879,8 @@ impl Fig1127NestedRoute {
         responses
     }
 
-    /// The nested `ctx` call an unguarded sibling route issues from inside the
-    /// recorded attempt, with the response shape its client expects:
+    /// The nested `ctx` call a formerly unguarded sibling route issues when the
+    /// mutation proof neutralizes the shared guard, with the response shape its client expects:
     /// `cancel` returns `Json<()>`, `await_terminal` returns
     /// `Json<ProcessAwaitOutput>` (`#[serde(tag = "type")]`), and the durable
     /// wait index's `resolve` returns `Json<ResolveOutcome>`
@@ -1145,7 +1153,11 @@ impl Fig1127NestedRouteRedrive for Fig1127NestedRouteRedriveImpl {
             Json(serde_json::Value::Null),
         );
         let Json(_sink) = request.call().await?;
-        Ok(Json(record.output.value_for_projection().to_string()))
+        let result = match &record.output.outcome {
+            lash_core::ToolCallOutcome::Failure(failure) => failure.message.clone(),
+            _ => record.output.value_for_projection().to_string(),
+        };
+        Ok(Json(result))
     }
 }
 
@@ -1337,10 +1349,11 @@ async fn fig1127_nested_tool_routes_refuse_and_redrive_without_ordinal_shift() {
         let refusal = run
             .redriven_output
             .unwrap_or_else(|| panic!("decode {} route refusal", route.label()));
-        assert!(
-            refusal.contains(route.expected_refusal()),
-            "{} route returned the wrong refusal: {refusal}",
-            route.label()
+        assert_eq!(
+            refusal,
+            route.expected_refusal(),
+            "{} route returned the literal typed refusal",
+            route.label(),
         );
         assert_eq!(
             run.body_runs,
@@ -1387,44 +1400,23 @@ async fn fig1127_processes_list_route_redrives_without_reissuing_any_nested_comm
     );
 }
 
-// FIG-1127 review finding F1: three sibling `processes()` routes emit a nested
-// journal command from inside a recorded `ToolAttempt` and are **not** guarded.
-// Each test below is a full RT0016 reproduction, kept `#[ignore]` so CI stays
-// green while the defect stays impossible to forget. Closing the routes is a
-// separate ruled decision (guard at `ProcessCommandRunner::run` versus per-route
-// guards versus narrowing the predicate to ordinal-addressed journals); until
-// that ruling lands these are the red proof. Un-ignore them when the guard
-// ships — they then assert the refusal instead.
-//
-// The green counterpart that keeps the defect visible in every CI run is
-// `lash-core`'s `attempt_atomicity_row_processes_{cancel,signal,await_process}`:
-// those rows are classified `RedPinnedNestedCommand` and assert that the nested
-// command really does cross the controller.
-
-async fn assert_fig1127_unguarded_route_reproduces_rt0016(
-    route: Fig1127NestedRoute,
-    expected_service_difference: &str,
-    expected_handler_difference: &str,
-) {
+// FIG-1127 review finding F1: these three sibling process routes used to emit
+// nested ordinal commands. The shared ProcessCommandRunner guard turns the
+// former red reproductions into active endpoint laws. The module header carries
+// the mutation command that reopens the RT0016 proof on demand.
+async fn assert_fig1127_guarded_route_refuses_without_rt0016(route: Fig1127NestedRoute) {
     let run = fig1127_redrive(route).await;
-    let error = run.error.unwrap_or_else(|| {
-        panic!(
-            "{} route was expected to reproduce RT0016; it did not",
-            route.label()
-        )
-    });
-    for expected in [
-        "Found a mismatch between the code paths taken during the previous execution",
-        "The mismatch happened while executing 'call' (index '2')",
-        expected_service_difference,
-        expected_handler_difference,
-    ] {
-        assert!(
-            error.contains(expected),
-            "{} route redrive did not report `{expected}`: {error}",
-            route.label()
-        );
-    }
+    assert_eq!(run.error, None, "guarded route must not produce RT0016");
+    assert_eq!(
+        run.first_output.as_deref(),
+        Some(route.expected_refusal()),
+        "first execution returns the literal typed refusal"
+    );
+    assert_eq!(
+        run.redriven_output.as_deref(),
+        Some(route.expected_refusal()),
+        "redrive replays the literal typed refusal"
+    );
     assert_eq!(
         run.body_runs,
         1,
@@ -1434,36 +1426,18 @@ async fn assert_fig1127_unguarded_route_reproduces_rt0016(
 }
 
 #[tokio::test]
-#[ignore = "FIG-1127: unguarded route, pending ruling — reproduces RT0016 by design"]
-async fn fig1127_unguarded_sibling_route_cancel_reproduces_rt0016() {
-    assert_fig1127_unguarded_route_reproduces_rt0016(
-        Fig1127NestedRoute::ProcessesCancel,
-        "service_name: LashProcessWorkflow != Fig1127NestedRouteSink",
-        "handler_name: cancel != complete",
-    )
-    .await;
+async fn fig1127_processes_cancel_refuses_without_rt0016() {
+    assert_fig1127_guarded_route_refuses_without_rt0016(Fig1127NestedRoute::ProcessesCancel).await;
 }
 
 #[tokio::test]
-#[ignore = "FIG-1127: unguarded route, pending ruling — reproduces RT0016 by design"]
-async fn fig1127_unguarded_sibling_route_signal_reproduces_rt0016() {
-    assert_fig1127_unguarded_route_reproduces_rt0016(
-        Fig1127NestedRoute::ProcessesSignal,
-        "service_name: LashDurableWaitIndex != Fig1127NestedRouteSink",
-        "handler_name: resolve != complete",
-    )
-    .await;
+async fn fig1127_processes_signal_refuses_without_rt0016() {
+    assert_fig1127_guarded_route_refuses_without_rt0016(Fig1127NestedRoute::ProcessesSignal).await;
 }
 
 #[tokio::test]
-#[ignore = "FIG-1127: unguarded route, pending ruling — reproduces RT0016 by design"]
-async fn fig1127_unguarded_sibling_route_await_process_reproduces_rt0016() {
-    assert_fig1127_unguarded_route_reproduces_rt0016(
-        Fig1127NestedRoute::ProcessesAwait,
-        "service_name: LashProcessWorkflow != Fig1127NestedRouteSink",
-        "handler_name: await_terminal != complete",
-    )
-    .await;
+async fn fig1127_processes_await_refuses_without_rt0016() {
+    assert_fig1127_guarded_route_refuses_without_rt0016(Fig1127NestedRoute::ProcessesAwait).await;
 }
 
 #[tokio::test]

@@ -32,20 +32,39 @@ That exception does not extend to a `ToolProvider::execute` implementation.
 Nested tool-batch dispatch from a tool attempt remains prohibited; authors must
 decompose that composition into process steps.
 
-The controller-owned replay boundary is enforced at every `ToolContext` route
-that can otherwise enter another journaled command. The inventory is:
+FIG-1127 completion (2026-08-12) replaces the falsified static route inventory
+with this structural rule:
 
-| Route from a tool body | Resolution |
-| --- | --- |
-| `ToolContext::dispatch().batch()` | Refuses nested dispatch and directs the author to process steps. |
-| `ToolContext::processes().start()` | Refuses before process registration or workflow start; start the process from a process step. |
-| `ToolContext::triggers().emit()` | Refuses before occurrence ingestion or delivery routing; emit the trigger from a process step. |
-| `ToolContext::sessions().start_turn()` | Refuses before turn-scope registration; start the nested turn from a process step. |
-| `ToolContext::direct_completions()` | Executes locally at `DirectExecutionPosition::ToolAttempt`, without a nested journal command. |
+> A recorded body must not emit commands into an ordinal-addressed journal.
 
-These refusals apply specifically when a controller owns replay for the parent
-`ToolAttempt`. Inline execution has no controller journal to nest and retains
-its existing behavior.
+Every process command emitted through an in-turn process capability crosses
+`ProcessCommandRunner::run`. That choke point refuses `Start`, `Await`,
+`Cancel`, `Signal`, and `Transfer` when their parent is a `ToolAttempt` and the
+controller reports `EffectJournalAddressing::OrdinalAddressed`. `List` remains
+available: the Restate endpoint replay law proves at the captured-byte level
+that it is registry-served and reissues no journal command. Registry-only
+`validate_visible` and `complete_external` do not cross the choke point.
+`ToolContext::triggers().emit()` and `ToolContext::sessions().start_turn()` keep
+their corresponding ordinal-tier guards because they are not process commands.
+Each refusal names the route and tier, directs authors to process-step
+decomposition, and notes the pending intent protocol.
+
+The 20-row attempt-atomicity matrix and its controller-decorating sentinel are
+the standing inventory mechanism. The sentinel records every controller
+crossing while a recorded attempt body is open; its catch-all law fails when a
+new capability crosses without a declared row. Restate endpoint laws separately
+pin the ordinal behavior, including active crash-redrive laws for the formerly
+unguarded await, cancel, and signal routes. The PostgreSQL crash/replay law
+proves the converse: its controller is key-addressed by stable replay key, so
+nested commands remain safe and all guarded capabilities stay available there.
+Runtime-owned tiers are likewise unaffected.
+
+This guard is the fail-closed backstop, not the final authoring model. The
+capability-separated result/intent protocol described by the determinism survey
+remains the intended redesign; track it as **FIG-INTENT (to be filed)**. The
+separate journal-addressing and durable-workflow capabilities should eventually
+move onto one consolidated controller-traits surface without conflating their
+semantics.
 
 The former `ToolContext::durable_effects()` facade and its `DurableStep`
 producer are removed, including the serialized command and outcome. External

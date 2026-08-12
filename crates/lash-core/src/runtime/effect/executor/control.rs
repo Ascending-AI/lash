@@ -521,6 +521,7 @@ pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     replay_ownership: crate::EffectReplayOwnership,
     durable_workflow_controller: bool,
+    journal_addressing: crate::EffectJournalAddressing,
     allows_process_lifetime_completion_keys: bool,
     supports_concurrent_effects: bool,
 }
@@ -541,6 +542,7 @@ impl EffectTaskController {
             requests,
             replay_ownership: controller.replay_ownership(),
             durable_workflow_controller: controller.durable_workflow_controller(),
+            journal_addressing: controller.journal_addressing(),
             allows_process_lifetime_completion_keys: controller
                 .allows_process_lifetime_completion_keys(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
@@ -560,6 +562,10 @@ impl AwaitEventResolver for EffectTaskController {
 
     fn durable_workflow_controller(&self) -> bool {
         self.durable_workflow_controller
+    }
+
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        self.journal_addressing
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {
@@ -765,6 +771,16 @@ pub trait AwaitEventResolver: Send + Sync {
     /// re-driven by a durable engine.
     fn durable_workflow_controller(&self) -> bool {
         false
+    }
+
+    /// Describes how this boundary addresses replayed journal entries.
+    ///
+    /// Keep this capability independent from any future
+    /// `durable_workflow_controller()` capability. The two are candidates for
+    /// a consolidated controller-traits surface, but durability and journal
+    /// addressing answer different questions today.
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        crate::EffectJournalAddressing::Runtime
     }
 
     /// Whether [`ToolContext::completion_key`](crate::ToolContext::completion_key)

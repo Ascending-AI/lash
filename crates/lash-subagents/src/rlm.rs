@@ -294,7 +294,7 @@ fn spawn_agent_definition(capability_names: &[String], examples: Vec<String>) ->
     let cap_list = capability_list_for_description(capability_names);
     let capability_detail = capability_detail_for_tool_description(capability_names);
     let description = format!(
-        "Run one subagent and return its final result. Direct awaits are serial; for parallel fan-out, start every branch process before awaiting the handle collection. {capability_detail} Available capabilities: {cap_list}. \
+        "Run one subagent and return its final result. Direct awaits are serial; for parallel fan-out, start every branch process before awaiting the handle collection. On ordinal-addressed Restate tiers this tool returns a typed refusal inside an atomic tool attempt; spawn from an explicit process step. Runtime-owned and key-addressed tiers are unaffected. {capability_detail} Available capabilities: {cap_list}. \
         \n\nThe child inherits no state. Pass required context through `seed`; projected roots remain read-only projections, while computed values become writable globals. Projected seeds require an RLM child.\
         \n\nA child can fail terminally through `task.fail`; this operation returns that reason as an error."
     );

@@ -521,6 +521,38 @@ usage = "examples/docs-snippets/src/operations.rs:296#assert_eq!(accepting.remai
 assertion = "examples/docs-snippets/src/operations.rs:296#assert_eq!(accepting.remaining_invocations, 1);"
 
 [[api]]
+symbol = "lash_core::EffectJournalAddressing"
+kind = "enum"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts implement this controller capability to distinguish key-addressed replay from ordinal-addressed replay; bundled Restate and PostgreSQL hosts exercise both values in crates/lash-restate/src/controller/mod.rs and crates/lash-postgres-store/src/postgres/effect_replay.rs, while no example defines another effect host."
+
+[[api]]
+symbol = "lash_core::EffectJournalAddressing::KeyAddressed"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: key-addressed durable effect hosts use this value so nested effects retain stable replay identities; the bundled PostgreSQL host uses it in crates/lash-postgres-store/src/postgres/effect_replay.rs, while no example defines another key-addressed effect host."
+
+[[api]]
+symbol = "lash_core::EffectJournalAddressing::OrdinalAddressed"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: ordinal-addressed workflow effect hosts use this value so recorded bodies fail closed before emitting nested journal commands; the bundled Restate host uses it in crates/lash-restate/src/controller/mod.rs, while no example defines another ordinal-addressed effect host."
+
+[[api]]
+symbol = "lash_core::EffectJournalAddressing::Runtime"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime-owned effect hosts inherit this default when no durable effect journal addresses commands; bundled inline hosts exercise the default in crates/lash-core/src/runtime/effect/executor.rs, while no example defines another runtime-owned effect host."
+
+[[api]]
 symbol = "lash::EffectReplayOwnership"
 kind = "enum"
 availability = "default+all-features"
@@ -43716,6 +43748,15 @@ aliases = ["lash_core::AwaitEventResolver::allows_process_lifetime_completion_ke
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash::runtime::AwaitEventResolver::journal_addressing"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::AwaitEventResolver::journal_addressing"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable effect hosts implement this capability to distinguish key-addressed replay from ordinal-addressed replay; bundled Restate and PostgreSQL hosts exercise both contracts, while no example defines another effect host."
 
 [[api]]
 symbol = "lash::runtime::AwaitEventResolver::await_await_event"

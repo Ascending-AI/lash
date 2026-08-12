@@ -139,6 +139,10 @@ impl AwaitEventResolver for AttemptAtomicitySentinel<'_> {
         self.inner.replay_ownership()
     }
 
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        self.inner.journal_addressing()
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         self.inner.allows_process_lifetime_completion_keys()
     }

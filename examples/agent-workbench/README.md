@@ -305,6 +305,14 @@ recorded. Recovery must never re-execute an uncertain tool merely to rebuild UI
 state; rebuild from durable snapshots, and make externally visible tool effects
 idempotent or split them into explicit durable process steps.
 
+The workbench is an ordinal-addressed Restate host. Consequently
+`shell.start` (including `detach: true`), `shell.write`, `spawn_agent`, and
+`processes.cancel` return typed refusals when called inside atomic tool attempts;
+those commands must be expressed as process steps. `processes.list` remains
+available because its Restate replay is journal-neutral. Runtime-owned and
+key-addressed PostgreSQL effect hosts do not have this restriction. A
+capability-separated intent protocol is planned but is not yet available.
+
 The chat composer can upload one PNG (up to 1 MiB) through
 `POST /api/attachments`, then includes the returned content-addressed id as
 `attachment_id` in `POST /api/turn`. The Restate workflow resolves the durable file-store

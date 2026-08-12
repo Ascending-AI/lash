@@ -439,6 +439,20 @@ pub enum EffectReplayOwnership {
     Controller,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// How an effect controller addresses entries in its durable journal.
+///
+/// This capability is intentionally separate from [`EffectReplayOwnership`]:
+/// both key-addressed and ordinal-addressed controllers own replay, but only an
+/// ordinal-addressed recorded body can shift later commands when it emits a
+/// nested command. Runtime-owned controllers have no durable effect journal.
+pub enum EffectJournalAddressing {
+    #[default]
+    Runtime,
+    KeyAddressed,
+    OrdinalAddressed,
+}
+
 // Re-exports
 pub use attachments::{
     AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,

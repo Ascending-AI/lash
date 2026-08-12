@@ -86,6 +86,10 @@ impl AwaitEventResolver for PostgresEffectHost {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::KeyAddressed
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         true
     }
@@ -197,6 +201,10 @@ impl PostgresRuntimeEffectController {
 impl AwaitEventResolver for PostgresRuntimeEffectController {
     fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
         lash_core::EffectReplayOwnership::Controller
+    }
+
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::KeyAddressed
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {

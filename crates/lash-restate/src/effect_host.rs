@@ -54,6 +54,10 @@ impl AwaitEventResolver for RestateEffectHost {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::OrdinalAddressed
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         true
     }
@@ -260,6 +264,10 @@ struct RestateEffectHostController {
 impl AwaitEventResolver for RestateEffectHostController {
     fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
         lash_core::EffectReplayOwnership::Controller
+    }
+
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::OrdinalAddressed
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {

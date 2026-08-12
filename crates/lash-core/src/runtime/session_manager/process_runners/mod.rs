@@ -6,6 +6,8 @@ mod runner;
 mod session;
 mod tool;
 
+pub(crate) use control::guard_process_command_in_recorded_body;
+
 pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContext<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     event_drain: tokio::task::JoinHandle<()>,

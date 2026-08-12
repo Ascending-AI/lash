@@ -82,11 +82,11 @@ impl<'run> ToolSessionAdmin<'run> {
     ) -> Result<crate::AssembledTurn, PluginError> {
         if self.parent_invocation.as_ref().is_some_and(|invocation| {
             invocation.effect_kind() == Some(crate::RuntimeEffectKind::ToolAttempt)
-        }) && self.effect_controller.controller().replay_ownership()
-            == crate::EffectReplayOwnership::Controller
+        }) && self.effect_controller.controller().journal_addressing()
+            == crate::EffectJournalAddressing::OrdinalAddressed
         {
             return Err(PluginError::Session(
-                "ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt; start the nested turn from a process step"
+                "ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; start the nested turn from a process step; a first-class intent protocol is pending"
                     .to_string(),
             ));
         }
@@ -128,6 +128,10 @@ mod tests {
     impl crate::AwaitEventResolver for ControllerOwnedReplay {
         fn replay_ownership(&self) -> crate::EffectReplayOwnership {
             crate::EffectReplayOwnership::Controller
+        }
+
+        fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+            crate::EffectJournalAddressing::OrdinalAddressed
         }
     }
 
@@ -173,7 +177,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt; start the nested turn from a process step"
+            "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; start the nested turn from a process step; a first-class intent protocol is pending"
         );
     }
 }
