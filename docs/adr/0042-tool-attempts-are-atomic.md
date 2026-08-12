@@ -83,10 +83,17 @@ a replay-time intent gate; a future contract requiring such a gate must record
 it as a separate admission fact.
 
 After the enclosing turn or process reaches its end, recorded start intents are
-handled by a deterministic parent-end step: `Abandon` emits no command, while
-`Cancel` and `Terminate` emit one replay-keyed cancellation command with a
-policy-specific reason. The old `ToolContext` guards remain only for providers
-that have not yet moved to the FIG-1291 leaf signature.
+handled by a deterministic parent-end step. Version 1 deliberately exposes only
+`Abandon` and `Cancel`, with `Cancel` as the default: `Abandon` is a recorded
+no-op, while `Cancel` emits one replay-keyed `cancel_recorded_intent` command
+with a recorded typed outcome. Lash processes are cooperative and Lash has no
+hard-kill primitive; engines own their own kill semantics. Temporal's three-way
+Parent Close Policy therefore maps to Lash as `{Abandon, Cancel}`. This is a
+recorded model deviation, not an omitted implementation. If a hard-kill
+primitive earns its way into the process model, reject-and-recreate versioning
+adds the policy only together with that primitive, never ahead of it. The old
+`ToolContext` guards remain only for providers that have not yet moved to the
+FIG-1291 leaf signature.
 
 The former `ToolContext::durable_effects()` facade and its `DurableStep`
 producer are removed, including the serialized command and outcome. External

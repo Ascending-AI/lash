@@ -66,6 +66,11 @@ const TOOL_FAILURE_FEEDBACK: StandardProtocolScenarioCoverage = standard_protoco
     "tool failure feedback",
     "Tool failure is converted into model feedback after checkpoint."
 );
+const TOOL_INTENT_FEEDBACK: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
+    standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback,
+    "tool intent feedback",
+    "Typed outcomes for every v1 intent kind survive the Standard tool boundary and enter the next model request."
+);
 const STREAMED_TEXT_TERMINATION: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
     standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta,
     "streamed text termination",
@@ -84,13 +89,14 @@ const STANDARD_PROTOCOL_SCENARIO_COVERAGE: &[StandardProtocolScenarioCoverage] =
     NATIVE_TOOL_LOOP,
     PARALLEL_TOOL_CHECKPOINT,
     TOOL_FAILURE_FEEDBACK,
+    TOOL_INTENT_FEEDBACK,
     STREAMED_TEXT_TERMINATION,
     MAX_TURN_TERMINATION,
 ];
 
 #[test]
 fn standard_protocol_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(STANDARD_PROTOCOL_SCENARIO_COVERAGE.len(), 8);
+    assert_eq!(STANDARD_PROTOCOL_SCENARIO_COVERAGE.len(), 9);
     let mut names = BTreeSet::new();
     for coverage in STANDARD_PROTOCOL_SCENARIO_COVERAGE {
         let _declared_test = coverage.declared_test;
@@ -242,6 +248,11 @@ impl StandardProtocolScenario {
                         "{} native tool calls changed",
                         self.name
                     );
+                    observed.intent_outcomes.extend(
+                        results
+                            .iter()
+                            .flat_map(|result| result.intent_outcomes.iter().cloned()),
+                    );
                     machine.handle_response(Response::ToolResults {
                         id: tool_id,
                         results: calls
@@ -292,6 +303,7 @@ struct StandardToolResult {
     tool_name: &'static str,
     output: ToolCallOutput,
     model_return_text: &'static str,
+    intent_outcomes: Vec<lash_core::ToolIntentExecutionOutcome>,
 }
 
 impl StandardToolResult {
@@ -306,6 +318,7 @@ impl StandardToolResult {
             tool_name,
             output: ToolCallOutput::success(output),
             model_return_text,
+            intent_outcomes: Vec::new(),
         }
     }
 
@@ -325,7 +338,16 @@ impl StandardToolResult {
                 message,
             )),
             model_return_text,
+            intent_outcomes: Vec::new(),
         }
+    }
+
+    fn with_intent_outcomes(
+        mut self,
+        intent_outcomes: Vec<lash_core::ToolIntentExecutionOutcome>,
+    ) -> Self {
+        self.intent_outcomes = intent_outcomes;
+        self
     }
 
     fn completed_call(&self, args: serde_json::Value) -> sansio::CompletedToolCall {
@@ -337,12 +359,16 @@ impl StandardToolResult {
             model_return: lash_core::facade_support::ModelToolReturn {
                 call_id: self.call_id.to_string(),
                 tool_name: self.tool_name.to_string(),
-                parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
+                parts: std::iter::once(lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,
-                )],
+                ))
+                .chain(self.intent_outcomes.iter().map(|outcome| {
+                    lash_core::facade_support::ModelToolReturnPart::text(outcome.model_addendum())
+                }))
+                .collect(),
             },
             duration_ms: 1,
-            intent_outcomes: Vec::new(),
+            intent_outcomes: self.intent_outcomes.clone(),
             replay: None,
         }
     }
@@ -358,6 +384,8 @@ struct StandardProtocolExpectations {
     no_text_deltas: bool,
     error_contains: Vec<&'static str>,
     turn_outcome: Option<TurnOutcome>,
+    model_requests_contain: Vec<&'static str>,
+    intent_kinds: Vec<lash_core::ToolIntentKind>,
 }
 
 impl StandardProtocolExpectations {
@@ -415,6 +443,23 @@ impl StandardProtocolExpectations {
                 run.turn_outcomes
             );
         }
+        for expected in &self.model_requests_contain {
+            assert!(
+                run.model_request_texts
+                    .iter()
+                    .any(|request| request.contains(expected)),
+                "{scenario_name} omitted `{expected}` from its model requests: {:?}",
+                run.model_request_texts
+            );
+        }
+        assert_eq!(
+            run.intent_outcomes
+                .iter()
+                .filter_map(lash_core::ToolIntentExecutionOutcome::kind)
+                .collect::<Vec<_>>(),
+            self.intent_kinds,
+            "{scenario_name} typed intent evidence changed"
+        );
     }
 }
 
@@ -437,13 +482,19 @@ struct StandardProtocolRun {
     text_deltas: Vec<String>,
     errors: Vec<String>,
     turn_outcomes: Vec<TurnOutcome>,
+    model_request_texts: Vec<String>,
+    intent_outcomes: Vec<lash_core::ToolIntentExecutionOutcome>,
 }
 
 impl StandardProtocolRun {
     fn record(&mut self, effects: &[Effect]) {
         for effect in effects {
             match effect {
-                Effect::LlmCall { .. } => self.llm_call_count += 1,
+                Effect::LlmCall { request, .. } => {
+                    self.llm_call_count += 1;
+                    self.model_request_texts
+                        .push(format!("{:?}", request.messages));
+                }
                 Effect::ToolCalls { calls, .. } => {
                     self.tool_calls
                         .extend(calls.iter().map(|call| ExpectedToolCall {
@@ -669,6 +720,77 @@ fn standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint()
     standard     provider  model.request           messages=1 tools=0
     standard     tool      tool.call               name="read_file" call=call-001
     standard     tool      tool.result             name="read_file" outcome=success call=call-001
+    standard     commit    checkpoint.request      checkpoint=after_work
+    standard                 usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
+    standard     provider  model.request           messages=3 tools=0
+    "#);
+}
+
+#[test]
+fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback() {
+    let kinds = [
+        lash_core::ToolIntentKind::StartProcess,
+        lash_core::ToolIntentKind::SignalProcess,
+        lash_core::ToolIntentKind::CancelProcess,
+        lash_core::ToolIntentKind::EmitProcessEvent,
+    ];
+    let outcomes = kinds
+        .into_iter()
+        .enumerate()
+        .map(
+            |(intent_index, kind)| lash_core::ToolIntentExecutionOutcome::Executed {
+                identity: lash_core::ToolIntentIdentity {
+                    session_id: "standard-protocol-scenario".to_string(),
+                    execution_scope_id: "standard-protocol-turn".to_string(),
+                    tool_call_id: "tc-intents".to_string(),
+                    intent_index: intent_index as u32,
+                    replay_key: format!("standard-intent-{intent_index}"),
+                },
+                kind,
+                result: serde_json::json!({"literal_index": intent_index}),
+            },
+        )
+        .collect::<Vec<_>>();
+    let run = StandardProtocolScenario::new(TOOL_INTENT_FEEDBACK.display_name)
+        .user_message("run durable follow-on work")
+        .llm_response(
+            false,
+            vec![tool_call_part("tc-intents", "intent_leaf", "{}")],
+        )
+        .tool_results(vec![
+            StandardToolResult::ok(
+                "tc-intents",
+                "intent_leaf",
+                serde_json::json!({"provider": "done"}),
+                "provider done",
+            )
+            .with_intent_outcomes(outcomes),
+        ])
+        .checkpoint()
+        .expect(StandardProtocolExpectations {
+            initial_request_contains: vec!["run durable follow-on work"],
+            tool_calls: vec![ExpectedToolCall {
+                call_id: "tc-intents".to_string(),
+                tool_name: "intent_leaf".to_string(),
+                args: serde_json::json!({}),
+            }],
+            checkpoints: vec![CheckpointKind::AfterWork],
+            llm_call_count: Some(2),
+            done: Some(false),
+            model_requests_contain: vec![
+                "[tool intent start_process #0 executed:",
+                "[tool intent signal_process #1 executed:",
+                "[tool intent cancel_process #2 executed:",
+                "[tool intent emit_process_event #3 executed:",
+            ],
+            intent_kinds: kinds.to_vec(),
+            ..StandardProtocolExpectations::default()
+        })
+        .run();
+    insta::assert_snapshot!(run.transcript.render(), @r#"
+    standard     provider  model.request           messages=1 tools=0
+    standard     tool      tool.call               name="intent_leaf" call=call-001
+    standard     tool      tool.result             name="intent_leaf" outcome=success call=call-001
     standard     commit    checkpoint.request      checkpoint=after_work
     standard                 usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     standard     provider  model.request           messages=3 tools=0

@@ -108,9 +108,6 @@ pub(crate) async fn execute_parent_end_actions(context: &ToolDispatchContext<'_>
             crate::ProcessParentEndPolicy::Cancel => {
                 "recorded start intent parent ended with cancel policy"
             }
-            crate::ProcessParentEndPolicy::Terminate => {
-                "recorded start intent parent ended with terminate policy"
-            }
         };
         let replay_key = format!("{}:parent-end", action.identity.replay_key);
         let parent = crate::RuntimeInvocation::effect(

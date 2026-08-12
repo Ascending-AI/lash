@@ -66,18 +66,19 @@ impl ToolIntent {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessParentEndPolicy {
     Abandon,
+    #[default]
     Cancel,
-    Terminate,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StartProcessIntent {
     pub session_id: String,
     pub request: crate::ProcessStartRequest,
+    #[serde(default)]
     pub on_parent_end: ProcessParentEndPolicy,
 }
 
@@ -231,5 +232,43 @@ mod tests {
         assert_ne!(turn_7.replay_key, turn_8.replay_key);
         assert_ne!(turn_7.replay_key, process.replay_key);
         assert_ne!(turn_8.replay_key, process.replay_key);
+    }
+
+    #[test]
+    fn parent_end_policy_defaults_to_cancel_and_rejects_unreleased_terminate_bytes() {
+        assert_eq!(
+            ProcessParentEndPolicy::default(),
+            ProcessParentEndPolicy::Cancel
+        );
+        assert_eq!(
+            serde_json::from_str::<ProcessParentEndPolicy>(r#""cancel""#)
+                .expect("decode the v1 default policy"),
+            ProcessParentEndPolicy::Cancel
+        );
+        assert_eq!(
+            serde_json::from_str::<ProcessParentEndPolicy>(r#""abandon""#)
+                .expect("decode the v1 abandon policy"),
+            ProcessParentEndPolicy::Abandon
+        );
+        assert_eq!(
+            serde_json::from_str::<ProcessParentEndPolicy>(r#""terminate""#)
+                .expect_err("the unreleased terminate byte shape must stay fenced")
+                .to_string(),
+            "unknown variant `terminate`, expected `abandon` or `cancel` at line 1 column 11"
+        );
+    }
+
+    #[test]
+    fn start_process_intent_without_a_parent_policy_decodes_as_cancel() {
+        let intent = serde_json::from_value::<StartProcessIntent>(serde_json::json!({
+            "session_id": "session",
+            "request": crate::ProcessStartRequest::external(
+                "child",
+                crate::ProcessOriginator::host_scoped("parent-policy-default-law"),
+                serde_json::json!({"recorded": true}),
+            ),
+        }))
+        .expect("decode a start intent without an explicit parent policy");
+        assert_eq!(intent.on_parent_end, ProcessParentEndPolicy::Cancel);
     }
 }

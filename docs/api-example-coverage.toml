@@ -72942,15 +72942,6 @@ disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
 
 [[api]]
-symbol = "lash::tools::ProcessParentEndPolicy::Terminate"
-kind = "variant"
-aliases = ["lash_core::ProcessParentEndPolicy::Terminate"]
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
-
-[[api]]
 symbol = "lash::tools::SignalProcessIntent"
 kind = "struct"
 aliases = ["lash_core::SignalProcessIntent"]

@@ -2205,6 +2205,94 @@ async fn sqlite_effect_controller_replays_without_local_executor() {
 }
 
 #[tokio::test]
+async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
+    let dir = tempfile::tempdir().expect("intent replay tempdir");
+    let path = dir.path().join("recorded-intent-effect.db");
+    let scope = durable_turn_scope("sqlite-intent-session", "sqlite-intent-turn");
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            RuntimeScope::for_turn("sqlite-intent-session", "sqlite-intent-turn", 0, 0),
+            "sqlite-recorded-intent-attempt",
+            RuntimeEffectKind::ToolAttempt,
+            "sqlite-recorded-intent-attempt",
+        ),
+        RuntimeEffectCommand::ToolAttempt {
+            call: lash_core::PreparedToolCall::from_parts(
+                "sqlite-intent-call",
+                "tool:sqlite_intent_leaf",
+                "sqlite_intent_leaf",
+                serde_json::json!({"value": "record"}),
+                None,
+                serde_json::Value::Null,
+            ),
+            execution_grant: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    );
+    let expected = RuntimeEffectOutcome::ToolAttempt {
+        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
+            record: Box::new(lash_core::ToolCallRecord {
+                call_id: Some("sqlite-intent-call".to_string()),
+                tool: "sqlite_intent_leaf".to_string(),
+                args: serde_json::json!({"value": "record"}),
+                output: lash_core::ToolCallOutput::success(serde_json::json!({
+                    "provider": "done"
+                })),
+                duration_ms: 7,
+            }),
+            intents: lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::EmitProcessEvent(
+                lash_core::EmitProcessEventIntent {
+                    session_id: "sqlite-intent-session".to_string(),
+                    process_id: "sqlite-intent-target".to_string(),
+                    event_type: "sqlite.intent.recorded".to_string(),
+                    payload: serde_json::json!({"literal": true}),
+                },
+            )]),
+        }),
+        triggers: Vec::new(),
+    };
+    let expected_bytes = serde_json::to_vec(&expected).expect("serialize literal intent outcome");
+    let first_controller = SqliteRuntimeEffectController::open(&path, scope.clone())
+        .await
+        .expect("open first SQLite intent controller");
+    let first = first_controller
+        .execute_effect(
+            envelope.clone(),
+            RuntimeEffectLocalExecutor::testing({
+                let expected = expected.clone();
+                move |_| async move { Ok(expected) }
+            }),
+        )
+        .await
+        .expect("record non-empty intent carrier");
+    assert_eq!(
+        serde_json::to_vec(&first).expect("serialize first SQLite intent outcome"),
+        expected_bytes
+    );
+    drop(first_controller);
+
+    let replay_controller = SqliteRuntimeEffectController::open(&path, scope)
+        .await
+        .expect("reopen SQLite intent controller");
+    replay_controller.start_replay();
+    let replayed = replay_controller
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                panic!("SQLite replay must not rerun the recorded attempt body")
+            }),
+        )
+        .await
+        .expect("replay non-empty intent carrier");
+    assert_eq!(
+        serde_json::to_vec(&replayed).expect("serialize replayed SQLite intent outcome"),
+        expected_bytes,
+        "SQLite replays the literal non-empty intent carrier byte-for-byte"
+    );
+}
+
+#[tokio::test]
 async fn sqlite_effect_host_retires_session_journal_rows() {
     let dir = tempfile::tempdir().expect("effect replay tempdir");
     let path = dir.path().join("effect-replay.db");

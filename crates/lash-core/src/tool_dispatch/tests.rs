@@ -1,6 +1,7 @@
 use super::*;
 use crate::plugin::{PluginHost, PluginSession, StaticPluginFactory};
 use crate::runtime::RuntimeEffectControllerHandle;
+use crate::store::{SessionCommitStore as _, SessionExecutionLeaseStore as _, StoreError};
 use crate::{
     ProcessRegistry as _, ToolCall, ToolCallOutcome, ToolContext, ToolProvider, ToolResult,
     ToolRetryDisposition, ToolRetryPolicy,
@@ -171,6 +172,299 @@ struct AttemptIntentTools {
 struct RetryingIntentTools {
     definition: crate::ToolDefinition,
     calls: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct FixedAttemptIntentTools {
+    definition: crate::ToolDefinition,
+    intents: crate::ToolIntents,
+    calls: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct OrderedBatchIntentTools {
+    definitions: Vec<crate::ToolDefinition>,
+    second_attempt_finished: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for OrderedBatchIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(self.definitions.clone())
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        contract_from(self.definitions.clone(), name)
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("ordered batch intent law uses AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        self.definitions.iter().any(|tool| tool.id() == tool_id)
+    }
+
+    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        if call.name == "intent_batch_first" {
+            self.second_attempt_finished.notified().await;
+        } else {
+            assert_eq!(call.name, "intent_batch_second");
+            self.second_attempt_finished.notify_one();
+        }
+        let call_id = call
+            .context
+            .tool_call_id()
+            .expect("ordered batch calls carry ids");
+        crate::ToolAttemptResult::done(
+            crate::ToolResultDone::ok(json!({"completed": call.name})),
+            crate::ToolIntents::v1(
+                [0, 1]
+                    .into_iter()
+                    .map(|intent_index| {
+                        let event_type = format!("{call_id}.intent.{intent_index}");
+                        crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+                            session_id: "session".to_string(),
+                            process_id: "intent-law-target".to_string(),
+                            event_type,
+                            payload: json!({"call_id": call_id, "intent_index": intent_index}),
+                        })
+                    })
+                    .collect(),
+            ),
+        )
+    }
+}
+
+#[derive(Clone)]
+struct BlockingAttemptIntentTools {
+    definition: crate::ToolDefinition,
+    entered: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for BlockingAttemptIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![self.definition.clone()])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("pre-result cancellation law uses AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == self.definition.id()
+    }
+
+    async fn execute_attempt(&self, _call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        self.entered.notify_one();
+        std::future::pending().await
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for FixedAttemptIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![self.definition.clone()])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("fixed intent law uses AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == self.definition.id()
+    }
+
+    async fn execute_attempt(&self, _call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        crate::ToolAttemptResult::done(
+            crate::ToolResultDone::ok(json!({"provider": "recorded"})),
+            self.intents.clone(),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntentPausePoint {
+    AfterToolAttemptCommit,
+    BeforeProcessCommand(usize),
+    AfterProcessCommandCommit(usize),
+}
+
+struct IntentReplayController {
+    inline: crate::InlineRuntimeEffectController,
+    recorded: std::sync::Mutex<
+        BTreeMap<String, Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError>>,
+    >,
+    frame_sightings: std::sync::Mutex<BTreeMap<String, Vec<String>>>,
+    process_commands: AtomicUsize,
+    pause: std::sync::Mutex<Option<IntentPausePoint>>,
+    pause_entered: tokio::sync::Notify,
+    pause_release: tokio::sync::Notify,
+}
+
+impl IntentReplayController {
+    fn new(pause: Option<IntentPausePoint>) -> Self {
+        Self {
+            inline: crate::InlineRuntimeEffectController::default(),
+            recorded: std::sync::Mutex::new(BTreeMap::new()),
+            frame_sightings: std::sync::Mutex::new(BTreeMap::new()),
+            process_commands: AtomicUsize::new(0),
+            pause: std::sync::Mutex::new(pause),
+            pause_entered: tokio::sync::Notify::new(),
+            pause_release: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn take_pause(&self, expected: IntentPausePoint) -> bool {
+        let mut pause = self.pause.lock_recover();
+        if pause.as_ref() == Some(&expected) {
+            pause.take();
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn pause_if(&self, expected: IntentPausePoint) {
+        if self.take_pause(expected) {
+            self.pause_entered.notify_one();
+            self.pause_release.notified().await;
+        }
+    }
+
+    async fn wait_until_paused(&self) {
+        self.pause_entered.notified().await;
+    }
+
+    fn release(&self) {
+        self.pause_release.notify_one();
+    }
+
+    fn frame_sightings(&self) -> BTreeMap<String, Vec<String>> {
+        self.frame_sightings.lock_recover().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for IntentReplayController {
+    async fn await_event_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+        self.inline.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        self.inline.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
+        self.inline.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<crate::Resolution, crate::RuntimeError> {
+        self.inline.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.inline
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.inline
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for IntentReplayController {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let replay_key = envelope
+            .invocation
+            .replay_key()
+            .expect("law effects carry replay keys")
+            .to_string();
+        let frame = serde_json::to_string(&envelope).expect("serialize law effect frame");
+        self.frame_sightings
+            .lock_recover()
+            .entry(replay_key.clone())
+            .or_default()
+            .push(frame);
+        if let Some(result) = self.recorded.lock_recover().get(&replay_key).cloned() {
+            return result;
+        }
+
+        let kind = envelope.command.kind();
+        let process_ordinal = (kind == crate::RuntimeEffectKind::Process)
+            .then(|| self.process_commands.fetch_add(1, Ordering::SeqCst) + 1);
+        if let Some(ordinal) = process_ordinal {
+            self.pause_if(IntentPausePoint::BeforeProcessCommand(ordinal))
+                .await;
+        }
+        let result = match envelope.command {
+            crate::RuntimeEffectCommand::Process { command } => local_executor
+                .into_process()?
+                .execute(*command)
+                .await
+                .map(|result| crate::RuntimeEffectOutcome::Process { result }),
+            command => {
+                local_executor
+                    .execute(crate::RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        command,
+                    ))
+                    .await
+            }
+        };
+        self.recorded
+            .lock_recover()
+            .insert(replay_key, result.clone());
+        if kind == crate::RuntimeEffectKind::ToolAttempt {
+            self.pause_if(IntentPausePoint::AfterToolAttemptCommit)
+                .await;
+        }
+        if let Some(ordinal) = process_ordinal {
+            self.pause_if(IntentPausePoint::AfterProcessCommandCommit(ordinal))
+                .await;
+        }
+        result
+    }
 }
 
 #[async_trait::async_trait]
@@ -2126,7 +2420,6 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
     let policies = [
         crate::ProcessParentEndPolicy::Abandon,
         crate::ProcessParentEndPolicy::Cancel,
-        crate::ProcessParentEndPolicy::Terminate,
     ];
     let intents = crate::ToolIntents::v1(
         policies
@@ -2181,18 +2474,13 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
                     .count()
             })
             .collect::<Vec<_>>(),
-        vec![0, 1, 1],
-        "Abandon emits no command; Cancel and Terminate emit one command each"
+        vec![0, 1],
+        "Abandon is a recorded no-op and Cancel emits exactly one command"
     );
     assert_eq!(
         first_events[1][0].payload["reason"],
         json!("recorded start intent parent ended with cancel policy")
     );
-    assert_eq!(
-        first_events[2][0].payload["reason"],
-        json!("recorded start intent parent ended with terminate policy")
-    );
-
     intent_executor::record_parent_end_actions(&context, &intents, &outcomes);
     intent_executor::execute_parent_end_actions(&context).await;
     let redriven_events = futures_util::future::try_join_all(
@@ -2209,62 +2497,4 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
     );
 }
 
-#[tokio::test]
-async fn retry_drains_only_the_final_attempts_intents() {
-    let definition =
-        named_beta_tool("retry_intents").with_retry_policy(crate::ToolRetryPolicy::safe(2, 0, 0));
-    let calls = Arc::new(AtomicUsize::new(0));
-    let provider: Arc<dyn ToolProvider> = Arc::new(RetryingIntentTools {
-        definition: definition.clone(),
-        calls: Arc::clone(&calls),
-    });
-    let mut context = exact_dispatch_context(provider);
-    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-    registry
-        .register_process(
-            crate::ProcessRegistration::new(
-                "retry-intent-target",
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                crate::RecoveryDisposition::ExternallyOwned,
-                crate::ProcessProvenance::host(),
-            )
-            .with_extra_event_types([crate::ProcessEventType {
-                name: "attempt.retry.final".to_string(),
-                payload_schema: crate::LashSchema::any(),
-                semantics: crate::ProcessEventSemanticsSpec::default(),
-            }]),
-        )
-        .await
-        .expect("register retry intent target");
-    context.processes = crate::testing::effect_backed_process_service(registry.clone());
-    let prepared = crate::PreparedToolCall::from_parts(
-        "retry-intents-call",
-        definition.id().to_string(),
-        "retry_intents",
-        json!({"value": "drive"}),
-        None,
-        serde_json::Value::Null,
-    );
-    let tool_context = tool_context_for_prepared(&context, &prepared);
-    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
-        &context,
-        prepared,
-        None,
-        tool_context,
-    )
-    .await;
-    let ToolCallLaunch::Done(outcome) = launch else {
-        panic!("retrying provider completes on its second attempt");
-    };
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert_eq!(outcome.attempts.len(), 2);
-    assert_eq!(outcome.intent_outcomes.len(), 1);
-    let events = registry
-        .events_after("retry-intent-target", 0)
-        .await
-        .expect("read retry intent target events");
-    assert_eq!(events.len(), 1, "the retried declaration never drains");
-    assert_eq!(events[0].payload, json!({"attempt": 2}));
-}
+include!("tests/intent_laws.rs");
