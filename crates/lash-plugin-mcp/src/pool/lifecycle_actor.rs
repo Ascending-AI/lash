@@ -227,6 +227,7 @@ impl LifecycleActor {
                 return ConnectionExit::Failed;
             }
             Err(_) => {
+                drop(connection_attempt);
                 let error = McpError::StartupTimeout {
                     server: server_name.clone(),
                     timeout_ms: startup_timeout.as_millis() as u64,
@@ -485,6 +486,14 @@ impl LifecycleActor {
                 () = sleep_until(keepalive_at), if keepalive_at.is_some() => {
                     self.advance_keepalive_deadline();
                     let Some(entry) = self.entry.upgrade() else {
+                        self.unpublish(generation);
+                        let _ = self.cancel_and_reap(
+                            &server_name,
+                            &request_tasks,
+                            cancellation.take().expect("service cancellation token"),
+                            &mut waiting,
+                            stdio_child.take(),
+                        ).await;
                         return ConnectionExit::Shutdown;
                     };
                     if !entry.peer_supports_ping(&peer) {
@@ -651,7 +660,7 @@ impl LifecycleActor {
                     }
                     Some(LifecycleCommand::Establish { reply }) => {
                         let _ = reply.send(Err(McpError::Protocol(
-                            "MCP connection is shutting down".to_string(),
+                            "MCP connection is restarting or being reaped".to_string(),
                         )));
                     }
                     Some(LifecycleCommand::CallTimedOut { reply, .. }) => {

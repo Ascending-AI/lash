@@ -119,7 +119,7 @@ for line in sys.stdin:
         log.write(line)
     message = json.loads(line)
     method = message.get('method')
-    if method == 'initialize' and behavior != 'hang_initialize':
+    if method == 'initialize' and behavior not in ('hang_initialize', 'exit_on_eof_after_hang_initialize'):
         send({'jsonrpc': '2.0', 'id': message['id'], 'result': {
             'protocolVersion': protocol,
             'capabilities': {'tools': {}},
@@ -155,9 +155,10 @@ for line in sys.stdin:
                   'result': {'_meta': {'alive': True}}})
         elif behavior in ('silent_ping', 'success', 'progress', 'continuous_progress', 'sequence', 'fail_twice_then_success'):
             send({'jsonrpc': '2.0', 'id': message['id'], 'result': {}})
-if behavior == 'ignore_eof':
+if behavior in ('ignore_eof', 'exit_on_eof_after_hang_initialize'):
     with open(eof_path, 'w', encoding='utf-8') as f:
         f.write('closed')
+if behavior == 'ignore_eof':
     time.sleep(30)
 "#;
 
@@ -1078,6 +1079,48 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
 
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_timeout_drops_handshake_before_graceful_reap() {
+    let root = tempfile::tempdir().unwrap();
+    let started = Instant::now();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "exit_on_eof_after_hang_initialize",
+            startup_timeout_ms: 400,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(400),
+        "startup timeout returned before the literal 400ms timeout: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(1_500),
+        "startup timeout did not preserve a live grace window below the literal 1500ms ceiling: {elapsed:?}"
+    );
+
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("startup-timeout child pid")
+        .parse()
+        .expect("numeric child pid");
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("eof")).expect("stdin EOF marker"),
+        "closed"
+    );
+    assert_eq!(process_state(pid), None);
+    let current_entry = entry(&pool);
+    assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        current_entry.last_error.read_recover().as_deref(),
+        Some("MCP startup timed out for `mock` after 400ms")
+    );
+    pool.shutdown_all().await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
@@ -1093,7 +1136,12 @@ async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
     let attaching =
         tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
     wait_until(
-        || root.path().join("pid").exists(),
+        || {
+            std::fs::read_to_string(root.path().join("pid"))
+                .ok()
+                .and_then(|pid| pid.parse::<u32>().ok())
+                .is_some()
+        },
         "handshake child did not publish its PID",
     )
     .await;

@@ -70,6 +70,8 @@ const ENTRY_SHUTDOWN_TOTAL_BOUND: Duration = Duration::from_secs(5);
 /// Dropping a live pool only sends each child a best-effort kill and logs an
 /// error; it does not wait, so the child remains a zombie until the host
 /// process exits.
+/// Cancelling `shutdown_all()` mid-flight aborts the actor and likewise leaves
+/// any killed stdio child unreaped.
 pub struct McpConnectionPool {
     entries: RwLock<BTreeMap<String, Arc<McpEntry>>>,
     host_services: McpHostServices,
@@ -603,9 +605,10 @@ impl McpConnectionPool {
     /// bounded reap, so total pool shutdown is approximately five seconds, not
     /// the number of entries multiplied by five seconds.
     ///
-    /// Only a child that survives the actor's preemptive kill and bounded reap
-    /// can be abandoned at that deadline. Its literal PID and reason are
-    /// recorded in `last_error` and tracing; no background waitpid sweep is
+    /// A child can be abandoned if it survives the actor's preemptive kill and
+    /// bounded reap or if the entry deadline expires mid-reap. The deadline
+    /// abort branch reports the live `active_pid`; its literal PID and reason
+    /// are recorded in `last_error` and tracing. No background waitpid sweep is
     /// retained.
     ///
     /// The first caller wins and completes teardown. A concurrent or later
