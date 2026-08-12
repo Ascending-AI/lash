@@ -17,8 +17,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::{
-    EffectHost, ExecutionScope, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimeScope,
+    EffectHost, ExecutionScope, ProcessRegistry as _, RuntimeEffectCommand, RuntimeEffectEnvelope,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
+    RuntimeScope,
 };
 use lash_postgres_store::{PostgresEffectHost, PostgresStorage};
 
@@ -84,7 +85,17 @@ fn attempt_outcome(call_id: &str, value: &str) -> RuntimeEffectOutcome {
                 output: lash_core::ToolCallOutput::success(serde_json::json!(value)),
                 duration_ms: 0,
             }),
-            intents: lash_core::ToolIntents::default(),
+            intents: lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(
+                Box::new(lash_core::StartProcessIntent {
+                    session_id: SESSION.to_string(),
+                    request: lash_core::ProcessStartRequest::external(
+                        format!("{call_id}:recorded-child"),
+                        lash_core::ProcessOriginator::host_scoped("pg-attempt-atomicity"),
+                        serde_json::json!({"value": value}),
+                    ),
+                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
+                }),
+            )]),
         }),
         triggers: Vec::new(),
     }
@@ -237,6 +248,118 @@ async fn attempt_with_nested_command_redrives_identically_on_the_key_addressed_t
         keys,
         vec![ATTEMPT_KEY.to_string(), NESTED_KEY.to_string()],
         "the attempt and its nested command each claimed their own replay key"
+    );
+
+    reset(&second_storage).await;
+}
+
+/// Journal-first law for the key-addressed tier: the exact command produced by
+/// a recorded intent is replayed before any now-live process state can affect
+/// the answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgres() {
+    let Some(database_url) = database_url() else {
+        eprintln!(
+            "skipping the PostgreSQL recorded-intent law: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let first_storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect first PostgreSQL intent host");
+    reset(&first_storage).await;
+    let identity =
+        lash_core::derive_tool_intent_identity(SESSION, TURN, Some("pg-journal-first-call"), 0)
+            .expect("literal PostgreSQL intent identity");
+    let mut invocation = RuntimeInvocation::effect(
+        RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+        "pg-recorded-intent-start",
+        RuntimeEffectKind::Process,
+        identity.replay_key.clone(),
+    );
+    invocation.replay = Some(lash_core::RuntimeReplay {
+        key: identity.replay_key.clone(),
+        attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        )),
+    });
+    let registration = lash_core::ProcessRegistration::new(
+        identity.replay_key.clone(),
+        lash_core::ProcessInput::External {
+            metadata: serde_json::json!({"source": "postgres-recorded-intent"}),
+        },
+        lash_core::RecoveryDisposition::ExternallyOwned,
+        lash_core::ProcessProvenance::host(),
+    );
+    let envelope = RuntimeEffectEnvelope::new(
+        invocation,
+        RuntimeEffectCommand::process(lash_core::ProcessCommand::Start {
+            registration,
+            observers: vec![SESSION.to_string()],
+            execution_context: Box::default(),
+        }),
+    );
+    let frame_hash = envelope.stable_hash().expect("intent command frame hash");
+    let registry = Arc::new(first_storage.process_registry());
+    let first_host = first_storage.effect_host();
+    let first_scoped = first_host
+        .scoped(ExecutionScope::turn(SESSION, TURN))
+        .expect("scope first PostgreSQL intent host");
+    let first = first_scoped
+        .controller()
+        .execute_effect(
+            envelope.clone(),
+            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+        )
+        .await
+        .expect("execute recorded intent command");
+    registry
+        .complete_process(
+            &identity.replay_key,
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::json!("terminal after the recorded drain"),
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("terminalize the recorded intent target");
+    drop(registry);
+    drop(first_scoped);
+    drop(first_host);
+    drop(first_storage);
+
+    let second_storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect redriving PostgreSQL intent host");
+    let second_host = second_storage.effect_host();
+    second_host.start_replay();
+    let second_scoped = second_host
+        .scoped(ExecutionScope::turn(SESSION, TURN))
+        .expect("scope redriving PostgreSQL intent host");
+    assert_eq!(
+        envelope
+            .stable_hash()
+            .expect("redriven intent command frame hash"),
+        frame_hash,
+        "the redriven command frame is byte-identical"
+    );
+    let redriven = second_scoped
+        .controller()
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::processes(
+                Arc::new(second_storage.process_registry()),
+                None,
+            ),
+        )
+        .await
+        .expect("replay recorded intent command after live mutation");
+    assert_eq!(
+        serde_json::to_vec(&redriven).expect("serialize redriven intent outcome"),
+        serde_json::to_vec(&first).expect("serialize first intent outcome"),
+        "the key-addressed recorded outcome is byte-identical after live terminal mutation"
     );
 
     reset(&second_storage).await;

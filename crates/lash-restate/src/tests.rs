@@ -1129,7 +1129,21 @@ impl Fig1127NestedRouteRedrive for Fig1127NestedRouteRedriveImpl {
                                 output,
                                 duration_ms: 0,
                             }),
-                            intents: lash_core::ToolIntents::default(),
+                            intents: lash_core::ToolIntents::v1(vec![
+                                lash_core::ToolIntent::StartProcess(Box::new(
+                                    lash_core::StartProcessIntent {
+                                        session_id: "session".to_string(),
+                                        request: lash_core::ProcessStartRequest::external(
+                                            "captured-journal-child",
+                                            lash_core::ProcessOriginator::host_scoped(
+                                                "restate-positional-law",
+                                            ),
+                                            serde_json::json!({"captured": true}),
+                                        ),
+                                        on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
+                                    },
+                                )),
+                            ]),
                         }),
                         triggers: Vec::new(),
                     })
@@ -5710,7 +5724,21 @@ async fn restate_positional_replay_records_tool_attempt_as_one_command() {
                     Ok(RuntimeEffectOutcome::ToolAttempt {
                         launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                             record: Box::new(completed_tool_record("call-fast", "fast_tool")),
-                            intents: lash_core::ToolIntents::default(),
+                            intents: lash_core::ToolIntents::v1(vec![
+                                lash_core::ToolIntent::StartProcess(Box::new(
+                                    lash_core::StartProcessIntent {
+                                        session_id: "session".to_string(),
+                                        request: lash_core::ProcessStartRequest::external(
+                                            "positional-replay-child",
+                                            lash_core::ProcessOriginator::host_scoped(
+                                                "restate-positional-law",
+                                            ),
+                                            serde_json::json!({"captured": true}),
+                                        ),
+                                        on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
+                                    },
+                                )),
+                            ]),
                         }),
                         triggers: Vec::new(),
                     })
@@ -6820,6 +6848,33 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
             other => lash_core::ToolResult::err_fmt(format!("unknown replay tool `{other}`")),
         }
     }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == Self::scalar_definition().id()
+    }
+
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == Self::pending_definition().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        assert_eq!(call.name, "replay_scalar_counter");
+        self.scalar_invocations.fetch_add(1, Ordering::SeqCst);
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({ "value": "counted" })),
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::SignalProcess(
+                lash_core::SignalProcessIntent {
+                    session_id: call.context.session_id().to_string(),
+                    process_id: "restate-recorded-intent-target".to_string(),
+                    signal_name: "resume".to_string(),
+                    payload: serde_json::json!({"source": "recorded-scalar-attempt"}),
+                },
+            )]),
+        )
+    }
 }
 
 #[tokio::test]
@@ -6912,6 +6967,25 @@ finish (await handle)?
     let initial_state = replay_test_state(session_id, &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     let process_registry = process_registry();
+    process_registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                "restate-recorded-intent-target",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[session_id.to_string()],
+        )
+        .await
+        .expect("register the recorded-intent signal target");
     let process_worker =
         DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
@@ -7001,6 +7075,32 @@ finish (await handle)?
         "the real journaling host must derive its run identity from the caller-emitted envelope"
     );
     let scalar_envelope_hash = scalar_envelope.stable_hash().expect("scalar envelope hash");
+    let first_intent_events = process_registry
+        .events_after("restate-recorded-intent-target", 0)
+        .await
+        .expect("read the first recorded-intent event set")
+        .into_iter()
+        .filter(|event| event.event_type == "signal.resume")
+        .collect::<Vec<_>>();
+    assert_eq!(first_intent_events.len(), 1, "one signal command drains");
+    assert_eq!(first_intent_events[0].event_type, "signal.resume");
+    assert_eq!(
+        first_intent_events[0].payload,
+        serde_json::json!({"source": "recorded-scalar-attempt"})
+    );
+    let first_intent_event_bytes =
+        serde_json::to_vec(&first_intent_events).expect("serialize first intent events");
+    process_registry
+        .complete_process(
+            "restate-recorded-intent-target",
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::json!("live state mutated after drain"),
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("terminalize the intent target before redrive");
     let recorded_effect_count = first_recorded_envelopes.len();
 
     context
@@ -7018,7 +7118,7 @@ finish (await handle)?
         host,
         retry_store,
         plugin_factories,
-        Some(process_registry),
+        Some(Arc::clone(&process_registry)),
     ))
     .await;
     let replay_turn =
@@ -7056,6 +7156,18 @@ finish (await handle)?
             .expect("replayed scalar envelope hash"),
         scalar_envelope_hash,
         "the caller must reconstruct the same ToolAttempt envelope on replay"
+    );
+    let replayed_intent_events = process_registry
+        .events_after("restate-recorded-intent-target", 0)
+        .await
+        .expect("read redriven recorded-intent events")
+        .into_iter()
+        .filter(|event| event.event_type == "signal.resume")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        serde_json::to_vec(&replayed_intent_events).expect("serialize redriven intent events"),
+        first_intent_event_bytes,
+        "live terminal mutation cannot change, suppress, or duplicate the recorded signal outcome"
     );
     assert_eq!(
         context

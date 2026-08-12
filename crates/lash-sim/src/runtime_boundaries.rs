@@ -239,6 +239,18 @@ impl RuntimeBoundaryHarness {
         let local_calls_for_executor = Arc::clone(&local_calls);
         let scripted_result = requested_result.clone();
         let call_id = effect_id.clone();
+        let recorded_intents =
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+                lash_core::StartProcessIntent {
+                    session_id: event.actor_alias.clone(),
+                    request: lash_core::ProcessStartRequest::external(
+                        format!("{effect_id}:intent-child"),
+                        lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
+                        json!({"durable_key": durable_key}),
+                    ),
+                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
+                },
+            ))]);
         let controller = self.ensure_effect_controller().await?;
         let outcome = controller
             .execute_effect(
@@ -254,7 +266,7 @@ impl RuntimeBoundaryHarness {
                                 output: ToolCallOutput::success(scripted_result),
                                 duration_ms: 0,
                             }),
-                            intents: lash_core::ToolIntents::default(),
+                            intents: recorded_intents,
                         }),
                         triggers: Vec::new(),
                     })
@@ -517,7 +529,10 @@ impl RuntimeBoundaryHarness {
                         event_type: "process.wake".to_string(),
                     },
                     caused_by: None,
-                    replay: Some(RuntimeReplay { key: replay_key }),
+                    replay: Some(RuntimeReplay {
+                        key: replay_key,
+                        attribution: None,
+                    }),
                 },
                 process_caused_by: None,
                 authority: lash_core::QueuedWorkAuthority::default(),
@@ -1457,6 +1472,7 @@ fn worker_failover_work(
                 },
                 caused_by: None,
                 replay: Some(RuntimeReplay {
+                    attribution: None,
                     key: format!("worker-failover:{session}:work"),
                 }),
             },

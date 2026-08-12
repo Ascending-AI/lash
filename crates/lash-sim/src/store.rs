@@ -944,7 +944,10 @@ impl ModelStore {
                                 event_type: "process.wake".to_string(),
                             },
                             caused_by: None,
-                            replay: Some(lash_core::runtime::RuntimeReplay { key: replay_key }),
+                            replay: Some(lash_core::runtime::RuntimeReplay {
+                                key: replay_key,
+                                attribution: None,
+                            }),
                         },
                         process_caused_by: None,
                         authority: lash_core::QueuedWorkAuthority::default(),
@@ -1210,6 +1213,18 @@ impl ModelStore {
         let envelope_hash = envelope
             .stable_hash()
             .expect("abstract durable-effect envelope is serializable");
+        let recorded_intents =
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+                lash_core::StartProcessIntent {
+                    session_id: event.actor_alias.clone(),
+                    request: lash_core::ProcessStartRequest::external(
+                        format!("{effect_id}:intent-child"),
+                        lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
+                        json!({"durable_key": durable_key}),
+                    ),
+                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
+                },
+            ))]);
         let (result_digest, projected_result, execution_count, replay_count, replayed) =
             if let Some(entry) = self.durable_projection_entries.get_mut(&durable_key) {
                 entry.replay_count += 1;
@@ -1263,10 +1278,7 @@ impl ModelStore {
                         "output": lash_core::ToolCallOutput::success(projected_result),
                         "duration_ms": 0,
                     },
-                    "intents": {
-                        "protocol_version": lash_core::TOOL_INTENT_PROTOCOL_V1,
-                        "intents": [],
-                    },
+                    "intents": recorded_intents,
                 },
             },
         })
