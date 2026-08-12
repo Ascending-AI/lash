@@ -164,7 +164,7 @@ pub fn seeded_state_for(scenario: Scenario) -> State {
             ))),
         );
     }
-    State::from_snapshot(lashlang::Snapshot { globals })
+    State::from_snapshot(lashlang::Snapshot::new(globals))
 }
 
 include!("sections/program.rs");

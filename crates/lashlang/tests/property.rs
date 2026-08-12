@@ -888,12 +888,12 @@ proptest! {
     fn snapshot_round_trip_preserves_state(
         globals in globals_strategy()
     ) {
-        let state = State::from_snapshot(Snapshot {
-            globals: globals
+        let state = State::from_snapshot(Snapshot::new(
+            globals
                 .iter()
                 .map(|(key, value)| (key.clone(), value.to_value()))
                 .collect(),
-        });
+        ));
 
         let encoded = state.snapshot().to_canonical_bytes().expect("snapshot encode");
         let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
@@ -911,7 +911,7 @@ proptest! {
             .enumerate()
             .map(|(index, value)| (format!("variant_{index}"), value.clone()))
             .collect();
-        let snapshot = Snapshot { globals };
+        let snapshot = Snapshot::new(globals);
 
         let encoded = snapshot.to_canonical_bytes().expect("canonical snapshot encode");
         let decoded = Snapshot::from_canonical_bytes(&encoded)
@@ -942,12 +942,8 @@ proptest! {
         let source = format!("result = {}\nfinish result\n", value.to_source());
         let host = DeterministicHost;
 
-        let mut fresh = State::from_snapshot(Snapshot {
-            globals: base_globals.clone(),
-        });
-        let mut restored = State::from_snapshot(Snapshot {
-            globals: base_globals,
-        });
+        let mut fresh = State::from_snapshot(Snapshot::new(base_globals.clone()));
+        let mut restored = State::from_snapshot(Snapshot::new(base_globals));
         let blob = restored
             .snapshot()
             .to_canonical_bytes()

@@ -226,9 +226,13 @@ async fn continuation_preserves_record_insertion_order() {
         .iter()
         .position(|name| name.text.as_ref() == "ordered")
         .expect("ordered slot");
-    let Value::Record(record) = restored.slots[ordered_slot]
+    let ordered = restored.slots[ordered_slot]
         .as_ref()
-        .expect("ordered value")
+        .expect("ordered value");
+    let Value::Record(record) = restored
+        .heap
+        .materialize(ordered)
+        .expect("ordered value should materialize")
     else {
         panic!("ordered slot must contain a record");
     };
@@ -253,6 +257,7 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         pending_error_span: None,
         instructions_executed: 0,
         active_execution_elapsed: std::time::Duration::ZERO,
+        heap: VmHeapContinuation::default(),
     };
     let host = Host;
     let mut invalid_binding = base.clone();
@@ -499,4 +504,277 @@ async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters()
         Vm::resume_from(continuation, &program, &deadline_host),
         Err(ContinuationError::ExecutionDeadlineExceeded { limit_ms: 0 })
     ));
+}
+
+#[derive(Clone, Copy)]
+struct HeapConformanceHost {
+    stress_gc: bool,
+    memory_limit: ExecutionBound<std::num::NonZeroU64>,
+}
+
+impl ExecutionHost for HeapConformanceHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        Host.perform(op).await
+    }
+
+    fn execution_bounds(&self) -> ExecutionBounds {
+        ExecutionBounds::unbounded().with_memory_limit(self.memory_limit)
+    }
+
+    fn collect_heap_every_allocation(&self) -> bool {
+        self.stress_gc
+    }
+}
+
+async fn heap_conformance_run(stress_gc: bool) -> (ExecutionOutcome, Vec<u8>) {
+    let program = compile_source(
+        r#"
+        retained = { values: [1, 2, 3], label: "stable" }
+        garbage = []
+        for n in range(0, 30) {
+          garbage = [{ n: n }, { n: n + 1 }]
+        }
+        finish retained
+        "#,
+    )
+    .expect("heap conformance program should compile");
+    let host = HeapConformanceHost {
+        stress_gc,
+        memory_limit: ExecutionBound::Unbounded,
+    };
+    let mut state = State::new();
+    let outcome = execute_compiled(&program, &mut state, &host)
+        .await
+        .expect("heap conformance program should run");
+    let dump = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("state should serialize canonically");
+    (outcome, dump)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn gc_stress_mode_preserves_results_and_canonical_dumps() {
+    let default = heap_conformance_run(false).await;
+    let stress = heap_conformance_run(true).await;
+    assert_eq!(stress, default);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn logical_memory_exhaustion_is_an_uncatchable_typed_terminal() {
+    let program = compile_source("value = [1, 2, 3, 4]\nfinish value")
+        .expect("memory-bound program should compile");
+    let host = HeapConformanceHost {
+        stress_gc: false,
+        memory_limit: ExecutionBound::instructions(32),
+    };
+    let error = execute_compiled(&program, &mut State::new(), &host)
+        .await
+        .expect_err("logical heap limit should terminate execution");
+    assert!(matches!(error, RuntimeError::MemoryLimitExceeded { limit: 32, .. }));
+    assert!(error.is_execution_bound_exhausted());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn continuation_dump_round_trip_is_byte_identical_and_preserves_heap_meters() {
+    let program = compile_source(
+        "items = []\nfor n in range(0, 20) { items = items + [{ n: n }] }\nfinish items",
+    )
+    .expect("meter program should compile");
+    let host = Host;
+    let mut vm = continuation_test_vm(&program, &host);
+    vm.suspend_after_instructions(40);
+    assert_eq!(
+        vm.run_for_mode().await.expect("meter run should suspend"),
+        ExecutionOutcome::Continued
+    );
+    let before = vm.suspend().expect("meter continuation should capture");
+    let bytes = serde_json::to_vec(&before).expect("continuation should serialize");
+    let restored: VmContinuation =
+        serde_json::from_slice(&bytes).expect("continuation should restore");
+    let redumped = serde_json::to_vec(&restored).expect("continuation should reserialize");
+    assert_eq!(redumped, bytes);
+    assert_eq!(
+        restored.heap.allocation_counter(),
+        before.heap.allocation_counter()
+    );
+    assert_eq!(restored.heap.live_logical_bytes(), before.heap.live_logical_bytes());
+    assert_eq!(
+        restored.heap.size_schedule_version(),
+        HEAP_SIZE_SCHEDULE_VERSION
+    );
+
+    let prior_allocations = restored.heap.allocation_counter();
+    let prior_instructions = restored.instructions_executed;
+    let mut resumed = Vm::resume_from(restored, &program, &host).expect("continuation should resume");
+    resumed.suspend_after_instructions(prior_instructions as usize + 25);
+    assert_eq!(
+        resumed.run_for_mode().await.expect("resumed run should suspend"),
+        ExecutionOutcome::Continued
+    );
+    let after = resumed.suspend().expect("second continuation should capture");
+    assert!(after.heap.allocation_counter() > prior_allocations);
+}
+
+#[test]
+fn determinism_process_probe() {
+    if std::env::var_os("LASHLANG_HEAP_DETERMINISM_PROBE").is_none() {
+        return;
+    }
+    let program = compile_source("finish input").expect("probe program should compile");
+    let globals = [("input".to_string(), Value::List(vec![Value::Number(-0.0)].into()))]
+        .into_iter()
+        .collect();
+    let mut state = State::from_snapshot(Snapshot::new(globals));
+    let snapshot = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("probe snapshot should serialize");
+    let host = Host;
+    let vm = Vm::from_state(&program, &mut state, &host);
+    let continuation = serde_json::to_vec(&vm.suspend().expect("probe should suspend"))
+        .expect("probe continuation should serialize");
+    let hex = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    println!("HEAP_DETERMINISM_DUMP={}|{}", hex(&snapshot), hex(&continuation));
+}
+
+#[test]
+fn independent_os_processes_emit_byte_identical_snapshot_and_continuation_dumps() {
+    let executable = std::env::current_exe().expect("current test executable");
+    let run_probe = || {
+        let output = std::process::Command::new(&executable)
+            .args([
+                "--exact",
+                "runtime::tests::determinism_process_probe",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("LASHLANG_HEAP_DETERMINISM_PROBE", "1")
+            .output()
+            .expect("spawn determinism probe");
+        assert!(output.status.success());
+        String::from_utf8(output.stdout)
+            .expect("probe output should be UTF-8")
+            .lines()
+            .find_map(|line| {
+                line.find("HEAP_DETERMINISM_DUMP=")
+                    .map(|index| &line[index + "HEAP_DETERMINISM_DUMP=".len()..])
+            })
+            .expect("probe dump line")
+            .to_string()
+    };
+    assert_eq!(run_probe(), run_probe());
+}
+
+fn decode_test_hex(input: &str) -> Vec<u8> {
+    assert!(input.len().is_multiple_of(2));
+    input
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let text = std::str::from_utf8(pair).expect("hex should be ASCII");
+            u8::from_str_radix(text, 16).expect("valid hex byte")
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn meter_persistence_process_probe() {
+    let Some(mode) = std::env::var_os("LASHLANG_METER_PROBE_MODE") else {
+        return;
+    };
+    let program = compile_source(
+        "items = []\nfor n in range(0, 20) { items = items + [{ n: n }] }\nfinish items",
+    )
+    .expect("meter probe program should compile");
+    let host = Host;
+    if mode == "produce" {
+        let mut vm = continuation_test_vm(&program, &host);
+        vm.suspend_after_instructions(40);
+        assert_eq!(
+            vm.run_for_mode().await.expect("producer should suspend"),
+            ExecutionOutcome::Continued
+        );
+        let continuation = vm.suspend().expect("producer continuation");
+        let bytes = serde_json::to_vec(&continuation).expect("serialize producer continuation");
+        let hex = bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        println!(
+            "METER_PROBE={}:{}:{}:{}",
+            continuation.instructions_executed,
+            continuation.heap.allocation_counter(),
+            continuation.heap.live_logical_bytes(),
+            hex
+        );
+        return;
+    }
+    let encoded = std::env::var("LASHLANG_METER_CONTINUATION")
+        .expect("consumer continuation input");
+    let continuation: VmContinuation = serde_json::from_slice(&decode_test_hex(&encoded))
+        .expect("consumer should restore continuation");
+    let old_allocations = continuation.heap.allocation_counter();
+    let old_live = continuation.heap.live_logical_bytes();
+    let old_instructions = continuation.instructions_executed;
+    let mut vm = Vm::resume_from(continuation, &program, &host).expect("consumer should resume");
+    vm.suspend_after_instructions(old_instructions as usize + 25);
+    assert_eq!(
+        vm.run_for_mode().await.expect("consumer should suspend"),
+        ExecutionOutcome::Continued
+    );
+    let next = vm.suspend().expect("consumer continuation");
+    println!(
+        "METER_RESUMED={old_allocations}:{old_live}:{}:{}",
+        next.heap.allocation_counter(),
+        next.heap.live_logical_bytes()
+    );
+}
+
+#[test]
+fn heap_meters_continue_after_restore_in_a_new_os_process() {
+    let executable = std::env::current_exe().expect("current test executable");
+    let spawn_probe = |mode: &str, continuation: Option<&str>| {
+        let mut command = std::process::Command::new(&executable);
+        command
+            .args([
+                "--exact",
+                "runtime::tests::meter_persistence_process_probe",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("LASHLANG_METER_PROBE_MODE", mode);
+        if let Some(continuation) = continuation {
+            command.env("LASHLANG_METER_CONTINUATION", continuation);
+        }
+        let output = command.output().expect("spawn meter probe");
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).expect("meter probe output should be UTF-8")
+    };
+    let produced = spawn_probe("produce", None);
+    let producer = produced
+        .lines()
+        .find_map(|line| line.find("METER_PROBE=").map(|index| &line[index + 12..]))
+        .expect("producer meter line");
+    let fields = producer.splitn(4, ':').collect::<Vec<_>>();
+    assert_eq!(fields.len(), 4);
+    let old_allocations = fields[1].parse::<u64>().expect("allocation counter");
+    let old_live = fields[2].parse::<u64>().expect("live byte counter");
+    let consumed = spawn_probe("consume", Some(fields[3]));
+    let consumer = consumed
+        .lines()
+        .find_map(|line| line.find("METER_RESUMED=").map(|index| &line[index + 14..]))
+        .expect("consumer meter line");
+    let next = consumer
+        .split(':')
+        .map(|field| field.parse::<u64>().expect("meter field"))
+        .collect::<Vec<_>>();
+    assert_eq!(next[0], old_allocations);
+    assert_eq!(next[1], old_live);
+    assert!(next[2] > old_allocations);
 }

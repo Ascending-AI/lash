@@ -552,14 +552,14 @@ fn canonical_snapshot_encodes_projected_values_without_materializing() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn canonical_snapshot_restore_makes_projected_value_unavailable() {
-    let snapshot = Snapshot {
-        globals: [("match_text".to_string(), Value::Projected(ProjectedValue::custom(
+    let snapshot = Snapshot::new(
+        [("match_text".to_string(), Value::Projected(ProjectedValue::custom(
             "matches[0].text",
             Arc::new(SnapshotGuardProjectedValue::default()),
         )))]
         .into_iter()
         .collect(),
-    };
+    );
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
     let snapshot = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
 

@@ -307,7 +307,7 @@ async fn process_lifecycle_controls_sleep_wait_and_signal() {
     ]);
     let mut globals = Record::new();
     globals.insert("run".to_string(), Value::Record(Arc::new(handle)));
-    let mut state = State::from_snapshot(Snapshot { globals });
+    let mut state = State::from_snapshot(Snapshot::new(globals));
     let compiled = compile_program(&program);
 
     let outcome = execute_compiled_process(&compiled, &mut state, &host)

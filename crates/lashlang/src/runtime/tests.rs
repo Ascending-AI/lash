@@ -771,6 +771,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::PushBool(value) => format!("push_bool {value}"),
         Instruction::PushNumber(value) => format!("push_number {value}"),
         Instruction::LoadName(slot) => format!("load_name {slot}:{}", slot_name(chunk, slot)),
+        Instruction::DeepCopy => "deep_copy".to_string(),
         Instruction::StoreName(slot) => format!("store_name {slot}:{}", slot_name(chunk, slot)),
         Instruction::StoreConst { slot, constant } => format!(
             "store_const {slot}:{} c{constant} {}",
