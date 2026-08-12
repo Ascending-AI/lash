@@ -656,7 +656,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // replay names.
 // Version 9 rejects completed tool-attempt outcomes whose frame-switch control
 // still carries the pre-cutover `frame_id` field.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 9;
+// Version 10 adds the versioned tool-intent carrier to recorded tool-attempt
+// outcomes and the typed execution outcomes to completed tool batches.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 10;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

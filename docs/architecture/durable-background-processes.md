@@ -236,7 +236,8 @@ the keyed checkpoint-component cutover on top of the required per-turn budget an
 immutable graph-generation cutover. PostgreSQL schema 50 includes those cutovers,
 the indexed recovery worklist, and the session-metadata payload cutover.
 Process-registry schema 23 and trigger schema 5 carry the v3 process-environment
-reference cutover; effect schema 9 carries the agent-frame-key cutover.
+reference cutover; effect schema 10 carries both the agent-frame-key and recorded
+tool-intent cutovers.
 Development/test stores must be recreated.
 Process-event sequences remain small ordered values; downstream prompts,
 origins, and workflow projections do not receive timestamp-scale identifiers.

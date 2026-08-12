@@ -1135,11 +1135,11 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
 }
 
 #[tokio::test]
-async fn sqlite_effect_controller_rejects_pre_retirement_journal_schema_before_serving() {
+async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_serving() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("pre-canonical-envelope-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open legacy effect db");
-    conn.pragma_update(None, "user_version", 4)
+    conn.pragma_update(None, "user_version", 8)
         .expect("stamp legacy effect schema");
     drop(conn);
 
@@ -1147,12 +1147,12 @@ async fn sqlite_effect_controller_rejects_pre_retirement_journal_schema_before_s
         match SqliteRuntimeEffectController::open(&path, durable_turn_scope("session", "turn"))
             .await
         {
-            Ok(_) => panic!("pre-retirement effect stores must be recreated"),
+            Ok(_) => panic!("pre-intent effect stores must be recreated"),
             Err(error) => error,
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 9"));
+    assert!(message.contains("supports schema version 10"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
     ));
@@ -1270,7 +1270,7 @@ async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
     };
     assert_eq!(
         error.to_string(),
-        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 9, but the database reports version 8. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions.\")"
+        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 10, but the database reports version 8. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions.\")"
     );
 }
 

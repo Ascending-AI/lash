@@ -60,7 +60,7 @@
       </div>
       <aside class="contract">
         <strong>Start fresh when the version moves</strong>
-        <p>This release uses SQLite durable-core version 36, process-registry version 23, effect version 9, and trigger version 5, plus Postgres component version 50. Versions 36 and 50 persist the runtime-minted executor discriminator on session lease rows. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
+        <p>This release uses SQLite durable-core version 36, process-registry version 23, effect version 10, and trigger version 5, plus Postgres component version 50. Versions 36 and 50 persist the runtime-minted executor discriminator on session lease rows; versions 10 and 50 also persist versioned tool-intent carriers and typed execution outcomes. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
       </aside>
       <aside class="contract">
         <strong>Provisioning Postgres yourself</strong>
