@@ -5939,6 +5939,65 @@ async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
 }
 
 #[tokio::test]
+async fn durable_controller_waits_for_busy_session_lane_before_draining_queued_input() {
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        mock_provider(Vec::new()),
+        store_clock,
+    )
+    .await;
+    runtime.host.core.clock = clock.clone();
+    enqueue_idle_turn_input(store.as_ref(), "root", "queued during failover").await;
+    let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        "root",
+        &lease_owner("crashed-worker"),
+        50,
+    )
+    .await
+    .expect("claim crashed worker session execution lease")
+    .acquired()
+    .expect("crashed worker holds session execution lease");
+    assert_eq!(held_lease.expires_at_epoch_ms, 1_050);
+
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default().with_controller_owned_replay(),
+    );
+    let scope = crate::ScopedEffectController::shared(
+        controller,
+        crate::ExecutionScope::turn("root", "queued-failover-wake"),
+    )
+    .expect("durable queued-turn scope");
+    let mut drain = crate::task::spawn(async move {
+        runtime
+            .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
+            .await
+    });
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(5), &mut drain)
+            .await
+            .is_err(),
+        "durable queued drain must remain pending while the foreign lease is live"
+    );
+    clock.advance_ms(51);
+    let drained = drain
+        .await
+        .expect("join durable queued drain")
+        .expect("durable queued drain succeeds")
+        .expect("durable queued drain consumes the pending input");
+    assert_eq!(drained.assistant_output.safe_text, "finished");
+    assert!(
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+            .await
+            .expect("list pending input after durable drain")
+            .is_empty(),
+        "durable queued drain must settle the literal pending input"
+    );
+}
+
+#[tokio::test]
 async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires() {
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn crate::Clock> = clock.clone();

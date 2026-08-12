@@ -134,7 +134,7 @@ pub(super) struct SessionExecutionLeaseGuard {
     renew_task: tokio::task::JoinHandle<()>,
 }
 
-enum SessionExecutionLeaseGuardAcquisition {
+pub(super) enum SessionExecutionLeaseGuardAcquisition {
     Acquired(SessionExecutionLeaseGuard),
     Busy(SessionExecutionLease),
 }
@@ -202,7 +202,7 @@ impl SessionExecutionLeaseGuard {
         }
     }
 
-    async fn try_acquire_with_busy_holder(
+    pub(super) async fn try_acquire_with_busy_holder(
         store: Arc<dyn RuntimePersistence>,
         session_id: &str,
         owner: &crate::LeaseOwnerIdentity,

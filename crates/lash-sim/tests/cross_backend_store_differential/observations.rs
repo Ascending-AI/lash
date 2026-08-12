@@ -176,10 +176,11 @@ pub(super) struct SessionMetaObservation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SessionExecutionLeaseObservation {
     pub(super) owner: Option<LeaseOwnerIdentity>,
-    pub(super) executor_id: Option<String>,
-    // Lease tokens are backend-generated CAS capabilities. Their bytes are a
-    // physical implementation detail; token presence is the logical row state
-    // and is compared explicitly alongside owner, generation, and times.
+    // Executor IDs and lease tokens are backend-generated CAS capabilities.
+    // Their bytes are physical implementation details; presence is the logical
+    // row state and is compared explicitly alongside owner, generation, and
+    // times.
+    pub(super) executor_id_present: bool,
     pub(super) lease_token_present: bool,
     pub(super) fencing_token: u64,
     // PostgreSQL uses database-authoritative wall time while local stores use

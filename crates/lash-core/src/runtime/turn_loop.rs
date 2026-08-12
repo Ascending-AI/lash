@@ -814,6 +814,80 @@ impl LashRuntime {
         }
     }
 
+    /// Acquire the authoritative lane required to claim durable queued work.
+    ///
+    /// Ordinary controllers retain the public one-shot drain contract: Busy is
+    /// reported as `None` and the durable row stays pending. A durable workflow
+    /// controller instead waits through the observed holder's TTL and retries.
+    /// This keeps one workflow invocation alive across failover without letting
+    /// it bypass or forge the foreign executor's lease authority.
+    async fn claim_session_execution_lease_for_queued_work(
+        &mut self,
+        opts: &TurnOptions<'_>,
+    ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
+        let Some(store) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+        else {
+            return Ok(None);
+        };
+        let wait_for_lease = opts
+            .scoped_effect_controller()
+            .controller()
+            .replay_ownership()
+            == crate::EffectReplayOwnership::Controller;
+        loop {
+            let acquisition = SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
+                Arc::clone(&store),
+                &self.state.session_id,
+                &self.runtime_lease_owner,
+                &self.runtime_lease_executor_id,
+                self.host.core.control.lease_timings,
+                Arc::clone(&self.host.core.clock),
+            )
+            .await
+            .map_err(|err| {
+                RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
+            })?;
+            match acquisition {
+                SessionExecutionLeaseGuardAcquisition::Acquired(guard) => {
+                    return Ok(Some(guard));
+                }
+                SessionExecutionLeaseGuardAcquisition::Busy(_) if !wait_for_lease => {
+                    return Ok(None);
+                }
+                SessionExecutionLeaseGuardAcquisition::Busy(holder) => {
+                    let now_epoch_ms = self.host.core.clock.timestamp_ms();
+                    let wait_ms = holder
+                        .expires_at_epoch_ms
+                        .saturating_sub(now_epoch_ms)
+                        .max(1);
+                    tracing::debug!(
+                        session_id = %self.state.session_id,
+                        holder_owner_id = %holder.owner.owner_id,
+                        holder_incarnation_id = %holder.owner.incarnation_id,
+                        holder_executor_id = %holder.executor_id,
+                        holder_fencing_token = holder.fencing_token,
+                        holder_expires_at_epoch_ms = holder.expires_at_epoch_ms,
+                        wait_ms,
+                        event = "session_execution_lease.busy_wait",
+                        "durable queued drain is waiting for the live session lane"
+                    );
+                    let sleep = self
+                        .host
+                        .core
+                        .clock
+                        .sleep(std::time::Duration::from_millis(wait_ms));
+                    tokio::select! {
+                        () = sleep => {}
+                        () = opts.cancel.cancelled() => return Ok(None),
+                    }
+                }
+            }
+        }
+    }
+
     async fn settle_session_execution_lease<T>(
         &self,
         guard: Option<&SessionExecutionLeaseGuard>,
@@ -1545,7 +1619,10 @@ impl LashRuntime {
         let selected_batch_ids = selected_batch_ids.as_deref();
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
-        let Some(session_execution_lease) = self.claim_session_execution_lease().await? else {
+        let Some(session_execution_lease) = self
+            .claim_session_execution_lease_for_queued_work(&opts)
+            .await?
+        else {
             if let Some(batch_ids) = selected_batch_ids
                 && let Some(store) = self
                     .session

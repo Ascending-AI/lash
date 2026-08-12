@@ -1143,7 +1143,7 @@ async fn read_sqlite_durable_state(
                 let liveness_json = row.get::<_, Option<String>>(2)?;
                 Ok(SessionExecutionLeaseObservation {
                     owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
-                    executor_id: row.get(3)?,
+                    executor_id_present: row.get::<_, Option<String>>(3)?.is_some(),
                     lease_token_present: row.get::<_, Option<String>>(4)?.is_some(),
                     fencing_token: row.get::<_, i64>(5)? as u64,
                     claimed: row.get::<_, i64>(6)? != 0,

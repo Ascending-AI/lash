@@ -143,7 +143,7 @@ impl RawDurableReader {
                             expires_at_epoch_ms,
                         )| SessionExecutionLeaseObservation {
                             owner,
-                            executor_id,
+                            executor_id_present: executor_id.is_some(),
                             lease_token_present,
                             fencing_token,
                             claimed: claimed_at_epoch_ms != 0,
@@ -352,7 +352,7 @@ impl RawDurableReader {
                             expires_at_epoch_ms,
                         )| SessionExecutionLeaseObservation {
                             owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
-                            executor_id,
+                            executor_id_present: executor_id.is_some(),
                             lease_token_present: lease_token.is_some(),
                             fencing_token: fencing_token as u64,
                             claimed: claimed_at_epoch_ms != 0,

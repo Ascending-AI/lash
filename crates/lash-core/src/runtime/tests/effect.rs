@@ -38,7 +38,7 @@ impl RecordingEffectController {
         self
     }
 
-    fn with_controller_owned_replay(mut self) -> Self {
+    pub(super) fn with_controller_owned_replay(mut self) -> Self {
         self.controller_owned_replay = true;
         self
     }
