@@ -2381,6 +2381,7 @@ dependencies = [
  "lash-lashlang-runtime",
  "lash-llm-tools",
  "lash-plugin-tool-output-budget",
+ "lash-postgres-store",
  "lash-protocol-rlm",
  "lash-protocol-standard",
  "lash-remote-protocol",

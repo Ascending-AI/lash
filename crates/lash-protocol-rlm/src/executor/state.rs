@@ -18,14 +18,14 @@ use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 pub(super) struct RlmSnapshotRoot {
     version: u32,
     engine: String,
-    globals: BTreeMap<String, PersistedGlobal>,
-    files: BTreeMap<String, String>,
+    globals: BTreeMap<String, PersistedValue>,
+    files: BTreeMap<String, PersistedValue>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum PersistedGlobal {
+enum PersistedValue {
     Inline {
         #[serde(with = "serde_bytes")]
         body: Vec<u8>,
@@ -42,7 +42,7 @@ const ROOT_FIELDS: &[&str] = &[
     "files",
     "deferred_resolutions",
 ];
-const GLOBAL_FIELDS: &[&str] = &["kind", "body", "component"];
+const PERSISTED_VALUE_FIELDS: &[&str] = &["kind", "body", "component"];
 const DEFERRED_RESOLUTION_FIELDS: &[&str] = &["link_key", "resolutions"];
 const DEFERRED_LINK_KEY_FIELDS: &[&str] = &[
     "session_id",
@@ -205,7 +205,9 @@ fn root_map_order(location: &str) -> CanonicalMapOrder {
         "root.deferred_resolutions.link_key" => {
             CanonicalMapOrder::Declared(DEFERRED_LINK_KEY_FIELDS)
         }
-        _ if is_global_location(location) => CanonicalMapOrder::Declared(GLOBAL_FIELDS),
+        _ if is_persisted_value_location(location) => {
+            CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS)
+        }
         _ if is_resolution_location(location) => CanonicalMapOrder::Declared(RESOLUTION_FIELDS),
         _ if location.ends_with(".definition") => CanonicalMapOrder::Fields(TOOL_DEFINITION_FIELDS),
         _ if location.ends_with(".input_schema") || location.ends_with(".output_schema") => {
@@ -243,7 +245,7 @@ fn root_map_required(location: &str) -> bool {
             | "root.deferred_resolutions.link_key"
             | "root.deferred_resolutions.resolutions"
     ) || is_resolution_location(location)
-        || is_global_location(location)
+        || is_persisted_value_location(location)
         || location.ends_with(".definition")
         || location.ends_with(".input_schema")
         || location.ends_with(".output_schema")
@@ -265,6 +267,17 @@ fn is_global_location(location: &str) -> bool {
         .strip_prefix("root.globals.")
         .is_some_and(|suffix| !suffix.contains('.'))
         || (location.starts_with("root.globals[") && location.ends_with(']'))
+}
+
+fn is_file_location(location: &str) -> bool {
+    location
+        .strip_prefix("root.files.")
+        .is_some_and(|suffix| !suffix.contains('.'))
+        || (location.starts_with("root.files[") && location.ends_with(']'))
+}
+
+fn is_persisted_value_location(location: &str) -> bool {
+    is_global_location(location) || is_file_location(location)
 }
 
 fn is_schema_override_location(location: &str) -> bool {
@@ -313,14 +326,7 @@ fn restore_runtime_value(data: &[u8]) -> Result<FlowValue, RlmSnapshotError> {
         .expect("the canonical value binding was checked"))
 }
 
-fn value_is_scalar(value: &FlowValue) -> bool {
-    matches!(
-        value,
-        FlowValue::Null | FlowValue::Bool(_) | FlowValue::Number(_) | FlowValue::String(_)
-    )
-}
-
-fn composite_prefers_leaf(encoded_len: usize) -> bool {
+fn body_prefers_leaf(encoded_len: usize) -> bool {
     // One source of truth, owned by the crate both sides of the checkpoint
     // contract depend on. Deliberately not a store blob-compression profile:
     // that answers whether bytes should be compressed, not whether a value is
@@ -329,8 +335,64 @@ fn composite_prefers_leaf(encoded_len: usize) -> bool {
     encoded_len >= lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES
 }
 
+fn persist_value_body(
+    body: Vec<u8>,
+    prior_leaf_keys: &BTreeSet<String>,
+    changed_leaves: &mut BTreeMap<String, Vec<u8>>,
+) -> PersistedValue {
+    if body_prefers_leaf(body.len()) {
+        let component = leaf_component_key(&body);
+        if !prior_leaf_keys.contains(&component) {
+            changed_leaves.insert(component.clone(), body);
+        }
+        PersistedValue::Leaf { component }
+    } else {
+        PersistedValue::Inline { body }
+    }
+}
+
 fn leaf_component_key(body: &[u8]) -> String {
     format!("execution_state/sha256/{:x}", Sha256::digest(body))
+}
+
+#[cfg(test)]
+pub(super) fn measure_snapshot(
+    snapshot: &lash_core::plugin::ExecutionStateSnapshot,
+) -> lash_core::testing::RuntimeCommitBudgetMeasurement {
+    let state = lash_core::RuntimeSessionState {
+        session_id: "fig-1257-snapshot-budget".to_string(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.checkpoint.components.insert(
+        "execution_state".to_string(),
+        lash_core::HydratedCheckpointComponent::changed(
+            snapshot.root.clone().expect("snapshot root"),
+        ),
+    );
+    for (key, component) in &snapshot.components {
+        let component = match component {
+            lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                lash_core::HydratedCheckpointComponent::changed(body.clone())
+            }
+            lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                let hash = key
+                    .strip_prefix("execution_state/sha256/")
+                    .expect("RLM leaf component key");
+                lash_core::HydratedCheckpointComponent::unchanged(
+                    &lash_core::CheckpointComponentDescriptor {
+                        blob_ref: lash_core::BlobRef(hash.to_string()),
+                        encoding_version: lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                    },
+                )
+            }
+        };
+        commit.checkpoint.components.insert(key.clone(), component);
+    }
+    lash_core::testing::measure_runtime_commit_budget(&commit)
+        .expect("measure RLM runtime commit budget")
 }
 
 fn resolve_leaf<'a>(
@@ -362,16 +424,19 @@ fn root_leaf_keys(root: &RlmSnapshotRoot) -> BTreeSet<String> {
 }
 
 fn root_leaf_keys_from_sections(
-    globals: &BTreeMap<String, PersistedGlobal>,
-    files: &BTreeMap<String, String>,
+    globals: &BTreeMap<String, PersistedValue>,
+    files: &BTreeMap<String, PersistedValue>,
 ) -> BTreeSet<String> {
     globals
         .values()
         .filter_map(|global| match global {
-            PersistedGlobal::Inline { .. } => None,
-            PersistedGlobal::Leaf { component } => Some(component.clone()),
+            PersistedValue::Inline { .. } => None,
+            PersistedValue::Leaf { component } => Some(component.clone()),
         })
-        .chain(files.values().cloned())
+        .chain(files.values().filter_map(|file| match file {
+            PersistedValue::Inline { .. } => None,
+            PersistedValue::Leaf { component } => Some(component.clone()),
+        }))
         .collect()
 }
 
@@ -389,8 +454,8 @@ enum CaptureMode {
 /// A capture that has been built but not yet installed as the pending capture.
 struct PreparedCapture {
     snapshot: lash_core::plugin::ExecutionStateSnapshot,
-    persisted_globals: BTreeMap<String, PersistedGlobal>,
-    persisted_files: BTreeMap<String, String>,
+    persisted_globals: BTreeMap<String, PersistedValue>,
+    persisted_files: BTreeMap<String, PersistedValue>,
     persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
     leaf_keys: BTreeSet<String>,
     #[cfg(test)]
@@ -398,8 +463,8 @@ struct PreparedCapture {
 }
 
 struct CaptureRollback {
-    persisted_globals: BTreeMap<String, PersistedGlobal>,
-    persisted_files: BTreeMap<String, String>,
+    persisted_globals: BTreeMap<String, PersistedValue>,
+    persisted_files: BTreeMap<String, PersistedValue>,
     persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
@@ -422,14 +487,14 @@ pub struct RlmExecutionState {
     /// mtime, and on Unix device/inode/ctime), which a same-length rewrite
     /// inside one filesystem timestamp tick could defeat. Any writer inside this
     /// process must therefore mark the path in `dirty_files` as
-    /// [`Self::write_scratch_file`] does, rather than rely on the stamp. Today
+    /// [`Self::write_scratch_file_for_testing`] does, rather than rely on the stamp. Today
     /// no production code writes here — code effects write through Lashlang
     /// values, and `restore_files` writes only into a fresh directory during
     /// restore — so the only writer is that test helper. A first production
     /// writer must be added with its marking, not without it.
     scratch_dir: tempfile::TempDir,
-    persisted_globals: BTreeMap<String, PersistedGlobal>,
-    persisted_files: BTreeMap<String, String>,
+    persisted_globals: BTreeMap<String, PersistedValue>,
+    persisted_files: BTreeMap<String, PersistedValue>,
     persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
@@ -483,12 +548,18 @@ impl RlmExecutionState {
 
     /// Write a scratch file and mark it changed. The marking, not the metadata
     /// stamp, is what makes a same-length rewrite safe; see [`Self::scratch_dir`].
-    #[cfg(test)]
-    fn write_scratch_file(&mut self, path: &str, body: &[u8]) -> Result<(), ScratchFileError> {
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    fn write_scratch_file_for_testing(
+        &mut self,
+        path: &str,
+        body: &[u8],
+    ) -> Result<(), SessionError> {
         restore_files(
             self.scratch_dir.path(),
             &[(path.to_string(), body.to_vec())].into_iter().collect(),
-        )?;
+        )
+        .map_err(|error| SessionError::Protocol(error.to_string()))?;
         self.dirty_files.insert(path.to_string());
         self.root_dirty = true;
         Ok(())
@@ -637,15 +708,7 @@ impl RlmExecutionState {
             {
                 encoded_globals += 1;
             }
-            let persisted = if value_is_scalar(value) || !composite_prefers_leaf(body.len()) {
-                PersistedGlobal::Inline { body }
-            } else {
-                let component = leaf_component_key(&body);
-                if !prior_leaf_keys.contains(&component) {
-                    changed_leaves.insert(component.clone(), body);
-                }
-                PersistedGlobal::Leaf { component }
-            };
+            let persisted = persist_value_body(body, &prior_leaf_keys, &mut changed_leaves);
             next_globals.insert(name.clone(), persisted);
         }
 
@@ -664,21 +727,17 @@ impl RlmExecutionState {
         let mut persisted_files = BTreeMap::new();
         let mut persisted_file_stamps = BTreeMap::new();
         for (path, collected) in collected_files {
-            let component = if let Some(body) = collected.changed_body {
-                let component = leaf_component_key(&body);
-                if !prior_leaf_keys.contains(&component) {
-                    changed_leaves.entry(component.clone()).or_insert(body);
-                }
-                component
+            let persisted = if let Some(body) = collected.changed_body {
+                persist_value_body(body, &prior_leaf_keys, &mut changed_leaves)
             } else {
                 self.persisted_files.get(&path).cloned().ok_or_else(|| {
                     SessionError::Protocol(format!(
-                        "unchanged RLM scratch file `{path}` has no persisted component"
+                        "unchanged RLM scratch file `{path}` has no persisted value"
                     ))
                 })?
             };
             persisted_file_stamps.insert(path.clone(), collected.stamp);
-            persisted_files.insert(path, component);
+            persisted_files.insert(path, persisted);
         }
 
         let root = RlmSnapshotRoot {
@@ -845,8 +904,8 @@ impl RlmExecutionState {
         let mut globals = lashlang::Record::new();
         for (name, persisted) in &parsed.globals {
             let body = match persisted {
-                PersistedGlobal::Inline { body } => body.as_slice(),
-                PersistedGlobal::Leaf { component } => resolve_leaf(state, name, component)?,
+                PersistedValue::Inline { body } => body.as_slice(),
+                PersistedValue::Leaf { component } => resolve_leaf(state, name, component)?,
             };
             globals.insert(name.clone(), restore_runtime_value(body)?);
         }
@@ -854,8 +913,11 @@ impl RlmExecutionState {
         prune_reserved_projected_bindings(&mut next_rlm);
 
         let mut files = BTreeMap::new();
-        for (path, component) in &parsed.files {
-            let body = resolve_leaf(state, path, component)?;
+        for (path, persisted) in &parsed.files {
+            let body = match persisted {
+                PersistedValue::Inline { body } => body.as_slice(),
+                PersistedValue::Leaf { component } => resolve_leaf(state, path, component)?,
+            };
             files.insert(path.clone(), body.to_vec());
         }
         let next_scratch_dir = tempfile::TempDir::new().map_err(ScratchFileError::CreateScratch)?;
@@ -966,6 +1028,17 @@ impl RlmExecutionState {
         }
         out
     }
+}
+
+#[cfg(feature = "testing")]
+pub(crate) fn capture_scratch_files_for_testing(
+    files: Vec<(String, Vec<u8>)>,
+) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
+    let mut state = RlmExecutionState::new()?;
+    for (path, body) in files {
+        state.write_scratch_file_for_testing(&path, &body)?;
+    }
+    state.hydrated_execution_state()
 }
 
 #[cfg(test)]

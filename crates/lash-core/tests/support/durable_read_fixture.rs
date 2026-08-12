@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 11;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 12;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -42,6 +42,17 @@ const TRIGGER_KEY: &str = "durable-read-trigger";
 const TRIGGER_REGISTER_OPERATION: &str = "durable-read-trigger-register";
 const QUEUE_SOURCE_KEY: &str = "durable-read-queue-source";
 const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
+
+pub async fn assert_prior_component_encoding_is_refused(store: &dyn RuntimePersistence) {
+    let error = store
+        .load_session()
+        .await
+        .expect_err("component encoding version 1 must be refused during hydration");
+    assert_eq!(
+        error.to_string(),
+        "checkpoint component `execution_state` uses encoding version 1, but this build requires version 2; remedy: drain affected sessions and recreate the store with this Lash version"
+    );
+}
 
 pub struct FixtureHandles {
     pub clock: Arc<dyn Clock>,

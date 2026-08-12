@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted. Amended 2026-08-10 (FIG-1195): the inline-versus-leaf line comes from a named constant rather than a store blob profile.
+Accepted. Amended 2026-08-10 (FIG-1195): the inline-versus-leaf line comes from
+a named constant rather than a store blob profile. Amended 2026-08-11
+(FIG-1257): that line applies to every value shape.
 
 ## Context
 
@@ -50,9 +52,18 @@ backend may collapse the keyed set back into one opaque execution-state blob.
 
 Execution state uses hybrid granularity:
 
-- byte and file bodies are always leaves;
-- scalar values are always inline in the root; and
-- only composite values cross the inline-versus-leaf size line.
+- every value body below the inline-versus-leaf size line is inline in the
+  root; and
+- every value body at or above the line is a leaf, regardless of whether it is
+  a scalar, composite, byte value, or file.
+
+The withdrawn structural rules were proxies for size assumptions that fail in
+both directions. A scalar string can hold a scraped page large enough that
+inlining many of them makes every commit track total session size, while a
+scratch file can be so small that its root reference and manifest row cost
+several times more than its body. Shape therefore does not decide checkpoint
+granularity; measured encoded body size does. File bodies are measured as their
+verbatim bytes, and global values as their canonical typed MessagePack bytes.
 
 That line is structural and lives in exactly one place: the named constant
 `lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES`, which every protocol
@@ -65,9 +76,12 @@ backend and leave the granularity of a checkpoint tied to an unrelated knob.
 The constant's value follows from what each choice costs per commit — an inline
 value costs its encoded length because the root is re-encoded in full every
 commit, while a leaf costs a root reference plus a manifest row and nothing
-else — which puts break-even near 250 bytes of encoded body and the line at
-twice that. Small composites stay inline, while composites above the line
-become leaves under stable logical keys. Content-defined chunking is deferred.
+else. The production budget accounting measures a retained file leaf at 273
+bytes of fixed overhead and the inline/leaf break-even at a 272-byte body. The
+512-byte line stays comfortably above that marginal point without introducing
+a new fixed threshold. Small values stay inline, while values at or above the
+line become leaves under stable logical keys. Content-defined chunking is
+deferred.
 It may later operate inside one oversized leaf, as Git added packfile deltas
 beneath its tree/blob model, without changing the checkpoint contract.
 
@@ -84,6 +98,9 @@ raw bytes. Encoding observes these normative rules:
 - byte fields use `serde_bytes` rather than MessagePack integer arrays; and
 - the minimum encoder version is pinned, including the rmp-serde fix from PR
   257, and named-field encoding is pinned by conformance test.
+
+An inline file body remains verbatim bytes in the typed root and uses
+`serde_bytes`; it is never interpreted as UTF-8.
 
 The canonicalization conformance test encodes the same logical state across
 runs and dependency bumps and asserts byte equality. It is the authority for
@@ -130,6 +147,12 @@ The record-schema-version reject pins old records to the old deployment and
 prevents them from being interpreted under the new schema. There are no
 compatibility decoders; the record and per-component version checks make that
 policy enforceable.
+
+The FIG-1257 amendment changes durable root shape decisions and therefore
+raises the RLM snapshot version from 7 to 8 and the checkpoint-component
+encoding version from 1 to 2. It adds no compatibility decoder and no store
+schema change; retained version-1 components are rejected and must be drained
+or recreated.
 
 ## Consequences
 
