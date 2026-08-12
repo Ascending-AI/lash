@@ -25,6 +25,7 @@ pub mod host;
 pub mod naming;
 pub mod plugin;
 pub mod pool;
+mod service_lifecycle;
 
 pub use config::{McpCallPolicy, McpServerConfig, TimeoutDisconnectPolicy};
 pub use error::McpError;
