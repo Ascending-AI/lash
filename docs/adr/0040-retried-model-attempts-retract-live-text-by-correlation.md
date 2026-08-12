@@ -13,6 +13,12 @@ A compliant observer removes text for those correlations and leaves every other 
 Each attempt starts fresh correlation tracking, so any number of consecutive resets applies the
 same rule without comparing text or inferring retry boundaries.
 
+FIG-1275 further establishes every provider re-generation as a host-visible generation boundary,
+including one that occurs before the superseded attempt emits visible output. Such a reset has
+empty prose and reasoning correlation lists. Observers retain it as boundary evidence, perform no
+retraction, and must never interpret an empty list as "retract all." Retraction remains strictly
+correlation-based.
+
 The reset is appended to the same bounded Live Replay log as the deltas. A live observer sees
 failed deltas followed by their reset. A late observer whose cursor precedes the failed attempt
 replays both and reaches the same state; one whose cursor follows the reset sees neither

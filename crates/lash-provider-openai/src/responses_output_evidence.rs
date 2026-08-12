@@ -59,11 +59,12 @@ pub(super) fn handle_evidence_only_event(
     state: &mut ResponsesStreamState,
 ) -> bool {
     match event_type {
-        // A named SSE ping loses its `event:` name in the shared framers. A
-        // JSON object without a Responses type is benign unless it carries a
-        // field that can hold generated output.
+        // A named SSE ping loses its `event:` name in the shared framers and
+        // arrives as `{}`. Every other untyped payload is possible generated
+        // output: extensions must fail safe without a field-name allowlist.
         "" => {
-            state.streamed_item_content_received |= untyped_event_has_output_evidence(event);
+            state.streamed_item_content_received |=
+                !event.as_object().is_some_and(serde_json::Map::is_empty);
         }
         // OpenRouter request-debug metadata describes the upstream request;
         // it is never model-generated response output.
@@ -142,32 +143,6 @@ pub(super) fn handle_evidence_only_event(
         _ => return false,
     }
     true
-}
-
-fn untyped_event_has_output_evidence(event: &Value) -> bool {
-    has_nonempty_string(
-        event,
-        &[
-            "delta",
-            "text",
-            "refusal",
-            "code",
-            "arguments",
-            "input",
-            "content",
-            "output_text",
-            "encrypted_content",
-        ],
-    ) || event.get("part").is_some_and(output_content_has_evidence)
-        || event
-            .get("response")
-            .is_some_and(response_value_has_output_evidence)
-        || event
-            .get("output")
-            .is_some_and(|output| !output.as_array().is_some_and(Vec::is_empty))
-        || event
-            .get("usage")
-            .is_some_and(lash_core::llm::types::provider_usage_has_quantities)
 }
 
 pub(super) fn reasoning_item_has_output_evidence(item: &Value) -> bool {

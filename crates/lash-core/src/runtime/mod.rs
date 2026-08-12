@@ -1117,11 +1117,14 @@ pub enum TurnEvent {
     ReasoningDelta {
         text: Arc<str>,
     },
-    /// Retracts visible text emitted by a provider attempt that will be retried.
+    /// Marks a provider generation boundary before a retry and retracts any
+    /// visible text emitted by the superseded attempt.
     ///
     /// Observers remove only prose and reasoning deltas whose correlation ids
     /// appear here. The reset is itself replayed in order, so reconnecting
-    /// observers converge on the same visible text as live observers.
+    /// observers converge on the same visible text as live observers. Empty
+    /// correlation lists mean the provider regenerated before emitting visible
+    /// output; they remain boundary evidence and never mean "retract all."
     ModelAttemptReset {
         assistant_prose_correlation_ids: Vec<TurnActivityId>,
         reasoning_correlation_ids: Vec<TurnActivityId>,

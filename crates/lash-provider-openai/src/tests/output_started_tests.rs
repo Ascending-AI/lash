@@ -301,12 +301,16 @@ fn official_responses_stream_events_have_explicit_classifications() {
         ),
         (serde_json::json!({}), false),
         (
+            serde_json::json!({"future_generated_content":"paid output"}),
+            true,
+        ),
+        (
             serde_json::json!({"type":"response.debug","debug":{"echo_upstream_body":{"model":"provider/model","messages":[{"role":"user","content":"hello"}],"stream":true,"max_tokens":1024,"temperature":1}},"sequence_number":0}),
             false,
         ),
     ];
 
-    assert_eq!(cases.len(), 55);
+    assert_eq!(cases.len(), 56);
     for (event, expected_output_started) in cases {
         let mut state = ResponsesStreamState::default();
         let event = event.to_string();
@@ -420,6 +424,12 @@ async fn responses_handle_does_not_retry_unknown_stream_event() {
         "data: {\"type\":\"response.future_output.delta\",\"delta\":\"paid\"}\n\n",
     )
     .await;
+}
+
+#[tokio::test]
+async fn responses_handle_does_not_retry_untyped_future_generated_content() {
+    assert_streamed_output_stops_retry("data: {\"future_generated_content\":\"paid output\"}\n\n")
+        .await;
 }
 
 #[tokio::test]

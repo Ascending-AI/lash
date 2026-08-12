@@ -5577,14 +5577,20 @@ async fn counted_provider_regeneration_emits_one_host_visible_attempt_reset() {
             .count(),
         2
     );
-    assert_eq!(
-        turn_events
-            .snapshot()
-            .iter()
-            .filter(|activity| { matches!(activity.event, TurnEvent::ModelAttemptReset { .. }) })
-            .count(),
-        1
-    );
+    let turn_events = turn_events.snapshot();
+    let resets = turn_events
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::ModelAttemptReset {
+                assistant_prose_correlation_ids,
+                reasoning_correlation_ids,
+            } => Some((assistant_prose_correlation_ids, reasoning_correlation_ids)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(resets.len(), 1);
+    assert_eq!(resets[0].0, &Vec::<crate::runtime::TurnActivityId>::new());
+    assert_eq!(resets[0].1, &Vec::<crate::runtime::TurnActivityId>::new());
 }
 
 #[tokio::test(start_paused = true)]
