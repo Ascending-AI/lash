@@ -842,6 +842,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
     let config: crate::rlm::RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
         "instruction_budget": { "bounded": 1_000_000 },
         "deadline": { "bounded": 30_000 },
+        "memory_limit": { "bounded": 67_108_864 },
         "lashlang_abilities": { "processes": true, "triggers": true }
     }))
     .expect("rlm config");
