@@ -18,8 +18,8 @@ use lash_core::{
     facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
-    LashlangSurface, TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity, TraceLashlangMap,
-    TraceLashlangStatus,
+    LashlangSurface, TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity,
+    TraceLanguageExecutionMap, TraceLanguageExecutionStatus,
 };
 use lashlang::{ExecutionOutcome, State as FlowState};
 
@@ -631,7 +631,7 @@ fn foreground_lashlang_execution_trace(
     Some(LashlangExecutionTrace::new(
         sink,
         config.trace_context.clone(),
-        TraceLashlangExecutionIdentity {
+        TraceLanguageExecutionIdentity {
             scope: TraceRuntimeScope {
                 session_id: invocation.scope.session_id.clone(),
                 turn_id: invocation.scope.turn_id.clone(),
@@ -654,7 +654,7 @@ fn emit_foreground_execution_started(
     trace: &LashlangExecutionTrace,
     artifact: &lashlang::ModuleArtifact,
 ) {
-    trace.emit(TraceLashlangExecutionEvent::ExecutionStarted {
+    trace.emit(TraceLanguageExecutionEvent::ExecutionStarted {
         event_key: trace.event_key("started"),
         identity: trace.identity().clone(),
         execution_map: trace_main_map(artifact),
@@ -668,13 +668,14 @@ fn emit_foreground_execution_finished(
 ) {
     let (status, error) = match result {
         Ok(ExecutionOutcome::Finished(_)) | Ok(ExecutionOutcome::Continued) => {
-            (TraceLashlangStatus::Completed, None)
+            (TraceLanguageExecutionStatus::Completed, None)
         }
-        Ok(ExecutionOutcome::Failed(value)) => {
-            (TraceLashlangStatus::Failed, Some(value.to_string()))
-        }
+        Ok(ExecutionOutcome::Failed(value)) => (
+            TraceLanguageExecutionStatus::Failed,
+            Some(value.to_string()),
+        ),
         Err(error) => (
-            TraceLashlangStatus::Failed,
+            TraceLanguageExecutionStatus::Failed,
             Some(
                 runtime_failure
                     .map(|failure| failure.error.to_string())
@@ -682,7 +683,7 @@ fn emit_foreground_execution_finished(
             ),
         ),
     };
-    trace.emit(TraceLashlangExecutionEvent::ExecutionFinished {
+    trace.emit(TraceLanguageExecutionEvent::ExecutionFinished {
         event_key: trace.event_key("finished"),
         identity: trace.identity().clone(),
         status,
@@ -690,7 +691,7 @@ fn emit_foreground_execution_finished(
     });
 }
 
-fn trace_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLashlangMap {
+fn trace_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLanguageExecutionMap {
     lash_lashlang_runtime::trace_lashlang_main_map(artifact)
 }
 

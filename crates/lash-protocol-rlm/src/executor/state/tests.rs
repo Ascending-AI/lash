@@ -361,6 +361,23 @@ fn old_snapshot_version_is_typed_rejection_with_cutover_remedy() {
     assert!(message.contains("recreate development/test stores"));
 }
 
+#[test]
+fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
+    let mut source = RlmExecutionState::for_engine("lashlang").expect("source state");
+    let hydration = hydrate(source.snapshot_execution_state().expect("source snapshot"));
+    let mut target = RlmExecutionState::for_engine("typescript").expect("target state");
+
+    let error = target
+        .restore_execution_state(&hydration)
+        .expect_err("a snapshot from another dialect must be rejected");
+
+    assert!(matches!(
+        error,
+        RlmSnapshotError::EngineMismatch { expected, found }
+            if expected == "typescript" && found == "lashlang"
+    ));
+}
+
 /// Fixed-byte authority for the version-8 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder

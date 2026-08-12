@@ -5,6 +5,7 @@
 
 mod cell_scan;
 mod control_tools;
+mod dialect;
 mod driver;
 mod executor;
 mod plugin;
@@ -23,13 +24,12 @@ pub use executor::RlmCheckpointPerfFixture;
 pub use lash_lashlang_runtime::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
 };
-pub use lashlang::{
-    ExecutionBound, ExecutionBounds, NamedDataType, TypeExpr, TypeField, format_type_expr,
-};
+pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use plugin::{
-    LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,
-    LashlangModuleCompileRequest, ModuleCompileOutput, RLM_PROTOCOL_PLUGIN_ID,
-    RlmProtocolPluginConfig, RlmProtocolPluginFactory, rlm_lashlang_surface, rlm_protocol_config,
+    ExecutionBound, ExecutionBounds, LashlangCompileSurface, LashlangCompileSurfaceRequest,
+    LashlangModuleCompileError, LashlangModuleCompileRequest, ModuleCompileOutput,
+    RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmLanguageFeatures, RlmProtocolPluginConfig,
+    RlmProtocolPluginFactory, rlm_lashlang_surface, rlm_protocol_config,
 };
 pub use projection::{
     ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,

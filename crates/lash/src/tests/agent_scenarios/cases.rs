@@ -594,7 +594,10 @@ finish result"#,
         );
         assert_no_duplicate_label_step(&contract, "Spawn failing subagent");
         assert_graph_lineage_connected(&contract, &run.final_process_list);
-        assert_subagent_bridge_exec_graphs(&run, crate::tracing::TraceLashlangStatus::Completed);
+        assert_subagent_bridge_exec_graphs(
+            &run,
+            crate::tracing::TraceLanguageExecutionStatus::Completed,
+        );
 
         Ok(())
     })

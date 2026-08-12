@@ -3,60 +3,53 @@ use std::sync::Arc;
 
 use lash_core::plugin::{CodeExecutorPlugin, ProtocolSessionContext};
 use lash_core::{SessionError, SessionHistoryRecord};
-use lash_lashlang_runtime::{LashlangArtifactStore, LashlangSurface, SharedDeferredToolResolver};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
-use crate::executor::{
-    RlmExecutionState, RlmLashlangExecutionTraceConfig, execute_code_with_bounds,
-};
-use crate::projection::{
-    ProjectionResolver, RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event,
-};
-use crate::rlm_support::{
-    BoundVariableRenderCache, SharedBoundVariablesPrompt, render_bound_variables,
-};
+use crate::dialect::{RlmDialect, RlmDialectRegistry, RlmDialectSession};
+use crate::projection::{RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event};
+use crate::rlm_support::SharedBoundVariablesPrompt;
 
 pub(super) struct RlmRuntimeState {
-    projection_resolver: Arc<dyn ProjectionResolver>,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
-    lashlang_surface: LashlangSurface,
-    deferred_tool_resolver: Option<SharedDeferredToolResolver>,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-    execution_bounds: lashlang::ExecutionBounds,
+    dialect_registry: RlmDialectRegistry,
+    dialect: Arc<dyn RlmDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
-    execution: tokio::sync::Mutex<Option<RlmExecutionState>>,
+    execution: tokio::sync::Mutex<Option<Box<dyn RlmDialectSession>>>,
     active_agent_frame_id: tokio::sync::Mutex<Option<String>>,
-    bound_variable_render_cache: tokio::sync::Mutex<BoundVariableRenderCache>,
     bound_variables_prompt: SharedBoundVariablesPrompt,
 }
 
 impl RlmRuntimeState {
     pub(super) fn new(
-        projection_resolver: Arc<dyn ProjectionResolver>,
-        artifact_store: Arc<dyn LashlangArtifactStore>,
-        lashlang_surface: LashlangSurface,
-        deferred_tool_resolver: Option<SharedDeferredToolResolver>,
-        lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-        execution_bounds: lashlang::ExecutionBounds,
+        dialect_registry: RlmDialectRegistry,
+        dialect: Arc<dyn RlmDialect>,
     ) -> Result<Self, SessionError> {
-        let mut bound_variable_render_cache = BoundVariableRenderCache::default();
-        let bound_variables_prompt = Arc::new(std::sync::RwLock::new(render_bound_variables(
-            &mut bound_variable_render_cache,
-            &[],
-        )));
+        let mut execution = dialect.create_session()?;
+        let bound_variables_prompt = Arc::new(std::sync::RwLock::new(
+            execution.render_bound_variables(&BTreeSet::new()),
+        ));
         Ok(Self {
-            execution: tokio::sync::Mutex::new(Some(RlmExecutionState::new()?)),
-            projection_resolver,
-            artifact_store,
-            lashlang_surface,
-            deferred_tool_resolver,
-            lashlang_execution_trace_config,
-            execution_bounds,
+            execution: tokio::sync::Mutex::new(Some(execution)),
+            dialect_registry,
+            dialect,
             session_projected_bindings: tokio::sync::Mutex::new(RlmProjectedBindings::new()),
             active_agent_frame_id: tokio::sync::Mutex::new(None),
-            bound_variable_render_cache: tokio::sync::Mutex::new(bound_variable_render_cache),
             bound_variables_prompt,
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_lashlang_for_tests() -> Result<Self, SessionError> {
+        let dialect: Arc<dyn RlmDialect> = Arc::new(crate::dialect::LashlangDialect::new(
+            lash_lashlang_runtime::LashlangSurface::default(),
+            crate::dialect::LashlangDialectServices {
+                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+        ));
+        Self::new(RlmDialectRegistry::new([Arc::clone(&dialect)]), dialect)
     }
 
     pub(super) async fn projected_binding_prompt_contributions(
@@ -71,27 +64,18 @@ impl RlmRuntimeState {
     }
 
     async fn refresh_bound_variables_prompt(&self) {
-        let globals = self.bound_variable_values().await;
-        let mut cache = self.bound_variable_render_cache.lock().await;
-        let rendered = render_bound_variables(&mut cache, &globals);
+        let exclude = self.protected_projected_binding_names().await;
+        let rendered = self
+            .execution
+            .lock()
+            .await
+            .as_mut()
+            .map(|execution| execution.render_bound_variables(&exclude))
+            .unwrap_or_else(|| Arc::from(""));
         *self
             .bound_variables_prompt
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = rendered;
-    }
-
-    /// Live top-level variables for the "Bound Variables" prompt section: the
-    /// model's own scratch variables and any seeded computed globals, read from
-    /// the live execution namespace (not reconstructed from events). Excludes
-    /// read-only values; those render type-only in their own section.
-    async fn bound_variable_values(&self) -> Vec<(String, lashlang::Value)> {
-        let exclude = self.protected_projected_binding_names().await;
-        self.execution
-            .lock()
-            .await
-            .as_ref()
-            .map(|execution| execution.bound_variable_values(&exclude))
-            .unwrap_or_default()
     }
 
     async fn protected_projected_binding_names(&self) -> BTreeSet<String> {
@@ -158,9 +142,8 @@ impl RlmRuntimeState {
             .as_mut()
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
         if *active_agent_frame_id != state.current_frame_node_id {
-            *execution = RlmExecutionState::new()?;
+            *execution = self.dialect.create_session()?;
             *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
-            *self.bound_variable_render_cache.lock().await = BoundVariableRenderCache::default();
             *active_agent_frame_id = state.current_frame_node_id.clone();
         }
         let protected_names = self.protected_projected_binding_names().await;
@@ -172,16 +155,14 @@ impl RlmRuntimeState {
                     source: error,
                 })?
         {
-            execution
-                .restore_execution_state(&snapshot)
-                .map_err(|error| SessionError::Protocol(error.to_string()))?;
+            execution.restore_execution_state(&snapshot)?;
             execution.prune_protected_globals(&protected_names);
         }
         for event in state.read_view().active_events() {
             if let SessionHistoryRecord::Protocol(event) = event
                 && let Some(event) = decode_rlm_protocol_event(event)
             {
-                self.apply_seed_or_globals_event(execution, event, &protected_names)
+                self.apply_seed_or_globals_event(execution.as_mut(), event, &protected_names)
                     .await?;
             }
         }
@@ -205,7 +186,7 @@ impl RlmRuntimeState {
             if let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node
                 && let Some(event) = decode_rlm_protocol_event(event)
             {
-                self.apply_seed_or_globals_event(execution, event, &protected_names)
+                self.apply_seed_or_globals_event(execution.as_mut(), event, &protected_names)
                     .await?;
             }
         }
@@ -219,39 +200,22 @@ impl RlmRuntimeState {
         ctx: lash_core::RuntimeExecutionContext<'_>,
         request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, SessionError> {
+        self.dialect_registry
+            .resolve_active(&request.language, self.dialect.language_id())
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let session_projected_bindings = self.session_projected_bindings.lock().await.clone();
         let mut guard = self.execution.lock().await;
-        let state = guard
+        let mut state = guard
             .take()
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
 
-        let result = execute_code_with_bounds(
-            state,
-            ctx,
-            request,
-            Arc::clone(&self.artifact_store),
-            self.lashlang_surface.clone(),
-            self.deferred_tool_resolver.clone(),
-            session_projected_bindings,
-            Arc::clone(&self.projection_resolver),
-            self.lashlang_execution_trace_config.clone(),
-            self.execution_bounds,
-        )
-        .await;
-        match result {
-            Ok((state, response)) => {
-                *guard = Some(state);
-                drop(guard);
-                self.refresh_bound_variables_prompt().await;
-                Ok(response)
-            }
-            Err(err) => {
-                *guard = Some(RlmExecutionState::new()?);
-                drop(guard);
-                self.refresh_bound_variables_prompt().await;
-                Err(err)
-            }
-        }
+        let result = state
+            .execute(ctx, request, session_projected_bindings)
+            .await;
+        *guard = Some(state);
+        drop(guard);
+        self.refresh_bound_variables_prompt().await;
+        result
     }
 
     pub(super) fn execution_state_dirty(&self) -> bool {
@@ -318,8 +282,7 @@ impl RlmRuntimeState {
         execution
             .as_mut()
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
-            .restore_execution_state(state)
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
+            .restore_execution_state(state)?;
         drop(execution);
         self.refresh_bound_variables_prompt().await;
         Ok(())
@@ -327,7 +290,7 @@ impl RlmRuntimeState {
 
     async fn apply_seed_or_globals_event(
         &self,
-        execution: &mut RlmExecutionState,
+        execution: &mut dyn RlmDialectSession,
         event: RlmProtocolEvent,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
@@ -461,7 +424,6 @@ pub(super) fn reject_reserved_projected_binding_names(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::projection::ProjectionRegistry;
 
     #[test]
     fn executing_code_refreshes_the_driver_bound_variables_snapshot() {
@@ -470,19 +432,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new(
-                    Arc::new(ProjectionRegistry::new()),
-                    lashlang::global_in_memory_lashlang_artifact_store(),
-                    LashlangSurface::new(
-                        lashlang::LashlangAbilities::default(),
-                        lashlang::LashlangLanguageFeatures::default(),
-                        lashlang::LashlangHostCatalog::new(),
-                    ),
-                    None,
-                    RlmLashlangExecutionTraceConfig::default(),
-                    lashlang::ExecutionBounds::unbounded(),
-                )
-                .expect("runtime state");
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
                 let prompt = state.shared_bound_variables_prompt();
                 assert!(!prompt.read().expect("prompt read").contains("scratch_note"));
 
@@ -504,6 +454,34 @@ mod tests {
                         .expect("prompt read")
                         .contains("- `scratch_note` = after execution")
                 );
+            });
+    }
+
+    #[test]
+    fn execute_code_rejects_an_unregistered_language_before_execution() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
+                let error = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        lash_core::ExecRequest {
+                            language: "typescript".to_string(),
+                            code: "finish null".to_string(),
+                            accept_finish: true,
+                        },
+                    )
+                    .await
+                    .expect_err("unregistered language must be rejected");
+
+                assert!(matches!(
+                    error,
+                    SessionError::Protocol(message)
+                        if message == "RLM language `typescript` is not registered"
+                ));
             });
     }
 }

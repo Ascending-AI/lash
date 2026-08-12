@@ -1,8 +1,9 @@
-//! Finalize / non-streaming Lashlang cell handling. All paired-tag grammar
+//! Finalize / non-streaming executable-cell handling. All paired-tag grammar
 //! lives in [`crate::cell_scan`]; this module only layers the
 //! extraction-and-projection conveniences the driver needs.
 
-use crate::cell_scan::{complete_lashlang_start_tag_span, first_lashlang_cell_span};
+use crate::cell_scan::{complete_start_tag_span, first_cell_span};
+use crate::dialect::CellTags;
 
 pub(super) struct CellExtraction {
     pub(super) prose: String,
@@ -11,38 +12,34 @@ pub(super) struct CellExtraction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CellExtractionError {
+pub(crate) enum CellExtractionError {
     UnclosedCell,
 }
 
-impl CellExtractionError {
-    pub(super) fn message(self) -> &'static str {
-        match self {
-            Self::UnclosedCell => {
-                "Model response started a `<lashlang>` block but did not close it. Retry with a complete paired block. A line whose trimmed content is exactly `</lashlang>` closes the cell."
-            }
-        }
-    }
-}
+const LASHLANG_TAGS: CellTags = CellTags {
+    open: "<lashlang>",
+    close: "</lashlang>",
+};
 
 pub fn contains_lashlang_cell(text: &str) -> bool {
-    first_lashlang_cell_span(text).is_some()
+    first_cell_span(text, LASHLANG_TAGS).is_some()
 }
 
-pub fn project_visible_assistant_prose(text: &str) -> String {
-    let start = first_lashlang_cell_span(text)
+pub(crate) fn project_visible_assistant_prose_with_tags(text: &str, tags: CellTags) -> String {
+    let start = first_cell_span(text, tags)
         .map(|span| span.start_tag_start)
-        .or_else(|| complete_lashlang_start_tag_span(text).map(|span| span.start_tag_start));
+        .or_else(|| complete_start_tag_span(text, tags).map(|span| span.start_tag_start));
     start
         .map(|start| text[..start].trim_end().to_string())
         .unwrap_or_else(|| text.to_string())
 }
 
-pub(super) fn extract_lashlang_cell(
+pub(super) fn extract_cell(
     text: &str,
+    tags: CellTags,
 ) -> Result<Option<CellExtraction>, CellExtractionError> {
-    let Some(span) = first_lashlang_cell_span(text) else {
-        return if complete_lashlang_start_tag_span(text).is_some() {
+    let Some(span) = first_cell_span(text, tags) else {
+        return if complete_start_tag_span(text, tags).is_some() {
             Err(CellExtractionError::UnclosedCell)
         } else {
             Ok(None)

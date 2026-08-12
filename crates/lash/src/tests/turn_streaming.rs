@@ -7246,7 +7246,7 @@ finish value"#,
     assert_eq!(graph.entry_name, "lookup");
     assert_eq!(
         graph.status,
-        lash_lashlang_runtime::TraceLashlangStatus::Running
+        lash_lashlang_runtime::TraceLanguageExecutionStatus::Running
     );
     assert!(!graph.nodes.is_empty());
     assert!(

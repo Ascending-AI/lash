@@ -13,8 +13,8 @@ use lash_core::{
     facade_support::TraceRuntimeSubject, facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
-    LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLashlangChildExecution,
-    TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity, lashlang_process_event_types,
+    LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLanguageChildExecution,
+    TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity, lashlang_process_event_types,
     lashlang_process_signal_event_types, lashlang_type_expr_schema, lashlang_value_to_json,
     prepare_lashlang_process_start, protocol_tool_output_to_lashlang_value,
     resolve_lashlang_module_operation, sleep_duration_ms,
@@ -197,14 +197,14 @@ impl<'run> HostBridge<'run> {
 pub(super) struct LashlangExecutionTrace {
     sink: std::sync::Arc<dyn TraceSink>,
     base_context: TraceContext,
-    identity: TraceLashlangExecutionIdentity,
+    identity: TraceLanguageExecutionIdentity,
 }
 
 impl LashlangExecutionTrace {
     pub(super) fn new(
         sink: std::sync::Arc<dyn TraceSink>,
         base_context: TraceContext,
-        identity: TraceLashlangExecutionIdentity,
+        identity: TraceLanguageExecutionIdentity,
     ) -> Self {
         Self {
             sink,
@@ -213,7 +213,7 @@ impl LashlangExecutionTrace {
         }
     }
 
-    pub(super) fn identity(&self) -> &TraceLashlangExecutionIdentity {
+    pub(super) fn identity(&self) -> &TraceLanguageExecutionIdentity {
         &self.identity
     }
 
@@ -229,7 +229,7 @@ impl LashlangExecutionTrace {
         let parent_node_id = call_site.site.node_id;
         let occurrence = call_site.occurrence;
         ToolChildExecutionTraceHook::new(move |started| {
-            let child = TraceLashlangChildExecution {
+            let child = TraceLanguageChildExecution {
                 scope: trace.identity.scope.clone(),
                 subject: TraceRuntimeSubject::Process {
                     process_id: started.process_id,
@@ -239,7 +239,7 @@ impl LashlangExecutionTrace {
                 entry_name: started.child_entry_name,
             };
             let child_graph_key = child.graph_key();
-            trace.emit(TraceLashlangExecutionEvent::ChildStarted {
+            trace.emit(TraceLanguageExecutionEvent::ChildStarted {
                 event_key: format!(
                     "lashlang_execution:{}:child:{}:{}:{}",
                     trace.identity.graph_key(),
@@ -255,7 +255,7 @@ impl LashlangExecutionTrace {
         })
     }
 
-    pub(super) fn emit(&self, event: TraceLashlangExecutionEvent) {
+    pub(super) fn emit(&self, event: TraceLanguageExecutionEvent) {
         let mut context = self.base_context.clone();
         context.session_id = Some(self.identity.scope.session_id.clone());
         context.turn_id = self.identity.scope.turn_id.clone();
@@ -266,7 +266,10 @@ impl LashlangExecutionTrace {
         }
         let _ = self.sink.append(&TraceRecord::new(
             context,
-            TraceEvent::LashlangExecution { event },
+            TraceEvent::LanguageExecution {
+                language: LASHLANG_ENGINE_KIND.to_string(),
+                event,
+            },
         ));
     }
 }
@@ -1006,7 +1009,7 @@ impl ExecutionHost for HostBridge<'_> {
         let identity = trace.identity().clone();
         let event = match observation {
             lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence } => {
-                TraceLashlangExecutionEvent::NodeStarted {
+                TraceLanguageExecutionEvent::NodeStarted {
                     event_key: trace
                         .event_key(format!("node:{}:{occurrence}:started", site.node_id)),
                     identity,
@@ -1017,7 +1020,7 @@ impl ExecutionHost for HostBridge<'_> {
                 }
             }
             lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence } => {
-                TraceLashlangExecutionEvent::NodeCompleted {
+                TraceLanguageExecutionEvent::NodeCompleted {
                     event_key: trace
                         .event_key(format!("node:{}:{occurrence}:completed", site.node_id)),
                     identity,
@@ -1031,7 +1034,7 @@ impl ExecutionHost for HostBridge<'_> {
                 site,
                 occurrence,
                 error,
-            } => TraceLashlangExecutionEvent::NodeFailed {
+            } => TraceLanguageExecutionEvent::NodeFailed {
                 event_key: trace.event_key(format!("node:{}:{occurrence}:failed", site.node_id)),
                 identity,
                 node_id: site.node_id,
@@ -1045,7 +1048,7 @@ impl ExecutionHost for HostBridge<'_> {
                 occurrence,
                 edge_id,
                 selected,
-            } => TraceLashlangExecutionEvent::BranchSelected {
+            } => TraceLanguageExecutionEvent::BranchSelected {
                 event_key: trace
                     .event_key(format!("branch:{}:{occurrence}:{edge_id}", site.node_id)),
                 identity,
@@ -1061,7 +1064,7 @@ impl ExecutionHost for HostBridge<'_> {
                 site,
                 occurrence,
                 child,
-            } => TraceLashlangExecutionEvent::ChildStarted {
+            } => TraceLanguageExecutionEvent::ChildStarted {
                 event_key: trace.event_key(format!(
                     "child:{}:{occurrence}:{}",
                     site.node_id, child.process_id
@@ -1069,7 +1072,7 @@ impl ExecutionHost for HostBridge<'_> {
                 identity,
                 parent_node_id: site.node_id,
                 occurrence,
-                child: TraceLashlangChildExecution {
+                child: TraceLanguageChildExecution {
                     scope: trace.identity().scope.clone(),
                     subject: TraceRuntimeSubject::Process {
                         process_id: child.process_id,

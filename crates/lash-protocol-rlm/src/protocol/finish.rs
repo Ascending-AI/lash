@@ -2,21 +2,21 @@ use lash_core::facade_support::reasoning_part;
 use lash_core::session_model::{Message, MessageRole, Part, shared_parts};
 use serde_json::Value;
 
+use crate::dialect::RlmDialect;
+
 use super::state::RlmReasoningPart;
 
-pub(crate) fn turn_limit_final_message(message_id: String, max_turns: usize) -> Message {
+pub(crate) fn turn_limit_final_message(
+    dialect: &dyn RlmDialect,
+    message_id: String,
+    max_turns: usize,
+) -> Message {
     Message {
         id: message_id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{message_id}.p0"),
-            format!(
-                "Turn limit reached ({max_turns}). You MUST reply in plain prose now containing:\n\
-                1. Summary of what you accomplished\n\
-                2. List of remaining tasks not yet completed\n\
-                3. Recommended next steps\n\
-                Do NOT emit a <lashlang> block, invoke module operations, or call finish/control.continue_as."
-            ),
+            dialect.turn_limit_final_copy(max_turns),
             None,
         )]),
         origin: None,
@@ -61,18 +61,17 @@ fn prose_message(
     }
 }
 
-pub(super) fn finish_required_reminder_message(id: String, requires_schema: bool) -> Message {
-    let content = if requires_schema {
-        "Deliver the final answer from a paired `<lashlang>...</lashlang>` block by calling `finish <value>` with a value matching the required output schema. Plain text before the block is recorded only as progress."
-    } else {
-        "Your prose was recorded, but this turn requires an explicit final value. Add a paired `<lashlang>...</lashlang>` block containing `finish <value>`. Use `finish null` only when null is intentional."
-    };
+pub(super) fn finish_required_reminder_message(
+    dialect: &dyn RlmDialect,
+    id: String,
+    requires_schema: bool,
+) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{id}.p0"),
-            content.to_string(),
+            dialect.finish_required_copy(requires_schema),
             None,
         )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
@@ -82,13 +81,13 @@ pub(super) fn finish_required_reminder_message(id: String, requires_schema: bool
     }
 }
 
-pub(super) fn finish_schema_mismatch_message(id: String) -> Message {
+pub(super) fn finish_schema_mismatch_message(dialect: &dyn RlmDialect, id: String) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{id}.p0"),
-            "The `finish` value didn't match the required output schema. Fix the value described in the failed-step observation and call `finish <corrected>` from another paired `<lashlang>...</lashlang>` block.".to_string(),
+            dialect.finish_schema_mismatch_copy(),
             None,
         )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
@@ -98,15 +97,17 @@ pub(super) fn finish_schema_mismatch_message(id: String) -> Message {
     }
 }
 
-pub(super) fn invalid_lashlang_cell_message(id: String, error_text: &str) -> Message {
+pub(super) fn invalid_cell_message(
+    dialect: &dyn RlmDialect,
+    id: String,
+    error_text: &str,
+) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{id}.p0"),
-            format!(
-                "{error_text}\n\nReply again using exactly one paired `<lashlang>...</lashlang>` block, with no text after `</lashlang>`."
-            ),
+            dialect.invalid_cell_retry_copy(error_text),
             None,
         )]),
         origin: Some(lash_core::MessageOrigin::Plugin {

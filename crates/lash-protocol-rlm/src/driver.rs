@@ -15,6 +15,7 @@ use lash_core::{
 use lash_lashlang_runtime::LashlangSurface;
 use lash_rlm_types::{RlmCreateExtras, RlmFinalAnswerFormat, RlmTermination};
 
+use crate::dialect::{LashlangDialect, RlmDialect};
 #[cfg(test)]
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options};
@@ -38,6 +39,14 @@ pub struct RlmProjectorConfig {
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub lashlang_surface: LashlangSurface,
     pub redaction_roots: Arc<[PathBuf]>,
+}
+
+pub(crate) struct RlmPreambleConfig {
+    pub(crate) max_output_chars: usize,
+    pub(crate) max_budget_tokens: Option<usize>,
+    pub(crate) last_prompt_usage: SharedPromptUsage,
+    pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
+    pub(crate) redaction_roots: Arc<[PathBuf]>,
 }
 
 impl Default for RlmProjectorConfig {
@@ -70,6 +79,29 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
     config: RlmProjectorConfig,
     bound_variables_prompt: SharedBoundVariablesPrompt,
 ) -> TurnDriverPreamble {
+    let dialect: Arc<dyn RlmDialect> = Arc::new(LashlangDialect::prompt_only(
+        config.lashlang_surface.clone(),
+    ));
+    build_rlm_preamble_with_dialect(
+        input,
+        RlmPreambleConfig {
+            max_output_chars: config.max_output_chars,
+            max_budget_tokens: config.max_budget_tokens,
+            last_prompt_usage: config.last_prompt_usage,
+            prompt_features: config.prompt_features,
+            redaction_roots: config.redaction_roots,
+        },
+        bound_variables_prompt,
+        dialect,
+    )
+}
+
+pub(crate) fn build_rlm_preamble_with_dialect(
+    input: ProtocolBuildInput,
+    config: RlmPreambleConfig,
+    bound_variables_prompt: SharedBoundVariablesPrompt,
+    dialect: Arc<dyn RlmDialect>,
+) -> TurnDriverPreamble {
     let tool_catalog = input.tool_catalog.as_ref();
     let tool_names = tool_catalog.tool_names();
     let tool_names_fingerprint = tool_catalog.tool_names_fingerprint();
@@ -80,32 +112,37 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
         prompt_contributions.push(PromptContribution::execution("Tools", tool_docs));
     }
     prompt_contributions.extend(input.extra_prompt_contributions);
-    let lashlang_host_environment = config
-        .lashlang_surface
-        .host_environment(tool_catalog)
-        .expect("RLM tool catalog registration must validate explicit Lashlang bindings");
-
+    let turn_limit_dialect = Arc::clone(&dialect);
     TurnDriverPreamble {
         config: TurnDriverConfig {
-            protocol: Arc::new(crate::protocol::RlmDriver::new(Arc::clone(
-                &config.redaction_roots,
-            ))),
+            protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(
+                Arc::clone(&config.redaction_roots),
+                Arc::clone(&dialect),
+            )),
             projector: Arc::new(RlmContextProjector {
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,
                 last_prompt_usage: config.last_prompt_usage,
                 bound_variables_prompt,
+                dialect: Arc::clone(&dialect),
             }),
             sync_execution_environment: true,
-            turn_limit_final_message: Arc::new(crate::protocol::turn_limit_final_message),
+            turn_limit_final_message: Arc::new(move |message_id, max_turns| {
+                crate::protocol::turn_limit_final_message(
+                    turn_limit_dialect.as_ref(),
+                    message_id,
+                    max_turns,
+                )
+            }),
         },
         tool_specs: Arc::new(Vec::new()),
         tool_names,
         tool_names_fingerprint,
-        execution_prompt: Arc::from(crate::protocol::rlm_execution_section_for_host_environment(
-            config.prompt_features,
-            &lashlang_host_environment,
-        )),
+        execution_prompt: Arc::from(
+            dialect
+                .render_execution_section(config.prompt_features, tool_catalog)
+                .expect("RLM tool catalog registration must validate the active dialect surface"),
+        ),
         prompt_contributions,
     }
 }
@@ -260,13 +297,14 @@ struct RlmContextProjector {
     max_budget_tokens: Option<usize>,
     last_prompt_usage: SharedPromptUsage,
     bound_variables_prompt: SharedBoundVariablesPrompt,
+    dialect: Arc<dyn RlmDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
     fn project(&self, ctx: ProjectorContext<'_>) -> Arc<LlmRequest> {
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");
-        let finalization = rlm_finalization_prompt(&options.termination);
+        let finalization = self.dialect.finalization_copy(&options.termination);
         let required_output = required_output_block(&options.termination);
         let final_answer_format = final_answer_format_prompt(&options);
         let guard = self.last_prompt_usage.read_recover();
@@ -287,6 +325,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         let mut attachments = Vec::new();
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                dialect: self.dialect.as_ref(),
                 events: ctx.events,
                 turn_messages: ctx.messages,
                 turn_causes: ctx.turn_causes,
@@ -304,7 +343,8 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         let mut generation = ctx.config.generation.clone();
         // The paired-tag grammar is RLM's response boundary. Provider wire
         // stops, including caller-supplied ones, could withhold that literal
-        // boundary and leave the parser with a truncated cell.
+        // boundary and leave the parser with a truncated cell. The boundary is
+        // the dialect's, but no dialect hands it to the provider as a stop.
         generation.suppress_stop_sequences_for_protocol();
 
         Arc::new(LlmRequest {
@@ -429,39 +469,9 @@ fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
     })
 }
 
+#[cfg(test)]
 fn rlm_finalization_prompt(termination: &RlmTermination) -> &'static str {
-    match termination {
-        RlmTermination::FinishRequired { schema: Some(_) } => {
-            "This turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain a paired `<lashlang>...</lashlang>` block that performs the next step; prose before the block is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the block that does it. The terminal response must be a paired `<lashlang>...</lashlang>` block that calls `finish <value>`, and `<value>` must match the REQUIRED OUTPUT contract."
-        }
-        RlmTermination::FinishRequired { schema: None } => {
-            "This turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain a paired `<lashlang>...</lashlang>` block that performs the next step; prose before the block is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the block that does it. The terminal response must be a paired `<lashlang>...</lashlang>` block that calls `finish <value>`. Use `finish null` only when null is intentional."
-        }
-        RlmTermination::Natural => {
-            r#"This turn uses natural termination. Each assistant response must choose exactly one of these shapes:
-
-1. Continue working: include a paired `<lashlang>...</lashlang>` block. Brief prose may appear before the block; that prose is commentary/status for the action that follows. A block without `finish` is progress and continues the loop.
-2. Finish with prose: write prose with no `<lashlang>` block. A prose-only response immediately ends the turn as the final answer. Use this only when the task is complete and no work remains.
-3. Finish with a computed/raw value: call `finish <value>` inside a paired `<lashlang>...</lashlang>` block. This ends the turn with that value.
-
-Every message before the final answer must contain a paired `<lashlang>...</lashlang>` block. Any message may also contain prose; when prose accompanies a Lashlang block, it is commentary/status for the action that follows. Unaccompanied prose is final-answer-only. If any work remains, do not write prose-only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the `<lashlang>` block that does it.
-
-Example multi-step natural turn:
-
-I’ll inspect the current value first.
-<lashlang>
-preview = slice(to_string(value), 0, 400)
-print(preview)
-</lashlang>
-
-<lashlang>
-result = format("Checked: {}", preview)
-print(result)
-</lashlang>
-
-Done. I inspected the value and summarized the result."#
-        }
-    }
+    LashlangDialect::prompt_only(LashlangSurface::default()).finalization_copy(termination)
 }
 
 impl RlmContextProjector {
@@ -472,6 +482,7 @@ impl RlmContextProjector {
         let mut attachments = Vec::new();
         let messages = render_history_messages(
             &RlmHistoryRenderInput {
+                dialect: self.dialect.as_ref(),
                 events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
@@ -503,12 +514,14 @@ impl RlmContextProjector {
 pub(crate) fn render_conformance_history_message(
     message: lash_core::Message,
 ) -> Result<LlmMessage, String> {
+    let dialect = LashlangDialect::prompt_only(LashlangSurface::default());
     let events = [lash_core::SessionHistoryRecord::Conversation(
         lash_core::session_model::ConversationRecord::from_message(message),
     )];
     let mut attachments = Vec::new();
     let rendered = render_history_messages(
         &RlmHistoryRenderInput {
+            dialect: &dialect,
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
             turn_causes: &[],
@@ -617,6 +630,7 @@ mod tests {
             bound_variables_prompt: Arc::new(RwLock::new(
                 crate::rlm_support::render_bound_variables(&mut bound_variables_cache, &[]),
             )),
+            dialect: Arc::new(LashlangDialect::prompt_only(LashlangSurface::default())),
         }
     }
 
@@ -673,7 +687,10 @@ mod tests {
             emit_llm_trace: false,
             termination: lash_core::ProtocolTurnOptions::typed(RlmCreateExtras::default())
                 .expect("RLM options"),
-            turn_limit_final_message: Arc::new(crate::protocol::turn_limit_final_message),
+            turn_limit_final_message: Arc::new(|message_id, max_turns| {
+                let dialect = LashlangDialect::prompt_only(LashlangSurface::default());
+                crate::protocol::turn_limit_final_message(&dialect, message_id, max_turns)
+            }),
         };
         projector.project(ProjectorContext {
             config: &config,
@@ -754,6 +771,7 @@ mod tests {
 
     #[test]
     fn folded_step_renders_as_emission_cell_not_history_echo() {
+        let projector = projector(1000);
         // Regression for the observed glm-5.2 echo: a step preceded by assistant
         // prose folds into ONE assistant message that is the literal `<lashlang>`
         // cell — byte-identical to what the model emits — never a
@@ -766,6 +784,7 @@ mod tests {
         let mut attachments = Vec::new();
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
@@ -796,12 +815,15 @@ mod tests {
         assert!(!assistant_texts[0].contains("Code:\n"));
         assert_eq!(
             assistant_texts[0],
-            crate::cell_scan::render_lashlang_cell_text("Found it. Running it now.", "loc = run()")
+            projector
+                .dialect
+                .render_history_cell("Found it. Running it now.", "loc = run()")
         );
     }
 
     #[test]
     fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
+        let projector = projector(1000);
         let terminal_image = lash_core::AttachmentRef {
             id: lash_core::AttachmentId::new("terminal-image"),
             media_type: lash_core::MediaType::parse("image/png").unwrap(),
@@ -830,6 +852,7 @@ mod tests {
 
         let messages = render_history_messages(
             &RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
@@ -909,6 +932,7 @@ mod tests {
 
     #[test]
     fn natural_prose_history_is_byte_unchanged() {
+        let projector = projector(1000);
         let events = [
             user_event("u1", "Tell me naturally."),
             assistant_prose_event("a1", "A natural prose answer.\n\nSecond paragraph."),
@@ -916,6 +940,7 @@ mod tests {
         let mut attachments = Vec::new();
         let messages = render_history_messages(
             &RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
@@ -940,6 +965,7 @@ mod tests {
 
     #[test]
     fn committed_transcript_remains_the_rolling_cache_fence() {
+        let projector = projector(1000);
         let events = [
             user_event("u1", "compute"),
             terminal_step_event(
@@ -954,6 +980,7 @@ mod tests {
         let mut attachments = Vec::new();
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
@@ -1115,6 +1142,7 @@ mod tests {
 
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
@@ -1139,6 +1167,7 @@ mod tests {
 
     #[test]
     fn active_turn_causes_render_in_current_turn_events_without_history_duplication() {
+        let projector = projector(1000);
         let cause = lash_core::TurnCause {
             id: "wake:abc".to_string(),
             event_type: "process.wake".to_string(),
@@ -1157,6 +1186,7 @@ mod tests {
 
         let rendered = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &[],
                 turn_messages: &messages,
                 turn_causes: std::slice::from_ref(&cause),
@@ -1197,6 +1227,7 @@ mod tests {
 
     #[test]
     fn printed_images_render_as_llm_image_blocks() {
+        let projector = projector(1000);
         let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
             RlmProtocolEvent::RlmTrajectoryEntry(RlmTrajectoryEntry {
                 id: "lashlang_step_1".to_string(),
@@ -1221,6 +1252,7 @@ mod tests {
 
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
@@ -1254,11 +1286,13 @@ mod tests {
 
     #[test]
     fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() {
+        let projector = projector(1000);
         let events = [user_event("u1", "first"), step_event(0, "print 1", "1")];
         let mut attachments = Vec::new();
 
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
@@ -1373,6 +1407,7 @@ mod tests {
 
     #[test]
     fn rlm_prompt_renders_required_output_block_when_schema_present() {
+        let projector = projector(1000);
         let events = [user_event("u1", "first")];
         let mut attachments = Vec::new();
         let schema = serde_json::json!({
@@ -1387,6 +1422,7 @@ mod tests {
         let schema_contract = render_value_schema_contract(&schema);
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                dialect: projector.dialect.as_ref(),
                 events: &events,
                 turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],

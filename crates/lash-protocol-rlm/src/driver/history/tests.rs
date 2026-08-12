@@ -78,8 +78,12 @@ fn observation_text(message: &lash_core::llm::types::LlmMessage) -> String {
 }
 
 fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMessage> {
+    let dialect = crate::dialect::LashlangDialect::prompt_only(
+        lash_lashlang_runtime::LashlangSurface::default(),
+    );
     render_history_messages(
         &RlmHistoryRenderInput {
+            dialect: &dialect,
             events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
             turn_causes: &[],
@@ -149,7 +153,14 @@ fn ordered_reasoning_replay_precedes_cell_in_folded_history_message() {
             && second_text == "second folded reasoning"
             && second_actual == &second
             && cell.as_ref()
-                == crate::cell_scan::render_lashlang_cell_text("Working.", "value = inspect()")
+                == crate::cell_scan::render_cell_text(
+                    crate::dialect::CellTags {
+                        open: "<lashlang>",
+                        close: "</lashlang>",
+                    },
+                    "Working.",
+                    "value = inspect()",
+                )
     ));
 }
 

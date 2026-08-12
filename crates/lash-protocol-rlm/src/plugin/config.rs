@@ -1,16 +1,18 @@
 use std::path::PathBuf;
 
+use super::{ExecutionBound, ExecutionBounds, RlmAbilities, RlmLanguageFeatures};
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RlmProtocolPluginConfig {
-    pub instruction_budget: lashlang::ExecutionBound<std::num::NonZeroU64>,
-    pub deadline: lashlang::ExecutionBound<std::time::Duration>,
+    pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
+    pub deadline: ExecutionBound<std::time::Duration>,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     #[serde(default)]
-    pub lashlang_abilities: lashlang::LashlangAbilities,
+    pub lashlang_abilities: RlmAbilities,
     #[serde(default)]
-    pub lashlang_language_features: lashlang::LashlangLanguageFeatures,
+    pub lashlang_language_features: RlmLanguageFeatures,
     #[serde(default = "default_max_output_chars")]
     pub max_output_chars: usize,
     #[serde(default = "default_continue_as_soft_warn_tokens")]
@@ -32,35 +34,35 @@ fn default_continue_as_soft_warn_tokens() -> Option<usize> {
 
 impl RlmProtocolPluginConfig {
     pub fn new(
-        instruction_budget: lashlang::ExecutionBound<std::num::NonZeroU64>,
-        deadline: lashlang::ExecutionBound<std::time::Duration>,
+        instruction_budget: impl Into<ExecutionBound<std::num::NonZeroU64>>,
+        deadline: impl Into<ExecutionBound<std::time::Duration>>,
     ) -> Self {
         Self {
-            instruction_budget,
-            deadline,
+            instruction_budget: instruction_budget.into(),
+            deadline: deadline.into(),
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
-            lashlang_abilities: lashlang::LashlangAbilities::default(),
-            lashlang_language_features: lashlang::LashlangLanguageFeatures::default(),
+            lashlang_abilities: RlmAbilities::default(),
+            lashlang_language_features: RlmLanguageFeatures::default(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
             redaction_roots: None,
         }
     }
 
-    pub(crate) fn execution_bounds(&self) -> lashlang::ExecutionBounds {
-        lashlang::ExecutionBounds::new(self.instruction_budget, self.deadline)
+    pub(crate) fn execution_bounds(&self) -> ExecutionBounds {
+        ExecutionBounds::new(self.instruction_budget, self.deadline)
     }
 
-    pub fn with_lashlang_abilities(mut self, abilities: lashlang::LashlangAbilities) -> Self {
-        self.lashlang_abilities = abilities;
+    pub fn with_lashlang_abilities(mut self, abilities: impl Into<RlmAbilities>) -> Self {
+        self.lashlang_abilities = abilities.into();
         self
     }
 
     pub fn with_lashlang_language_features(
         mut self,
-        language_features: lashlang::LashlangLanguageFeatures,
+        language_features: impl Into<RlmLanguageFeatures>,
     ) -> Self {
-        self.lashlang_language_features = language_features;
+        self.lashlang_language_features = language_features.into();
         self
     }
 
@@ -77,10 +79,8 @@ mod tests {
 
     #[test]
     fn rlm_config_defaults_soft_budget_threshold_after_explicit_bounds() {
-        let config = RlmProtocolPluginConfig::new(
-            lashlang::ExecutionBound::Unbounded,
-            lashlang::ExecutionBound::Unbounded,
-        );
+        let config =
+            RlmProtocolPluginConfig::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded);
 
         assert_eq!(config.continue_as_soft_warn_tokens, Some(100_000));
     }
@@ -105,8 +105,8 @@ mod tests {
     #[test]
     fn execution_bounds_use_host_friendly_json_shapes() {
         let config = RlmProtocolPluginConfig::new(
-            lashlang::ExecutionBound::instructions(1_000_000),
-            lashlang::ExecutionBound::millis(30_000),
+            ExecutionBound::instructions(1_000_000),
+            ExecutionBound::millis(30_000),
         );
         let encoded = serde_json::to_value(&config).expect("serialize config");
         assert_eq!(

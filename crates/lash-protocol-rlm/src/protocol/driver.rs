@@ -25,28 +25,51 @@ use serde_json::Value;
 #[cfg(feature = "testing")]
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 
+use crate::dialect::{LashlangDialect, RlmDialect};
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 
 use super::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
 use super::cell::{
-    CellExtraction, CellExtractionError, extract_lashlang_cell, project_visible_assistant_prose,
+    CellExtraction, CellExtractionError, extract_cell, project_visible_assistant_prose_with_tags,
 };
 use super::finish::{
     finish_required_reminder_message, finish_schema_mismatch_message,
-    internal_assistant_prose_message, invalid_lashlang_cell_message, output_limit_retry_message,
+    internal_assistant_prose_message, invalid_cell_message, output_limit_retry_message,
     turn_limit_final_message, validate_finish_value,
 };
 use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct RlmDriver {
     redaction_roots: Arc<[PathBuf]>,
+    dialect: Arc<dyn RlmDialect>,
 }
 
 impl RlmDriver {
     pub fn new(redaction_roots: Arc<[PathBuf]>) -> Self {
-        Self { redaction_roots }
+        Self {
+            redaction_roots,
+            dialect: Arc::new(LashlangDialect::prompt_only(
+                lash_lashlang_runtime::LashlangSurface::default(),
+            )),
+        }
+    }
+
+    pub(crate) fn with_dialect(
+        redaction_roots: Arc<[PathBuf]>,
+        dialect: Arc<dyn RlmDialect>,
+    ) -> Self {
+        Self {
+            redaction_roots,
+            dialect,
+        }
+    }
+}
+
+impl Default for RlmDriver {
+    fn default() -> Self {
+        Self::new(Arc::from([]))
     }
 }
 
@@ -56,7 +79,7 @@ const EXEC_TOOL_CALL_OVERFLOW_NAME: &str = "lash.exec_tool_call_overflow";
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
     fn project_visible_assistant_prose(&self, text: &str) -> String {
-        super::cell::project_visible_assistant_prose(text)
+        super::cell::project_visible_assistant_prose_with_tags(text, self.dialect.cell_tags())
     }
 
     fn handles_output_limit_response(&self) -> bool {
@@ -95,9 +118,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 return actions;
             }
         };
+        let tags = self.dialect.cell_tags();
         let assistant_text = projected.assistant_text;
         let reasoning = projected.reasoning;
-        let visible_prose = project_visible_assistant_prose(&assistant_text);
+        let visible_prose = project_visible_assistant_prose_with_tags(&assistant_text, tags);
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: ctx.protocol_iteration(),
             content: visible_prose.clone(),
@@ -124,20 +148,20 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Err(err) => return invalid_turn_options_actions(err),
         };
 
-        let extraction = match extract_lashlang_cell(&assistant_text) {
+        let extraction = match extract_cell(&assistant_text, tags) {
             Ok(extraction) => extraction,
             Err(err) => {
                 let (decision, message) = match (err, terminal_reason) {
                     (CellExtractionError::UnclosedCell, LlmTerminalReason::OutputLimit) => (
                         "retry_output_limit_cell",
-                        output_limit_cell_message(
+                        self.dialect.output_limit_cell_copy(
                             ctx.generation()
                                 .output_token_cap
                                 .map(std::num::NonZeroUsize::get),
                         ),
                     ),
                     (CellExtractionError::UnclosedCell, _) => {
-                        ("retry_unclosed_cell", err.message().to_string())
+                        ("retry_unclosed_cell", self.dialect.cell_error_message(err))
                     }
                 };
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
@@ -161,13 +185,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         &reasoning,
                     )));
                 }
-                retry_events.push(conversation_event(invalid_lashlang_cell_message(
+                retry_events.push(conversation_event(invalid_cell_message(
+                    self.dialect.as_ref(),
                     rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "invalid_cell"),
                     &message,
                 )));
-                if let Err(err) =
-                    continue_or_stop_after_nonterminal(&ctx, &mut actions, Vec::new(), retry_events)
-                {
+                if let Err(err) = continue_or_stop_after_nonterminal(
+                    self.dialect.as_ref(),
+                    &ctx,
+                    &mut actions,
+                    Vec::new(),
+                    retry_events,
+                ) {
                     return invalid_turn_options_actions(err);
                 }
                 return actions;
@@ -205,9 +234,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         .output_token_cap
                         .map(std::num::NonZeroUsize::get),
                 )));
-                if let Err(err) =
-                    continue_or_stop_after_nonterminal(&ctx, &mut actions, Vec::new(), retry_events)
-                {
+                if let Err(err) = continue_or_stop_after_nonterminal(
+                    self.dialect.as_ref(),
+                    &ctx,
+                    &mut actions,
+                    Vec::new(),
+                    retry_events,
+                ) {
                     return invalid_turn_options_actions(err);
                 }
                 return actions;
@@ -274,12 +307,17 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 )));
             }
             events.push(conversation_event(finish_required_reminder_message(
+                self.dialect.as_ref(),
                 rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "finish_reminder"),
                 schema.is_some(),
             )));
-            if let Err(err) =
-                continue_or_stop_after_nonterminal(&ctx, &mut actions, Vec::new(), events)
-            {
+            if let Err(err) = continue_or_stop_after_nonterminal(
+                self.dialect.as_ref(),
+                &ctx,
+                &mut actions,
+                Vec::new(),
+                events,
+            ) {
                 return invalid_turn_options_actions(err);
             }
             return actions;
@@ -288,7 +326,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
             "llm_extraction",
             llm_extraction_payload(
-                "execute_lashlang",
+                self.dialect.execution_diagnostic_name(),
                 &termination,
                 LlmExtractionCounts::cell(&assistant_text, &reasoning, &cell),
             ),
@@ -310,10 +348,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         // view (Alt+O) above the tool activities it produced.
         actions.push(DriverAction::Emit(SessionStreamEvent::Message {
             text: cell.code.clone(),
-            kind: "lashlang_code".to_string(),
+            kind: self.dialect.code_stream_kind().to_string(),
         }));
         actions.push(DriverAction::StartExec {
-            language: "lashlang".to_string(),
+            language: self.dialect.language_id().to_string(),
             code: cell.code,
             driver_state: rlm_driver_state(state),
         });
@@ -400,6 +438,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 && let Err(error_text) = validate_finish_value(finish_value, &schema)
             {
                 if let Err(err) = continue_or_stop_after_nonterminal(
+                    self.dialect.as_ref(),
                     &ctx,
                     &mut actions,
                     trajectory_events(
@@ -411,6 +450,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         None,
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
+                        self.dialect.as_ref(),
                         rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "schema_mismatch"),
                     ))],
                 ) {
@@ -439,6 +479,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         }
 
         if let Err(err) = continue_or_stop_after_nonterminal(
+            self.dialect.as_ref(),
             &ctx,
             &mut actions,
             trajectory_events(
@@ -455,15 +496,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         }
         actions
     }
-}
-
-fn output_limit_cell_message(output_token_cap: Option<usize>) -> String {
-    let cap = output_token_cap
-        .map(|cap| format!(" The request cap was {cap} tokens."))
-        .unwrap_or_default();
-    format!(
-        "Model output limit truncated the `<lashlang>` block before `</lashlang>`.{cap} Retry with a shorter block; do less per cell and continue in a later step."
-    )
 }
 
 struct ProjectedResponse {
@@ -617,6 +649,7 @@ pub fn project_conformance_messages_through_rlm_history(
 }
 
 fn continue_or_stop_after_nonterminal(
+    dialect: &dyn RlmDialect,
     ctx: &DriverContextView<'_>,
     actions: &mut Vec<DriverAction>,
     durable_events: Vec<SessionHistoryRecord>,
@@ -653,6 +686,7 @@ fn continue_or_stop_after_nonterminal(
                 if let Some(max_turns) = ctx.turn_budget().max_turns() {
                     actions.push(DriverAction::ScheduleTurnLimitFinal {
                         message: turn_limit_final_message(
+                            dialect,
                             rlm_message_id(ctx.turn_id(), next_protocol_iteration, "turn_limit"),
                             max_turns,
                         ),

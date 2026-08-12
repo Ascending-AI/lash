@@ -1,8 +1,5 @@
 use std::sync::Arc;
 
-use lash_core::plugin::{PluginError, PluginRegistrar};
-use lash_lashlang_runtime::{LashlangArtifactStore, LashlangSurface, SharedDeferredToolResolver};
-
 use super::RlmProtocolPluginConfig;
 use super::budget_warning::BudgetUsageObserver;
 use super::prose_projector::RlmAssistantProseProjector;
@@ -10,32 +7,23 @@ use super::protocol_driver::RlmProtocolDriver;
 use super::protocol_session::RlmProtocolSession;
 use super::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
 use super::tool_args::normalize_projected_tool_args;
+use crate::dialect::{RlmDialect, RlmDialectRegistry};
 use crate::driver::SharedPromptUsage;
-use crate::executor::RlmLashlangExecutionTraceConfig;
-use crate::projection::{ProjectionResolver, RLM_TURN_INPUT_PLUGIN_ID, RlmProjectionExtension};
+use crate::projection::{RLM_TURN_INPUT_PLUGIN_ID, RlmProjectionExtension};
 use crate::stream_mask;
+use lash_core::plugin::{PluginError, PluginRegistrar};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn register_rlm_protocol_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
-    projection_resolver: Arc<dyn ProjectionResolver>,
-    deferred_tool_resolver: Option<SharedDeferredToolResolver>,
-    artifact_store: Arc<dyn LashlangArtifactStore>,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-    lashlang_surface: LashlangSurface,
+    dialect_registry: RlmDialectRegistry,
+    dialect: Arc<dyn RlmDialect>,
     last_prompt_usage: SharedPromptUsage,
 ) -> Result<(), PluginError> {
     let runtime_state = Arc::new(
-        RlmRuntimeState::new(
-            projection_resolver,
-            Arc::clone(&artifact_store),
-            lashlang_surface.clone(),
-            deferred_tool_resolver,
-            lashlang_execution_trace_config,
-            config.execution_bounds(),
-        )
-        .map_err(|err| PluginError::Session(err.to_string()))?,
+        RlmRuntimeState::new(dialect_registry, Arc::clone(&dialect))
+            .map_err(|err| PluginError::Session(err.to_string()))?,
     );
     let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
     let protocol_session = Arc::new(RlmProtocolSession::new(
@@ -45,10 +33,12 @@ pub(super) fn register_rlm_protocol_plugin(
     reg.protocol().session(protocol_session.clone())?;
     reg.execution().code_executor(code_executor)?;
     reg.output()
-        .assistant_prose_projector(Arc::new(RlmAssistantProseProjector))?;
+        .assistant_prose_projector(Arc::new(RlmAssistantProseProjector {
+            dialect: Arc::clone(&dialect),
+        }))?;
     reg.protocol().protocol_driver(Arc::new(RlmProtocolDriver {
         config,
-        lashlang_surface,
+        dialect: Arc::clone(&dialect),
         last_prompt_usage: Arc::clone(&last_prompt_usage),
         bound_variables_prompt: runtime_state.shared_bound_variables_prompt(),
     }))?;
@@ -78,7 +68,7 @@ pub(super) fn register_rlm_protocol_plugin(
         Box::pin(async move { session.soft_warn_directives(ctx) })
     }));
 
-    stream_mask::register_stream_mask(reg)?;
+    stream_mask::register_stream_mask(reg, dialect)?;
     Ok(())
 }
 

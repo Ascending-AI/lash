@@ -1307,10 +1307,10 @@ fn agent_contract_graph_facts(
             )
         {
             match graph.status {
-                lash::tracing::TraceLashlangStatus::Completed => {
+                lash::tracing::TraceLanguageExecutionStatus::Completed => {
                     child_session_exec_completed_count += 1;
                 }
-                lash::tracing::TraceLashlangStatus::Failed => {
+                lash::tracing::TraceLanguageExecutionStatus::Failed => {
                     child_session_exec_failed_count += 1;
                 }
                 _ => {}
@@ -1321,7 +1321,7 @@ fn agent_contract_graph_facts(
                 graph.subject,
                 lash::tracing::TraceRuntimeSubject::Process { .. }
             )
-            && graph.status == lash::tracing::TraceLashlangStatus::Completed
+            && graph.status == lash::tracing::TraceLanguageExecutionStatus::Completed
         {
             completed_process_entries.insert(graph.entry_name.clone());
         }
@@ -1402,12 +1402,14 @@ fn agent_failed_child_activity_facts(
     })
 }
 
-fn trace_lashlang_status_label(status: lash::tracing::TraceLashlangStatus) -> &'static str {
+fn trace_lashlang_status_label(
+    status: lash::tracing::TraceLanguageExecutionStatus,
+) -> &'static str {
     match status {
-        lash::tracing::TraceLashlangStatus::Running => "running",
-        lash::tracing::TraceLashlangStatus::Completed => "completed",
-        lash::tracing::TraceLashlangStatus::Failed => "failed",
-        lash::tracing::TraceLashlangStatus::Cancelled => "cancelled",
+        lash::tracing::TraceLanguageExecutionStatus::Running => "running",
+        lash::tracing::TraceLanguageExecutionStatus::Completed => "completed",
+        lash::tracing::TraceLanguageExecutionStatus::Failed => "failed",
+        lash::tracing::TraceLanguageExecutionStatus::Cancelled => "cancelled",
     }
 }
 

@@ -5,9 +5,11 @@ use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    TraceEvent, TraceLabelMetadata, TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity,
-    TraceLashlangMap, TraceLashlangStatus, TraceRecord, TraceRuntimeScope, TraceRuntimeSubject,
-    TraceSink, TraceSinkError,
+    TraceEvent, TraceLabelMetadata, TraceLanguageExecutionEvent as LanguageEvent,
+    TraceLanguageExecutionIdentity as LanguageIdentity,
+    TraceLanguageExecutionMap as LanguageExecutionMap,
+    TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRecord, TraceRuntimeScope,
+    TraceRuntimeSubject, TraceSink, TraceSinkError,
 };
 
 /// Trace-derived Lashlang execution graph snapshot for hosts and debugging tools.
@@ -21,7 +23,7 @@ pub struct TraceLashlangGraph {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_ref: Option<String>,
     pub entry_name: String,
-    pub status: TraceLashlangStatus,
+    pub status: LanguageExecutionStatus,
     pub nodes: Vec<TraceLashlangGraphNode>,
     pub edges: Vec<TraceLashlangGraphEdge>,
     pub children: Vec<TraceLashlangGraphChildLink>,
@@ -131,7 +133,7 @@ struct TraceLashlangGraphAccumulator {
     entry_kind: String,
     entry_ref: Option<String>,
     entry_name: String,
-    status: TraceLashlangStatus,
+    status: LanguageExecutionStatus,
     nodes: BTreeMap<String, TraceLashlangGraphNode>,
     edges: BTreeMap<String, TraceLashlangGraphEdge>,
     children: Vec<TraceLashlangGraphChildLink>,
@@ -165,9 +167,12 @@ impl TraceLashlangGraphStore {
 
 impl TraceSink for TraceLashlangGraphStore {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        let TraceEvent::LashlangExecution { event } = &record.event else {
+        let TraceEvent::LanguageExecution { language, event } = &record.event else {
             return Ok(());
         };
+        if language != "lashlang" {
+            return Ok(());
+        }
         let event_key = lashlang_execution_event_key(event);
         let mut state = self.inner.lock_recover();
         if !state.seen_event_keys.insert(event_key.to_string()) {
@@ -179,7 +184,7 @@ impl TraceSink for TraceLashlangGraphStore {
 }
 
 impl TraceLashlangGraphAccumulator {
-    fn new(identity: &TraceLashlangExecutionIdentity) -> Self {
+    fn new(identity: &LanguageIdentity) -> Self {
         Self {
             graph_key: identity.graph_key(),
             scope: identity.scope.clone(),
@@ -188,7 +193,7 @@ impl TraceLashlangGraphAccumulator {
             entry_kind: identity.entry_kind.clone(),
             entry_ref: identity.entry_ref.clone(),
             entry_name: identity.entry_name.clone(),
-            status: TraceLashlangStatus::Running,
+            status: LanguageExecutionStatus::Running,
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             children: Vec::new(),
@@ -214,21 +219,21 @@ impl TraceLashlangGraphAccumulator {
 
 fn reduce_lashlang_execution_event(
     state: &mut TraceLashlangGraphState,
-    event: &TraceLashlangExecutionEvent,
+    event: &LanguageEvent,
     timestamp: &str,
 ) {
     match event {
-        TraceLashlangExecutionEvent::ExecutionStarted {
+        LanguageEvent::ExecutionStarted {
             identity,
             execution_map,
             ..
         } => seed_lashlang_graph(graph_mut(state, identity), execution_map),
-        TraceLashlangExecutionEvent::ExecutionFinished {
+        LanguageEvent::ExecutionFinished {
             identity, status, ..
         } => {
             graph_mut(state, identity).status = *status;
         }
-        TraceLashlangExecutionEvent::NodeStarted {
+        LanguageEvent::NodeStarted {
             identity,
             node_id,
             node_kind,
@@ -252,7 +257,7 @@ fn reduce_lashlang_execution_event(
             node.status = TraceLashlangNodeStatus::Running;
             node.occurrence = Some(*occurrence);
         }
-        TraceLashlangExecutionEvent::NodeCompleted {
+        LanguageEvent::NodeCompleted {
             identity,
             node_id,
             node_kind,
@@ -274,7 +279,7 @@ fn reduce_lashlang_execution_event(
             node.status = TraceLashlangNodeStatus::Completed;
             node.occurrence = Some(*occurrence);
         }
-        TraceLashlangExecutionEvent::NodeFailed {
+        LanguageEvent::NodeFailed {
             identity,
             node_id,
             node_kind,
@@ -298,7 +303,7 @@ fn reduce_lashlang_execution_event(
             node.latest_error = Some(error.clone());
             node.occurrence = Some(*occurrence);
         }
-        TraceLashlangExecutionEvent::BranchSelected {
+        LanguageEvent::BranchSelected {
             identity,
             node_id,
             occurrence,
@@ -341,7 +346,7 @@ fn reduce_lashlang_execution_event(
                 }
             }
         }
-        TraceLashlangExecutionEvent::ChildStarted {
+        LanguageEvent::ChildStarted {
             identity,
             parent_node_id,
             child,
@@ -367,9 +372,9 @@ fn reduce_lashlang_execution_event(
 
 fn seed_lashlang_graph(
     graph: &mut TraceLashlangGraphAccumulator,
-    execution_map: &TraceLashlangMap,
+    execution_map: &LanguageExecutionMap,
 ) {
-    graph.status = TraceLashlangStatus::Running;
+    graph.status = LanguageExecutionStatus::Running;
     for node in &execution_map.nodes {
         graph.nodes.entry(node.id.clone()).or_insert_with(|| {
             TraceLashlangGraphNode::unobserved(
@@ -396,7 +401,7 @@ fn seed_lashlang_graph(
 
 #[derive(Clone, Copy)]
 struct TraceLashlangNodeIdentity<'event> {
-    identity: &'event TraceLashlangExecutionIdentity,
+    identity: &'event LanguageIdentity,
     node_id: &'event str,
     node_kind: &'event str,
     label: &'event str,
@@ -404,7 +409,7 @@ struct TraceLashlangNodeIdentity<'event> {
 
 fn graph_mut<'a>(
     state: &'a mut TraceLashlangGraphState,
-    identity: &TraceLashlangExecutionIdentity,
+    identity: &LanguageIdentity,
 ) -> &'a mut TraceLashlangGraphAccumulator {
     let graph_key = identity.graph_key();
     state
@@ -430,15 +435,15 @@ fn node_mut<'a>(
         })
 }
 
-fn lashlang_execution_event_key(event: &TraceLashlangExecutionEvent) -> &str {
+fn lashlang_execution_event_key(event: &LanguageEvent) -> &str {
     match event {
-        TraceLashlangExecutionEvent::ExecutionStarted { event_key, .. }
-        | TraceLashlangExecutionEvent::ExecutionFinished { event_key, .. }
-        | TraceLashlangExecutionEvent::NodeStarted { event_key, .. }
-        | TraceLashlangExecutionEvent::NodeCompleted { event_key, .. }
-        | TraceLashlangExecutionEvent::NodeFailed { event_key, .. }
-        | TraceLashlangExecutionEvent::BranchSelected { event_key, .. }
-        | TraceLashlangExecutionEvent::ChildStarted { event_key, .. } => event_key,
+        LanguageEvent::ExecutionStarted { event_key, .. }
+        | LanguageEvent::ExecutionFinished { event_key, .. }
+        | LanguageEvent::NodeStarted { event_key, .. }
+        | LanguageEvent::NodeCompleted { event_key, .. }
+        | LanguageEvent::NodeFailed { event_key, .. }
+        | LanguageEvent::BranchSelected { event_key, .. }
+        | LanguageEvent::ChildStarted { event_key, .. } => event_key,
     }
 }
 
@@ -454,12 +459,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        TraceBranchSelection, TraceContext, TraceLabelMetadata, TraceLashlangChildExecution,
-        TraceLashlangMapEdge, TraceLashlangMapNode,
+        TraceBranchSelection, TraceContext, TraceLabelMetadata, TraceLanguageChildExecution,
+        TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
     };
 
-    fn identity() -> TraceLashlangExecutionIdentity {
-        TraceLashlangExecutionIdentity {
+    fn identity() -> LanguageIdentity {
+        LanguageIdentity {
             scope: TraceRuntimeScope {
                 session_id: "session-1".to_string(),
                 turn_id: Some("turn-1".to_string()),
@@ -477,39 +482,42 @@ mod tests {
         }
     }
 
-    fn append_at(store: &TraceLashlangGraphStore, event: TraceLashlangExecutionEvent, ms: i64) {
+    fn append_at(store: &TraceLashlangGraphStore, event: LanguageEvent, ms: i64) {
         store
             .append(&TraceRecord::new_with_timestamp(
                 TraceContext::default().for_session("session-1"),
-                TraceEvent::LashlangExecution { event },
+                TraceEvent::LanguageExecution {
+                    language: "lashlang".to_string(),
+                    event,
+                },
                 Utc.timestamp_millis_opt(ms).single().expect("timestamp"),
             ))
             .expect("append lashlang execution event");
     }
 
-    fn started_event(event_key: &str) -> TraceLashlangExecutionEvent {
-        TraceLashlangExecutionEvent::ExecutionStarted {
+    fn started_event(event_key: &str) -> LanguageEvent {
+        LanguageEvent::ExecutionStarted {
             event_key: event_key.to_string(),
             identity: identity(),
-            execution_map: TraceLashlangMap {
+            execution_map: LanguageExecutionMap {
                 module_ref: "module-1".to_string(),
                 entry_kind: "main".to_string(),
                 entry_ref: None,
                 entry_name: "main".to_string(),
                 nodes: vec![
-                    TraceLashlangMapNode {
+                    TraceLanguageExecutionMapNode {
                         id: "branch".to_string(),
                         kind: "branch".to_string(),
                         label: "if ready".to_string(),
                         label_metadata: None,
                     },
-                    TraceLashlangMapNode {
+                    TraceLanguageExecutionMapNode {
                         id: "then".to_string(),
                         kind: "branch_arm".to_string(),
                         label: "then".to_string(),
                         label_metadata: None,
                     },
-                    TraceLashlangMapNode {
+                    TraceLanguageExecutionMapNode {
                         id: "else".to_string(),
                         kind: "branch_arm".to_string(),
                         label: "else".to_string(),
@@ -517,13 +525,13 @@ mod tests {
                     },
                 ],
                 edges: vec![
-                    TraceLashlangMapEdge {
+                    TraceLanguageExecutionMapEdge {
                         id: "then-edge".to_string(),
                         from: "branch".to_string(),
                         to: "then".to_string(),
                         label: "then".to_string(),
                     },
-                    TraceLashlangMapEdge {
+                    TraceLanguageExecutionMapEdge {
                         id: "else-edge".to_string(),
                         from: "branch".to_string(),
                         to: "else".to_string(),
@@ -534,8 +542,8 @@ mod tests {
         }
     }
 
-    fn node_started(event_key: &str, occurrence: u64) -> TraceLashlangExecutionEvent {
-        TraceLashlangExecutionEvent::NodeStarted {
+    fn node_started(event_key: &str, occurrence: u64) -> LanguageEvent {
+        LanguageEvent::NodeStarted {
             event_key: event_key.to_string(),
             identity: identity(),
             node_id: "branch".to_string(),
@@ -545,8 +553,8 @@ mod tests {
         }
     }
 
-    fn node_completed(event_key: &str, occurrence: u64) -> TraceLashlangExecutionEvent {
-        TraceLashlangExecutionEvent::NodeCompleted {
+    fn node_completed(event_key: &str, occurrence: u64) -> LanguageEvent {
+        LanguageEvent::NodeCompleted {
             event_key: event_key.to_string(),
             identity: identity(),
             node_id: "branch".to_string(),
@@ -565,7 +573,7 @@ mod tests {
         let graph = store
             .graph("effect:session-1:turn-1:exec-1")
             .expect("graph");
-        assert_eq!(graph.status, TraceLashlangStatus::Running);
+        assert_eq!(graph.status, LanguageExecutionStatus::Running);
         assert_eq!(graph.nodes[0].status, TraceLashlangNodeStatus::Unobserved);
         assert_eq!(
             graph.edges[0].selection,
@@ -574,10 +582,26 @@ mod tests {
     }
 
     #[test]
+    fn graph_store_ignores_other_language_execution_events() {
+        let store = TraceLashlangGraphStore::default();
+        store
+            .append(&TraceRecord::new(
+                TraceContext::default().for_session("session-1"),
+                TraceEvent::LanguageExecution {
+                    language: "typescript".to_string(),
+                    event: started_event("start"),
+                },
+            ))
+            .expect("append other-language execution event");
+
+        assert!(store.graphs().is_empty());
+    }
+
+    #[test]
     fn graph_store_preserves_static_label_metadata() {
         let store = TraceLashlangGraphStore::default();
         let mut event = started_event("start");
-        if let TraceLashlangExecutionEvent::ExecutionStarted { execution_map, .. } = &mut event {
+        if let LanguageEvent::ExecutionStarted { execution_map, .. } = &mut event {
             execution_map.nodes[0].label_metadata = Some(TraceLabelMetadata {
                 title: "Choose path".to_string(),
                 description: Some("Branch detail".to_string()),
@@ -634,7 +658,7 @@ mod tests {
         append_at(&store, started_event("start"), 1_000);
         append_at(
             &store,
-            TraceLashlangExecutionEvent::BranchSelected {
+            LanguageEvent::BranchSelected {
                 event_key: "branch".to_string(),
                 identity: identity(),
                 node_id: "branch".to_string(),
@@ -672,12 +696,12 @@ mod tests {
 
         append_at(
             &store,
-            TraceLashlangExecutionEvent::ChildStarted {
+            LanguageEvent::ChildStarted {
                 event_key: "child".to_string(),
                 identity: identity(),
                 parent_node_id: "spawn".to_string(),
                 occurrence: 1,
-                child: TraceLashlangChildExecution {
+                child: TraceLanguageChildExecution {
                     scope: TraceRuntimeScope::new("session-1"),
                     subject: TraceRuntimeSubject::Process {
                         process_id: "process:child".to_string(),

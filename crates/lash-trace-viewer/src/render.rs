@@ -161,10 +161,10 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
             usage_text(usage, cumulative.as_ref()),
             false,
         ),
-        TraceEvent::LashlangExecution { event } => (
-            lashlang_title(event),
-            lashlang_summary(event),
-            lashlang_failed(event),
+        TraceEvent::LanguageExecution { language, event } => (
+            language_execution_title(language, event),
+            language_execution_summary(event),
+            language_execution_failed(event),
         ),
         TraceEvent::TurnCompleted {
             status,

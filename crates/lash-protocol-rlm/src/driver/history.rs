@@ -54,10 +54,11 @@ use lash_core::{
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
 use lashlang::{Value as FlowValue, ValueProjectionContext};
 
-use crate::cell_scan::render_lashlang_cell_text;
+use crate::dialect::RlmDialect;
 use crate::projection::{decode_rlm_protocol_event, json_to_flow_value, rlm_history_projection};
 
 pub(super) struct RlmHistoryRenderInput<'a> {
+    pub(super) dialect: &'a dyn RlmDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
     pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
     pub(super) turn_causes: &'a [lash_core::TurnCause],
@@ -192,7 +193,9 @@ pub(super) fn render_history_messages(
                 // byte-identical to the model's own emission.
                 let prose = pending.take();
                 let prose_text = prose.as_ref().map(|p| p.text.as_str()).unwrap_or("");
-                let cell = render_lashlang_cell_text(prose_text, step.code.trim());
+                let cell = input
+                    .dialect
+                    .render_history_cell(prose_text, step.code.trim());
                 let mut cell_blocks = prose
                     .as_ref()
                     .map(|prose| prose.reasoning_blocks.clone())

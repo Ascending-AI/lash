@@ -1,5 +1,20 @@
-use super::cell::extract_lashlang_cell;
+use super::cell::extract_cell;
 use super::*;
+
+fn tags() -> crate::dialect::CellTags {
+    crate::dialect::CellTags {
+        open: "<lashlang>",
+        close: "</lashlang>",
+    }
+}
+
+fn extract_lashlang_cell(text: &str) -> Result<Option<cell::CellExtraction>, CellExtractionError> {
+    extract_cell(text, tags())
+}
+
+fn project_visible_assistant_prose(text: &str) -> String {
+    cell::project_visible_assistant_prose_with_tags(text, tags())
+}
 
 #[test]
 fn rlm_execution_section_default_prompt_is_golden() {
@@ -657,7 +672,7 @@ fn rendered_history_cell_round_trips_through_extractor() {
     // `--- history[...] ---` meta-format the model could imitate (the regression
     // for the observed glm-5.2 history echo).
     let code = "loc = run()\nprint(loc)";
-    let cell = crate::cell_scan::render_lashlang_cell_text("Found it.", code);
+    let cell = crate::cell_scan::render_cell_text(tags(), "Found it.", code);
     assert!(!cell.contains("--- history["));
     assert!(!cell.contains("\nCode:\n"));
     let extraction = extract_lashlang_cell(&cell)

@@ -9,10 +9,11 @@ pub use error::{LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeEr
 pub mod testing;
 
 pub use lash_trace::{
-    TraceLashlangChildExecution, TraceLashlangEdgeSelection, TraceLashlangExecutionEvent,
-    TraceLashlangExecutionIdentity, TraceLashlangGraph, TraceLashlangGraphChildLink,
-    TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangMap,
-    TraceLashlangMapEdge, TraceLashlangMapNode, TraceLashlangNodeStatus, TraceLashlangStatus,
+    TraceLanguageChildExecution, TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity,
+    TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
+    TraceLanguageExecutionStatus, TraceLashlangEdgeSelection, TraceLashlangGraph,
+    TraceLashlangGraphChildLink, TraceLashlangGraphEdge, TraceLashlangGraphNode,
+    TraceLashlangGraphStore, TraceLashlangNodeStatus,
 };
 pub use lashlang::{
     CompiledProcessCache, InMemoryLashlangArtifactStore, LASH_TYPE_KEY, LashlangAbilities,
