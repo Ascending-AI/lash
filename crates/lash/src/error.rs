@@ -1,5 +1,23 @@
 use crate::support::*;
 
+/// Why a host-selected queued-work drain was refused before executing a turn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectedQueuedWorkDrainRefusalCause {
+    /// The requested rows do not form one claimable queue composition.
+    UnclaimableTogether {
+        /// Requested batch IDs that the store could not claim with the rest.
+        unclaimed_batch_ids: Vec<String>,
+    },
+    /// A requested row belongs to an interrupted claim whose complete,
+    /// already-journaled composition must be redriven atomically.
+    InterruptedBatchRequiresFullComposition {
+        /// Complete interrupted composition, in durable enqueue order.
+        required_batch_ids: Vec<String>,
+    },
+    /// Another host currently owns the session's execution lane.
+    ExecutionLaneBusy,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum EmbedError {
     #[error(
@@ -78,8 +96,10 @@ pub enum EmbedError {
     StaticTurnStreamRequiresStaticEffectHost,
     #[error("runtime session error: {0}")]
     Session(#[from] SessionError),
-    #[error("selected queued-work batches could not be claimed together: {unclaimed_batch_ids:?}")]
-    SelectedQueuedWorkDrainRefused { unclaimed_batch_ids: Vec<String> },
+    #[error("selected queued-work drain refused: {cause:?}")]
+    SelectedQueuedWorkDrainRefused {
+        cause: SelectedQueuedWorkDrainRefusalCause,
+    },
     #[error("runtime turn error: {0}")]
     Runtime(#[from] lash_core::RuntimeError),
     #[error("runtime plugin/control error: {0}")]

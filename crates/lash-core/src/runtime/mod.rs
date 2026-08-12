@@ -390,7 +390,9 @@ pub use turn_input_ingress::{
     TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
     TurnInputState,
 };
-pub use turn_loop::{SelectedQueuedWorkDrainError, ensure_durable_effect_input};
+pub use turn_loop::ensure_durable_effect_input;
+#[doc(hidden)]
+pub use turn_loop::{SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainRefusalCause};
 pub use turn_queue::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,

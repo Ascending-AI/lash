@@ -38,7 +38,7 @@ pub use crate::admin::{
     SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{LashCore, LashCoreBuilder, SessionDeleteReport};
-pub use crate::error::{EmbedError, Result};
+pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause};
 pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::session::{
@@ -229,8 +229,7 @@ pub mod persistence {
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     pub mod queued_work {
         pub use lash_core::store::queued_work::{
-            ClaimCandidate, QueuedWorkClass, claim_scan_limit, derive_batch_id,
-            select_leading_session_command, select_turn_work_claim_indices,
+            QueuedWorkClass, claim_scan_limit, derive_batch_id, select_leading_session_command,
             select_turn_work_claim_prefix,
         };
     }

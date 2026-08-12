@@ -188,6 +188,28 @@ pub fn select_turn_work_claim_indices(
     if boundary == QueuedWorkClaimBoundary::ActiveTurnCheckpoint
         && first.delivery_policy != DeliveryPolicy::EarliestSafeBoundary
     {
+        if let Some(withheld_claim_id) = first.prior_claim_id.as_deref() {
+            let remaining_indices = candidates
+                .iter()
+                .enumerate()
+                .filter_map(|(index, candidate)| {
+                    (candidate.prior_claim_id.as_deref() != Some(withheld_claim_id))
+                        .then_some(index)
+                })
+                .collect::<Vec<_>>();
+            let remaining = remaining_indices
+                .iter()
+                .map(|index| candidates[*index].clone())
+                .collect::<Vec<_>>();
+            let selected =
+                select_turn_work_claim_indices(&remaining, boundary, policy, now_epoch_ms)?;
+            if !selected.is_empty() {
+                return Ok(selected
+                    .into_iter()
+                    .map(|index| remaining_indices[index])
+                    .collect());
+            }
+        }
         record_turn_claim_decision(
             candidates,
             boundary,
@@ -328,6 +350,55 @@ pub fn select_turn_work_claim_prefix(
         .enumerate()
         .take_while(|(prefix_index, selected_index)| prefix_index == selected_index)
         .count())
+}
+
+/// Resolve an exact-ID selection against interrupted predecessor identities.
+///
+/// `candidate_batch_claims` must contain every ready, claimable row for the
+/// session in durable enqueue order. When a requested row belongs to an
+/// interrupted claim, this returns that claim's complete row indices only if
+/// the request includes the complete composition. A partial request returns
+/// the literal required composition without selecting any rows.
+#[doc(hidden)]
+pub fn select_interrupted_exact_claim_indices(
+    candidate_batch_claims: &[(String, Option<String>)],
+    requested_batch_ids: &[String],
+) -> Result<Option<Vec<usize>>, Vec<String>> {
+    let requested = requested_batch_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let Some(prior_claim_id) =
+        candidate_batch_claims
+            .iter()
+            .find_map(|(batch_id, prior_claim_id)| {
+                requested
+                    .contains(batch_id.as_str())
+                    .then_some(prior_claim_id.as_deref())
+                    .flatten()
+            })
+    else {
+        return Ok(None);
+    };
+    let required_indices = candidate_batch_claims
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, candidate_claim_id))| {
+            (candidate_claim_id.as_deref() == Some(prior_claim_id)).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    let required_batch_ids = required_indices
+        .iter()
+        .map(|index| candidate_batch_claims[*index].0.clone())
+        .collect::<Vec<_>>();
+    if required_batch_ids
+        .iter()
+        .all(|batch_id| requested.contains(batch_id.as_str()))
+    {
+        Ok(Some(required_indices))
+    } else {
+        Err(required_batch_ids)
+    }
 }
 
 /// Conservative upper bound for the exact model-visible queued-work render.
@@ -512,6 +583,26 @@ mod tests {
             turn_causes: Vec::new(),
             input_texts: vec!["wake".to_string()],
         }
+    }
+
+    #[test]
+    fn exact_selection_requires_the_literal_interrupted_composition() {
+        let candidates = vec![
+            ("w1".to_string(), Some("claim-a".to_string())),
+            ("fresh".to_string(), None),
+            ("w2".to_string(), Some("claim-a".to_string())),
+        ];
+        assert_eq!(
+            select_interrupted_exact_claim_indices(&candidates, &["w1".to_string()]),
+            Err(vec!["w1".to_string(), "w2".to_string()])
+        );
+        assert_eq!(
+            select_interrupted_exact_claim_indices(
+                &candidates,
+                &["w1".to_string(), "w2".to_string()],
+            ),
+            Ok(Some(vec![0, 2]))
+        );
     }
 
     fn policy(max_context_tokens: usize, action_token_reserve: usize) -> QueuedWorkClaimPolicy {

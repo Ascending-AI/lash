@@ -43,14 +43,9 @@ const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = $1
        )";
 
 fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> String {
-    let delivery_gate = match boundary {
-        QueuedWorkClaimBoundary::Idle => "",
-        QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
-            "WHERE head_delivery_policy = 'earliest_safe_boundary'"
-        }
-    };
-    format!(
-        "queued_work_head_candidate AS (
+    if boundary == QueuedWorkClaimBoundary::Idle {
+        return format!(
+            "queued_work_head_candidate AS (
             SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
             FROM (
                 SELECT enqueue_seq AS head_enqueue_seq,
@@ -62,7 +57,50 @@ fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) ->
                 ORDER BY enqueue_seq ASC
                 LIMIT 1
             ) AS unfiltered_head
-            {delivery_gate}
+         )"
+        );
+    }
+    format!(
+        "queued_work_unfiltered_head AS (
+            SELECT enqueue_seq AS head_enqueue_seq,
+                   batch_id AS head_batch_id,
+                   delivery_policy AS head_delivery_policy,
+                   claim_id AS head_claim_id
+            FROM lash_queued_work_batches
+            WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+            ORDER BY enqueue_seq ASC
+            LIMIT 1
+         ),
+         queued_work_head_candidate AS (
+            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
+            FROM (
+                SELECT candidate.enqueue_seq AS head_enqueue_seq,
+                       candidate.batch_id AS head_batch_id,
+                       candidate.delivery_policy AS head_delivery_policy,
+                       candidate.claim_id AS head_claim_id
+                FROM lash_queued_work_batches AS candidate
+                CROSS JOIN queued_work_unfiltered_head AS unfiltered
+                WHERE candidate.session_id = $1
+                  AND candidate.available_at_ms <= FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)
+                  AND (
+                       candidate.claim_token IS NULL
+                       OR candidate.claim_session_lease_generation <> $2
+                  )
+                  AND (
+                       (
+                            candidate.enqueue_seq = unfiltered.head_enqueue_seq
+                            AND unfiltered.head_delivery_policy = 'earliest_safe_boundary'
+                       )
+                       OR (
+                            unfiltered.head_delivery_policy <> 'earliest_safe_boundary'
+                            AND unfiltered.head_claim_id IS NOT NULL
+                            AND candidate.claim_id IS DISTINCT FROM unfiltered.head_claim_id
+                       )
+                  )
+                ORDER BY candidate.enqueue_seq ASC
+                LIMIT 1
+            ) AS boundary_head
+            WHERE head_delivery_policy = 'earliest_safe_boundary'
          )"
     )
 }
@@ -78,6 +116,7 @@ fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) 
          FROM lash_queued_work_batches
          CROSS JOIN queued_work_head_candidate
          WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+           AND enqueue_seq >= head_enqueue_seq
            AND (head_claim_id IS NULL OR lash_queued_work_batches.claim_id = head_claim_id)
          ORDER BY enqueue_seq ASC
          LIMIT COALESCE((
@@ -1745,43 +1784,69 @@ impl QueuedWorkStore for PostgresSessionStore {
             .into_iter()
             .map(queued_batch_row)
             .collect::<Result<Vec<_>, _>>()?;
-        let mut requested_batches = std::collections::BTreeMap::new();
-        for row in candidate_rows
+        let candidate_batch_claims = candidate_rows
             .iter()
-            .filter(|row| requested_ids.contains(&row.batch_id))
-        {
-            let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
-            if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
-                tx.rollback().await.map_err(store_sqlx_error)?;
-                return Ok(None);
-            }
-            requested_batches.insert(row.batch_id.clone(), batch);
-        }
-        if requested_batches.len() != requested_ids.len() {
-            tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        }
-        let Some(first_position) = candidate_rows
-            .iter()
-            .position(|row| requested_ids.contains(&row.batch_id))
-        else {
-            tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        };
-        let mut selected = candidate_rows[first_position..]
-            .iter()
-            .take_while(|row| requested_ids.contains(&row.batch_id))
-            .cloned()
+            .map(|row| (row.batch_id.clone(), row.claim_id.clone()))
             .collect::<Vec<_>>();
-        let mut selected_batches = selected
-            .iter()
-            .map(|row| {
-                requested_batches
-                    .get(&row.batch_id)
-                    .expect("contiguous exact row was validated")
-                    .clone()
-            })
-            .collect::<Vec<_>>();
+        let interrupted_positions =
+            lash_core::store::queued_work::select_interrupted_exact_claim_indices(
+                &candidate_batch_claims,
+                batch_ids,
+            )
+            .map_err(|required_batch_ids| {
+                StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }
+            })?;
+        let (mut selected, mut selected_batches) =
+            if let Some(interrupted_positions) = interrupted_positions {
+                let selected = interrupted_positions
+                    .into_iter()
+                    .map(|position| candidate_rows[position].clone())
+                    .collect::<Vec<_>>();
+                let mut selected_batches = Vec::with_capacity(selected.len());
+                for row in &selected {
+                    selected_batches.push(queued_work_batch_from_row(&mut tx, row.clone()).await?);
+                }
+                (selected, selected_batches)
+            } else {
+                let mut requested_batches = std::collections::BTreeMap::new();
+                for row in candidate_rows
+                    .iter()
+                    .filter(|row| requested_ids.contains(&row.batch_id))
+                {
+                    let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
+                    if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
+                        tx.rollback().await.map_err(store_sqlx_error)?;
+                        return Ok(None);
+                    }
+                    requested_batches.insert(row.batch_id.clone(), batch);
+                }
+                if requested_batches.len() != requested_ids.len() {
+                    tx.rollback().await.map_err(store_sqlx_error)?;
+                    return Ok(None);
+                }
+                let Some(first_position) = candidate_rows
+                    .iter()
+                    .position(|row| requested_ids.contains(&row.batch_id))
+                else {
+                    tx.rollback().await.map_err(store_sqlx_error)?;
+                    return Ok(None);
+                };
+                let selected = candidate_rows[first_position..]
+                    .iter()
+                    .take_while(|row| requested_ids.contains(&row.batch_id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let selected_batches = selected
+                    .iter()
+                    .map(|row| {
+                        requested_batches
+                            .get(&row.batch_id)
+                            .expect("contiguous exact row was validated")
+                            .clone()
+                    })
+                    .collect::<Vec<_>>();
+                (selected, selected_batches)
+            };
         let candidates = selected
             .iter()
             .zip(selected_batches.iter())

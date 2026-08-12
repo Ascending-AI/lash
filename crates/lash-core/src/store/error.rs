@@ -226,6 +226,11 @@ pub enum StoreError {
         superseding_claim_id: Option<Box<str>>,
         superseding_session_lease_generation: Option<Box<u64>>,
     },
+    #[doc(hidden)]
+    #[error(
+        "selected queued work intersects an interrupted claim and requires its full composition: {required_batch_ids:?}"
+    )]
+    SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids: Vec<String> },
     #[error(
         "turn input claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
     )]
@@ -464,6 +469,9 @@ impl StoreError {
             Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
             Self::CurrentFrameNodeMismatch { .. } => "CurrentFrameNodeMismatch",
             Self::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
+            Self::SelectedQueuedWorkRequiresInterruptedComposition { .. } => {
+                "SelectedQueuedWorkRequiresInterruptedComposition"
+            }
             Self::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
             Self::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
             Self::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",

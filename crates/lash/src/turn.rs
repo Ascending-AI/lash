@@ -843,11 +843,23 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
             Err(lash_core::SelectedQueuedWorkDrainError::Runtime(error)) => {
                 return Err(error.into());
             }
-            Err(lash_core::SelectedQueuedWorkDrainError::Refused {
-                unclaimed_batch_ids,
-            }) => {
+            Err(lash_core::SelectedQueuedWorkDrainError::Refused { cause }) => {
                 return Err(EmbedError::SelectedQueuedWorkDrainRefused {
-                    unclaimed_batch_ids,
+                    cause: match cause {
+                        lash_core::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                            unclaimed_batch_ids,
+                        } => SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                            unclaimed_batch_ids,
+                        },
+                        lash_core::SelectedQueuedWorkDrainRefusalCause::
+                            InterruptedBatchRequiresFullComposition { required_batch_ids } => {
+                            SelectedQueuedWorkDrainRefusalCause::
+                                InterruptedBatchRequiresFullComposition { required_batch_ids }
+                        }
+                        lash_core::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
+                            SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
+                        }
+                    },
                 });
             }
         }

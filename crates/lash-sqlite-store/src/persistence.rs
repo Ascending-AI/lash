@@ -55,14 +55,9 @@ const SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = ?1
        )";
 
 fn sqlite_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> String {
-    let delivery_gate = match boundary {
-        QueuedWorkClaimBoundary::Idle => "",
-        QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
-            "WHERE head_delivery_policy = 'earliest_safe_boundary'"
-        }
-    };
-    format!(
-        "queued_work_head_candidate AS (
+    if boundary == QueuedWorkClaimBoundary::Idle {
+        return format!(
+            "queued_work_head_candidate AS (
             SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
             FROM (
                 SELECT enqueue_seq AS head_enqueue_seq,
@@ -74,7 +69,53 @@ fn sqlite_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> S
                 ORDER BY enqueue_seq ASC
                 LIMIT 1
             ) AS unfiltered_head
-            {delivery_gate}
+         )"
+        );
+    }
+    format!(
+        "queued_work_unfiltered_head AS (
+            SELECT enqueue_seq AS head_enqueue_seq,
+                   batch_id AS head_batch_id,
+                   delivery_policy AS head_delivery_policy,
+                   claim_id AS head_claim_id
+            FROM queued_work_batches
+            WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+            ORDER BY enqueue_seq ASC
+            LIMIT 1
+         ),
+         queued_work_head_candidate AS (
+            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
+            FROM (
+                SELECT candidate.enqueue_seq AS head_enqueue_seq,
+                       candidate.batch_id AS head_batch_id,
+                       candidate.delivery_policy AS head_delivery_policy,
+                       candidate.claim_id AS head_claim_id
+                FROM queued_work_batches AS candidate
+                CROSS JOIN queued_work_unfiltered_head AS unfiltered
+                WHERE candidate.session_id = ?1
+                  AND candidate.available_at_ms <= ?2
+                  AND (
+                       candidate.claim_token IS NULL
+                       OR candidate.claim_session_lease_generation <> ?3
+                  )
+                  AND (
+                       (
+                            candidate.enqueue_seq = unfiltered.head_enqueue_seq
+                            AND unfiltered.head_delivery_policy = 'earliest_safe_boundary'
+                       )
+                       OR (
+                            unfiltered.head_delivery_policy <> 'earliest_safe_boundary'
+                            AND unfiltered.head_claim_id IS NOT NULL
+                            AND (
+                                 candidate.claim_id IS NULL
+                                 OR candidate.claim_id <> unfiltered.head_claim_id
+                            )
+                       )
+                  )
+                ORDER BY candidate.enqueue_seq ASC
+                LIMIT 1
+            ) AS boundary_head
+            WHERE head_delivery_policy = 'earliest_safe_boundary'
          )"
     )
 }
@@ -90,6 +131,7 @@ fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) ->
          FROM queued_work_batches
          CROSS JOIN queued_work_head_candidate
          WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+           AND enqueue_seq >= head_enqueue_seq
            AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
          ORDER BY enqueue_seq ASC
          LIMIT COALESCE((
@@ -1773,40 +1815,70 @@ impl QueuedWorkStore for Store {
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };
-                    let mut requested_batches = std::collections::BTreeMap::new();
-                    for row in candidate_rows
+                    let candidate_batch_claims = candidate_rows
                         .iter()
-                        .filter(|row| requested_ids.contains(&row.batch_id))
-                    {
-                        let batch = queued_work_batch_from_conn(tx, row.clone())?;
-                        if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
-                            return Ok(None);
-                        }
-                        requested_batches.insert(row.batch_id.clone(), batch);
-                    }
-                    if requested_batches.len() != requested_ids.len() {
-                        return Ok(None);
-                    }
-                    let Some(first_position) = candidate_rows
-                        .iter()
-                        .position(|row| requested_ids.contains(&row.batch_id))
-                    else {
-                        return Ok(None);
-                    };
-                    let mut rows = candidate_rows[first_position..]
-                        .iter()
-                        .take_while(|row| requested_ids.contains(&row.batch_id))
-                        .cloned()
+                        .map(|row| (row.batch_id.clone(), row.claim_id.clone()))
                         .collect::<Vec<_>>();
-                    let mut batches = rows
-                        .iter()
-                        .map(|row| {
-                            requested_batches
-                                .get(&row.batch_id)
-                                .expect("contiguous exact row was validated")
-                                .clone()
-                        })
-                        .collect::<Vec<_>>();
+                    let interrupted_positions =
+                        lash_core::store::queued_work::select_interrupted_exact_claim_indices(
+                            &candidate_batch_claims,
+                            &batch_ids,
+                        )
+                        .map_err(|required_batch_ids| {
+                            StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                                required_batch_ids,
+                            }
+                        })?;
+                    let (mut rows, mut batches) =
+                        if let Some(interrupted_positions) = interrupted_positions {
+                            let rows = interrupted_positions
+                                .into_iter()
+                                .map(|position| candidate_rows[position].clone())
+                                .collect::<Vec<_>>();
+                            let batches = rows
+                                .iter()
+                                .map(|row| queued_work_batch_from_conn(tx, row.clone()))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            (rows, batches)
+                        } else {
+                            let mut requested_batches = std::collections::BTreeMap::new();
+                            for row in candidate_rows
+                                .iter()
+                                .filter(|row| requested_ids.contains(&row.batch_id))
+                            {
+                                let batch = queued_work_batch_from_conn(tx, row.clone())?;
+                                if batch.work_class()
+                                    != Some(lash_core::store::QueuedWorkClass::TurnWork)
+                                {
+                                    return Ok(None);
+                                }
+                                requested_batches.insert(row.batch_id.clone(), batch);
+                            }
+                            if requested_batches.len() != requested_ids.len() {
+                                return Ok(None);
+                            }
+                            let Some(first_position) = candidate_rows
+                                .iter()
+                                .position(|row| requested_ids.contains(&row.batch_id))
+                            else {
+                                return Ok(None);
+                            };
+                            let rows = candidate_rows[first_position..]
+                                .iter()
+                                .take_while(|row| requested_ids.contains(&row.batch_id))
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            let batches = rows
+                                .iter()
+                                .map(|row| {
+                                    requested_batches
+                                        .get(&row.batch_id)
+                                        .expect("contiguous exact row was validated")
+                                        .clone()
+                                })
+                                .collect::<Vec<_>>();
+                            (rows, batches)
+                        };
                     let candidates = rows
                         .iter()
                         .zip(batches.iter())

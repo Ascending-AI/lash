@@ -1324,33 +1324,56 @@ impl QueuedWorkStore for RuntimePerfStore {
             })
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        let requested_indices = claimable_indices
+        let candidate_batch_claims = claimable_indices
             .iter()
-            .copied()
-            .filter(|index| requested_ids.contains(&queued[*index].batch.batch_id))
+            .map(|index| {
+                (
+                    queued[*index].batch.batch_id.clone(),
+                    queued[*index].claim_id.clone(),
+                )
+            })
             .collect::<Vec<_>>();
-        if requested_indices.len() != requested_ids.len() {
-            return Ok(None);
-        }
-        for index in &requested_indices {
-            if Self::queued_batch_work_class(&queued[*index].batch)?
-                != lash_core::store::QueuedWorkClass::TurnWork
-            {
+        let interrupted_indices = store::queued_work::select_interrupted_exact_claim_indices(
+            &candidate_batch_claims,
+            batch_ids,
+        )
+        .map_err(|required_batch_ids| {
+            StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }
+        })?;
+        let mut indices = if let Some(interrupted_indices) = interrupted_indices {
+            interrupted_indices
+                .into_iter()
+                .map(|position| claimable_indices[position])
+                .collect::<Vec<_>>()
+        } else {
+            let requested_indices = claimable_indices
+                .iter()
+                .copied()
+                .filter(|index| requested_ids.contains(&queued[*index].batch.batch_id))
+                .collect::<Vec<_>>();
+            if requested_indices.len() != requested_ids.len() {
                 return Ok(None);
             }
-        }
-        let first_requested = requested_indices[0];
-        let Some(first_position) = claimable_indices
-            .iter()
-            .position(|index| *index == first_requested)
-        else {
-            return Ok(None);
+            for index in &requested_indices {
+                if Self::queued_batch_work_class(&queued[*index].batch)?
+                    != lash_core::store::QueuedWorkClass::TurnWork
+                {
+                    return Ok(None);
+                }
+            }
+            let first_requested = requested_indices[0];
+            let Some(first_position) = claimable_indices
+                .iter()
+                .position(|index| *index == first_requested)
+            else {
+                return Ok(None);
+            };
+            claimable_indices[first_position..]
+                .iter()
+                .copied()
+                .take_while(|index| requested_ids.contains(&queued[*index].batch.batch_id))
+                .collect::<Vec<_>>()
         };
-        let mut indices = claimable_indices[first_position..]
-            .iter()
-            .copied()
-            .take_while(|index| requested_ids.contains(&queued[*index].batch.batch_id))
-            .collect::<Vec<_>>();
         let candidates = indices
             .iter()
             .map(|index| {

@@ -4399,6 +4399,7 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
     release_session_execution_lease_for_test(&store, &accepted_session_lease).await;
 }
 
+#[doc(hidden)]
 pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -5786,6 +5787,39 @@ async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
             .is_none(),
         "the active checkpoint boundary must produce a literal empty claim"
     );
+    for (source_key, label) in [("gate-fresh-w1", "fresh-w1"), ("gate-fresh-w2", "fresh-w2")] {
+        store
+            .enqueue_queued_work(
+                queued_draft(session_id, label, DeliveryPolicy::EarliestSafeBoundary)
+                    .with_source_key(source_key)
+                    .with_merge_key("gate-fresh-key"),
+            )
+            .await
+            .expect("enqueue fresh checkpoint-deliverable work");
+    }
+    let fresh_checkpoint_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim fresh work while idle-only predecessor remains withheld")
+        .expect("fresh checkpoint-deliverable work remains claimable");
+    assert_eq!(
+        fresh_checkpoint_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gate-fresh-w1"), 3), (Some("gate-fresh-w2"), 4),]
+    );
+    store
+        .abandon_queued_work_claim(&fresh_checkpoint_claim)
+        .await
+        .expect("return fresh checkpoint claim before idle redrive");
     let after_boundary = store
         .claim_ready_queued_work(
             session_id,

@@ -12,12 +12,24 @@ use lash_sansio::core_support::*;
 use std::pin::Pin;
 
 /// Typed outcome of a host-selected queued-work drain before turn execution.
+#[doc(hidden)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectedQueuedWorkDrainRefusalCause {
+    UnclaimableTogether { unclaimed_batch_ids: Vec<String> },
+    InterruptedBatchRequiresFullComposition { required_batch_ids: Vec<String> },
+    ExecutionLaneBusy,
+}
+
+/// Typed outcome of a host-selected queued-work drain before turn execution.
+#[doc(hidden)]
 #[derive(Debug, thiserror::Error)]
 pub enum SelectedQueuedWorkDrainError {
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
-    #[error("selected queued-work batches could not be claimed together: {unclaimed_batch_ids:?}")]
-    Refused { unclaimed_batch_ids: Vec<String> },
+    #[error("selected queued-work drain refused: {cause:?}")]
+    Refused {
+        cause: SelectedQueuedWorkDrainRefusalCause,
+    },
 }
 
 fn trace_fields_from_outcome(
@@ -1460,7 +1472,13 @@ impl LashRuntime {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
         let Some(session_execution_lease) = self.claim_session_execution_lease().await? else {
-            return Ok(None);
+            return if selected_batch_ids.is_some() {
+                Err(SelectedQueuedWorkDrainError::Refused {
+                    cause: SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy,
+                })
+            } else {
+                Ok(None)
+            };
         };
         // This snapshot stays current while leading commands drain because
         // `RefreshToolCatalog` never acquires a fresh session lease; any later
@@ -1598,8 +1616,24 @@ impl LashRuntime {
                     claim_policy,
                 )
                 .await
-        }
-        .map_err(super::runtime_error_from_store_commit)?;
+        };
+        let claim = match claim {
+            Err(crate::StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                required_batch_ids,
+            }) => {
+                session_execution_lease
+                    .release_if_live()
+                    .await
+                    .map_err(|err| {
+                        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
+                    })?;
+                return Err(SelectedQueuedWorkDrainError::Refused {
+                    cause: SelectedQueuedWorkDrainRefusalCause::
+                        InterruptedBatchRequiresFullComposition { required_batch_ids },
+                });
+            }
+            other => other.map_err(super::runtime_error_from_store_commit)?,
+        };
         let Some(claim) = claim else {
             session_execution_lease
                 .release_if_live()
@@ -1609,7 +1643,9 @@ impl LashRuntime {
                 })?;
             return if let Some(batch_ids) = selected_batch_ids {
                 Err(SelectedQueuedWorkDrainError::Refused {
-                    unclaimed_batch_ids: batch_ids.to_vec(),
+                    cause: SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                        unclaimed_batch_ids: batch_ids.to_vec(),
+                    },
                 })
             } else {
                 Ok(None)
@@ -1638,7 +1674,9 @@ impl LashRuntime {
                         RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
                     })?;
                 return Err(SelectedQueuedWorkDrainError::Refused {
-                    unclaimed_batch_ids,
+                    cause: SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                        unclaimed_batch_ids,
+                    },
                 });
             }
         }

@@ -164,6 +164,118 @@ fn workbench_lists_and_controls_individual_queued_batches() {
 }
 
 #[test]
+fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
+    run_async_test_on_stack_budget("workbench-selected-drain-refusal", || async {
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-selected-drain-refusal-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create selected-drain refusal dir");
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        );
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
+            &data_dir,
+            16,
+            lash::testing::TestProvider::builder()
+                .kind("workbench-selected-drain-refusal-test")
+                .complete(|_| async {
+                    Ok(text_response(
+                        "<lashlang>\nfinish \"processed selected row\"\n</lashlang>",
+                    ))
+                })
+                .build()
+                .into_handle(),
+            in_memory_trigger_store(),
+            Arc::clone(&store_factory),
+            Some(inert_queued_work_driver()),
+            32_768,
+        )
+        .await;
+        let session_id = state.current_session_id();
+        let session = state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .expect("open selected-drain refusal session");
+        let store = store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: lash::persistence::SessionRelation::Root,
+                policy: session.policy_snapshot(),
+            })
+            .await
+            .expect("open selected-drain refusal store");
+        for (source_key, merge_key) in [
+            ("workbench-selected-a1", "a"),
+            ("workbench-selected-b1", "b"),
+            ("workbench-selected-a2", "a"),
+        ] {
+            store
+                .enqueue_queued_work(
+                    queued_work_test_draft(&session_id, source_key).with_merge_key(merge_key),
+                )
+                .await
+                .expect("enqueue selected-drain refusal row");
+        }
+
+        let error = session
+            .queued_turn()
+            .batch_ids(["recording-qwb-1", "recording-qwb-3"])
+            .run()
+            .await
+            .expect_err("a key break refuses the original selected set");
+        match error {
+            lash::EmbedError::SelectedQueuedWorkDrainRefused { cause } => match cause {
+                lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                    unclaimed_batch_ids,
+                } => assert_eq!(unclaimed_batch_ids, vec!["recording-qwb-3".to_string()]),
+                lash::SelectedQueuedWorkDrainRefusalCause::
+                    InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!(
+                    "key-break example did not create interrupted composition {required_batch_ids:?}"
+                ),
+                lash::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
+                    panic!("key-break example does not hold the execution lane")
+                }
+            },
+            other => panic!("expected typed unclaimable-together refusal, got {other:?}"),
+        }
+
+        let output = session
+            .queued_turn()
+            .batch_ids(["recording-qwb-1"])
+            .run()
+            .await
+            .expect("re-select the claimable prefix")
+            .expect("the re-selected row executes");
+        assert_eq!(
+            output
+                .activities
+                .iter()
+                .find_map(|activity| match &activity.event {
+                    lash::TurnEvent::QueuedWorkStarted { batch_ids, .. } => {
+                        Some(batch_ids.clone())
+                    }
+                    _ => None,
+                }),
+            Some(vec!["recording-qwb-1".to_string()])
+        );
+        assert_eq!(
+            session
+                .queued_work()
+                .await
+                .expect("list after selected-drain re-selection")
+                .iter()
+                .map(|batch| batch.batch_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["recording-qwb-2", "recording-qwb-3"]
+        );
+        let _ = std::fs::remove_dir_all(data_dir);
+    });
+}
+
+#[test]
 fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery() {
     run_async_test_on_stack_budget("workbench-targeted-wake-drain", || async {
         let data_dir = std::env::temp_dir().join(format!(
