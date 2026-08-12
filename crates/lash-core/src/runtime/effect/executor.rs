@@ -423,6 +423,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             pending_turn_input_claims: driver.pending_turn_input_claims.clone(),
             pending_checkpoint_turn_input_claim: driver.pending_checkpoint_turn_input_claim.clone(),
             checkpoint_messages: driver.checkpoint_messages.clone(),
+            parent_end_actions: driver.parent_end_actions.clone(),
             session_execution_lease: driver.session_execution_lease.clone(),
             runtime_lease_owner: driver.runtime_lease_owner.clone(),
             turn_phase_probe: driver.turn_phase_probe.clone(),

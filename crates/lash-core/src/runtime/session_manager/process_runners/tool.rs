@@ -95,6 +95,7 @@ impl RuntimeSessionServices {
         .await;
         drop(tool_context);
         let launch = coordinated.launch;
+        crate::tool_dispatch::execute_parent_end_actions(dispatch.as_ref()).await;
         let output = match launch {
             crate::tool_dispatch::ToolCallLaunch::Done(outcome) => outcome.record.output,
             crate::tool_dispatch::ToolCallLaunch::Pending(pending) => {

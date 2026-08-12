@@ -53,7 +53,9 @@ impl ToolIntentKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolIntentIdentity {
     pub session_id: String,
-    pub turn_id: String,
+    /// The enclosing execution-scope id: a turn id for turn scope and a
+    /// process id for process scope.
+    pub execution_scope_id: String,
     pub tool_call_id: String,
     pub intent_index: u32,
     pub replay_key: String,
@@ -120,12 +122,16 @@ pub enum ToolIntentExecutionOutcome {
         kind: ToolIntentKind,
         refusal: ToolIntentRefusalReason,
     },
+    /// Batch-level protocol refusal used when the recorded batch contains no
+    /// declarations to which the refusal could honestly be attached.
+    ProtocolRefused { refusal: ToolIntentRefusalReason },
 }
 
 impl ToolIntentExecutionOutcome {
-    pub fn kind(&self) -> ToolIntentKind {
+    pub fn kind(&self) -> Option<ToolIntentKind> {
         match self {
-            Self::Executed { kind, .. } | Self::Refused { kind, .. } => *kind,
+            Self::Executed { kind, .. } | Self::Refused { kind, .. } => Some(*kind),
+            Self::ProtocolRefused { .. } => None,
         }
     }
 
@@ -152,6 +158,9 @@ impl ToolIntentExecutionOutcome {
                 intent_index,
                 refusal.code()
             ),
+            Self::ProtocolRefused { refusal } => {
+                format!("[tool intent batch refused: {}]", refusal.code())
+            }
         }
     }
 }

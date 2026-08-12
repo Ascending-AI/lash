@@ -55,6 +55,16 @@ pub trait ProcessService: Send + Sync {
         ))
     }
 
+    /// Issues the single process-start command for a recorded tool intent.
+    /// Implementations must not consult live visibility, existence, terminal,
+    /// or host policy state before crossing the effect-controller boundary.
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &str,
+        request: ProcessStartRequest,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessHandleSummary, PluginError>;
+
     async fn start(
         &self,
         session_id: &str,
@@ -120,6 +130,15 @@ pub trait ProcessService: Send + Sync {
         self.cancel(session_id, process_id, scope).await
     }
 
+    /// Journal-first cancellation used only by the recorded intent protocol.
+    async fn cancel_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessRecord, PluginError>;
+
     async fn cancel_visible(
         &self,
         session_id: &str,
@@ -163,6 +182,17 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessEvent, PluginError>;
 
+    /// Journal-first signal used only by the recorded intent protocol.
+    async fn signal_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessEvent, PluginError>;
+
     async fn emit_event(
         &self,
         _session_id: &str,
@@ -176,6 +206,17 @@ pub trait ProcessService: Send + Sync {
             "process event emission is unavailable in this runtime".to_string(),
         ))
     }
+
+    /// Journal-first event emission used only by the recorded intent protocol.
+    async fn emit_event_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessEvent, PluginError>;
 
     /// Signal a process whose handle is possessed by the current run.
     ///
@@ -215,6 +256,17 @@ pub struct UnavailableProcessService;
 
 #[async_trait::async_trait]
 impl ProcessService for UnavailableProcessService {
+    async fn start_from_recorded_intent(
+        &self,
+        _session_id: &str,
+        _request: ProcessStartRequest,
+        _scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessHandleSummary, PluginError> {
+        Err(PluginError::Session(
+            "processes are unavailable in this runtime".to_string(),
+        ))
+    }
+
     async fn start(
         &self,
         _session_id: &str,
@@ -270,6 +322,18 @@ impl ProcessService for UnavailableProcessService {
         ))
     }
 
+    async fn cancel_recorded_intent(
+        &self,
+        _session_id: &str,
+        _process_id: &str,
+        _reason: Option<String>,
+        _scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessRecord, PluginError> {
+        Err(PluginError::Session(
+            "processes are unavailable in this runtime".to_string(),
+        ))
+    }
+
     async fn signal(
         &self,
         _session_id: &str,
@@ -281,6 +345,34 @@ impl ProcessService for UnavailableProcessService {
     ) -> Result<ProcessEvent, PluginError> {
         Err(PluginError::Session(
             "process signalling is unavailable in this runtime".to_string(),
+        ))
+    }
+
+    async fn signal_recorded_intent(
+        &self,
+        _session_id: &str,
+        _process_id: &str,
+        _signal_name: String,
+        _signal_id: String,
+        _payload: serde_json::Value,
+        _scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessEvent, PluginError> {
+        Err(PluginError::Session(
+            "processes are unavailable in this runtime".to_string(),
+        ))
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        _session_id: &str,
+        _process_id: &str,
+        _event_type: String,
+        _replay_key: String,
+        _payload: serde_json::Value,
+        _scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessEvent, PluginError> {
+        Err(PluginError::Session(
+            "processes are unavailable in this runtime".to_string(),
         ))
     }
 
@@ -361,6 +453,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ProcessService for RecordingProcessService {
+        async fn start_from_recorded_intent(
+            &self,
+            _session_id: &str,
+            _request: ProcessStartRequest,
+            _scope: ProcessOpScope<'_>,
+        ) -> Result<ProcessHandleSummary, PluginError> {
+            Err(PluginError::Session("start not implemented".to_string()))
+        }
+
         async fn start(
             &self,
             _session_id: &str,
@@ -422,6 +523,16 @@ mod tests {
             Ok(record)
         }
 
+        async fn cancel_recorded_intent(
+            &self,
+            session_id: &str,
+            process_id: &str,
+            _reason: Option<String>,
+            scope: ProcessOpScope<'_>,
+        ) -> Result<ProcessRecord, PluginError> {
+            self.cancel(session_id, process_id, scope).await
+        }
+
         async fn signal(
             &self,
             _session_id: &str,
@@ -432,6 +543,40 @@ mod tests {
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessEvent, PluginError> {
             Err(PluginError::Session("signal not implemented".to_string()))
+        }
+
+        async fn signal_recorded_intent(
+            &self,
+            session_id: &str,
+            process_id: &str,
+            signal_name: String,
+            signal_id: String,
+            payload: serde_json::Value,
+            scope: ProcessOpScope<'_>,
+        ) -> Result<ProcessEvent, PluginError> {
+            self.signal(
+                session_id,
+                process_id,
+                signal_name,
+                signal_id,
+                payload,
+                scope,
+            )
+            .await
+        }
+
+        async fn emit_event_recorded_intent(
+            &self,
+            _session_id: &str,
+            _process_id: &str,
+            _event_type: String,
+            _replay_key: String,
+            _payload: serde_json::Value,
+            _scope: ProcessOpScope<'_>,
+        ) -> Result<ProcessEvent, PluginError> {
+            Err(PluginError::Session(
+                "event emission not implemented".to_string(),
+            ))
         }
 
         async fn transfer(

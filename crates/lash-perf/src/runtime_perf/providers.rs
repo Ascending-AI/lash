@@ -233,6 +233,10 @@ impl ToolProvider for BenchmarkEchoTool {
         }
     }
 
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == benchmark_async_tool_definition().id()
+    }
+
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolResult {
         match call.name {
             "benchmark_echo" => execute_benchmark_echo(call).await,

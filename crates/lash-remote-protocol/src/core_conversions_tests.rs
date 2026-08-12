@@ -910,7 +910,35 @@ fn remote_turn_result_maps_core_semantics() {
             record: call_record.clone(),
         }),
     );
-    let remote = RemoteTurnResult::from_core("session", "turn", turn, [result_activity]);
+    let intent_outcome = RemoteToolIntentExecutionOutcome::Executed {
+        identity: RemoteToolIntentIdentity {
+            session_id: "session".to_string(),
+            execution_scope_id: "turn".to_string(),
+            tool_call_id: "exec-call".to_string(),
+            intent_index: 0,
+            replay_key: "intent-replay-key".to_string(),
+        },
+        kind: RemoteToolIntentKind::EmitProcessEvent,
+        result: serde_json::json!({"sequence": 3}),
+    };
+    let remote = RemoteTurnResult::from_core(
+        "session",
+        "turn",
+        turn,
+        [
+            result_activity,
+            RemoteTurnActivity {
+                protocol_version: REMOTE_PROTOCOL_VERSION,
+                sequence: 1,
+                id: "intent-activity".to_string(),
+                correlation_id: "intent-correlation".to_string(),
+                event: RemoteTurnEvent::ToolIntentOutcome {
+                    call_id: "exec-call".to_string(),
+                    outcome: intent_outcome.clone(),
+                },
+            },
+        ],
+    );
     remote.validate().expect("valid turn result");
     assert_eq!(remote.status, RemoteTurnStatus::Completed);
     assert_eq!(remote.usage.total.input_tokens, 4);
@@ -927,6 +955,7 @@ fn remote_turn_result_maps_core_semantics() {
         .expect("attempt evidence crosses the remote result boundary");
     assert_eq!(evidence.served_model.as_deref(), Some("served-model"));
     assert_eq!(evidence.reasoning_output_tokens, Some(0));
+    assert_eq!(remote.tool_calls[0].intent_outcomes, vec![intent_outcome]);
     assert!(matches!(
         &remote.tool_calls[0].outcome,
         RemoteToolCallOutcome::Success(value) if value == &serde_json::json!({ "ok": true })
@@ -1100,15 +1129,12 @@ fn remote_activity_preserves_typed_tool_intent_refusal_payload() {
         remote.event,
         RemoteTurnEvent::ToolIntentOutcome {
             call_id: "call-1".to_string(),
-            outcome: serde_json::json!({
-                "status": "refused",
-                "intent_index": 0,
-                "kind": "signal_process",
-                "refusal": {
-                    "reason": "unsupported_protocol_version",
-                    "recorded": 2,
-                },
-            }),
+            outcome: RemoteToolIntentExecutionOutcome::Refused {
+                identity: None,
+                intent_index: 0,
+                kind: RemoteToolIntentKind::SignalProcess,
+                refusal: RemoteToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 2 },
+            },
         }
     );
 }

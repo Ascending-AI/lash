@@ -281,8 +281,7 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
             lash_core::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
                 Self::ToolIntentOutcome {
                     call_id,
-                    outcome: serde_json::to_value(outcome)
-                        .unwrap_or(serde_json::Value::Null),
+                    outcome: outcome.into(),
                 }
             }
             lash_core::TurnEvent::FinalValue { value } => Self::FinalValue { value },

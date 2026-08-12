@@ -1,0 +1,5 @@
+error[E0599]: no method named `emit_child_process_started` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/attempt_context_has_no_child_trace_emission.rs:2:13
+  |
+2 |     context.emit_child_process_started("process", None);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&AttemptContext<'_>`

@@ -360,7 +360,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 outcome: ToolIntentExecutionOutcome::Executed {
                     identity: ToolIntentIdentity {
                         session_id: "session-1".to_string(),
-                        turn_id: "turn-1".to_string(),
+                        execution_scope_id: "turn-1".to_string(),
                         tool_call_id: "call-1".to_string(),
                         intent_index: 0,
                         replay_key: "tool-intent:v1:sha256:literal".to_string(),

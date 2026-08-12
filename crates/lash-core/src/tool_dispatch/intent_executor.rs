@@ -1,21 +1,6 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::ToolDispatchContext;
-
-static START_EXECUTED: AtomicU64 = AtomicU64::new(0);
-static SIGNAL_EXECUTED: AtomicU64 = AtomicU64::new(0);
-static CANCEL_EXECUTED: AtomicU64 = AtomicU64::new(0);
-static EVENT_EXECUTED: AtomicU64 = AtomicU64::new(0);
-static REFUSED: AtomicU64 = AtomicU64::new(0);
-static REFUSED_UNSUPPORTED_VERSION: AtomicU64 = AtomicU64::new(0);
-static REFUSED_MISSING_CALL_ID: AtomicU64 = AtomicU64::new(0);
-static REFUSED_INDEX_OVERFLOW: AtomicU64 = AtomicU64::new(0);
-static REFUSED_COUNT_BUDGET: AtomicU64 = AtomicU64::new(0);
-static REFUSED_BYTE_BUDGET: AtomicU64 = AtomicU64::new(0);
-static REFUSED_PER_KIND_BUDGET: AtomicU64 = AtomicU64::new(0);
-static REFUSED_SESSION_MISMATCH: AtomicU64 = AtomicU64::new(0);
-static REFUSED_COMMAND_FAILED: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) async fn execute_final_tool_intents(
     context: &ToolDispatchContext<'_>,
@@ -23,19 +8,19 @@ pub(crate) async fn execute_final_tool_intents(
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Vec<crate::ToolIntentExecutionOutcome> {
+    let execution_scope_id = context.effect_controller.scoped().scope_id().to_string();
+    if let Some(refusal) = admit_batch(&context.session_id, tool_call_id, intents) {
+        return refuse_all(context, &execution_scope_id, tool_call_id, intents, refusal);
+    }
     if intents.intents.is_empty() {
         return Vec::new();
-    }
-    let turn_id = context.effect_controller.scoped().scope_id().to_string();
-    if let Some(refusal) = admit_batch(&context.session_id, tool_call_id, intents) {
-        return refuse_all(context, &turn_id, tool_call_id, intents, refusal);
     }
 
     let mut outcomes = Vec::with_capacity(intents.intents.len());
     for (index, intent) in intents.intents.iter().enumerate() {
         let identity = match crate::derive_tool_intent_identity(
             &context.session_id,
-            &turn_id,
+            &execution_scope_id,
             tool_call_id,
             index,
         ) {
@@ -49,7 +34,7 @@ pub(crate) async fn execute_final_tool_intents(
             target: "lash::tool_intent",
             "tool_intent.execute",
             session_id = %identity.session_id,
-            turn_id = %identity.turn_id,
+            execution_scope_id = %identity.execution_scope_id,
             tool_call_id = %identity.tool_call_id,
             intent_index = identity.intent_index,
             intent_kind = intent.kind().as_str(),
@@ -59,7 +44,6 @@ pub(crate) async fn execute_final_tool_intents(
         let result = execute_one(context, intent, &identity, child_trace_hook).await;
         let outcome = match result {
             Ok(result) => {
-                executed_counter(intent.kind()).fetch_add(1, Ordering::Relaxed);
                 record_executed_metric(intent.kind());
                 crate::ToolIntentExecutionOutcome::Executed {
                     identity,
@@ -72,8 +56,8 @@ pub(crate) async fn execute_final_tool_intents(
                 intent.kind(),
                 Some(identity),
                 crate::ToolIntentRefusalReason::CommandFailed {
-                    code: "process_command_failed".to_string(),
-                    message: error.to_string(),
+                    code: error_code(&error),
+                    message: error_message(&error),
                 },
             ),
         };
@@ -82,12 +66,95 @@ pub(crate) async fn execute_final_tool_intents(
             outcome = match &outcome {
                 crate::ToolIntentExecutionOutcome::Executed { .. } => "executed",
                 crate::ToolIntentExecutionOutcome::Refused { .. } => "refused",
+                crate::ToolIntentExecutionOutcome::ProtocolRefused { .. } => "protocol_refused",
             },
             "tool intent outcome"
         );
         outcomes.push(outcome);
     }
     outcomes
+}
+
+pub(crate) fn record_parent_end_actions(
+    context: &ToolDispatchContext<'_>,
+    intents: &crate::ToolIntents,
+    outcomes: &[crate::ToolIntentExecutionOutcome],
+) {
+    for (intent, outcome) in intents.intents.iter().zip(outcomes) {
+        let crate::ToolIntent::StartProcess(intent) = intent else {
+            continue;
+        };
+        let crate::ToolIntentExecutionOutcome::Executed {
+            identity,
+            kind: crate::ToolIntentKind::StartProcess,
+            ..
+        } = outcome
+        else {
+            continue;
+        };
+        context
+            .parent_end_actions
+            .enqueue(super::context::ParentEndAction {
+                identity: identity.clone(),
+                policy: intent.on_parent_end,
+            });
+    }
+}
+
+pub(crate) async fn execute_parent_end_actions(context: &ToolDispatchContext<'_>) {
+    for action in context.parent_end_actions.drain() {
+        let reason = match action.policy {
+            crate::ProcessParentEndPolicy::Abandon => continue,
+            crate::ProcessParentEndPolicy::Cancel => {
+                "recorded start intent parent ended with cancel policy"
+            }
+            crate::ProcessParentEndPolicy::Terminate => {
+                "recorded start intent parent ended with terminate policy"
+            }
+        };
+        let replay_key = format!("{}:parent-end", action.identity.replay_key);
+        let parent = crate::RuntimeInvocation::effect(
+            crate::RuntimeScope::new(&action.identity.session_id),
+            format!("tool-intent-parent-end:{}", action.identity.intent_index),
+            crate::RuntimeEffectKind::ToolBatch,
+            replay_key.clone(),
+        );
+        let mut parent = parent;
+        parent.replay = Some(crate::RuntimeReplay {
+            key: replay_key,
+            attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(
+                action.identity.clone(),
+            )),
+        });
+        let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
+            .with_parent_invocation(Some(parent))
+            .with_agent_frame_id(Some(context.agent_frame_id.clone()));
+        let result = context
+            .processes
+            .cancel_recorded_intent(
+                &action.identity.session_id,
+                &action.identity.replay_key,
+                Some(reason.to_string()),
+                scope,
+            )
+            .await;
+        match result {
+            Ok(_) => tracing::info!(
+                target: "lash::tool_intent",
+                intent_index = action.identity.intent_index,
+                policy = ?action.policy,
+                "tool intent parent-end action executed"
+            ),
+            Err(error) => tracing::warn!(
+                target: "lash::tool_intent",
+                intent_index = action.identity.intent_index,
+                policy = ?action.policy,
+                code = %error_code(&error),
+                message = %error_message(&error),
+                "tool intent parent-end action refused"
+            ),
+        }
+    }
 }
 
 fn admit_batch(
@@ -143,11 +210,30 @@ fn admit_batch(
 
 fn refuse_all(
     context: &ToolDispatchContext<'_>,
-    turn_id: &str,
+    execution_scope_id: &str,
     tool_call_id: Option<&str>,
     intents: &crate::ToolIntents,
     refusal: crate::ToolIntentRefusalReason,
 ) -> Vec<crate::ToolIntentExecutionOutcome> {
+    if intents.intents.is_empty() {
+        let span = tracing::info_span!(
+            target: "lash::tool_intent",
+            "tool_intent.execute",
+            session_id = %context.session_id,
+            execution_scope_id,
+            tool_call_id = tool_call_id.unwrap_or("<missing>"),
+            intent_index = tracing::field::Empty,
+            intent_kind = "<batch>",
+            replay_key = "<unavailable>",
+        );
+        let _entered = span.enter();
+        tracing::warn!(
+            target: "lash::tool_intent",
+            refusal_reason = refusal.code(),
+            "empty tool intent batch refused"
+        );
+        return vec![crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal }];
+    }
     intents
         .intents
         .iter()
@@ -155,11 +241,22 @@ fn refuse_all(
         .map(|(index, intent)| {
             let identity = crate::derive_tool_intent_identity(
                 &context.session_id,
-                turn_id,
+                execution_scope_id,
                 tool_call_id,
                 index,
             )
             .ok();
+            let span = tracing::info_span!(
+                target: "lash::tool_intent",
+                "tool_intent.execute",
+                session_id = %context.session_id,
+                execution_scope_id,
+                tool_call_id = tool_call_id.unwrap_or("<missing>"),
+                intent_index = index,
+                intent_kind = intent.kind().as_str(),
+                replay_key = identity.as_ref().map_or("<unavailable>", |identity| identity.replay_key.as_str()),
+            );
+            let _entered = span.enter();
             refused(index, intent.kind(), identity, refusal.clone())
         })
         .collect()
@@ -171,8 +268,6 @@ fn refused(
     identity: Option<crate::ToolIntentIdentity>,
     refusal: crate::ToolIntentRefusalReason,
 ) -> crate::ToolIntentExecutionOutcome {
-    REFUSED.fetch_add(1, Ordering::Relaxed);
-    refusal_counter(&refusal).fetch_add(1, Ordering::Relaxed);
     record_refused_metric(kind, &refusal);
     tracing::warn!(
         target: "lash::tool_intent",
@@ -212,21 +307,6 @@ fn record_refused_metric(kind: crate::ToolIntentKind, refusal: &crate::ToolInten
 #[cfg(not(feature = "otel-trace"))]
 fn record_refused_metric(_kind: crate::ToolIntentKind, _refusal: &crate::ToolIntentRefusalReason) {}
 
-fn refusal_counter(reason: &crate::ToolIntentRefusalReason) -> &'static AtomicU64 {
-    match reason {
-        crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { .. } => {
-            &REFUSED_UNSUPPORTED_VERSION
-        }
-        crate::ToolIntentRefusalReason::MissingToolCallId => &REFUSED_MISSING_CALL_ID,
-        crate::ToolIntentRefusalReason::IntentIndexOverflow => &REFUSED_INDEX_OVERFLOW,
-        crate::ToolIntentRefusalReason::CountBudgetExceeded { .. } => &REFUSED_COUNT_BUDGET,
-        crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded { .. } => &REFUSED_BYTE_BUDGET,
-        crate::ToolIntentRefusalReason::PerKindBudgetExceeded { .. } => &REFUSED_PER_KIND_BUDGET,
-        crate::ToolIntentRefusalReason::SessionMismatch { .. } => &REFUSED_SESSION_MISMATCH,
-        crate::ToolIntentRefusalReason::CommandFailed { .. } => &REFUSED_COMMAND_FAILED,
-    }
-}
-
 async fn execute_one(
     context: &ToolDispatchContext<'_>,
     intent: &crate::ToolIntent,
@@ -243,6 +323,9 @@ async fn execute_one(
     });
     parent.replay = Some(crate::RuntimeReplay {
         key: identity.replay_key.clone(),
+        attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        )),
     });
     let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
         .with_parent_invocation(Some(parent))
@@ -252,24 +335,9 @@ async fn execute_one(
         crate::ToolIntent::StartProcess(intent) => {
             let mut request = intent.request.clone();
             request.id = identity.replay_key.clone();
-            if !request
-                .observers
-                .iter()
-                .any(|observer| observer == &context.session_id)
-            {
-                request.observers.push(context.session_id.clone());
-            }
-            if request.env_spec.is_none()
-                && matches!(
-                    &request.input,
-                    crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. }
-                )
-            {
-                request.env_spec = Some(context.execution_env_spec.clone());
-            }
             let summary = context
                 .processes
-                .start_from_request(&context.session_id, request, scope)
+                .start_from_recorded_intent(&intent.session_id, request, scope)
                 .await?;
             if let Some(hook) = child_trace_hook {
                 hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
@@ -282,8 +350,8 @@ async fn execute_one(
         crate::ToolIntent::SignalProcess(intent) => {
             let event = context
                 .processes
-                .signal(
-                    &context.session_id,
+                .signal_recorded_intent(
+                    &intent.session_id,
                     &intent.process_id,
                     intent.signal_name.clone(),
                     identity.replay_key.clone(),
@@ -294,18 +362,10 @@ async fn execute_one(
             Ok(serde_json::to_value(event).unwrap_or(serde_json::Value::Null))
         }
         crate::ToolIntent::CancelProcess(intent) => {
-            context
-                .processes
-                .validate_visible(
-                    &context.session_id,
-                    std::slice::from_ref(&intent.process_id),
-                    scope.clone(),
-                )
-                .await?;
             let record = context
                 .processes
-                .cancel_with_reason(
-                    &context.session_id,
+                .cancel_recorded_intent(
+                    &intent.session_id,
                     &intent.process_id,
                     intent.reason.clone(),
                     scope,
@@ -319,8 +379,8 @@ async fn execute_one(
         crate::ToolIntent::EmitProcessEvent(intent) => {
             let event = context
                 .processes
-                .emit_event(
-                    &context.session_id,
+                .emit_event_recorded_intent(
+                    &intent.session_id,
                     &intent.process_id,
                     intent.event_type.clone(),
                     identity.replay_key.clone(),
@@ -333,12 +393,17 @@ async fn execute_one(
     }
 }
 
-fn executed_counter(kind: crate::ToolIntentKind) -> &'static AtomicU64 {
-    match kind {
-        crate::ToolIntentKind::StartProcess => &START_EXECUTED,
-        crate::ToolIntentKind::SignalProcess => &SIGNAL_EXECUTED,
-        crate::ToolIntentKind::CancelProcess => &CANCEL_EXECUTED,
-        crate::ToolIntentKind::EmitProcessEvent => &EVENT_EXECUTED,
+fn error_code(error: &crate::PluginError) -> String {
+    match error {
+        crate::PluginError::RuntimeEffectController(error) => error.code.as_str().to_string(),
+        _ => "plugin".to_string(),
+    }
+}
+
+fn error_message(error: &crate::PluginError) -> String {
+    match error {
+        crate::PluginError::RuntimeEffectController(error) => error.message.clone(),
+        _ => error.to_string(),
     }
 }
 
@@ -439,7 +504,7 @@ mod tests {
         let executed = crate::ToolIntentExecutionOutcome::Executed {
             identity: crate::ToolIntentIdentity {
                 session_id: "session".to_string(),
-                turn_id: "turn".to_string(),
+                execution_scope_id: "turn".to_string(),
                 tool_call_id: "call".to_string(),
                 intent_index: 4,
                 replay_key: "tool-intent-v1-literal".to_string(),

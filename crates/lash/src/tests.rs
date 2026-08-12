@@ -1324,6 +1324,10 @@ impl ToolProvider for PendingAppTools {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == app_tool_definition().id()
+    }
+
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
         assert_eq!(call.name, "app_lookup");
         let key = match call.context.completion_key().await {
@@ -1442,6 +1446,10 @@ impl ToolProvider for DurableInputTools {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
         (name == "mock_input_request").then(|| Arc::new(durable_input_tool_definition().contract()))
+    }
+
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == durable_input_tool_definition().id()
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {

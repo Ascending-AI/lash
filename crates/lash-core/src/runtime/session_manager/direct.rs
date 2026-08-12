@@ -461,6 +461,7 @@ impl DirectCompletionCapability {
         }
         let replay = crate::RuntimeReplay {
             key: request.scope.request_id.clone(),
+            attribution: None,
         };
         let plan = self
             .plan_direct_effect(

@@ -15,15 +15,15 @@ pub(crate) use attempt_coordinator::{
     BatchIntentDrainGate, IntentDrainSlot, ToolAttemptEffectIdentity, coordinate_tool_invocation,
 };
 pub(crate) use context::{
-    CheckpointMessageBuffer, PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchOutcome,
-    ToolPreparationOutcome, ToolTriggerOutcomeBuffer,
+    CheckpointMessageBuffer, ParentEndActionBuffer, PendingToolDispatchOutcome, ToolCallLaunch,
+    ToolDispatchOutcome, ToolPreparationOutcome, ToolTriggerOutcomeBuffer,
 };
 #[cfg(test)]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub(crate) use execution::{
     execute_prepared_tool_attempt_effect, finalize_tool_result_with_execution_context,
 };
-pub(crate) use intent_executor::execute_final_tool_intents;
+pub(crate) use intent_executor::{execute_final_tool_intents, execute_parent_end_actions};
 #[cfg(test)]
 pub(crate) use preparation::dispatch_tool_call;
 #[cfg(test)]

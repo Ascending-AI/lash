@@ -901,6 +901,14 @@ impl RemoteRuntimeScope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteRuntimeReplay {
     pub key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<RemoteRuntimeReplayAttribution>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", content = "identity", rename_all = "snake_case")]
+pub enum RemoteRuntimeReplayAttribution {
+    ToolIntent(crate::RemoteToolIntentIdentity),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

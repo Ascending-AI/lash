@@ -46,6 +46,27 @@ pub(crate) struct ToolTriggerOutcomeBuffer {
     queue: Arc<Mutex<Vec<ToolTriggerEffectOutcome>>>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ParentEndAction {
+    pub identity: crate::ToolIntentIdentity,
+    pub policy: crate::ProcessParentEndPolicy,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ParentEndActionBuffer {
+    queue: Arc<Mutex<Vec<ParentEndAction>>>,
+}
+
+impl ParentEndActionBuffer {
+    pub(crate) fn enqueue(&self, action: ParentEndAction) {
+        self.queue.lock_recover().push(action);
+    }
+
+    pub(crate) fn drain(&self) -> Vec<ParentEndAction> {
+        self.queue.lock_recover().drain(..).collect()
+    }
+}
+
 impl ToolTriggerOutcomeBuffer {
     pub(crate) fn enqueue(&self, outcome: ToolTriggerEffectOutcome) {
         let mut queue = self.queue.lock_recover();
@@ -77,6 +98,7 @@ pub struct ToolDispatchContext<'run> {
     pub event_tx: mpsc::Sender<SessionStreamEvent>,
     pub(crate) checkpoint_messages: CheckpointMessageBuffer,
     pub(crate) trigger_outcomes: ToolTriggerOutcomeBuffer,
+    pub(crate) parent_end_actions: ParentEndActionBuffer,
     pub attachment_store: Arc<crate::SessionAttachmentStore>,
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     pub turn_context: crate::TurnContext,
@@ -109,6 +131,7 @@ impl<'run> ToolDispatchContext<'run> {
             event_tx: self.event_tx.clone(),
             checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),
+            parent_end_actions: self.parent_end_actions.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
             attachment_source_policy: Arc::clone(&self.attachment_source_policy),
             turn_context: self.turn_context.clone(),

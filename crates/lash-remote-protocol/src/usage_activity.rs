@@ -133,7 +133,7 @@ pub enum RemoteTurnEvent {
     },
     ToolIntentOutcome {
         call_id: String,
-        outcome: serde_json::Value,
+        outcome: crate::RemoteToolIntentExecutionOutcome,
     },
     FinalValue {
         value: serde_json::Value,

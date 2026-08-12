@@ -164,7 +164,7 @@ pub mod tools {
         ToolCallRecord, ToolContext, ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailure,
         ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntents, ToolManifest,
         ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolResult,
-        ToolRetryDisposition, ToolValue, facade_support::ToolSourceHandle,
+        ToolResultDone, ToolRetryDisposition, ToolValue, facade_support::ToolSourceHandle,
         facade_support::ToolTriggerClient,
     };
     pub use lash_core::{

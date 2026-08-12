@@ -1286,8 +1286,13 @@ pub trait ToolProvider: Send + Sync + 'static {
     fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
         false
     }
+    /// Whether this leaf tool may return deferred completion. The coordinator
+    /// reserves a completion key only for tools that declare this capability.
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
+    }
     async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> crate::ToolAttemptResult {
-        crate::ToolAttemptResult::without_intents(ToolResult::failure(crate::ToolFailure {
+        crate::ToolAttemptResult::from_tool_result(ToolResult::failure(crate::ToolFailure {
             class: crate::ToolFailureClass::Unavailable,
             code: "tool_attempt_context_not_implemented".to_string(),
             message: format!(
@@ -1306,7 +1311,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         context: &AttemptContext<'_>,
     ) -> crate::ToolAttemptResult {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return crate::ToolAttemptResult::without_intents(ToolResult::err_fmt(format!(
+            return crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format!(
                 "Unknown tool id: {tool_id}"
             )));
         };
@@ -1335,7 +1340,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         _args: &serde_json::Value,
         _context: &AttemptContext<'_>,
     ) -> crate::ToolAttemptResult {
-        crate::ToolAttemptResult::without_intents(ToolResult::err_fmt(format_args!(
+        crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format_args!(
             "Granted leaf execution is unsupported for tool id `{}`",
             grant.manifest.id
         )))

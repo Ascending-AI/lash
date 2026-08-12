@@ -1,5 +1,29 @@
-error[E0599]: no method named `cancel` found for struct `AttemptProcessReads` in the current scope
+error[E0599]: no method named `start` found for struct `AttemptProcessReads` in the current scope
  --> tests/ui/attempt_context_has_no_journal_capability.rs:2:33
   |
-2 |     let _ = context.processes().cancel("process-1").await;
+2 |     let _ = context.processes().start(()).await;
+  |                                 ^^^^^ method not found in `AttemptProcessReads`
+
+error[E0599]: no method named `cancel` found for struct `AttemptProcessReads` in the current scope
+ --> tests/ui/attempt_context_has_no_journal_capability.rs:3:33
+  |
+3 |     let _ = context.processes().cancel("process-1").await;
   |                                 ^^^^^^ method not found in `AttemptProcessReads`
+
+error[E0599]: no method named `signal` found for struct `AttemptProcessReads` in the current scope
+ --> tests/ui/attempt_context_has_no_journal_capability.rs:4:33
+  |
+4 |     let _ = context.processes().signal("process-1").await;
+  |                                 ^^^^^^ method not found in `AttemptProcessReads`
+
+error[E0599]: no method named `await_process` found for struct `AttemptProcessReads` in the current scope
+ --> tests/ui/attempt_context_has_no_journal_capability.rs:5:33
+  |
+5 |     let _ = context.processes().await_process("process-1").await;
+  |                                 ^^^^^^^^^^^^^ method not found in `AttemptProcessReads`
+
+error[E0599]: no method named `complete_external` found for struct `AttemptProcessReads` in the current scope
+ --> tests/ui/attempt_context_has_no_journal_capability.rs:6:33
+  |
+6 |     let _ = context.processes().complete_external("process-1").await;
+  |                                 ^^^^^^^^^^^^^^^^^ method not found in `AttemptProcessReads`

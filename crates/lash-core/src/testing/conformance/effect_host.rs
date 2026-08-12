@@ -1631,7 +1631,17 @@ fn replay_conformance_tool_attempt_outcome(
                 })),
                 duration_ms: 0,
             }),
-            intents: crate::ToolIntents::default(),
+            intents: crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
+                crate::StartProcessIntent {
+                    session_id: "replay-session".to_string(),
+                    request: crate::ProcessStartRequest::external(
+                        format!("{call_id}:intent-child"),
+                        crate::ProcessOriginator::host_scoped("effect-host-conformance"),
+                        serde_json::json!({"tool": tool_name}),
+                    ),
+                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
+                },
+            ))]),
         }),
         triggers: Vec::new(),
     }

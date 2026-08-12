@@ -287,6 +287,12 @@ impl ToolProvider for ToolRegistry {
             .is_ok_and(|(source, _)| source.supports_attempt_context(tool_id))
     }
 
+
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
+        self.resolve_execution_source(tool_id)
+            .is_ok_and(|(source, _)| source.attempt_may_defer(tool_id))
+    }
+
     async fn execute_attempt_by_id(
         &self,
         tool_id: &ToolId,
@@ -295,7 +301,7 @@ impl ToolProvider for ToolRegistry {
     ) -> crate::ToolAttemptResult {
         let (source, _) = match self.resolve_execution_source(tool_id) {
             Ok(resolved) => resolved,
-            Err(result) => return crate::ToolAttemptResult::without_intents(result),
+            Err(result) => return crate::ToolAttemptResult::from_tool_result(result),
         };
         source.execute_attempt_by_id(tool_id, args, context).await
     }
@@ -339,7 +345,7 @@ impl ToolProvider for ToolRegistry {
     ) -> crate::ToolAttemptResult {
         let source = match self.resolve_granted_execution_source(grant) {
             Ok(source) => source,
-            Err(result) => return crate::ToolAttemptResult::without_intents(result),
+            Err(result) => return crate::ToolAttemptResult::from_tool_result(result),
         };
         source
             .execute_attempt_by_id(&grant.manifest.id, args, context)

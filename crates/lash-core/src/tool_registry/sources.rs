@@ -215,6 +215,11 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
             .is_some_and(|index| self.providers[index].supports_attempt_context(tool_id))
     }
 
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
+        self.provider_index_for_id(tool_id)
+            .is_some_and(|index| self.providers[index].attempt_may_defer(tool_id))
+    }
+
     async fn execute_attempt_by_id(
         &self,
         tool_id: &ToolId,
@@ -222,7 +227,7 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         context: &crate::AttemptContext<'_>,
     ) -> crate::ToolAttemptResult {
         let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return crate::ToolAttemptResult::without_intents(ToolResult::err_fmt(format_args!(
+            return crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format_args!(
                 "Unknown tool id: {tool_id}"
             )));
         };
@@ -309,6 +314,10 @@ impl ToolSourceExecutor for ToolProviderSource {
 
     fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
         self.provider.supports_attempt_context(tool_id)
+    }
+
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
+        self.provider.attempt_may_defer(tool_id)
     }
 
     async fn execute_attempt_by_id(

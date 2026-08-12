@@ -1,0 +1,5 @@
+error[E0599]: no method named `triggers` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/attempt_context_has_no_trigger_commands.rs:2:21
+  |
+2 |     let _ = context.triggers().emit("trigger", ()).await;
+  |                     ^^^^^^^^ method not found in `&AttemptContext<'_>`

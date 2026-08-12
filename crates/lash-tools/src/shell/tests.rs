@@ -98,6 +98,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessService for TestProcessService {
+        async fn start_from_recorded_intent(
+            &self,
+            session_id: &str,
+            request: lash_core::ProcessStartRequest,
+            scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessHandleSummary, PluginError> {
+            self.start_from_request(session_id, request, scope).await
+        }
+
         async fn start_from_request(
             &self,
             session_id: &str,
@@ -253,6 +262,25 @@ mod tests {
                 .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))
         }
 
+        async fn cancel_recorded_intent(
+            &self,
+            _session_id: &str,
+            process_id: &str,
+            reason: Option<String>,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessRecord, PluginError> {
+            self.registry
+                .append_event(
+                    process_id,
+                    lash_core::ProcessEventAppendRequest::cancel_requested(process_id, reason),
+                )
+                .await?;
+            self.registry
+                .get_process(process_id)
+                .await?
+                .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))
+        }
+
         async fn signal(
             &self,
             session_id: &str,
@@ -283,6 +311,46 @@ mod tests {
                     lash_core::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
                         format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
                     ),
+                )
+                .await
+                .map(|result| result.event)
+        }
+
+        async fn signal_recorded_intent(
+            &self,
+            _session_id: &str,
+            process_id: &str,
+            signal_name: String,
+            signal_id: String,
+            payload: serde_json::Value,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessEvent, PluginError> {
+            let event_type = lash_core::facade_support::process_signal_event_type(&signal_name)?;
+            self.registry
+                .append_event(
+                    process_id,
+                    lash_core::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
+                        format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
+                    ),
+                )
+                .await
+                .map(|result| result.event)
+        }
+
+        async fn emit_event_recorded_intent(
+            &self,
+            _session_id: &str,
+            process_id: &str,
+            event_type: String,
+            replay_key: String,
+            payload: serde_json::Value,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessEvent, PluginError> {
+            self.registry
+                .append_event(
+                    process_id,
+                    lash_core::ProcessEventAppendRequest::new(event_type, payload)
+                        .with_replay_key(replay_key),
                 )
                 .await
                 .map(|result| result.event)

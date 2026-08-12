@@ -106,22 +106,11 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     )
     .await;
     let duration_ms = context.clock.now().duration_since(tool_start).as_millis() as u64;
-    let crate::ToolAttemptResult { result, intents } = attempt_result;
-    let result = match result {
-        ToolResult::Done(_) => result,
-        ToolResult::Pending(pending) => {
-            if !intents.is_empty() {
-                return launch_done(outcome(
-                    tool_name,
-                    args,
-                    runtime_failure(
-                        ToolFailureClass::Internal,
-                        "pending_tool_declared_intents",
-                        "a Pending tool result cannot carry intents",
-                    ),
-                    duration_ms,
-                ));
-            }
+    let (result, intents) = match attempt_result {
+        crate::ToolAttemptResult::Done { result, intents } => {
+            (ToolResult::from_output(result.into_output()), intents)
+        }
+        crate::ToolAttemptResult::Pending(pending) => {
             let key = match completion_context.take_completion_key() {
                 Some(key) => key,
                 None => {
@@ -203,22 +192,11 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
     )
     .await;
     let duration_ms = context.clock.now().duration_since(tool_start).as_millis() as u64;
-    let crate::ToolAttemptResult { result, intents } = attempt_result;
-    let result = match result {
-        ToolResult::Done(_) => result,
-        ToolResult::Pending(pending) => {
-            if !intents.is_empty() {
-                return launch_done(outcome(
-                    tool_name,
-                    args,
-                    runtime_failure(
-                        ToolFailureClass::Internal,
-                        "pending_tool_declared_intents",
-                        "a Pending tool result cannot carry intents",
-                    ),
-                    duration_ms,
-                ));
-            }
+    let (result, intents) = match attempt_result {
+        crate::ToolAttemptResult::Done { result, intents } => {
+            (ToolResult::from_output(result.into_output()), intents)
+        }
+        crate::ToolAttemptResult::Pending(pending) => {
             let key = match completion_context.take_completion_key() {
                 Some(key) => key,
                 None => {

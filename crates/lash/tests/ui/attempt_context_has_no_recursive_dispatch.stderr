@@ -1,0 +1,5 @@
+error[E0599]: no method named `dispatch` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/attempt_context_has_no_recursive_dispatch.rs:2:21
+  |
+2 |     let _ = context.dispatch().batch(Vec::new()).await;
+  |                     ^^^^^^^^ method not found in `&AttemptContext<'_>`

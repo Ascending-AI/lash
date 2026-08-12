@@ -499,6 +499,7 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
         attachment_store: Arc::clone(&attachment_store),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -621,6 +622,7 @@ pub fn atomic_tool_context_with_services<'run>(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
         attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -680,6 +682,17 @@ impl EffectBackedProcessService {
 
 #[async_trait::async_trait]
 impl crate::ProcessService for EffectBackedProcessService {
+    async fn list_visible_for_attempt(
+        &self,
+        session_id: &str,
+        mode: crate::ProcessListMode,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        match mode {
+            crate::ProcessListMode::Live => self.registry.list_live_observed_by(session_id).await,
+            crate::ProcessListMode::All => self.registry.list_observed_by(session_id).await,
+        }
+    }
+
     async fn start_from_request(
         &self,
         _session_id: &str,
@@ -703,6 +716,15 @@ impl crate::ProcessService for EffectBackedProcessService {
             }
             _ => unreachable!("start command returns start outcome"),
         }
+    }
+
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+        self.start_from_request(session_id, request, scope).await
     }
 
     async fn start(
@@ -806,6 +828,23 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
+    async fn cancel_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let command = crate::ProcessCommand::Cancel {
+            process_id: process_id.to_string(),
+            reason,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            _ => unreachable!("cancel command returns cancel outcome"),
+        }
+    }
+
     async fn signal(
         &self,
         _session_id: &str,
@@ -831,6 +870,26 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
+    async fn signal_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.signal(
+            session_id,
+            process_id,
+            signal_name,
+            signal_id,
+            payload,
+            scope,
+        )
+        .await
+    }
+
     async fn emit_event(
         &self,
         _session_id: &str,
@@ -849,6 +908,21 @@ impl crate::ProcessService for EffectBackedProcessService {
             crate::ProcessEffectOutcome::EmitEvent { event } => Ok(*event),
             _ => unreachable!("emit-event command returns emit-event outcome"),
         }
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.emit_event(
+            session_id, process_id, event_type, replay_key, payload, scope,
+        )
+        .await
     }
 
     async fn transfer(
@@ -1074,6 +1148,28 @@ impl crate::plugin::SessionGraphService for MockSessionManager {}
 
 #[async_trait::async_trait]
 impl crate::ProcessService for MockSessionManager {
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, PluginError> {
+        let observers = request.observers.clone();
+        let env_ref = request
+            .env_spec
+            .as_ref()
+            .map(|_| crate::ProcessExecutionEnvRef::new("process-env:mock-recorded-intent"));
+        let record = self
+            .start(
+                session_id,
+                request.into_registration(env_ref),
+                crate::ProcessStartOptions::new().with_initial_observers(observers),
+                scope,
+            )
+            .await?;
+        Ok(crate::ProcessHandleSummary::from_record(record))
+    }
+
     async fn start(
         &self,
         _session_id: &str,
@@ -1175,6 +1271,21 @@ impl crate::ProcessService for MockSessionManager {
         .await
     }
 
+    async fn cancel_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, PluginError> {
+        crate::InlineRuntimeEffectController::request_process_cancel(
+            self.process_registry.clone(),
+            process_id,
+            reason,
+        )
+        .await
+    }
+
     async fn signal(
         &self,
         _session_id: &str,
@@ -1191,6 +1302,45 @@ impl crate::ProcessService for MockSessionManager {
                 crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
                     format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
                 ),
+            )
+            .await
+            .map(|result| result.event)
+    }
+
+    async fn signal_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, PluginError> {
+        self.signal(
+            session_id,
+            process_id,
+            signal_name,
+            signal_id,
+            payload,
+            scope,
+        )
+        .await
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, PluginError> {
+        self.process_registry
+            .append_event(
+                process_id,
+                crate::ProcessEventAppendRequest::new(event_type, payload)
+                    .with_replay_key(replay_key),
             )
             .await
             .map(|result| result.event)

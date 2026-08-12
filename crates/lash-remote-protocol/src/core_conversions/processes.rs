@@ -879,15 +879,37 @@ impl From<RemoteRuntimeScope> for lash_core::runtime::RuntimeScope {
 
 impl From<lash_core::runtime::RuntimeReplay> for RemoteRuntimeReplay {
     fn from(value: lash_core::runtime::RuntimeReplay) -> Self {
-        let lash_core::runtime::RuntimeReplay { key } = value;
-        Self { key }
+        let lash_core::runtime::RuntimeReplay { key, attribution } = value;
+        Self {
+            key,
+            attribution: attribution.map(|attribution| match attribution {
+                lash_core::RuntimeReplayAttribution::ToolIntent(identity) => {
+                    RemoteRuntimeReplayAttribution::ToolIntent(identity.into())
+                }
+            }),
+        }
     }
 }
 
 impl From<RemoteRuntimeReplay> for lash_core::runtime::RuntimeReplay {
     fn from(value: RemoteRuntimeReplay) -> Self {
-        let RemoteRuntimeReplay { key } = value;
-        Self { key }
+        let RemoteRuntimeReplay { key, attribution } = value;
+        Self {
+            key,
+            attribution: attribution.map(|attribution| match attribution {
+                RemoteRuntimeReplayAttribution::ToolIntent(identity) => {
+                    lash_core::RuntimeReplayAttribution::ToolIntent(
+                        lash_core::ToolIntentIdentity {
+                            session_id: identity.session_id,
+                            execution_scope_id: identity.execution_scope_id,
+                            tool_call_id: identity.tool_call_id,
+                            intent_index: identity.intent_index,
+                            replay_key: identity.replay_key,
+                        },
+                    )
+                }
+            }),
+        }
     }
 }
 
@@ -1897,7 +1919,10 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessEventAppendReques
         Ok(lash_core::ProcessEventAppendRequest {
             event_type,
             payload,
-            replay: replay_key.map(|key| lash_core::runtime::RuntimeReplay { key }),
+            replay: replay_key.map(|key| lash_core::runtime::RuntimeReplay {
+                key,
+                attribution: None,
+            }),
         })
     }
 }

@@ -199,6 +199,31 @@ impl<'scope> ProcessCommandRunner<'scope> {
         Ok(event)
     }
 
+    /// Intent realization stops at the one recorded process command. The
+    /// ordinary tool path performs live waiter-resolution bookkeeping after
+    /// that command; doing so here would make the intent outcome depend on
+    /// post-command registry state during redrive.
+    async fn signal_recorded(
+        &self,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        request: crate::ProcessEventAppendRequest,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        match self
+            .run(crate::ProcessCommand::Signal {
+                process_id: process_id.to_string(),
+                signal_name,
+                signal_id,
+                request,
+            })
+            .await?
+        {
+            crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
+            _ => Err(wrong_process_outcome("signal")),
+        }
+    }
+
     async fn emit_event(
         &self,
         process_id: &str,
@@ -384,6 +409,42 @@ impl ProcessCapability {
             .await
     }
 
+    /// Builds a start command only from the recorded intent payload and its
+    /// structural parent invocation, then crosses the journal immediately.
+    pub(in crate::runtime::session_manager) async fn start_process_from_recorded_intent(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.mark_current_process_sync_needed(current, session_id);
+        let caused_by = scope
+            .parent_invocation
+            .as_ref()
+            .and_then(crate::RuntimeInvocation::causal_ref);
+        let env_ref = match request.env_spec.as_ref() {
+            Some(env_spec) => Some(
+                crate::persist_process_execution_env(
+                    current.host.core.durability.process_env_store.as_ref(),
+                    env_spec,
+                )
+                .await?,
+            ),
+            None => None,
+        };
+        let observers = request.observers.clone();
+        let originator = request.originator.clone();
+        let registration = request.into_registration(env_ref).with_process_provenance(
+            crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
+        );
+        let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
+        let execution_context = options.execution_context(&scope);
+        self.command_runner(current, &scope)?
+            .start(registration, options.initial_observers, execution_context)
+            .await
+    }
+
     async fn prepare_process_environment(
         &self,
         current: &CurrentSessionCapability,
@@ -563,6 +624,18 @@ impl ProcessCapability {
         runner.cancel(process_id, reason).await
     }
 
+    pub(in crate::runtime::session_manager) async fn cancel_recorded_intent(
+        &self,
+        current: &CurrentSessionCapability,
+        process_id: &str,
+        reason: Option<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.command_runner(current, &scope)?
+            .cancel(process_id, reason)
+            .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(in crate::runtime::session_manager) async fn emit_process_event(
         &self,
@@ -671,6 +744,41 @@ impl ProcessCapability {
         );
         runner
             .signal(process_id, signal_name, signal_id, request)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::runtime::session_manager) async fn signal_recorded_intent(
+        &self,
+        current: &CurrentSessionCapability,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let event_type = crate::process_signal_event_type(&signal_name)?;
+        let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
+            format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
+        );
+        self.command_runner(current, &scope)?
+            .signal_recorded(process_id, signal_name, signal_id, request)
+            .await
+    }
+
+    pub(in crate::runtime::session_manager) async fn emit_event_recorded_intent(
+        &self,
+        current: &CurrentSessionCapability,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let request =
+            crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
+        self.command_runner(current, &scope)?
+            .emit_event(process_id, request)
             .await
     }
 

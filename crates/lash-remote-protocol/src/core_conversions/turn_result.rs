@@ -48,6 +48,17 @@ impl RemoteTurnResult {
             tool_calls,
             errors,
         } = turn;
+        let activities = activities.into_iter().collect::<Vec<_>>();
+        let mut intent_outcomes_by_call =
+            HashMap::<String, Vec<RemoteToolIntentExecutionOutcome>>::new();
+        for activity in &activities {
+            if let RemoteTurnEvent::ToolIntentOutcome { call_id, outcome } = &activity.event {
+                intent_outcomes_by_call
+                    .entry(call_id.clone())
+                    .or_default()
+                    .push(outcome.clone());
+            }
+        }
         let parent = RemoteUsage::from(token_usage);
         let children = children_usage
             .into_iter()
@@ -73,10 +84,21 @@ impl RemoteTurnResult {
                 total,
             },
             execution: execution.into(),
-            tool_calls: tool_calls.into_iter().map(Into::into).collect(),
+            tool_calls: tool_calls
+                .into_iter()
+                .map(|record| {
+                    let mut summary = RemoteToolCallSummary::from(record);
+                    if let Some(call_id) = summary.call_id.as_ref() {
+                        summary.intent_outcomes = intent_outcomes_by_call
+                            .remove(call_id)
+                            .unwrap_or_default();
+                    }
+                    summary
+                })
+                .collect(),
             llm_calls: llm_calls.into_iter().map(Into::into).collect(),
             issues: errors.into_iter().map(Into::into).collect(),
-            activities: activities.into_iter().collect(),
+            activities,
             metadata: HashMap::new(),
         }
     }
@@ -190,6 +212,93 @@ impl From<lash_core::facade_support::ExecutionSummary> for RemoteExecutionSummar
     }
 }
 
+impl From<lash_core::ToolIntentIdentity> for RemoteToolIntentIdentity {
+    fn from(value: lash_core::ToolIntentIdentity) -> Self {
+        Self {
+            session_id: value.session_id,
+            execution_scope_id: value.execution_scope_id,
+            tool_call_id: value.tool_call_id,
+            intent_index: value.intent_index,
+            replay_key: value.replay_key,
+        }
+    }
+}
+
+impl From<lash_core::ToolIntentKind> for RemoteToolIntentKind {
+    fn from(value: lash_core::ToolIntentKind) -> Self {
+        match value {
+            lash_core::ToolIntentKind::StartProcess => Self::StartProcess,
+            lash_core::ToolIntentKind::SignalProcess => Self::SignalProcess,
+            lash_core::ToolIntentKind::CancelProcess => Self::CancelProcess,
+            lash_core::ToolIntentKind::EmitProcessEvent => Self::EmitProcessEvent,
+        }
+    }
+}
+
+impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason {
+    fn from(value: lash_core::ToolIntentRefusalReason) -> Self {
+        use lash_core::ToolIntentRefusalReason as Core;
+        match value {
+            Core::UnsupportedProtocolVersion { recorded } => {
+                Self::UnsupportedProtocolVersion { recorded }
+            }
+            Core::MissingToolCallId => Self::MissingToolCallId,
+            Core::IntentIndexOverflow => Self::IntentIndexOverflow,
+            Core::CountBudgetExceeded { actual, maximum } => {
+                Self::CountBudgetExceeded { actual, maximum }
+            }
+            Core::CanonicalByteBudgetExceeded { actual, maximum } => {
+                Self::CanonicalByteBudgetExceeded { actual, maximum }
+            }
+            Core::PerKindBudgetExceeded {
+                kind,
+                actual,
+                maximum,
+            } => Self::PerKindBudgetExceeded {
+                kind: kind.into(),
+                actual,
+                maximum,
+            },
+            Core::SessionMismatch { expected, recorded } => {
+                Self::SessionMismatch { expected, recorded }
+            }
+            Core::CommandFailed { code, message } => Self::CommandFailed { code, message },
+        }
+    }
+}
+
+impl From<lash_core::ToolIntentExecutionOutcome> for RemoteToolIntentExecutionOutcome {
+    fn from(value: lash_core::ToolIntentExecutionOutcome) -> Self {
+        match value {
+            lash_core::ToolIntentExecutionOutcome::Executed {
+                identity,
+                kind,
+                result,
+            } => Self::Executed {
+                identity: identity.into(),
+                kind: kind.into(),
+                result,
+            },
+            lash_core::ToolIntentExecutionOutcome::Refused {
+                identity,
+                intent_index,
+                kind,
+                refusal,
+            } => Self::Refused {
+                identity: identity.map(Into::into),
+                intent_index,
+                kind: kind.into(),
+                refusal: refusal.into(),
+            },
+            lash_core::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => {
+                Self::ProtocolRefused {
+                    refusal: refusal.into(),
+                }
+            }
+        }
+    }
+}
+
 impl From<lash_core::ToolCallRecord> for RemoteToolCallSummary {
     fn from(value: lash_core::ToolCallRecord) -> Self {
         let lash_core::ToolCallRecord {
@@ -205,6 +314,7 @@ impl From<lash_core::ToolCallRecord> for RemoteToolCallSummary {
             args,
             outcome: output.into(),
             duration_ms,
+            intent_outcomes: Vec::new(),
         }
     }
 }

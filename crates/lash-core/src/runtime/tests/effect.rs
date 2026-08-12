@@ -84,7 +84,7 @@ impl RecordingEffectController {
         self.records.lock_recover().clone()
     }
 
-    fn envelopes(&self) -> Vec<String> {
+    pub(super) fn envelopes(&self) -> Vec<String> {
         self.envelopes.lock_recover().clone()
     }
 
@@ -308,10 +308,10 @@ impl RuntimeEffectController for RecordingEffectController {
                     ))
                     .await
             }
-            RuntimeEffectCommand::Process { .. } => Err(RuntimeEffectControllerError::foreign(
-                "process_unexpected",
-                "recording effect controller does not execute processes",
-            )),
+            RuntimeEffectCommand::Process { command } => {
+                let result = local_executor.into_process()?.execute(*command).await?;
+                Ok(RuntimeEffectOutcome::Process { result })
+            }
             RuntimeEffectCommand::Trigger { command } => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(

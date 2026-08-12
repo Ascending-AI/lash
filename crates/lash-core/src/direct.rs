@@ -117,7 +117,10 @@ impl DirectRequest {
     }
 
     pub fn with_replay_key(mut self, key: impl Into<String>) -> Self {
-        self.replay = Some(crate::RuntimeReplay { key: key.into() });
+        self.replay = Some(crate::RuntimeReplay {
+            key: key.into(),
+            attribution: None,
+        });
         self
     }
 

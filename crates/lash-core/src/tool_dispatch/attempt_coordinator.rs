@@ -226,7 +226,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
     let mut attempts = Vec::new();
 
     for attempt in 1..=max_attempts {
-        let completion_key = if context.tools.supports_attempt_context(&call.tool_id)
+        let completion_key = if context.tools.attempt_may_defer(&call.tool_id)
             && context
                 .effect_controller
                 .controller()
@@ -358,6 +358,11 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         child_trace_hook.as_ref(),
                     )
                     .await;
+                    super::intent_executor::record_parent_end_actions(
+                        context,
+                        &intents,
+                        &intent_outcomes,
+                    );
                     if let Some(slot) = &intent_drain_slot {
                         slot.complete_final_drain().await;
                     }
@@ -391,6 +396,11 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         child_trace_hook.as_ref(),
                     )
                     .await;
+                    super::intent_executor::record_parent_end_actions(
+                        context,
+                        &intents,
+                        &intent_outcomes,
+                    );
                     if let Some(slot) = &intent_drain_slot {
                         slot.complete_final_drain().await;
                     }

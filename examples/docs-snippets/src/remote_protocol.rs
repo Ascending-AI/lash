@@ -248,10 +248,10 @@ mod asserted_process_examples {
             }),
             replay: Some(RemoteRuntimeReplay {
                 key: "invoice-export:signal:approval:1".to_string(),
+                attribution: None,
             }),
         }
     }
-
     fn signal_event() -> RemoteProcessEvent {
         RemoteProcessEvent {
             process_id: "invoice-export".to_string(),

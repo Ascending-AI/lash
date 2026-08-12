@@ -108,7 +108,7 @@ pub struct EmitProcessEventIntent {
 /// The single identity seam for the v1 protocol.
 pub fn derive_tool_intent_identity(
     session_id: &str,
-    turn_id: &str,
+    execution_scope_id: &str,
     tool_call_id: Option<&str>,
     intent_index: usize,
 ) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
@@ -120,33 +120,72 @@ pub fn derive_tool_intent_identity(
     // frame-key-grade stable call identity supplied by FIG-1203.
     let mut encoder = crate::stable_identity::IdentityEncoder::new("lash.tool-intent", 1);
     encoder.string(session_id);
-    encoder.string(turn_id);
+    encoder.string(execution_scope_id);
     encoder.string(tool_call_id);
     encoder.u32(intent_index);
     let replay_key = crate::stable_identity::rendered_hash("tool-intent", 1, &encoder.finish());
     Ok(ToolIntentIdentity {
         session_id: session_id.to_string(),
-        turn_id: turn_id.to_string(),
+        execution_scope_id: execution_scope_id.to_string(),
         tool_call_id: tool_call_id.to_string(),
         intent_index,
         replay_key,
     })
 }
 
+/// A completed leaf-provider value. Unlike [`crate::ToolResult`], this type has
+/// no deferred variant, so a completed result can be paired with intents
+/// without making `Pending + intents` representable.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolResultDone(Box<crate::ToolCallOutput>);
+
+impl ToolResultDone {
+    pub fn from_output(output: crate::ToolCallOutput) -> Self {
+        Self(Box::new(output))
+    }
+
+    pub fn ok(result: serde_json::Value) -> Self {
+        Self::from_output(crate::ToolCallOutput::success(result))
+    }
+
+    pub fn failure(failure: crate::ToolFailure) -> Self {
+        Self::from_output(crate::ToolCallOutput::failure(failure))
+    }
+
+    pub fn into_output(self) -> crate::ToolCallOutput {
+        *self.0
+    }
+}
+
 /// Value returned by a leaf provider body before the attempt effect records it.
+/// The enum is the law: only the completed variant has an intents field.
 #[derive(Clone, Debug)]
-pub struct ToolAttemptResult {
-    pub result: crate::ToolResult,
-    pub intents: ToolIntents,
+pub enum ToolAttemptResult {
+    Done {
+        result: ToolResultDone,
+        intents: ToolIntents,
+    },
+    Pending(crate::PendingCompletion),
 }
 
 impl ToolAttemptResult {
-    pub fn new(result: crate::ToolResult, intents: ToolIntents) -> Self {
-        Self { result, intents }
+    pub fn done(result: ToolResultDone, intents: ToolIntents) -> Self {
+        Self::Done { result, intents }
     }
 
-    pub fn without_intents(result: crate::ToolResult) -> Self {
-        Self::new(result, ToolIntents::default())
+    pub fn done_without_intents(result: ToolResultDone) -> Self {
+        Self::done(result, ToolIntents::default())
+    }
+
+    pub fn pending(pending: crate::PendingCompletion) -> Self {
+        Self::Pending(pending)
+    }
+
+    pub(crate) fn from_tool_result(result: crate::ToolResult) -> Self {
+        match result {
+            crate::ToolResult::Done(output) => Self::done_without_intents(ToolResultDone(output)),
+            crate::ToolResult::Pending(pending) => Self::Pending(pending),
+        }
     }
 }
 
@@ -162,7 +201,7 @@ mod tests {
             identity,
             ToolIntentIdentity {
                 session_id: "session-fig1292".to_string(),
-                turn_id: "turn-7".to_string(),
+                execution_scope_id: "turn-7".to_string(),
                 tool_call_id: "call-3".to_string(),
                 intent_index: 2,
                 replay_key: "tool-intent:v1:sha256:8cd893b79abe66a4a894753ab43053964c7bc4253a841916235b90aeedf50719".to_string(),
@@ -176,5 +215,21 @@ mod tests {
             derive_tool_intent_identity("session", "turn", None, 0),
             Err(ToolIntentRefusalReason::MissingToolCallId)
         );
+    }
+
+    #[test]
+    fn intent_identity_is_distinct_across_turn_and_process_execution_scopes() {
+        let turn_7 = derive_tool_intent_identity("session", "turn-7", Some("call"), 0)
+            .expect("turn 7 identity");
+        let turn_8 = derive_tool_intent_identity("session", "turn-8", Some("call"), 0)
+            .expect("turn 8 identity");
+        let process = derive_tool_intent_identity("session", "process-7", Some("call"), 0)
+            .expect("process identity");
+        assert_eq!(turn_7.execution_scope_id, "turn-7");
+        assert_eq!(turn_8.execution_scope_id, "turn-8");
+        assert_eq!(process.execution_scope_id, "process-7");
+        assert_ne!(turn_7.replay_key, turn_8.replay_key);
+        assert_ne!(turn_7.replay_key, process.replay_key);
+        assert_ne!(turn_8.replay_key, process.replay_key);
     }
 }

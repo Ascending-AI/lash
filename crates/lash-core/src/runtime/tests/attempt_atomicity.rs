@@ -31,6 +31,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::ProcessRegistry as _;
 use crate::testing::attempt_sentinel::{AttemptAtomicitySentinel, NestedJournalLedger};
 
 const SESSION: &str = "atomic-tool-test-session";
@@ -264,6 +265,9 @@ const ROUTE_MATRIX: &[MatrixRow] = &[
     MatrixRow {
         route: Route::ProcessEventEmit,
         label: "process_events().emit() / emit_request()",
+        // Interim hazard: the legacy process-execution facade appends through
+        // registry authority rather than the effect journal. AttemptContext
+        // intentionally omits it; v1 leaf providers declare EmitProcessEvent.
         classification: Classification::NoControllerCrossing,
         outcome: "process events emitted",
         crossings: &[],
@@ -471,6 +475,7 @@ fn tool_context<'run>(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -1243,6 +1248,9 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
             crate::ToolIntentExecutionOutcome::Refused { refusal, .. } => {
                 panic!("fixture intent was refused: {refusal:?}")
             }
+            crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => {
+                panic!("fixture batch was refused: {refusal:?}")
+            }
         })
         .collect::<Vec<_>>();
     assert_eq!(actual_ids, literal_ids);
@@ -1319,4 +1327,159 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
             "over-budget admission issues zero commands"
         );
     }
+}
+
+#[tokio::test]
+async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overcounts() {
+    let tier = ControllerOwnedTier::key_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let identity = crate::derive_tool_intent_identity(SESSION, TURN, Some(CALL_ID), 9)
+        .expect("literal intent identity");
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    registry
+        .register_process(
+            crate::ProcessRegistration::new(
+                "structural-process",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([crate::ProcessEventType {
+                name: "structural.note".to_string(),
+                payload_schema: crate::LashSchema::any(),
+                semantics: crate::ProcessEventSemanticsSpec::default(),
+            }]),
+        )
+        .await
+        .expect("register structural attribution target");
+    let command = crate::ProcessCommand::EmitEvent {
+        process_id: "structural-process".to_string(),
+        request: crate::ProcessEventAppendRequest::new(
+            "structural.note",
+            serde_json::json!({"law": "overcount"}),
+        )
+        .with_replay_key("structural-attribution-event"),
+    };
+    let mut attributed = crate::RuntimeInvocation::effect(
+        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+        "structurally-attributed-command",
+        crate::RuntimeEffectKind::Process,
+        "plain-unprefixed-key",
+    );
+    attributed.replay = Some(crate::RuntimeReplay {
+        key: "plain-unprefixed-key".to_string(),
+        attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        )),
+    });
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        crate::RuntimeEffectEnvelope::new(
+            attributed,
+            crate::RuntimeEffectCommand::process(command.clone()),
+        ),
+        crate::RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+    )
+    .await
+    .expect("unprefixed command executes");
+    assert_eq!(
+        ledger.crossings_for_intent(&identity.replay_key),
+        vec!["execute_effect:process:structurally-attributed-command".to_string()]
+    );
+
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        crate::RuntimeEffectEnvelope::new(
+            crate::RuntimeInvocation::effect(
+                crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+                "missing-attribution-command",
+                crate::RuntimeEffectKind::Process,
+                "another-plain-key",
+            ),
+            crate::RuntimeEffectCommand::process(command),
+        ),
+        crate::RuntimeEffectLocalExecutor::processes(registry, None),
+    )
+    .await
+    .expect("unattributed command executes");
+    assert_eq!(
+        ledger.crossings_for_intent(&identity.replay_key),
+        vec![
+            "execute_effect:process:structurally-attributed-command".to_string(),
+            "execute_effect:process:missing-attribution-command".to_string(),
+        ],
+        "missing structural metadata fails the one-command law by over-counting"
+    );
+}
+
+#[tokio::test]
+async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identical_bytes() {
+    let fixtures = fixtures().await;
+    let controller = super::effect::RecordingEffectController::default().with_replay_by_key();
+    let scoped = crate::ScopedEffectController::borrowed(
+        &controller,
+        crate::ExecutionScope::turn(SESSION, TURN),
+    )
+    .expect("scoped replaying controller");
+    let tool = tool_context(scoped, &fixtures);
+    let dispatch = tool
+        .runtime_dispatch
+        .as_ref()
+        .map(|context| context.as_ref().clone())
+        .expect("runtime dispatch context");
+    let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
+        crate::SignalProcessIntent {
+            session_id: SESSION.to_string(),
+            process_id: LIVE_PROCESS.to_string(),
+            signal_name: "resume".to_string(),
+            payload: serde_json::json!({"recorded": "payload"}),
+        },
+    )]);
+
+    let first =
+        crate::tool_dispatch::execute_final_tool_intents(&dispatch, Some(CALL_ID), &intents, None)
+            .await;
+    let first_bytes = serde_json::to_vec(&first).expect("serialize first intent outcome");
+    assert!(
+        matches!(
+            first.as_slice(),
+            [crate::ToolIntentExecutionOutcome::Executed {
+                kind: crate::ToolIntentKind::SignalProcess,
+                ..
+            }]
+        ),
+        "expected recorded signal execution, got {first:?}"
+    );
+    let command_frames = controller.envelopes();
+    assert_eq!(command_frames.len(), 1, "one command frame on first drain");
+
+    fixtures
+        .registry
+        .complete_process(
+            LIVE_PROCESS,
+            crate::ProcessAwaitOutput::Success {
+                value: serde_json::json!("terminal after first drain"),
+                control: None,
+            },
+            crate::ProcessCompletionAuthority::workflow_key("live-mutation-law"),
+        )
+        .await
+        .expect("mutate live target to terminal");
+
+    let redriven =
+        crate::tool_dispatch::execute_final_tool_intents(&dispatch, Some(CALL_ID), &intents, None)
+            .await;
+    assert_eq!(
+        serde_json::to_vec(&redriven).expect("serialize redriven intent outcome"),
+        first_bytes,
+        "the recorded command outcome is byte-identical after live mutation"
+    );
+    let redriven_frames = controller.envelopes();
+    assert_eq!(
+        redriven_frames, command_frames,
+        "redrive reuses the recorded command frame instead of taking a live-state branch"
+    );
 }

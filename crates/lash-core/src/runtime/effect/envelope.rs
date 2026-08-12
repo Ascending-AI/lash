@@ -110,6 +110,7 @@ impl RuntimeInvocation {
             caused_by: None,
             replay: Some(RuntimeReplay {
                 key: replay_key.into(),
+                attribution: None,
             }),
         }
     }
@@ -224,6 +225,16 @@ impl RuntimeScope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeReplay {
     pub key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<RuntimeReplayAttribution>,
+}
+
+/// Structural attribution for a durable replay entry. Consumers must use this
+/// tag rather than infer ownership from replay-key spelling.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "identity", rename_all = "snake_case")]
+pub enum RuntimeReplayAttribution {
+    ToolIntent(crate::ToolIntentIdentity),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1138,7 +1149,13 @@ mod rejection_tests {
 
     #[test]
     fn rejects_missing_or_empty_replay_key() {
-        for replay in [None, Some(RuntimeReplay { key: String::new() })] {
+        for replay in [
+            None,
+            Some(RuntimeReplay {
+                key: String::new(),
+                attribution: None,
+            }),
+        ] {
             let mut value = invocation(RuntimeEffectKind::Sleep);
             value.replay = replay;
             assert_rejected(

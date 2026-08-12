@@ -60,6 +60,10 @@ pub(crate) fn child_effect_invocation(
         caused_by: parent.causal_ref(),
         replay: Some(RuntimeReplay {
             key: format!("{replay_base}:{}", replay_suffix.as_ref()),
+            attribution: parent
+                .replay
+                .as_ref()
+                .and_then(|replay| replay.attribution.clone()),
         }),
     }
 }
@@ -153,6 +157,10 @@ pub(crate) fn process_effect_invocation(
             caused_by: parent.causal_ref(),
             replay: Some(RuntimeReplay {
                 key: format!("{replay_base}:{effect_id}"),
+                attribution: parent
+                    .replay
+                    .as_ref()
+                    .and_then(|replay| replay.attribution.clone()),
             }),
         };
     }
@@ -196,6 +204,7 @@ pub(crate) fn trigger_occurrence_invocation(
         caused_by: None,
         replay: Some(RuntimeReplay {
             key: format!("trigger:{occurrence_id}"),
+            attribution: None,
         }),
     }
 }
@@ -478,6 +487,7 @@ mod tests {
             direct_request_discriminator(
                 Some(&RuntimeReplay {
                     key: "a:b".to_string(),
+                    attribution: None,
                 }),
                 None,
                 99,
@@ -485,7 +495,14 @@ mod tests {
             "direct-discriminator:v2:sha256:1eb28645e78667703f0b891533ee432ba5980d060c95f85f00e3c779759b1a68"
         );
         assert_eq!(
-            direct_request_discriminator(Some(&RuntimeReplay { key: String::new() }), None, 0,),
+            direct_request_discriminator(
+                Some(&RuntimeReplay {
+                    key: String::new(),
+                    attribution: None,
+                }),
+                None,
+                0,
+            ),
             "direct-discriminator:v2:sha256:9dd568ea674ab6bb59ca91a19cc78d8fddaa867a1d7171d6b71db92515e7dbf2"
         );
         assert_eq!(
@@ -527,6 +544,7 @@ mod tests {
         let first_discriminator = direct_request_discriminator(
             Some(&RuntimeReplay {
                 key: "x:direct:v2:ordinal:1".to_string(),
+                attribution: None,
             }),
             None,
             0,

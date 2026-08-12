@@ -11,9 +11,9 @@ mod validation;
 pub use envelope::{
     CheckpointClaimSet, LlmAttachmentSpec, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
     RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeScope,
-    RuntimeSubject, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome,
-    ToolCallLaunch,
+    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay,
+    RuntimeReplayAttribution, RuntimeScope, RuntimeSubject, ToolAttemptEffectOutcome,
+    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
 };
 pub use executor::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,

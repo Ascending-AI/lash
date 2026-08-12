@@ -274,6 +274,7 @@ fn remote_turn_result_json_round_trips() {
             args: serde_json::json!({"x": 1}),
             outcome: RemoteToolCallOutcome::Success(serde_json::json!({"ok": true})),
             duration_ms: 5,
+            intent_outcomes: Vec::new(),
         }],
         llm_calls: vec![call_record.clone()],
         issues: Vec::new(),
@@ -1907,6 +1908,7 @@ fn remote_process_event() -> RemoteProcessEvent {
             }),
             replay: Some(RemoteRuntimeReplay {
                 key: "process:1:completed".to_string(),
+                attribution: None,
             }),
         }),
         semantics: RemoteProcessEventSemantics {

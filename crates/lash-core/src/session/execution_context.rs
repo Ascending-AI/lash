@@ -127,6 +127,9 @@ impl RuntimeExecutionTracing {
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
+    pub(crate) async fn finish_parent_end_actions(&self) {
+        crate::tool_dispatch::execute_parent_end_actions(self.dispatch.as_ref()).await;
+    }
     pub(super) fn process_scope(
         &self,
         parent_invocation: Option<crate::RuntimeInvocation>,
@@ -1020,6 +1023,7 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),

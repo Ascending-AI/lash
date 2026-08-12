@@ -1404,6 +1404,7 @@ impl LashRuntime {
         turn_index: usize,
         trace_turn_id: String,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        driver.finish_parent_end_actions().await?;
         let RuntimeTurnDriver {
             session,
             policy,
@@ -2870,6 +2871,7 @@ impl LashRuntime {
             pending_turn_input_claims: initial_claims.turn_inputs,
             pending_checkpoint_turn_input_claim: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
             session_execution_lease: session_execution_fence,
             runtime_lease_owner: self.runtime_lease_owner.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
@@ -2965,6 +2967,7 @@ impl LashRuntime {
             "runtime post-run_task"
         );
 
+        driver.finish_parent_end_actions().await?;
         let RuntimeTurnDriver {
             session,
             policy,

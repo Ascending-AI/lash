@@ -232,6 +232,20 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         Ok(crate::ProcessHandleSummary::from_record(record))
     }
 
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+        let record = self
+            .services
+            .processes
+            .start_process_from_recorded_intent(&self.services.current, session_id, request, scope)
+            .await?;
+        Ok(crate::ProcessHandleSummary::from_record(record))
+    }
+
     async fn start(
         &self,
         session_id: &str,
@@ -350,6 +364,19 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
+    async fn cancel_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.services
+            .processes
+            .cancel_recorded_intent(&self.services.current, process_id, reason, scope)
+            .await
+    }
+
     async fn signal(
         &self,
         session_id: &str,
@@ -373,6 +400,28 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
+    async fn signal_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.services
+            .processes
+            .signal_recorded_intent(
+                &self.services.current,
+                process_id,
+                signal_name,
+                signal_id,
+                payload,
+                scope,
+            )
+            .await
+    }
+
     async fn emit_event(
         &self,
         session_id: &str,
@@ -387,6 +436,28 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .emit_process_event(
                 &self.services.current,
                 session_id,
+                process_id,
+                event_type,
+                replay_key,
+                payload,
+                scope,
+            )
+            .await
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.services
+            .processes
+            .emit_event_recorded_intent(
+                &self.services.current,
                 process_id,
                 event_type,
                 replay_key,
@@ -463,6 +534,18 @@ impl crate::ProcessService for ModelToolSessionProcessService {
             services: Arc::clone(&self.services),
         };
         crate::ProcessService::start_from_request(&host, session_id, request, scope).await
+    }
+
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::start_from_recorded_intent(&host, session_id, request, scope).await
     }
 
     async fn start(
@@ -565,6 +648,20 @@ impl crate::ProcessService for ModelToolSessionProcessService {
             .await
     }
 
+    async fn cancel_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::cancel_recorded_intent(&host, session_id, process_id, reason, scope)
+            .await
+    }
+
     async fn signal(
         &self,
         session_id: &str,
@@ -596,6 +693,30 @@ impl crate::ProcessService for ModelToolSessionProcessService {
             .await
     }
 
+    async fn signal_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::signal_recorded_intent(
+            &host,
+            session_id,
+            process_id,
+            signal_name,
+            signal_id,
+            payload,
+            scope,
+        )
+        .await
+    }
+
     async fn emit_event(
         &self,
         session_id: &str,
@@ -617,6 +738,24 @@ impl crate::ProcessService for ModelToolSessionProcessService {
                 scope,
             )
             .await
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::emit_event_recorded_intent(
+            &host, session_id, process_id, event_type, replay_key, payload, scope,
+        )
+        .await
     }
 
     async fn signal_possessed(

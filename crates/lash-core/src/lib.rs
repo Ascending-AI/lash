@@ -876,7 +876,7 @@ pub(crate) use runtime::{
     LlmAttachmentSpec, ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData,
-    QueuedWorkItem, QueuedWorkPayload, RuntimeReplay, RuntimeSubject, load_process_execution_env,
+    QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, load_process_execution_env,
     materialize_process_event_semantics, persist_process_execution_env,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
     process_event_invocation, process_registration_fingerprint, process_wake_batch_draft,
@@ -899,8 +899,8 @@ pub use runtime::{
     ProcessEventSemanticsSpec, RuntimeCheckpointComponents, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeScope, RuntimeSessionState,
-    ToolAttemptLaunch,
+    RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
+    RuntimeScope, RuntimeSessionState, ToolAttemptLaunch,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 
@@ -938,7 +938,7 @@ pub use tool_intent::{
     CancelProcessIntent, EmitProcessEventIntent, ProcessParentEndPolicy, SignalProcessIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptResult, ToolIntent, ToolIntents,
-    derive_tool_intent_identity,
+    ToolResultDone, derive_tool_intent_identity,
 };
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall, PreparedToolBatch,
