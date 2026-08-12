@@ -424,7 +424,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::DeepCopy => {
                 let value = self.pop_stack()?;
-                self.stack.push(self.heap.deep_copy(&value)?);
+                self.stack.push(self.heap.isolate_value(&value)?);
             }
             Instruction::StoreName(name) => {
                 let value = self.pop_stack()?;

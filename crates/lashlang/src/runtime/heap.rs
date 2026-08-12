@@ -652,9 +652,23 @@ impl Heap {
         Ok(exported)
     }
 
+    #[cfg(test)]
     pub(crate) fn deep_copy(&mut self, value: &Value) -> Result<Value, RuntimeError> {
         let mut copied = FxHashMap::default();
         self.deep_copy_inner(value, &mut copied)
+    }
+
+    /// Isolate a value at a Lashlang assignment/container boundary.
+    ///
+    /// Heap mutations replace or materialize the root they target, so cloning
+    /// the root object is sufficient to establish copy-on-write value
+    /// semantics. Child references remain shared until a later path mutation
+    /// materializes that root as a fresh tree.
+    pub(crate) fn isolate_value(&mut self, value: &Value) -> Result<Value, RuntimeError> {
+        match value {
+            Value::Ref(id) => self.allocate(self.get(*id)?.clone()),
+            value => self.import(value.clone()),
+        }
     }
 
     pub(crate) fn push_list(&mut self, target: &Value, item: Value) -> Result<Value, RuntimeError> {
@@ -851,6 +865,7 @@ impl Heap {
         }
     }
 
+    #[cfg(test)]
     fn deep_copy_inner(
         &mut self,
         value: &Value,

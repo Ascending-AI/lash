@@ -44,7 +44,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     fn deep_copy_loop_binding(&mut self, binding: usize) -> Result<(), RuntimeError> {
         let source = self.load_slot(binding)?.clone();
         self.slots
-            .assign_loop_binding(binding, self.heap.deep_copy(&source)?);
+            .assign_loop_binding(binding, self.heap.isolate_value(&source)?);
         Ok(())
     }
 }
