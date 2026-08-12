@@ -59,7 +59,10 @@ pub(crate) struct WorkbenchQueuedTurnWorkflowRequest {
 }
 
 impl WorkbenchQueuedTurnWorkflowRequest {
-    pub(crate) fn queued_turn(&self, session: &lash::LashSession) -> lash::QueuedTurnBuilder {
+    pub(crate) fn queued_turn(
+        &self,
+        session: &lash::LashSession,
+    ) -> lash::SelectedQueuedTurnBuilder {
         session
             .queued_turn()
             .batch_ids(self.batch_ids.iter().cloned())
@@ -997,6 +1000,7 @@ async fn run_queued_turn(
         .stream_to(&ui_events)
         .await
         .map_err(AppError::runtime)?
+        .turn
     else {
         state.trace_for_session(
             &request.session_id,

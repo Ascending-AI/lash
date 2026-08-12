@@ -79,7 +79,8 @@ pub mod store_backend_support {
 #[doc(hidden)]
 pub mod facade_support {
     pub use crate::runtime::turn_loop::{
-        SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainRefusalCause,
+        SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainError,
+        SelectedQueuedWorkDrainOutcome, SelectedQueuedWorkDrainRefusalCause,
     };
     /// Build the core-level tool-registry projection through the same plugin
     /// composition path used for runtime sessions.
@@ -900,12 +901,12 @@ pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use session_model::{SessionPolicy, TurnBudget};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseClaimNonce, LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SessionAdmission,
-    SessionBinding, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseDisplacement, SessionExecutionLeaseRenewalInstallMismatch,
-    SessionExecutionLeaseStore, SessionMeta, StoreError, StoreMaintenance, TurnInputStore,
-    VacuumReport,
+    LeaseClaimNonce, LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence,
+    SelectedQueuedWorkClaimOutcome, SessionAdmission, SessionBinding, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
+    SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
+    StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 pub use store::{
     CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, HydratedCheckpointComponent,

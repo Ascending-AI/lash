@@ -2383,6 +2383,7 @@ async fn consume_wake(
         )
         .await
         .map_err(|error| error.to_string())?
+        .claim
     else {
         return Ok(false);
     };
@@ -2468,7 +2469,6 @@ fn counterexample_path(backend: &str) -> PathBuf {
         .unwrap_or_else(|| std::env::temp_dir().join("lash-store-contract-counterexamples"));
     root.join(format!("{backend}.txt"))
 }
-
 fn persist_counterexample(backend: &str, runner_seed: u64, error: &TestError<GeneratedCase>) {
     let path = counterexample_path(backend);
     if let Some(parent) = path.parent()

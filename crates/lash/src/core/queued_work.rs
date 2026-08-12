@@ -129,7 +129,6 @@ impl InlineQueuedWorkRunHandle {
                 scoped,
                 CancellationToken::new(),
                 lash_core::TurnCancelOriginHint::default(),
-                &[],
             )
             .await
             .map_err(|error| {

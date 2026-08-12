@@ -2931,7 +2931,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1116#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1120#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -3309,7 +3309,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::QueuedTurnBuilder", "lash::turn::QueuedTurnBuilder"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:65#.batch_ids(self.batch_ids.iter().cloned())"
+usage = "examples/agent-workbench/src/restate.rs:68#.batch_ids(self.batch_ids.iter().cloned())"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/restate.rs:63, inside `queued_turn`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/queued_work.rs:322 asserts an unrelated expression in `targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery`, and `queued_turn` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3328,7 +3328,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::QueuedTurnBuilder::batch_ids", "lash::turn::QueuedTurnBuilder::batch_ids"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:65#.batch_ids(self.batch_ids.iter().cloned())"
+usage = "examples/agent-workbench/src/restate.rs:68#.batch_ids(self.batch_ids.iter().cloned())"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/restate.rs:63, inside `queued_turn`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/queued_work.rs:322 asserts an unrelated expression in `targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery`, and `queued_turn` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -13190,6 +13190,7 @@ reason = "Facade contract surface, not a closure-only discovery: the owning type
 symbol = "lash::persistence::QueuedWorkClaim"
 kind = "type_alias"
 availability = "default+all-features"
+aliases = ["lash_core::runtime::turn_queue::QueuedWorkClaim"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::QueuedWorkClaim to the agent-service persistence setup example and assert its externally observable result."
@@ -23789,8 +23790,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessEventSemanticsSpec"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:352#semantics: lash::process::ProcessEventSemanticsSpec {"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:353#semantics: lash::process::ProcessEventSemanticsSpec {"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::ProcessEventSemanticsSpec::terminal"
@@ -23808,8 +23809,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessEventSemanticsSpec::wake"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:328#.expect(\"valid wake expiry\")"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:331#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:329#.expect(\"valid wake expiry\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 
 [[api]]
 symbol = "lash::process::ProcessEventSink"
@@ -26858,8 +26859,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:354#when: Some(lash::process::ProcessValueSelector::Present("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:355#when: Some(lash::process::ProcessValueSelector::Present("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::ProcessValueSelector::Const"
@@ -26895,8 +26896,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector::Pointer"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:357#input: lash::process::ProcessValueSelector::Pointer("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:358#input: lash::process::ProcessValueSelector::Pointer("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::ProcessValueSelector::Pointer::0"
@@ -26905,8 +26906,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector::Pointer::0"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:357#input: lash::process::ProcessValueSelector::Pointer("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:358#input: lash::process::ProcessValueSelector::Pointer("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::ProcessValueSelector::Present"
@@ -26915,8 +26916,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector::Present"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:354#when: Some(lash::process::ProcessValueSelector::Present("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:355#when: Some(lash::process::ProcessValueSelector::Present("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::ProcessValueSelector::Present::0"
@@ -26925,8 +26926,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector::Present::0"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:354#when: Some(lash::process::ProcessValueSelector::Present("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:355#when: Some(lash::process::ProcessValueSelector::Present("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::ProcessValueSelector::Template"
@@ -27750,8 +27751,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:327#let wake_delivery_config = lash::process::WakeDeliveryConfig::new(10_000)"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:331#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:328#let wake_delivery_config = lash::process::WakeDeliveryConfig::new(10_000)"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryConfig::delivery_expiry_ms"
@@ -27760,8 +27761,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig::delivery_expiry_ms"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:331#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:331#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryConfig::enqueuing_stale_after_ms"
@@ -27770,8 +27771,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig::enqueuing_stale_after_ms"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryConfig::new"
@@ -27780,8 +27781,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig::new"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:327#let wake_delivery_config = lash::process::WakeDeliveryConfig::new(10_000)"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:331#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:328#let wake_delivery_config = lash::process::WakeDeliveryConfig::new(10_000)"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryConfig::with_enqueuing_stale_after_ms"
@@ -27790,8 +27791,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig::with_enqueuing_stale_after_ms"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:329#.with_enqueuing_stale_after_ms(25)"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:331#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:330#.with_enqueuing_stale_after_ms(25)"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:332#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport"
@@ -27799,8 +27800,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:463#let redelivery: lash::process::WakeDeliveryDriveReport ="
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:460#assert_eq!(before_stale_boundary.inspected, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:464#let redelivery: lash::process::WakeDeliveryDriveReport ="
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:461#assert_eq!(before_stale_boundary.inspected, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::discarded_expired"
@@ -27808,8 +27809,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:475#assert_eq!(redelivery.discarded_expired, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:475#assert_eq!(redelivery.discarded_expired, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:476#assert_eq!(redelivery.discarded_expired, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:476#assert_eq!(redelivery.discarded_expired, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::discarded_sequence_rewound"
@@ -27817,8 +27818,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:478#assert_eq!(redelivery.discarded_sequence_rewound, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:478#assert_eq!(redelivery.discarded_sequence_rewound, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:479#assert_eq!(redelivery.discarded_sequence_rewound, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:479#assert_eq!(redelivery.discarded_sequence_rewound, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::discarded_target_gone"
@@ -27826,8 +27827,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:476#assert_eq!(redelivery.discarded_target_gone, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:476#assert_eq!(redelivery.discarded_target_gone, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:477#assert_eq!(redelivery.discarded_target_gone, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:477#assert_eq!(redelivery.discarded_target_gone, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::enqueued"
@@ -27835,8 +27836,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:474#assert_eq!(redelivery.enqueued, 1);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:474#assert_eq!(redelivery.enqueued, 1);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:475#assert_eq!(redelivery.enqueued, 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:475#assert_eq!(redelivery.enqueued, 1);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::floor_absorbed"
@@ -27844,8 +27845,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:477#assert_eq!(redelivery.floor_absorbed, 1);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:477#assert_eq!(redelivery.floor_absorbed, 1);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:478#assert_eq!(redelivery.floor_absorbed, 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:478#assert_eq!(redelivery.floor_absorbed, 1);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::inspected"
@@ -27853,8 +27854,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:460#assert_eq!(before_stale_boundary.inspected, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:460#assert_eq!(before_stale_boundary.inspected, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:461#assert_eq!(before_stale_boundary.inspected, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:461#assert_eq!(before_stale_boundary.inspected, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::retryable_failures"
@@ -27862,8 +27863,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:479#assert_eq!(redelivery.retryable_failures, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:479#assert_eq!(redelivery.retryable_failures, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:480#assert_eq!(redelivery.retryable_failures, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:480#assert_eq!(redelivery.retryable_failures, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriver"
@@ -27871,8 +27872,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:451#let before_stale_boundary = lash::process::WakeDeliveryDriver::drive_pending_once("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:460#assert_eq!(before_stale_boundary.inspected, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:452#let before_stale_boundary = lash::process::WakeDeliveryDriver::drive_pending_once("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:461#assert_eq!(before_stale_boundary.inspected, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriver::drive_pending"
@@ -27888,8 +27889,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:451#let before_stale_boundary = lash::process::WakeDeliveryDriver::drive_pending_once("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:460#assert_eq!(before_stale_boundary.inspected, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:452#let before_stale_boundary = lash::process::WakeDeliveryDriver::drive_pending_once("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:461#assert_eq!(before_stale_boundary.inspected, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriver::drive_pending_once_with_delivery_policy"
@@ -27905,8 +27906,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:492#let expiry_clock = Arc::new("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:440#.list_queued_work(&session_id)"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:493#let expiry_clock = Arc::new("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:441#.list_queued_work(&session_id)"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriver::nudge"
@@ -70870,6 +70871,330 @@ aliases = ["lash_core::PROCESS_WAKE_MERGE_KEY"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime embedders and custom durable-store implementors configure, persist, inspect, and enforce queued-work batching semantics at the public store boundary."
+
+[[api]]
+symbol = "lash::SelectedQueuedTurnBuilder"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder"]
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/restate.rs:65#) -> lash::SelectedQueuedTurnBuilder {"
+reason = "The agent-workbench selected-drain workflow returns this builder directly; its run outcome is asserted separately by selected_queued_turn_reports_claimed_now_and_already_satisfied_ids."
+
+[[api]]
+symbol = "lash::SelectedQueuedTurnBuilder::advanced"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder::advanced"]
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add the advanced selected-drain scope path to a durable-controller example and assert its typed satisfaction outcome."
+
+[[api]]
+symbol = "lash::SelectedQueuedTurnBuilder::cancel"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder::cancel"]
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add selected-drain cooperative cancellation to an embedding example and assert the cancellation outcome."
+
+[[api]]
+symbol = "lash::SelectedQueuedTurnBuilder::cancel_with_origin"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder::cancel_with_origin"]
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add selected-drain cancellation with host origin evidence to an embedding example and assert the recorded origin."
+
+[[api]]
+symbol = "lash::SelectedQueuedTurnBuilder::drain_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder::drain_id"]
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/restate.rs:69#.drain_id("
+reason = "The Restate workbench supplies a stable selected-drain idempotency key; the scope identity is internal and has no direct host-visible assertion in that constructor."
+
+[[api]]
+symbol = "lash::SelectedQueuedTurnBuilder::effects"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder::effects"]
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/restate.rs:999#.effects(controller)"
+reason = "The Restate selected-drain workflow binds its durable effect controller before streaming; controller ownership is verified by the workflow integration tests rather than at this call site."
+
+[[api]]
+symbol = "lash::SelectedQueuedTurnBuilder::run"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder::run"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1033#.run()"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1039#assert!(claimed.turn.is_some());"
+
+[[api]]
+symbol = "lash::SelectedQueuedTurnBuilder::stream_to"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder::stream_to"]
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add direct selected-drain streaming to an embedding example and assert both emitted activity and typed satisfaction."
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkBatchSatisfaction"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1036#let claimed_satisfaction = vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1041#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1050#vec![lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1055#assert_eq!(replay.satisfied, replay_satisfaction);"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied::batch_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied::batch_id"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1051#batch_id: batch.batch_id,"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1055#assert_eq!(replay.satisfied, replay_satisfaction);"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction::ClaimedNow"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1036#let claimed_satisfaction = vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1041#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow::batch_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction::ClaimedNow::batch_id"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1037#batch_id: batch.batch_id.clone(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1041#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkDrainOutcome"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1030#let claimed = session"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1039#assert!(claimed.turn.is_some());"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkDrainOutcome::expect"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::expect"]
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:672#.expect(\"a selection naming an already-drained batch is a no-op, not an error\")"
+reason = "The workbench unwraps the successful typed result before directly asserting that the selected drain needed no new turn."
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkDrainOutcome::is_none"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::is_none"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1054#assert!(replay.is_none());"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1054#assert!(replay.is_none());"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkDrainOutcome::is_some"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::is_some"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1040#assert!(claimed.is_some());"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1040#assert!(claimed.is_some());"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkDrainOutcome::satisfied"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::satisfied"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1041#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1041#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+
+[[api]]
+symbol = "lash::SelectedQueuedWorkDrainOutcome::turn"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::turn"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1039#assert!(claimed.turn.is_some());"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1039#assert!(claimed.turn.is_some());"
+
+[[api]]
+symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::SelectedQueuedWorkClaimOutcome"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Required result type of the public QueuedWorkStore exact-selection method. Custom durable-store implementors must return the acquired claim separately from requested IDs whose durable rows are already absent."
+
+[[api]]
+symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome::already_satisfied_batch_ids"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SelectedQueuedWorkClaimOutcome::already_satisfied_batch_ids"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Custom QueuedWorkStore implementations populate this field so the facade can report idempotently satisfied absent IDs."
+
+[[api]]
+symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome::claim"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SelectedQueuedWorkClaimOutcome::claim"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Custom QueuedWorkStore implementations populate this field with rows acquired by the current selected drain."
+
+[[api]]
+symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome::expect"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SelectedQueuedWorkClaimOutcome::expect"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Integrator convenience for conformance and custom-store probes that require a newly acquired exact claim."
+
+[[api]]
+symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome::is_none"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SelectedQueuedWorkClaimOutcome::is_none"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Integrator convenience for conformance and custom-store probes that distinguish no new claim from store failure."
+
+[[api]]
+symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome::map"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SelectedQueuedWorkClaimOutcome::map"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Integrator convenience used by deterministic store state-machine adapters to transform an optional exact claim."
+
+[[api]]
+symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome::new"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SelectedQueuedWorkClaimOutcome::new"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Construction seam required by custom QueuedWorkStore implementations returning exact-selection outcomes."
+
+[[api]]
+symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome::ok_or_else"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SelectedQueuedWorkClaimOutcome::ok_or_else"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Integrator convenience used by deterministic store laws to require an acquired exact claim with typed test errors."
+
+[[api]]
+symbol = "lash::turn::AdvancedSelectedQueuedTurn"
+kind = "struct"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add the advanced selected-drain scope path to a durable-controller example and assert its typed satisfaction outcome."
+
+[[api]]
+symbol = "lash::turn::AdvancedSelectedQueuedTurn::stream_to_with_scope"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add an explicitly scoped selected drain to a durable-controller example and assert its typed satisfaction outcome."
+
+[[api]]
+symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder"
+kind = "struct"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/restate.rs:999#.effects(controller)"
+reason = "The Restate workbench selected drain uses the controller-scoped builder; its workflow outcome is checked by higher-level integration coverage."
+
+[[api]]
+symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder::cancel"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add scoped selected-drain cooperative cancellation to a durable-controller example and assert the cancellation outcome."
+
+[[api]]
+symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder::cancel_with_origin"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add scoped selected-drain cancellation origin evidence to a durable-controller example and assert the recorded origin."
+
+[[api]]
+symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder::drain_id"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add an explicit drain-id override after controller scoping and assert the resulting durable effect scope."
+
+[[api]]
+symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder::run"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add controller-scoped selected run collection to an embedding example and assert its typed satisfaction outcome."
+
+[[api]]
+symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder::stream_to"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/restate.rs:1000#.stream_to(&ui_events)"
+reason = "The Restate workbench streams a controller-scoped selected drain into its UI sink; higher-level workflow tests validate the emitted reply."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkAuthority"

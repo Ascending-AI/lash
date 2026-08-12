@@ -233,9 +233,9 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: &[String],
         policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, crate::store::StoreError> {
         if batch_ids.is_empty() {
-            return Ok(None);
+            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
         }
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
@@ -247,14 +247,33 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .fail_next_exact_queue_claim
             .swap(false, std::sync::atomic::Ordering::SeqCst)
         {
-            return Ok(None);
+            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
         }
         let generation = session_execution_lease.fencing_token;
         let mut queued = self.queued_work.lock_recover();
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         let requested_ids = batch_ids.iter().collect::<std::collections::BTreeSet<_>>();
         if requested_ids.len() != batch_ids.len() {
-            return Ok(None);
+            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
+        }
+        let present_ids = queued
+            .iter()
+            .filter(|entry| {
+                entry.batch.session_id == session_id
+                    && requested_ids.contains(&entry.batch.batch_id)
+            })
+            .map(|entry| entry.batch.batch_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let already_satisfied_batch_ids = batch_ids
+            .iter()
+            .filter(|batch_id| !present_ids.contains(batch_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if present_ids.is_empty() {
+            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         let claim_available = |entry: &super::InMemoryQueuedBatch| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
@@ -270,8 +289,11 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             })
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        if requested_indices.len() != requested_ids.len() {
-            return Ok(None);
+        if requested_indices.len() != present_ids.len() {
+            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         let involved_claim_ids = requested_indices
             .iter()
@@ -336,7 +358,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 if Self::queued_batch_work_class(&queued[*index].batch)?
                     != crate::store::QueuedWorkClass::TurnWork
                 {
-                    return Ok(None);
+                    return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                        None,
+                        already_satisfied_batch_ids,
+                    ));
                 }
             }
             let first_requested = requested_indices[0];
@@ -344,7 +369,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 .iter()
                 .position(|index| *index == first_requested)
             else {
-                return Ok(None);
+                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
             };
             span_indices[first_position..]
                 .iter()
@@ -370,7 +398,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             now,
         )?;
         if selected_len == 0 {
-            return Ok(None);
+            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         indices.truncate(selected_len);
         let next_fencing_tokens = indices
@@ -404,18 +435,21 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             entry.claim_session_lease_generation = generation;
             batches.push(entry.batch.clone());
         }
-        Ok(Some(crate::QueuedWorkClaim {
-            session_id: session_id.to_string(),
-            claim_id,
-            owner: owner.clone(),
-            lease_token,
-            fencing_token,
-            session_lease_generation: generation,
-            data: crate::QueuedWorkClaimData {
-                batches,
-                abandon_restore_claim_id,
-            },
-        }))
+        Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+            Some(crate::QueuedWorkClaim {
+                session_id: session_id.to_string(),
+                claim_id,
+                owner: owner.clone(),
+                lease_token,
+                fencing_token,
+                session_lease_generation: generation,
+                data: crate::QueuedWorkClaimData {
+                    batches,
+                    abandon_restore_claim_id,
+                },
+            }),
+            already_satisfied_batch_ids,
+        ))
     }
 
     async fn abandon_queued_work_claim(

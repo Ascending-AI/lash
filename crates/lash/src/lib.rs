@@ -46,8 +46,9 @@ pub use crate::session::{
 };
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::{
-    QueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput, TurnResult, TurnStream,
-    message_role, message_text,
+    QueuedTurnBuilder, SelectedQueuedTurnBuilder, SelectedQueuedWorkBatchSatisfaction,
+    SelectedQueuedWorkDrainOutcome, TurnActivityFanout, TurnBuilder, TurnOutput, TurnResult,
+    TurnStream, message_role, message_text,
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
@@ -214,6 +215,7 @@ pub mod persistence {
         SessionLeaseDiagnostics, SessionLeaseHolder, SessionLeaseRenewal,
     };
     pub use lash_core::CheckpointKind;
+    pub use lash_core::SelectedQueuedWorkClaimOutcome;
     pub use lash_core::facade_support::FileAttachmentStore;
     pub use lash_core::runtime::{
         DeliveryPolicy, ForkPoint, ForkSessionRequest, ForkSessionResult, InMemorySessionStore,

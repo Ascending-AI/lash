@@ -975,3 +975,84 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         let _ = std::fs::remove_dir_all(data_dir);
     });
 }
+
+#[test]
+fn selected_drain_reports_claimed_and_already_satisfied_batches() {
+    run_async_test_on_stack_budget("workbench-selected-drain-outcome", || async {
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-selected-drain-outcome-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create selected-drain outcome dir");
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
+            &data_dir,
+            16,
+            lash::testing::TestProvider::builder()
+                .kind("workbench-selected-drain-outcome-test")
+                .complete(|_| async {
+                    Ok(text_response(
+                        "<lashlang>\nfinish \"processed selected row\"\n</lashlang>",
+                    ))
+                })
+                .build()
+                .into_handle(),
+            in_memory_trigger_store(),
+            Arc::clone(&store_factory),
+            Some(inert_queued_work_driver()),
+            32_768,
+        )
+        .await;
+        let session_id = state.current_session_id();
+        let session = state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .expect("open selected-drain outcome session");
+        let store = store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: lash::persistence::SessionRelation::Root,
+                policy: session.policy_snapshot(),
+            })
+            .await
+            .expect("open selected-drain outcome store");
+        let batch = store
+            .enqueue_queued_work(queued_work_test_draft(
+                &session_id,
+                "workbench-selected-drain-outcome",
+            ))
+            .await
+            .expect("enqueue selected-drain outcome row");
+
+        let claimed = session
+            .queued_turn()
+            .batch_ids([batch.batch_id.clone()])
+            .run()
+            .await
+            .expect("run selected-drain outcome row");
+        let claimed_satisfaction = vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+            batch_id: batch.batch_id.clone(),
+        }];
+        assert!(claimed.turn.is_some());
+        assert!(claimed.is_some());
+        assert_eq!(claimed.satisfied, claimed_satisfaction);
+
+        let replay = session
+            .queued_turn()
+            .batch_ids([batch.batch_id.clone()])
+            .run()
+            .await
+            .expect("replay selected-drain outcome row");
+        let replay_satisfaction =
+            vec![lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                batch_id: batch.batch_id,
+            }];
+        assert!(replay.turn.is_none());
+        assert!(replay.is_none());
+        assert_eq!(replay.satisfied, replay_satisfaction);
+        let _ = std::fs::remove_dir_all(data_dir);
+    });
+}

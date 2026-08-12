@@ -13,6 +13,7 @@ use lash::persistence::{
     PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch,
     QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkStore,
+    SelectedQueuedWorkClaimOutcome,
     RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult, RuntimePersistence,
     RuntimeSessionState, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore,
@@ -264,8 +265,8 @@ impl QueuedWorkStore for FacadeStore {
         _boundary: QueuedWorkClaimBoundary,
         _batch_ids: &[String],
         _policy: QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        Ok(None)
+    ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
+        Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()))
     }
 
     async fn abandon_queued_work_claim(&self, _claim: &QueuedWorkClaim) -> Result<(), StoreError> {

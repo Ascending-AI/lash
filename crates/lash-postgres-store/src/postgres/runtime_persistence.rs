@@ -1750,9 +1750,12 @@ impl QueuedWorkStore for PostgresSessionStore {
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
         policy: QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<lash_core::SelectedQueuedWorkClaimOutcome, StoreError> {
         if batch_ids.is_empty() {
-            return Ok(None);
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                Vec::new(),
+            ));
         }
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
@@ -1764,7 +1767,34 @@ impl QueuedWorkStore for PostgresSessionStore {
             .collect::<std::collections::BTreeSet<_>>();
         if requested_ids.len() != batch_ids.len() {
             tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(None);
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                Vec::new(),
+            ));
+        }
+        let present_ids = sqlx::query_scalar::<_, String>(
+            "SELECT batch_id
+             FROM lash_queued_work_batches
+             WHERE session_id = $1 AND batch_id = ANY($2)",
+        )
+        .bind(session_id)
+        .bind(batch_ids)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        let already_satisfied_batch_ids = batch_ids
+            .iter()
+            .filter(|batch_id| !present_ids.contains(batch_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if present_ids.is_empty() {
+            tx.rollback().await.map_err(store_sqlx_error)?;
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         let requested_rows = sqlx::query(
                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
@@ -1787,9 +1817,12 @@ impl QueuedWorkStore for PostgresSessionStore {
             .into_iter()
             .map(queued_batch_row)
             .collect::<Result<Vec<_>, _>>()?;
-        if requested_rows.len() != requested_ids.len() {
+        if requested_rows.len() != present_ids.len() {
             tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(None);
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         let involved_claim_ids = requested_rows
             .iter()
@@ -1855,7 +1888,10 @@ impl QueuedWorkStore for PostgresSessionStore {
                     let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
                     if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
                         tx.rollback().await.map_err(store_sqlx_error)?;
-                        return Ok(None);
+                        return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                            None,
+                            already_satisfied_batch_ids,
+                        ));
                     }
                     requested_batches.insert(row.batch_id.clone(), batch);
                 }
@@ -1892,7 +1928,10 @@ impl QueuedWorkStore for PostgresSessionStore {
                     .position(|row| requested_ids.contains(&row.batch_id))
                 else {
                     tx.rollback().await.map_err(store_sqlx_error)?;
-                    return Ok(None);
+                    return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                        None,
+                        already_satisfied_batch_ids,
+                    ));
                 };
                 let selected = span_rows[first_position..]
                     .iter()
@@ -1918,7 +1957,10 @@ impl QueuedWorkStore for PostgresSessionStore {
         let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
         if selected_len == 0 {
             tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(None);
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         selected.truncate(selected_len);
         selected_batches.truncate(selected_len);
@@ -1956,22 +1998,28 @@ impl QueuedWorkStore for PostgresSessionStore {
             .rows_affected();
             if changed != 1 {
                 tx.rollback().await.map_err(store_sqlx_error)?;
-                return Ok(None);
+                return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
             }
         }
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Some(QueuedWorkClaim {
-            session_id: session_id.to_string(),
-            claim_id: lease.claim_id,
-            owner: owner.clone(),
-            lease_token: lease.lease_token,
-            fencing_token: lease.fencing_token,
-            session_lease_generation: lease.session_lease_generation,
-            data: lash_core::store_backend_support::queued_work_claim_data(
-                selected_batches,
-                candidates[0].prior_claim_id.clone(),
-            ),
-        }))
+        Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+            Some(QueuedWorkClaim {
+                session_id: session_id.to_string(),
+                claim_id: lease.claim_id,
+                owner: owner.clone(),
+                lease_token: lease.lease_token,
+                fencing_token: lease.fencing_token,
+                session_lease_generation: lease.session_lease_generation,
+                data: lash_core::store_backend_support::queued_work_claim_data(
+                    selected_batches,
+                    candidates[0].prior_claim_id.clone(),
+                ),
+            }),
+            already_satisfied_batch_ids,
+        ))
     }
 
     async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {

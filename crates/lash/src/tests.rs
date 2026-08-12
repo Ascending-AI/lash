@@ -587,11 +587,12 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _batch_ids: &[String],
         _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::QueuedWorkClaim>,
-        lash_core::store::StoreError,
-    > {
-        Ok(None)
+    ) -> std::result::Result<lash_core::SelectedQueuedWorkClaimOutcome, lash_core::store::StoreError>
+    {
+        Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+            None,
+            Vec::new(),
+        ))
     }
 
     async fn abandon_queued_work_claim(
@@ -1027,11 +1028,12 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _batch_ids: &[String],
         _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::QueuedWorkClaim>,
-        lash_core::store::StoreError,
-    > {
-        Ok(None)
+    ) -> std::result::Result<lash_core::SelectedQueuedWorkClaimOutcome, lash_core::store::StoreError>
+    {
+        Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+            None,
+            Vec::new(),
+        ))
     }
 
     async fn abandon_queued_work_claim(

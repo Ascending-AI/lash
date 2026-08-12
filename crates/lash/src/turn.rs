@@ -5,10 +5,76 @@ use std::task::{Context, Poll};
 use crate::support::*;
 use futures_util::Stream;
 use lash_core::facade_support::{
-    RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps, TurnContextFacadeOps,
+    RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
+    SelectedQueuedWorkBatchSatisfaction as CoreSelectedQueuedWorkBatchSatisfaction,
+    SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError,
+    SelectedQueuedWorkDrainRefusalCause as CoreSelectedQueuedWorkDrainRefusalCause,
+    TurnContextFacadeOps,
 };
 
 pub use lash_core::{facade_support::AssistantOutput, facade_support::TurnIssue};
+
+/// How one requested batch ID satisfied a selected queued-work drain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectedQueuedWorkBatchSatisfaction {
+    /// This drain claimed and executed the durable row.
+    ClaimedNow {
+        /// Requested durable batch ID.
+        batch_id: String,
+    },
+    /// No durable row remained, so the idempotent request was already done.
+    AlreadySatisfied {
+        /// Requested durable batch ID.
+        batch_id: String,
+    },
+}
+
+/// Successful result of a host-selected queued-work drain.
+#[derive(Clone, Debug)]
+pub struct SelectedQueuedWorkDrainOutcome<T> {
+    /// Executed turn, absent when every requested ID was already satisfied.
+    pub turn: Option<T>,
+    /// One typed satisfaction entry per requested ID, in request order.
+    pub satisfied: Vec<SelectedQueuedWorkBatchSatisfaction>,
+}
+
+impl<T> SelectedQueuedWorkDrainOutcome<T> {
+    /// Whether this successful drain needed no new turn.
+    pub fn is_none(&self) -> bool {
+        self.turn.is_none()
+    }
+
+    /// Whether this successful drain executed a newly claimed turn.
+    pub fn is_some(&self) -> bool {
+        self.turn.is_some()
+    }
+
+    /// Return the executed turn or panic with `message`.
+    #[track_caller]
+    pub fn expect(self, message: &str) -> T {
+        self.turn.expect(message)
+    }
+}
+
+fn selected_drain_outcome<T>(
+    outcome: lash_core::facade_support::SelectedQueuedWorkDrainOutcome<T>,
+) -> SelectedQueuedWorkDrainOutcome<T> {
+    SelectedQueuedWorkDrainOutcome {
+        turn: outcome.turn,
+        satisfied: outcome
+            .satisfied
+            .into_iter()
+            .map(|satisfaction| match satisfaction {
+                CoreSelectedQueuedWorkBatchSatisfaction::ClaimedNow { batch_id } => {
+                    SelectedQueuedWorkBatchSatisfaction::ClaimedNow { batch_id }
+                }
+                CoreSelectedQueuedWorkBatchSatisfaction::AlreadySatisfied { batch_id } => {
+                    SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied { batch_id }
+                }
+            })
+            .collect(),
+    }
+}
 
 /// The two internal event sinks threaded through the turn-execution helpers.
 ///
@@ -565,7 +631,6 @@ pub struct QueuedTurnBuilder {
     pub(crate) cancel: CancellationToken,
     pub(crate) cancel_origin_hint: TurnCancelOriginHint,
     pub(crate) cancels: TurnCancelRegistry,
-    pub(crate) batch_ids: Vec<String>,
     pub(crate) drain_id: Option<String>,
 }
 
@@ -587,9 +652,14 @@ impl QueuedTurnBuilder {
         self
     }
 
-    pub fn batch_ids(mut self, batch_ids: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.batch_ids = batch_ids.into_iter().map(Into::into).collect();
-        self
+    pub fn batch_ids(
+        self,
+        batch_ids: impl IntoIterator<Item = impl Into<String>>,
+    ) -> SelectedQueuedTurnBuilder {
+        SelectedQueuedTurnBuilder {
+            builder: self,
+            batch_ids: batch_ids.into_iter().map(Into::into).collect(),
+        }
     }
 
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
@@ -627,10 +697,7 @@ impl QueuedTurnBuilder {
     }
 
     fn resolved_drain_id(&self) -> String {
-        self.drain_id
-            .clone()
-            .or_else(|| self.batch_ids.first().cloned())
-            .unwrap_or_else(fresh_queue_drain_id)
+        self.drain_id.clone().unwrap_or_else(fresh_queue_drain_id)
     }
 
     async fn stream_to_with_effect_host(
@@ -676,11 +743,149 @@ impl QueuedTurnBuilder {
             cancel,
             cancel_origin_hint,
             cancels,
-            batch_ids,
             drain_id: _,
         } = self;
         let _cancel_guard = cancels.register(cancel.clone(), cancel_origin_hint.clone());
         stream_next_queued_prepared_turn(
+            &runtime,
+            TurnSinks::turn(events),
+            scoped_effect_controller,
+            cancel,
+            cancel_origin_hint,
+        )
+        .await
+    }
+}
+
+pub struct SelectedQueuedTurnBuilder {
+    builder: QueuedTurnBuilder,
+    batch_ids: Vec<String>,
+}
+
+impl SelectedQueuedTurnBuilder {
+    pub fn cancel(mut self, cancel: CancellationToken) -> Self {
+        self.builder = self.builder.cancel(cancel);
+        self
+    }
+
+    pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
+        self.builder = self.builder.cancel_with_origin(cancel, origin);
+        self
+    }
+
+    pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
+        self.builder = self.builder.drain_id(drain_id);
+        self
+    }
+
+    pub fn effects(
+        self,
+        controller: &dyn RuntimeEffectController,
+    ) -> ScopedSelectedQueuedTurnBuilder<'_> {
+        ScopedSelectedQueuedTurnBuilder {
+            builder: self,
+            controller,
+        }
+    }
+
+    pub async fn run(self) -> Result<SelectedQueuedWorkDrainOutcome<TurnOutput>> {
+        let collector = RunActivityCollector::default();
+        let outcome = self.stream_to(&collector).await?;
+        Ok(SelectedQueuedWorkDrainOutcome {
+            turn: outcome.turn.map(|result| TurnOutput {
+                result,
+                activities: collector.into_activities(),
+            }),
+            satisfied: outcome.satisfied,
+        })
+    }
+
+    pub async fn stream_to(
+        self,
+        events: &dyn TurnActivitySink,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+        let effect_host = Arc::clone(&self.builder.effect_host);
+        reject_controller_owned_replay_host(effect_host.as_ref(), "selected queued turn")?;
+        self.stream_to_with_effect_host(events, effect_host.as_ref())
+            .await
+    }
+
+    pub fn advanced(self) -> AdvancedSelectedQueuedTurn {
+        AdvancedSelectedQueuedTurn { builder: self }
+    }
+
+    fn resolved_drain_id(&self) -> String {
+        self.builder
+            .drain_id
+            .clone()
+            .or_else(|| self.batch_ids.first().cloned())
+            .unwrap_or_else(fresh_queue_drain_id)
+    }
+
+    async fn stream_to_with_effect_host(
+        self,
+        events: &dyn TurnActivitySink,
+        effect_host: &dyn EffectHost,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+        let drain_id = self.resolved_drain_id();
+        let scope = self
+            .builder
+            .runtime
+            .observe()
+            .persisted_state
+            .queue_drain_scope(drain_id);
+        let scoped_effect_controller = effect_host.scoped(scope)?;
+        self.stream_to_with_scope(events, scoped_effect_controller)
+            .await
+    }
+
+    async fn stream_to_with_effect_controller(
+        self,
+        events: &dyn TurnActivitySink,
+        controller: &dyn RuntimeEffectController,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+        let drain_id = self.resolved_drain_id();
+        let scope = self
+            .builder
+            .runtime
+            .observe()
+            .persisted_state
+            .queue_drain_scope(drain_id);
+        let scoped_effect_controller = ScopedEffectController::borrowed(controller, scope)?;
+        self.stream_to_with_scope(events, scoped_effect_controller)
+            .await
+    }
+
+    async fn stream_to_with_scope(
+        self,
+        events: &dyn TurnActivitySink,
+        scoped_effect_controller: ScopedEffectController<'_>,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+        let Self { builder, batch_ids } = self;
+        let QueuedTurnBuilder {
+            runtime,
+            effect_host: _,
+            cancel,
+            cancel_origin_hint,
+            cancels,
+            drain_id: _,
+        } = builder;
+        let _cancel_guard = cancels.register(cancel.clone(), cancel_origin_hint.clone());
+        if batch_ids.is_empty() {
+            let turn = stream_next_queued_prepared_turn(
+                &runtime,
+                TurnSinks::turn(events),
+                scoped_effect_controller,
+                cancel,
+                cancel_origin_hint,
+            )
+            .await?;
+            return Ok(SelectedQueuedWorkDrainOutcome {
+                turn,
+                satisfied: Vec::new(),
+            });
+        }
+        stream_selected_queued_prepared_turn(
             &runtime,
             TurnSinks::turn(events),
             scoped_effect_controller,
@@ -708,9 +913,14 @@ impl<'run> ScopedQueuedTurnBuilder<'run> {
         self
     }
 
-    pub fn batch_ids(mut self, batch_ids: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.builder = self.builder.batch_ids(batch_ids);
-        self
+    pub fn batch_ids(
+        self,
+        batch_ids: impl IntoIterator<Item = impl Into<String>>,
+    ) -> ScopedSelectedQueuedTurnBuilder<'run> {
+        ScopedSelectedQueuedTurnBuilder {
+            builder: self.builder.batch_ids(batch_ids),
+            controller: self.controller,
+        }
     }
 
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
@@ -736,8 +946,67 @@ impl<'run> ScopedQueuedTurnBuilder<'run> {
     }
 }
 
+pub struct ScopedSelectedQueuedTurnBuilder<'run> {
+    builder: SelectedQueuedTurnBuilder,
+    controller: &'run dyn RuntimeEffectController,
+}
+
+impl<'run> ScopedSelectedQueuedTurnBuilder<'run> {
+    pub fn cancel(mut self, cancel: CancellationToken) -> Self {
+        self.builder = self.builder.cancel(cancel);
+        self
+    }
+
+    pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
+        self.builder = self.builder.cancel_with_origin(cancel, origin);
+        self
+    }
+
+    pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
+        self.builder = self.builder.drain_id(drain_id);
+        self
+    }
+
+    pub async fn run(self) -> Result<SelectedQueuedWorkDrainOutcome<TurnOutput>> {
+        let collector = RunActivityCollector::default();
+        let outcome = self.stream_to(&collector).await?;
+        Ok(SelectedQueuedWorkDrainOutcome {
+            turn: outcome.turn.map(|result| TurnOutput {
+                result,
+                activities: collector.into_activities(),
+            }),
+            satisfied: outcome.satisfied,
+        })
+    }
+
+    pub async fn stream_to(
+        self,
+        events: &dyn TurnActivitySink,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+        self.builder
+            .stream_to_with_effect_controller(events, self.controller)
+            .await
+    }
+}
+
 pub struct AdvancedQueuedTurn {
     builder: QueuedTurnBuilder,
+}
+
+pub struct AdvancedSelectedQueuedTurn {
+    builder: SelectedQueuedTurnBuilder,
+}
+
+impl AdvancedSelectedQueuedTurn {
+    pub async fn stream_to_with_scope(
+        self,
+        events: &dyn TurnActivitySink,
+        scoped_effect_controller: ScopedEffectController<'_>,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+        self.builder
+            .stream_to_with_scope(events, scoped_effect_controller)
+            .await
+    }
 }
 
 impl AdvancedQueuedTurn {
@@ -800,7 +1069,6 @@ pub(crate) async fn stream_next_queued_prepared_turn(
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
-    batch_ids: &[String],
 ) -> Result<Option<TurnResult>> {
     let turn = Box::pin(stream_next_queued_prepared_assembled(
         runtime,
@@ -808,7 +1076,6 @@ pub(crate) async fn stream_next_queued_prepared_turn(
         scoped_effect_controller,
         cancel,
         cancel_origin_hint,
-        batch_ids,
     ))
     .await?;
     Ok(turn.map(TurnResult::from_assembled))
@@ -820,7 +1087,6 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
-    batch_ids: &[String],
 ) -> Result<Option<AssembledTurn>> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
@@ -835,37 +1101,82 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
         cancel,
     )
     .with_local_cancel_origin_hint(cancel_origin_hint);
-    let turn = if batch_ids.is_empty() {
-        writer.stream_next_queued_work(opts).await?
-    } else {
-        match writer.stream_selected_queued_work(opts, batch_ids).await {
-            Ok(turn) => turn,
-            Err(lash_core::facade_support::SelectedQueuedWorkDrainError::Runtime(error)) => {
-                return Err(error.into());
-            }
-            Err(lash_core::facade_support::SelectedQueuedWorkDrainError::Refused { cause }) => {
-                return Err(EmbedError::SelectedQueuedWorkDrainRefused {
-                    cause: match cause {
-                        lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
-                            unclaimed_batch_ids,
-                        } => SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
-                            unclaimed_batch_ids,
-                        },
-                        lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::
-                            InterruptedBatchRequiresFullComposition { required_batch_ids } => {
-                            SelectedQueuedWorkDrainRefusalCause::
-                                InterruptedBatchRequiresFullComposition { required_batch_ids }
-                        }
-                        lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
-                            SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
-                        }
+    let turn = writer.stream_next_queued_work(opts).await?;
+    runtime.publish_from(&writer);
+    Ok(turn)
+}
+
+pub(crate) async fn stream_selected_queued_prepared_turn(
+    runtime: &RuntimeHandle,
+    sinks: TurnSinks<'_>,
+    scoped_effect_controller: ScopedEffectController<'_>,
+    cancel: CancellationToken,
+    cancel_origin_hint: TurnCancelOriginHint,
+    batch_ids: &[String],
+) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+    let outcome = Box::pin(stream_selected_queued_prepared_assembled(
+        runtime,
+        sinks,
+        scoped_effect_controller,
+        cancel,
+        cancel_origin_hint,
+        batch_ids,
+    ))
+    .await?;
+    Ok(SelectedQueuedWorkDrainOutcome {
+        turn: outcome.turn.map(TurnResult::from_assembled),
+        satisfied: outcome.satisfied,
+    })
+}
+
+pub(crate) async fn stream_selected_queued_prepared_assembled(
+    runtime: &RuntimeHandle,
+    sinks: TurnSinks<'_>,
+    scoped_effect_controller: ScopedEffectController<'_>,
+    cancel: CancellationToken,
+    cancel_origin_hint: TurnCancelOriginHint,
+    batch_ids: &[String],
+) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>> {
+    let writer_handle = runtime.writer();
+    let mut writer = writer_handle.lock().await;
+    let observation_sink = SessionObservationTurnActivitySink {
+        runtime: runtime.clone(),
+        live: sinks.turn_events(),
+    };
+    let opts = turn_options(
+        sinks.events(),
+        &observation_sink,
+        scoped_effect_controller,
+        cancel,
+    )
+    .with_local_cancel_origin_hint(cancel_origin_hint);
+    let outcome = match writer.stream_selected_queued_work(opts, batch_ids).await {
+        Ok(outcome) => outcome,
+        Err(CoreSelectedQueuedWorkDrainError::Runtime(error)) => {
+            return Err(error.into());
+        }
+        Err(CoreSelectedQueuedWorkDrainError::Refused { cause }) => {
+            return Err(EmbedError::SelectedQueuedWorkDrainRefused {
+                cause: match cause {
+                    CoreSelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                        unclaimed_batch_ids,
+                    } => SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                        unclaimed_batch_ids,
                     },
-                });
-            }
+                    CoreSelectedQueuedWorkDrainRefusalCause::
+                        InterruptedBatchRequiresFullComposition { required_batch_ids } => {
+                        SelectedQueuedWorkDrainRefusalCause::
+                            InterruptedBatchRequiresFullComposition { required_batch_ids }
+                    }
+                    CoreSelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
+                        SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
+                    }
+                },
+            });
         }
     };
     runtime.publish_from(&writer);
-    Ok(turn)
+    Ok(selected_drain_outcome(outcome))
 }
 
 fn turn_options<'a>(

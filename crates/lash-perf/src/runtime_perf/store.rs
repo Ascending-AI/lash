@@ -11,21 +11,15 @@ use lash_core::store;
 use lash_core::store::{PersistedSessionRead, RuntimeCommitResult, SessionHeadMeta};
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
-    SessionGraph, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-    StoreMaintenance, TurnInputStore, VacuumReport, facade_support::current_epoch_ms,
+    SelectedQueuedWorkClaimOutcome, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionGraph, SessionNodeRecord,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore,
+    VacuumReport, facade_support::current_epoch_ms,
 };
 
-#[derive(Clone)]
-struct RuntimePerfQueuedBatch {
-    batch: QueuedWorkBatch,
-    claim_id: Option<String>,
-    claim_token: Option<String>,
-    claim_owner: Option<LeaseOwnerIdentity>,
-    claim_fencing_token: u64,
-    claim_session_lease_generation: u64,
-}
+mod queued_work;
+use queued_work::RuntimePerfQueuedBatch;
 
 #[derive(Clone)]
 struct RuntimePerfPendingTurnInput {
@@ -1304,18 +1298,28 @@ impl QueuedWorkStore for RuntimePerfStore {
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
         policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
         if batch_ids.is_empty() {
-            return Ok(None);
+            return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
         }
         self.verify_session_execution_lease(session_id, session_execution_lease)?;
         let generation = session_execution_lease.fencing_token;
         let now = current_epoch_ms();
         let mut queued = self.queued_work.lock_recover();
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
-        let requested_ids = batch_ids.iter().collect::<std::collections::BTreeSet<_>>();
-        if requested_ids.len() != batch_ids.len() {
-            return Ok(None);
+        let Some(queued_work::SelectedBatchPresence {
+            requested_ids,
+            present_ids,
+            already_satisfied_batch_ids,
+        }) = queued_work::selected_batch_presence(&queued, session_id, batch_ids)
+        else {
+            return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
+        };
+        if present_ids.is_empty() {
+            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         let claim_available = |entry: &RuntimePerfQueuedBatch| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
@@ -1331,8 +1335,11 @@ impl QueuedWorkStore for RuntimePerfStore {
             })
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        if requested_indices.len() != requested_ids.len() {
-            return Ok(None);
+        if requested_indices.len() != present_ids.len() {
+            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         let involved_claim_ids = requested_indices
             .iter()
@@ -1394,7 +1401,10 @@ impl QueuedWorkStore for RuntimePerfStore {
                 if Self::queued_batch_work_class(&queued[*index].batch)?
                     != lash_core::store::QueuedWorkClass::TurnWork
                 {
-                    return Ok(None);
+                    return Ok(SelectedQueuedWorkClaimOutcome::new(
+                        None,
+                        already_satisfied_batch_ids,
+                    ));
                 }
             }
             let first_requested = requested_indices[0];
@@ -1402,7 +1412,10 @@ impl QueuedWorkStore for RuntimePerfStore {
                 .iter()
                 .position(|index| *index == first_requested)
             else {
-                return Ok(None);
+                return Ok(SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
             };
             span_indices[first_position..]
                 .iter()
@@ -1424,7 +1437,10 @@ impl QueuedWorkStore for RuntimePerfStore {
         let selected_len =
             store::queued_work::select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
         if selected_len == 0 {
-            return Ok(None);
+            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
         indices.truncate(selected_len);
         let first = &queued[indices[0]];
@@ -1449,18 +1465,21 @@ impl QueuedWorkStore for RuntimePerfStore {
             entry.claim_session_lease_generation = generation;
             batches.push(entry.batch.clone());
         }
-        Ok(Some(QueuedWorkClaim {
-            session_id: session_id.to_string(),
-            claim_id,
-            owner: owner.clone(),
-            lease_token,
-            fencing_token,
-            session_lease_generation: generation,
-            data: lash_core::store_backend_support::queued_work_claim_data(
-                batches,
-                abandon_restore_claim_id,
-            ),
-        }))
+        Ok(SelectedQueuedWorkClaimOutcome::new(
+            Some(QueuedWorkClaim {
+                session_id: session_id.to_string(),
+                claim_id,
+                owner: owner.clone(),
+                lease_token,
+                fencing_token,
+                session_lease_generation: generation,
+                data: lash_core::store_backend_support::queued_work_claim_data(
+                    batches,
+                    abandon_restore_claim_id,
+                ),
+            }),
+            already_satisfied_batch_ids,
+        ))
     }
 
     async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {

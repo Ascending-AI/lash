@@ -582,6 +582,7 @@ impl RuntimeBoundaryHarness {
                 .map_err(|err| {
                     RuntimeBoundaryError::new(format!("claim queued wake failed: {err}"))
                 })?
+                .claim
         };
         store
             .release_session_execution_lease(&lease.completion())

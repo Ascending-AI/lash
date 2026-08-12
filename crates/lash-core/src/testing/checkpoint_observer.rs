@@ -823,7 +823,7 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
         policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
         self.inner
             .claim_ready_queued_work_by_batch_ids(
                 session_id,

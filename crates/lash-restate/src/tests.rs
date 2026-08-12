@@ -3893,7 +3893,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         batch_ids: &[String],
         policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> Result<Option<lash_core::runtime::QueuedWorkClaim>, lash_core::StoreError> {
+    ) -> Result<lash_core::SelectedQueuedWorkClaimOutcome, lash_core::StoreError> {
         self.inner
             .claim_ready_queued_work_by_batch_ids(
                 session_id,

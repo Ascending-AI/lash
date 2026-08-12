@@ -4370,6 +4370,26 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
 
     let accepted_session_lease =
         claim_session_execution_lease_for_test(&store, "root", "owner").await;
+    let already_settled = store
+        .claim_ready_queued_work_by_batch_ids(
+            "root",
+            &accepted_session_lease.fence(),
+            &lease_owner("owner"),
+            QueuedWorkClaimBoundary::Idle,
+            std::slice::from_ref(&second.batch_id),
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("resolve already-settled exact batch");
+    assert!(
+        already_settled.claim.is_none(),
+        "an already-settled selected ID must not acquire another claim"
+    );
+    assert_eq!(
+        already_settled.already_satisfied_batch_ids,
+        vec![second.batch_id.clone()],
+        "an already-settled selected ID is idempotently satisfied"
+    );
     let claim = store
         .claim_ready_queued_work_by_batch_ids(
             "root",
@@ -4554,12 +4574,17 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
             &selected_turn_lease.fence(),
             &lease_owner("turn-owner"),
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&turn.batch_id),
+            &[command.batch_id.clone(), turn.batch_id.clone()],
             crate::testing::queued_work_claim_policy(64),
         )
         .await
-        .expect("claim selected turn after command")
-        .expect("selected turn claim exists");
+        .expect("resolve mixed command and turn selection after command completion");
+    assert_eq!(
+        selected_turn.already_satisfied_batch_ids,
+        vec![command.batch_id.clone()],
+        "the leading command consumed before the selected turn is already satisfied"
+    );
+    let selected_turn = selected_turn.expect("selected turn claim exists");
     release_session_execution_lease_for_test(&store, &selected_turn_lease).await;
     assert_eq!(selected_turn.batches[0].batch_id, turn.batch_id);
 

@@ -24,6 +24,7 @@
 //!   cloned into an owned value before being moved in.
 
 use super::*;
+use lash_core::SelectedQueuedWorkClaimOutcome;
 
 pub(crate) fn ensure_session_not_deleted_conn(
     conn: &rusqlite::Connection,
@@ -1768,9 +1769,9 @@ impl QueuedWorkStore for Store {
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
         policy: QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
         if batch_ids.is_empty() {
-            return Ok(None);
+            return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
         }
         let session_id = session_id.to_string();
         let fence = session_execution_lease.clone();
@@ -1779,7 +1780,7 @@ impl QueuedWorkStore for Store {
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<Option<QueuedWorkClaim>, StoreError> = (|| {
+                let outcome: Result<SelectedQueuedWorkClaimOutcome, StoreError> = (|| {
                     ensure_session_execution_lease_conn(tx, &session_id, &fence, now)?;
                     let generation = fence.fencing_token;
                     let requested_ids = batch_ids
@@ -1787,7 +1788,35 @@ impl QueuedWorkStore for Store {
                         .cloned()
                         .collect::<std::collections::BTreeSet<_>>();
                     if requested_ids.len() != batch_ids.len() {
-                        return Ok(None);
+                        return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
+                    }
+                    let present_ids = {
+                        let mut sql = "SELECT batch_id FROM queued_work_batches
+                                       WHERE session_id = ? AND batch_id IN ("
+                            .to_string();
+                        sql.push_str(&vec!["?"; batch_ids.len()].join(", "));
+                        sql.push(')');
+                        let mut values: Vec<rusqlite::types::Value> =
+                            vec![session_id.clone().into()];
+                        values.extend(batch_ids.iter().cloned().map(Into::into));
+                        let mut stmt = tx.prepare(&sql).map_err(sqlite_error)?;
+                        stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
+                            row.get::<_, String>(0)
+                        })
+                        .map_err(sqlite_error)?
+                        .collect::<Result<std::collections::BTreeSet<_>, _>>()
+                        .map_err(sqlite_error)?
+                    };
+                    let already_satisfied_batch_ids = batch_ids
+                        .iter()
+                        .filter(|batch_id| !present_ids.contains(batch_id.as_str()))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if present_ids.is_empty() {
+                        return Ok(SelectedQueuedWorkClaimOutcome::new(
+                            None,
+                            already_satisfied_batch_ids,
+                        ));
                     }
                     let requested_rows = {
                         let mut sql = "SELECT enqueue_seq, batch_id, session_id, source_key,
@@ -1819,8 +1848,11 @@ impl QueuedWorkStore for Store {
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };
-                    if requested_rows.len() != requested_ids.len() {
-                        return Ok(None);
+                    if requested_rows.len() != present_ids.len() {
+                        return Ok(SelectedQueuedWorkClaimOutcome::new(
+                            None,
+                            already_satisfied_batch_ids,
+                        ));
                     }
                     let involved_claim_ids = requested_rows
                         .iter()
@@ -1896,7 +1928,10 @@ impl QueuedWorkStore for Store {
                             if batch.work_class()
                                 != Some(lash_core::store::QueuedWorkClass::TurnWork)
                             {
-                                return Ok(None);
+                                return Ok(SelectedQueuedWorkClaimOutcome::new(
+                                    None,
+                                    already_satisfied_batch_ids,
+                                ));
                             }
                             requested_batches.insert(row.batch_id.clone(), batch);
                         }
@@ -1939,7 +1974,10 @@ impl QueuedWorkStore for Store {
                             .iter()
                             .position(|row| requested_ids.contains(&row.batch_id))
                         else {
-                            return Ok(None);
+                            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                                None,
+                                already_satisfied_batch_ids,
+                            ));
                         };
                         let rows = span_rows[first_position..]
                             .iter()
@@ -1965,7 +2003,10 @@ impl QueuedWorkStore for Store {
                     let selected_len =
                         select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
                     if selected_len == 0 {
-                        return Ok(None);
+                        return Ok(SelectedQueuedWorkClaimOutcome::new(
+                            None,
+                            already_satisfied_batch_ids,
+                        ));
                     }
                     rows.truncate(selected_len);
                     batches.truncate(selected_len);
@@ -2011,25 +2052,32 @@ impl QueuedWorkStore for Store {
                             )
                             .map_err(sqlite_error)?;
                         if changed != 1 {
-                            return Ok(None);
+                            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                                None,
+                                already_satisfied_batch_ids,
+                            ));
                         }
                     }
-                    Ok(Some(QueuedWorkClaim {
-                        session_id,
-                        claim_id: lease.claim_id,
-                        owner,
-                        lease_token: lease.lease_token,
-                        fencing_token: lease.fencing_token,
-                        session_lease_generation: lease.session_lease_generation,
-                        data: lash_core::store_backend_support::queued_work_claim_data(
-                            batches,
-                            candidates[0].prior_claim_id.clone(),
-                        ),
-                    }))
-                })();
+                    Ok(SelectedQueuedWorkClaimOutcome::new(
+                        Some(QueuedWorkClaim {
+                            session_id,
+                            claim_id: lease.claim_id,
+                            owner,
+                            lease_token: lease.lease_token,
+                            fencing_token: lease.fencing_token,
+                            session_lease_generation: lease.session_lease_generation,
+                            data: lash_core::store_backend_support::queued_work_claim_data(
+                                batches,
+                                candidates[0].prior_claim_id.clone(),
+                            ),
+                        }),
+                        already_satisfied_batch_ids,
+                    ))
+                })(
+                );
                 match outcome {
-                    Ok(Some(value)) => Ok(TxOutcome::Commit(Ok(Some(value)))),
-                    Ok(None) => Ok(TxOutcome::Rollback(Ok(None))),
+                    Ok(value) if value.claim.is_some() => Ok(TxOutcome::Commit(Ok(value))),
+                    Ok(value) => Ok(TxOutcome::Rollback(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
                 }
             })

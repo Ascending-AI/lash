@@ -13,9 +13,53 @@ use sha2::{Digest, Sha256};
 
 use super::LeaseOwnerIdentity;
 use crate::{
-    DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkClaimBoundary,
+    DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkPayload, StoreError, TurnCause,
 };
+
+/// Result of resolving a host-selected queued-work set against durable rows.
+///
+/// IDs with no remaining row are already satisfied. Any returned claim covers
+/// only rows acquired by this call; present rows that could not join that claim
+/// remain visible to the runtime as a selected-drain refusal.
+#[derive(Clone, Debug)]
+pub struct SelectedQueuedWorkClaimOutcome {
+    /// Newly acquired rows, if the present selection was claimable.
+    pub claim: Option<QueuedWorkClaim>,
+    /// Requested IDs for which no durable queue row remained.
+    pub already_satisfied_batch_ids: Vec<String>,
+}
+
+impl SelectedQueuedWorkClaimOutcome {
+    /// Build an exact-claim resolution from its two disjoint outcomes.
+    pub fn new(claim: Option<QueuedWorkClaim>, already_satisfied_batch_ids: Vec<String>) -> Self {
+        Self {
+            claim,
+            already_satisfied_batch_ids,
+        }
+    }
+
+    /// Whether this resolution acquired no new durable rows.
+    pub fn is_none(&self) -> bool {
+        self.claim.is_none()
+    }
+
+    /// Transform the newly acquired claim, if any.
+    pub fn map<U>(self, f: impl FnOnce(QueuedWorkClaim) -> U) -> Option<U> {
+        self.claim.map(f)
+    }
+
+    /// Return the newly acquired claim or construct an error.
+    pub fn ok_or_else<E>(self, f: impl FnOnce() -> E) -> Result<QueuedWorkClaim, E> {
+        self.claim.ok_or_else(f)
+    }
+
+    /// Return the newly acquired claim or panic with `message`.
+    #[track_caller]
+    pub fn expect(self, message: &str) -> QueuedWorkClaim {
+        self.claim.expect(message)
+    }
+}
 
 /// Whether a durable queued-work row carries a session command or turn work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

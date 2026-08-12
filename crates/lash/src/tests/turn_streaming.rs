@@ -1211,6 +1211,71 @@ async fn selected_queued_turn_redrives_an_interrupted_composition_exactly_or_not
 }
 
 #[tokio::test]
+async fn selected_queued_turn_reports_claimed_now_and_already_satisfied_ids() -> Result<()> {
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-idempotent-outcome")
+        .complete(|_| async { Ok(text_response("selected outcome")) })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-idempotent-outcome";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    let batch = store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id,
+                lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    "selected-outcome-frame",
+                    "selected-outcome-task",
+                    None,
+                )],
+            )
+            .with_source_key("selected-outcome-source"),
+        )
+        .await
+        .expect("enqueue selected outcome row");
+
+    let claimed = session
+        .queued_turn()
+        .batch_ids([batch.batch_id.clone()])
+        .run()
+        .await?;
+    assert!(claimed.turn.is_some());
+    assert_eq!(
+        claimed.satisfied,
+        vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+            batch_id: batch.batch_id.clone(),
+        }]
+    );
+
+    let replay = session
+        .queued_turn()
+        .batch_ids([batch.batch_id.clone()])
+        .run()
+        .await?;
+    assert!(replay.turn.is_none());
+    assert_eq!(
+        replay.satisfied,
+        vec![
+            crate::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                batch_id: batch.batch_id,
+            },
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn selected_queued_turn_validates_every_interrupted_composition_before_mutating() -> Result<()>
 {
     let provider_calls = Arc::new(AtomicUsize::new(0));

@@ -35,7 +35,7 @@ pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{load_persisted_session_state, refresh_persisted_session_state};
-pub use queued_work::QueuedWorkClass;
+pub use queued_work::{QueuedWorkClass, SelectedQueuedWorkClaimOutcome};
 pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
     RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
@@ -1439,7 +1439,7 @@ pub trait QueuedWorkStore: Send + Sync {
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: &[String],
         policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError>;
 
     /// Release a held queued-work claim without completing it.
     async fn abandon_queued_work_claim(

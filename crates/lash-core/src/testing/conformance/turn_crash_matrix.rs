@@ -721,7 +721,7 @@ impl crate::QueuedWorkStore for SeamStore {
         boundary: QueuedWorkClaimBoundary,
         ids: &[String],
         policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimSelectedQueuedWork {
             boundary: format!("{boundary:?}").to_ascii_lowercase(),
         });
