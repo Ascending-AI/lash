@@ -136,7 +136,7 @@ run_postgres_conformance() {
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
     -p "127.0.0.1:${port}:5432" \
-    postgres:16-alpine >/dev/null
+    postgres:16-alpine -c shared_preload_libraries=pg_stat_statements >/dev/null
 
   local deadline=$((SECONDS + 60))
   until docker exec "$postgres_container" pg_isready -U lash -d lash >/dev/null 2>&1; do
