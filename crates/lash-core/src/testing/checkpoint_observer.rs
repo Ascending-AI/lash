@@ -721,6 +721,7 @@ impl SessionExecutionLeaseStore for ObservedSessionStore {
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        executor_id: &str,
         claim_nonce: &crate::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
@@ -728,6 +729,7 @@ impl SessionExecutionLeaseStore for ObservedSessionStore {
             .try_claim_session_execution_lease_with_token(
                 session_id,
                 owner,
+                executor_id,
                 claim_nonce,
                 lease_ttl_ms,
             )

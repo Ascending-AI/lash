@@ -75,7 +75,7 @@ async fn assert_renewal_response_refused(
     let refusal = capture.exactly_one("session_execution_lease.renewal_install_refused");
     assert_eq!(refusal.target, "lash_core::session_execution_lease");
     assert_eq!(refusal.level, "WARN");
-    assert_eq!(refusal.field_count(), 24);
+    assert_eq!(refusal.field_count(), 27);
     for field in [
         "event",
         "operation",
@@ -83,8 +83,10 @@ async fn assert_renewal_response_refused(
         "session_id",
         "presented_owner_id",
         "presented_incarnation_id",
+        "presented_executor_id",
         "current_owner_id",
         "current_incarnation_id",
+        "current_executor_id",
         "current_token_identity",
         "presented_token_identity",
         "consulted_state",
@@ -94,7 +96,7 @@ async fn assert_renewal_response_refused(
     ] {
         assert_eq!(refusal.field_kind(field), CapturedFieldKind::Str, "{field}");
     }
-    for field in ["owner_matched", "token_matched"] {
+    for field in ["owner_matched", "executor_matched", "token_matched"] {
         assert_eq!(
             refusal.field_kind(field),
             CapturedFieldKind::Bool,
@@ -147,6 +149,10 @@ async fn assert_renewal_response_refused(
     assert_eq!(
         refusal.field("token_matched"),
         (expected != crate::SessionExecutionLeaseRenewalInstallMismatch::LeaseToken).to_string()
+    );
+    assert_eq!(
+        refusal.field("executor_matched"),
+        (expected != crate::SessionExecutionLeaseRenewalInstallMismatch::Executor).to_string()
     );
     assert_eq!(
         refusal.field("generation_matched"),
@@ -203,6 +209,16 @@ async fn renewal_with_wrong_owner_incarnation_marks_lost_and_never_installs() {
         |_, response| response.owner.incarnation_id = "other-incarnation".to_string(),
         crate::SessionExecutionLeaseRenewalInstallMismatch::OwnerIncarnation,
         "owner_incarnation",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn renewal_with_wrong_executor_marks_lost_and_never_installs() {
+    assert_renewal_response_refused(
+        |_, response| response.executor_id = "other-executor".to_string(),
+        crate::SessionExecutionLeaseRenewalInstallMismatch::Executor,
+        "executor",
     )
     .await;
 }

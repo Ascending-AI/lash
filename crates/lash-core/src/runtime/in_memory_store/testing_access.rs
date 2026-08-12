@@ -269,6 +269,7 @@ impl InMemorySessionStore {
     ) -> Vec<(
         String,
         Option<crate::LeaseOwnerIdentity>,
+        Option<String>,
         bool,
         u64,
         u64,
@@ -282,6 +283,7 @@ impl InMemorySessionStore {
                 (
                     session_id.clone(),
                     lease.owner.clone(),
+                    lease.executor_id.clone(),
                     lease.lease_token.is_some(),
                     lease.fencing_token,
                     lease.claimed_at_epoch_ms,

@@ -35,6 +35,51 @@ async fn run_workbench_turn_attempt(
     .await
 }
 
+async fn run_workbench_turn_attempt_with_error_evidence(
+    state: &AppState,
+    session_id: &str,
+    turn_id: &str,
+    text: &str,
+) -> (
+    Result<(), AppError>,
+    Option<(lash::runtime::RuntimeErrorCode, String)>,
+) {
+    let session = match state.core.session(session_id.to_string()).open().await {
+        Ok(session) => session,
+        Err(error) => return (Err(AppError::session_open(error)), None),
+    };
+    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+    let ui_events = ChannelTurnEvents {
+        turn_state: Arc::clone(&turn_state),
+    };
+    match session
+        .turn(lash::TurnInput::text(text))
+        .turn_id(turn_id.to_string())
+        .require_finish()
+        .expect("require finish")
+        .stream_to(&ui_events)
+        .await
+    {
+        Ok(output) => (
+            crate::restate::record_turn_output(
+                state,
+                &session,
+                turn_id,
+                output,
+                turn_state,
+                "test.workbench_turn.completed",
+            )
+            .await,
+            None,
+        ),
+        Err(lash::EmbedError::Runtime(error)) => {
+            let evidence = Some((error.code.clone(), error.message.clone()));
+            (Err(AppError::runtime(lash::EmbedError::Runtime(error))), evidence)
+        }
+        Err(error) => (Err(AppError::runtime(error)), None),
+    }
+}
+
 fn product_user_rows(state: &AppState, session_id: &str) -> Vec<(String, String)> {
     state
         .event_tx
@@ -333,9 +378,42 @@ async fn same_turn_successor_within_dead_lease_ttl_commits_under_head_cas() {
     assert_eq!(dead_lease.owner, dead_boot);
 }
 
-/// FIG-1133 Phase 6 gate: two live writers serialize through graph refresh and
-/// head CAS without losing, duplicating, or partially publishing an append.
-#[tokio::test]
+struct AppendPreCommitBarrier {
+    barrier: std::sync::Barrier,
+    arrivals: std::sync::atomic::AtomicUsize,
+}
+
+impl AppendPreCommitBarrier {
+    fn new() -> Self {
+        Self {
+            barrier: std::sync::Barrier::new(2),
+            arrivals: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
+impl lash::runtime::RuntimeTurnPhaseProbe for AppendPreCommitBarrier {
+    fn begin(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+
+    fn begin_named(&self, phase: &str) {
+        if phase == "session_graph_append.pre_commit"
+            && self
+                .arrivals
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                < 2
+        {
+            self.barrier.wait();
+        }
+    }
+}
+
+/// FIG-1133 Phase 6 gate: both live writers stage from the same graph and are
+/// held at the pre-commit boundary. One wins the first head CAS; the loser
+/// observes that exact conflict, refreshes, and appends without loss or partial
+/// publication.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_live_writers_rebase_appends_into_durable_graph_order() {
     let data_dir = tempfile::tempdir().expect("concurrent append tempdir");
     let provider = lash::testing::TestProvider::builder()
@@ -357,39 +435,67 @@ async fn two_live_writers_rebase_appends_into_durable_graph_order() {
         .open()
         .await
         .expect("open right append writer");
+    let barrier = Arc::new(AppendPreCommitBarrier::new());
+    let probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe> = barrier;
+    left.set_turn_phase_probe(Arc::clone(&probe)).await;
+    right.set_turn_phase_probe(probe).await;
 
-    let left_committed = Arc::new(tokio::sync::Notify::new());
-    let left_task = tokio::spawn({
-        let left_committed = Arc::clone(&left_committed);
-        async move {
-            let result = left
-                .admin()
-                .state()
-                .append_messages(vec![lash::plugins::PluginMessage::text(
-                    lash::messages::MessageRole::Assistant,
-                    "fig1133-concurrent-left",
-                )])
-                .await;
-            left_committed.notify_one();
-            result
-        }
+    let left_task = tokio::spawn(async move {
+        let first = left
+            .admin()
+            .state()
+            .append_messages(vec![lash::plugins::PluginMessage::text(
+                lash::messages::MessageRole::Assistant,
+                "fig1133-concurrent-left",
+            )])
+            .await;
+        (left, first)
     });
     let right_task = tokio::spawn(async move {
-        left_committed.notified().await;
-        right
+        let first = right
             .admin()
             .state()
             .append_messages(vec![lash::plugins::PluginMessage::text(
                 lash::messages::MessageRole::Assistant,
                 "fig1133-concurrent-right",
             )])
-            .await
+            .await;
+        (right, first)
     });
     let (left_result, right_result) = tokio::join!(left_task, right_task);
-    let left_result = left_result.expect("left append task");
-    let right_result = right_result.expect("right append task");
-    left_result.expect("left concurrent append must commit");
-    right_result.expect("right concurrent append must rebase and commit");
+    let (left, left_result) = left_result.expect("left append task");
+    let (right, right_result) = right_result.expect("right append task");
+    assert_eq!(
+        [left_result.is_ok(), right_result.is_ok()]
+            .into_iter()
+            .filter(|won| *won)
+            .count(),
+        1
+    );
+    let left_lost = left_result.is_err();
+    let conflict = if left_lost {
+        left_result.expect_err("left writer loses the first CAS")
+    } else {
+        right_result.expect_err("right writer loses the first CAS")
+    };
+    assert_eq!(
+        conflict.to_string(),
+        "runtime session error: protocol error: failed to persist runtime state: store head revision conflict: expected 0, actual 1"
+    );
+    let (loser, missing_text) = if left_lost {
+        (left, "fig1133-concurrent-left")
+    } else {
+        (right, "fig1133-concurrent-right")
+    };
+    loser
+        .admin()
+        .state()
+        .append_messages(vec![lash::plugins::PluginMessage::text(
+            lash::messages::MessageRole::Assistant,
+            missing_text,
+        )])
+        .await
+        .expect("CAS loser refreshes and commits its append");
 
     let fresh = state
         .core
@@ -404,10 +510,10 @@ async fn two_live_writers_rebase_appends_into_durable_graph_order() {
         .map(lash::message_text)
         .filter(|text| text.starts_with("fig1133-concurrent-"))
         .collect::<Vec<_>>();
-    assert_eq!(
-        ordered,
-        vec!["fig1133-concurrent-left", "fig1133-concurrent-right"],
-        "both appends must appear exactly once in durable graph order"
+    assert!(
+        ordered == vec!["fig1133-concurrent-left", "fig1133-concurrent-right"]
+            || ordered == vec!["fig1133-concurrent-right", "fig1133-concurrent-left"],
+        "both literal appends must appear exactly once in durable graph order: {ordered:?}"
     );
 }
 
@@ -735,16 +841,22 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
         let session_id = session_id.clone();
         let turn_id = turn_id.clone();
         async move {
-            let result =
-                run_workbench_turn_attempt(&state, &session_id, &turn_id, "admitted send").await;
-            crate::restate::terminalize_turn_execution(
+            let (result, error_evidence) = run_workbench_turn_attempt_with_error_evidence(
+                &state,
+                &session_id,
+                &turn_id,
+                "admitted send",
+            )
+            .await;
+            let terminalized = crate::restate::terminalize_turn_execution(
                 &state,
                 &session_id,
                 &turn_id,
                 "restate_user_turn.failed",
                 Ok(result),
             )
-            .await
+            .await;
+            (terminalized, error_evidence)
         }
     });
     assert_eq!(
@@ -752,6 +864,19 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
             .await
             .expect("the admitted turn reaches the provider"),
         Some(0)
+    );
+    let holder_before_race = state
+        .core
+        .session_lease_diagnostics(&session_id)
+        .await
+        .expect("read stalled holder")
+        .expect("stalled turn materialized its lease")
+        .holder
+        .expect("stalled turn holds the lane");
+    assert_eq!(holder_before_race.owner.owner_id, "agent-workbench-test-worker");
+    assert_eq!(
+        holder_before_race.owner.incarnation_id,
+        "agent-workbench-test-boot"
     );
     assert_eq!(
         product_user_rows(&state, &session_id)
@@ -779,9 +904,26 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
         .await
         .expect("the competing turn commits first");
     drop(competitor);
+    let holder_after_race = state
+        .core
+        .session_lease_diagnostics(&session_id)
+        .await
+        .expect("read holder after lane-less competitor")
+        .expect("stalled holder row remains present")
+        .holder
+        .expect("stalled holder remains current");
+    assert_eq!(holder_after_race, holder_before_race);
 
     release.notify_one();
-    let terminalized = losing.await.expect("losing turn task");
+    let (terminalized, error_evidence) = losing.await.expect("losing turn task");
+    assert_eq!(
+        error_evidence,
+        Some((
+            lash::runtime::RuntimeErrorCode::StoreCommitFailed,
+            "store head revision conflict: expected 0, actual 1".to_string(),
+        )),
+        "the Busy/lane-less writer must lose at the typed head-CAS boundary"
+    );
     assert!(
         terminalized.is_err(),
         "a turn refused by the durable fence must terminalize as a failure"

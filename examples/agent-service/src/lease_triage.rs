@@ -58,6 +58,7 @@ pub(crate) struct LeaseTriageReport {
     pub(crate) observed_at_epoch_ms: Option<u64>,
     pub(crate) holder_owner_id: Option<String>,
     pub(crate) holder_incarnation_id: Option<String>,
+    pub(crate) holder_executor_id: Option<String>,
     /// The lane's fencing generation (ADR 0029). A takeover advances it.
     pub(crate) generation: Option<u64>,
     pub(crate) claimed_at_epoch_ms: Option<u64>,
@@ -108,6 +109,7 @@ impl LeaseTriageReport {
                 observed_at_epoch_ms: None,
                 holder_owner_id: None,
                 holder_incarnation_id: None,
+                holder_executor_id: None,
                 generation: None,
                 claimed_at_epoch_ms: None,
                 expires_at_epoch_ms: None,
@@ -129,6 +131,7 @@ impl LeaseTriageReport {
             observed_at_epoch_ms: Some(diagnostics.observed_at_epoch_ms),
             holder_owner_id: holder.map(|holder| holder.owner.owner_id.clone()),
             holder_incarnation_id: holder.map(|holder| holder.owner.incarnation_id.clone()),
+            holder_executor_id: holder.map(|holder| holder.executor_id.clone()),
             generation: holder.map(|holder| holder.generation),
             claimed_at_epoch_ms: holder.map(|holder| holder.claimed_at_epoch_ms),
             expires_at_epoch_ms: holder.map(|holder| holder.expires_at_epoch_ms),
@@ -156,8 +159,9 @@ impl LeaseTriageReport {
 /// The id routes the request; deployments exposing this endpoint beyond the
 /// local demo must authenticate the caller and authorize access to the chat.
 /// This route is operator-facing and leaks more than a chat route does: the
-/// response names the replica (`holder_owner_id`) and boot
-/// (`holder_incarnation_id`) currently executing the session, so an
+/// response names the replica (`holder_owner_id`), boot
+/// (`holder_incarnation_id`), and runtime open (`holder_executor_id`) currently
+/// executing the session, so an
 /// unauthenticated caller who can guess a chat id can enumerate fleet identity.
 /// It omits the lease token by design, and no returned field is a capability,
 /// but internal topology is still not public data.
@@ -172,7 +176,8 @@ pub(crate) async fn chat_lease_triage(
 mod tests {
     use super::*;
     use lash::persistence::{
-        LeaseOwnerIdentity, SessionLeaseHolder, SessionStoreCreateRequest, SessionStoreFactory,
+        LeaseClaimNonce, LeaseOwnerIdentity, SessionLeaseHolder, SessionStoreCreateRequest,
+        SessionStoreFactory,
     };
     use lash::{LashCore, ModelSpec};
     use lash_sqlite_store::SqliteSessionStoreFactory;
@@ -263,9 +268,11 @@ mod tests {
         let (core, factory) = durable_core(dir.path()).await;
         let store = materialized_store(&factory, SESSION_ID).await;
         let held = store
-            .try_claim_session_execution_lease(
+            .try_claim_session_execution_lease_with_token(
                 SESSION_ID,
                 &owner("worker-a", "worker-a:boot-1"),
+                "worker-a-runtime-open-1",
+                &LeaseClaimNonce::for_testing("worker-a-runtime-open-1-claim"),
                 60_000,
             )
             .await
@@ -281,6 +288,10 @@ mod tests {
         assert_eq!(
             report.holder_incarnation_id.as_deref(),
             Some("worker-a:boot-1")
+        );
+        assert_eq!(
+            report.holder_executor_id.as_deref(),
+            Some("worker-a-runtime-open-1")
         );
         assert_eq!(report.generation, Some(held.fencing_token));
         assert!(

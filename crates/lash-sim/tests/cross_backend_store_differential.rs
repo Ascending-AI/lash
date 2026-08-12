@@ -812,6 +812,7 @@ type LeaseRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
     i64,
     i64,
     i64,
@@ -1129,7 +1130,7 @@ async fn read_sqlite_durable_state(
         let mut statement = connection
             .prepare(
                 "SELECT lease_owner_id, lease_owner_incarnation_id,
-                        lease_owner_liveness_json, lease_token,
+                        lease_owner_liveness_json, lease_executor_id, lease_token,
                         lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms
                  FROM session_execution_leases
                  WHERE session_id = ?1",
@@ -1142,12 +1143,13 @@ async fn read_sqlite_durable_state(
                 let liveness_json = row.get::<_, Option<String>>(2)?;
                 Ok(SessionExecutionLeaseObservation {
                     owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
-                    lease_token_present: row.get::<_, Option<String>>(3)?.is_some(),
-                    fencing_token: row.get::<_, i64>(4)? as u64,
-                    claimed: row.get::<_, i64>(5)? != 0,
+                    executor_id: row.get(3)?,
+                    lease_token_present: row.get::<_, Option<String>>(4)?.is_some(),
+                    fencing_token: row.get::<_, i64>(5)? as u64,
+                    claimed: row.get::<_, i64>(6)? != 0,
                     ttl_ms: {
-                        let claimed_at_ms = row.get::<_, i64>(5)?;
-                        let expires_at_ms = row.get::<_, i64>(6)?;
+                        let claimed_at_ms = row.get::<_, i64>(6)?;
+                        let expires_at_ms = row.get::<_, i64>(7)?;
                         (claimed_at_ms != 0).then_some((expires_at_ms - claimed_at_ms) as u64)
                     },
                 })

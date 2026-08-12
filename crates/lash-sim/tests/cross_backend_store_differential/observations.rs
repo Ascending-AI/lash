@@ -176,6 +176,7 @@ pub(super) struct SessionMetaObservation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SessionExecutionLeaseObservation {
     pub(super) owner: Option<LeaseOwnerIdentity>,
+    pub(super) executor_id: Option<String>,
     // Lease tokens are backend-generated CAS capabilities. Their bytes are a
     // physical implementation detail; token presence is the logical row state
     // and is compared explicitly alongside owner, generation, and times.

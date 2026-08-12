@@ -495,8 +495,6 @@ pub async fn record_terminal_result(pool: &PgPool, response: &TurnResponse) -> R
             streamed_event_count = EXCLUDED.streamed_event_count,
             replay_cursor = EXCLUDED.replay_cursor,
             created_at_ms = EXCLUDED.created_at_ms
-        WHERE NOT lash_e2e_terminal_results.queued_turn_ran
-           OR EXCLUDED.queued_turn_ran
         "#,
     )
     .bind(&response.workflow_id)

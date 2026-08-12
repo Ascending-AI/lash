@@ -62,6 +62,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .build(crate::example_process_owner())?;</code></pre>
+          <p>The supplied owner is the host identity: stable <code>owner_id</code>, fresh per-boot <code>incarnation_id</code>. Lash mints a fresh <code>executor_id</code> for every runtime open. Lease reentry requires all three values to match, so resuming the same parked open reenters but a second concurrent open under the same core observes Busy and cannot revoke the first executor's fence.</p>
           <pre data-lang="rust" data-snippet="embedding_advanced#sqlite-core"><code>use std::sync::Arc;
 
 use lash::persistence::FileAttachmentStore;

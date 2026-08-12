@@ -37,13 +37,11 @@ use usage_conservation::{
     assert_usage_conservation, confirm_usage, record_usage, register_committed_usage,
     replay_usage_receipt, stage_usage,
 };
-
 const SESSION_ID: &str = "runtime-persistence-property";
 const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 857;
 const DEDICATED_LAW_SEED: u64 = 0x0ded_1ca7_e857;
 const MAX_OPS: usize = 96;
-
 /// The generated operation alphabet shared by every runtime-persistence backend.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -859,8 +857,11 @@ async fn claim_lease(
     owner_index: u8,
 ) -> Result<(), String> {
     let owner = owner(owner_index);
+    let s = SESSION_ID;
+    let e = format!("state-machine-executor-{owner_index}");
+    let n = crate::LeaseClaimNonce::new();
     let outcome = store
-        .try_claim_session_execution_lease(SESSION_ID, &owner, 60_000)
+        .try_claim_session_execution_lease_with_token(s, &owner, &e, &n, 60_000)
         .await
         .map_err(|error| error.to_string())?;
     match (&model.current_lease, outcome) {

@@ -6195,16 +6195,19 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
         *store.runtime_commit_count.lock_recover() > commits_before_lease_loss,
         "the current-head turn must checkpoint and commit despite advisory lease loss"
     );
-    let still_owned = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        store.as_ref(),
-        "root",
-        &successor_owner,
-        60_000,
-    )
-    .await
-    .expect("reclaim successor lease with the same owner")
-    .acquired()
-    .expect("the predecessor commit must leave the successor lease live");
+    let still_owned =
+        crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease_with_token(
+            store.as_ref(),
+            "root",
+            &successor_owner,
+            &stolen.executor_id,
+            &crate::LeaseClaimNonce::for_testing("advisory-successor-reentry-token"),
+            60_000,
+        )
+        .await
+        .expect("reclaim successor lease with the same owner")
+        .acquired()
+        .expect("the predecessor commit must leave the successor lease live");
     assert_eq!(
         still_owned.fencing_token, stolen.fencing_token,
         "the predecessor's final commit must not release the successor lease"

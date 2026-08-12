@@ -102,6 +102,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
     let forged = crate::SessionExecutionLeaseAuthority {
         session_id: "signed-write-generation".to_string(),
         owner: generation_owner.clone(),
+        executor_id: "signed-write-generation-executor".to_string(),
         lease_token: "forged-generation".to_string(),
         fencing_token: too_large,
     };

@@ -1265,8 +1265,8 @@ fn recovery_process_worker(
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
-        )
-        .with_lease_owner(owner),
+            owner,
+        ),
     )
 }
 

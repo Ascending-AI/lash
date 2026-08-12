@@ -195,12 +195,13 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         session_id: "parked-session".to_string(),
         relation: crate::SessionRelation::Root,
     });
+    let owner = crate::LeaseOwnerIdentity::opaque("parked-test-worker", "parked-test-boot");
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state("parked-session"),
         Some(store.clone() as Arc<dyn crate::RuntimePersistence>),
-        crate::testing::runtime_lease_owner(),
+        owner.clone(),
     )
     .await
     .expect("persistent runtime");
@@ -218,7 +219,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         .session_admission_count
         .load(std::sync::atomic::Ordering::SeqCst);
     let parked = runtime.park().await.expect("park runtime");
-    let resumed = LashRuntime::resume(parked, &env, crate::testing::runtime_lease_owner())
+    let resumed = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("resume runtime");
     assert_eq!(
@@ -816,13 +817,14 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
     let store_dyn: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let owner = crate::LeaseOwnerIdentity::opaque("surface-test-worker", "surface-test-boot");
 
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state("persisted-live-surface"),
         Some(store_dyn),
-        crate::testing::runtime_lease_owner(),
+        owner.clone(),
     )
     .await
     .expect("initial persistent runtime");
@@ -841,7 +843,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let parked = runtime.park().await.expect("park initial runtime");
 
     surface.replace(vec![original.clone(), discovered.clone()]);
-    let mut resumed = LashRuntime::resume(parked, &env, crate::testing::runtime_lease_owner())
+    let mut resumed = LashRuntime::resume(parked, &env, owner.clone())
         .await
         .expect("cold resume with changed live source");
     let resumed_state = resumed.tool_state().expect("resumed tool state");
@@ -891,7 +893,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     );
 
     let parked = resumed.park().await.expect("park rebuilt runtime");
-    let resumed_again = LashRuntime::resume(parked, &env, crate::testing::runtime_lease_owner())
+    let resumed_again = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("second cold resume");
     assert_eq!(
@@ -1183,12 +1185,13 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
+    let owner = crate::LeaseOwnerIdentity::opaque("orphan-test-worker", "orphan-test-boot");
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state("orphan-lifecycle"),
         Some(store),
-        crate::testing::runtime_lease_owner(),
+        owner.clone(),
     )
     .await
     .expect("initial persistent runtime");
@@ -1204,7 +1207,7 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     let parked = runtime.park().await.expect("persist original source");
 
     surface.replace(Vec::new());
-    let mut resumed = LashRuntime::resume(parked, &env, crate::testing::runtime_lease_owner())
+    let mut resumed = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("session opens while dynamic source is absent");
     let orphaned = resumed.tool_state().expect("orphaned state");

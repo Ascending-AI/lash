@@ -16,8 +16,9 @@
 //!   that is the case a takeover reported from the loser's renewal path missed
 //!   entirely.
 //! * `livelock`: the cause the procedure names for repeated CAS rejections: two
-//!   concurrent writers on one session under a single explicit core owner. The
-//!   busy claimant stays lane-less and the loser's commit dies on the head CAS.
+//!   concurrent runtime opens on one session under one host owner. Their owner
+//!   and boot incarnation match, their runtime-minted executor ids differ, the
+//!   busy claimant stays lane-less, and the loser's commit dies on the head CAS.
 //!
 //! Fault injection is deliberate and uses only public store surface. The
 //! `takeover` phase seeds an abandoned lease row (TTL zero, claimed through the
@@ -451,6 +452,7 @@ fn reading(diagnostics: Option<&SessionLeaseDiagnostics>) -> Value {
         "expired_for_ms": expired_for_ms,
         "holder_owner_id": holder.map(|holder| holder.owner.owner_id.clone()),
         "holder_incarnation_id": holder.map(|holder| holder.owner.incarnation_id.clone()),
+        "holder_executor_id": holder.map(|holder| holder.executor_id.clone()),
         "fencing_token": holder.map(|holder| holder.generation),
         "claimed_at_epoch_ms": holder.map(|holder| holder.claimed_at_epoch_ms),
         "expires_at_epoch_ms": holder.map(|holder| holder.expires_at_epoch_ms),
@@ -670,11 +672,10 @@ async fn lease_takeover(
 ///
 /// One collision is ordinary contention and proves nothing; the docs diagnose
 /// *repeated* `commit_cas_rejected` with `lease_lost = false` as livelock, so the
-/// harness has to produce recurrence. Sharing an identity is what makes it
-/// recur: the second writer reenters the first's lease instead of being rejected
-/// as busy, so nothing serializes the pair and every round collides again. Each
-/// round the loser reloads and retries, exactly as a retry-on-conflict host does,
-/// which is the shape that turns contention into a cycle.
+/// harness has to produce recurrence. The host owner is shared, but each runtime
+/// open mints a distinct executor id. The second writer therefore observes Busy
+/// and remains lane-less; recurrence comes from routing/retry policy sending the
+/// pair back to the same head, never from lease reentry.
 async fn commit_cas_livelock(
     backend: &Backend,
     capture: &LeaseTraceCapture,
@@ -717,8 +718,8 @@ async fn commit_cas_livelock(
             bail!("round {round}: the stalled turn never reached the provider: {settled:?}");
         }
 
-        // The peer reenters the same lease (shared identity, so no busy rejection)
-        // and publishes first.
+        // The peer has the same host owner but a distinct runtime executor. It
+        // observes Busy, remains lane-less, and publishes first under head CAS.
         let racer = racer_session
             .turn(lash::TurnInput::text(TURN_PROMPT))
             .turn_id(format!("lease-triage-livelock-{round}-racer"))

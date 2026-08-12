@@ -136,12 +136,14 @@ impl RawDurableReader {
                         |(
                             _session_id,
                             owner,
+                            executor_id,
                             lease_token_present,
                             fencing_token,
                             claimed_at_epoch_ms,
                             expires_at_epoch_ms,
                         )| SessionExecutionLeaseObservation {
                             owner,
+                            executor_id,
                             lease_token_present,
                             fencing_token,
                             claimed: claimed_at_epoch_ms != 0,
@@ -327,7 +329,7 @@ impl RawDurableReader {
                     .map(session_meta_observation);
                 let lease_rows: Vec<LeaseRow> = sqlx::query_as(
                     "SELECT lease_owner_id, lease_owner_incarnation_id,
-                            lease_owner_liveness_json, lease_token,
+                            lease_owner_liveness_json, lease_executor_id, lease_token,
                             lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms
                      FROM lash_session_execution_leases
                      WHERE session_id = $1",
@@ -343,12 +345,14 @@ impl RawDurableReader {
                             owner_id,
                             incarnation_id,
                             liveness_json,
+                            executor_id,
                             lease_token,
                             fencing_token,
                             claimed_at_epoch_ms,
                             expires_at_epoch_ms,
                         )| SessionExecutionLeaseObservation {
                             owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
+                            executor_id,
                             lease_token_present: lease_token.is_some(),
                             fencing_token: fencing_token as u64,
                             claimed: claimed_at_epoch_ms != 0,

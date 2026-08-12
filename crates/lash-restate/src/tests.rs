@@ -3784,6 +3784,7 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
         &self,
         session_id: &str,
         owner: &lash_core::LeaseOwnerIdentity,
+        executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<lash_core::SessionExecutionLeaseClaimOutcome, lash_core::StoreError> {
@@ -3792,6 +3793,7 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
             .try_claim_session_execution_lease_with_token(
                 session_id,
                 owner,
+                executor_id,
                 claim_nonce,
                 lease_ttl_ms,
             )
@@ -6243,6 +6245,7 @@ finish (await handle)?
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&process_registry),
+            lash_core::testing::runtime_lease_owner(),
         ));
     context.install_process_worker(process_worker);
 
@@ -8386,6 +8389,7 @@ fn recovery_worker_with_plugins(
             runtime_host,
             store_factory,
             registry,
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy()),
     )
@@ -9265,6 +9269,7 @@ async fn process_deployment_driver_and_workflow_share_registry() {
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&driver_registry),
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_change_hub(driver.change_hub()),
     );

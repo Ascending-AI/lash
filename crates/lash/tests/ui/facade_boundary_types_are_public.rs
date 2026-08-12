@@ -109,6 +109,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        executor_id: &str,
         claim_nonce: &LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
@@ -116,6 +117,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
             SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                 session_id: session_id.to_string(),
                 owner: owner.clone(),
+                executor_id: executor_id.to_string(),
                 lease_token: claim_nonce.as_str().to_string(),
                 fencing_token: 1,
                 claimed_at_epoch_ms: 0,
@@ -132,6 +134,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
         Ok(SessionExecutionLease {
             session_id: fence.session_id.clone(),
             owner: fence.owner.clone(),
+            executor_id: fence.executor_id.clone(),
             lease_token: fence.lease_token.clone(),
             fencing_token: fence.fencing_token,
             claimed_at_epoch_ms: 0,

@@ -312,11 +312,15 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
     let trigger_store =
         Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()) as Arc<dyn lash_core::TriggerStore>;
+    let core_owner = lash_core::LeaseOwnerIdentity::opaque(
+        "durable-worker-facade-owner",
+        "durable-worker-facade-boot",
+    );
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .trigger_store(Arc::clone(&trigger_store))
         .process_registry(Arc::clone(&registry))
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(core_owner)?;
 
     assert!(core.processes().observer().is_ok());
     let config = core.durable_process_worker_config()?;
@@ -325,6 +329,11 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
         .expect("process registry must be configured");
     assert!(Arc::ptr_eq(&config.process_registry, &core_registry));
     assert!(Arc::ptr_eq(&config.trigger_store, &trigger_store));
+    assert_eq!(config.lease_owner.owner_id, "durable-worker-facade-owner");
+    assert_eq!(
+        config.lease_owner.incarnation_id,
+        "durable-worker-facade-boot"
+    );
     assert_eq!(
         config.process_execution_concurrency(),
         lash_core::facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY

@@ -201,9 +201,9 @@ fn inline_worker_with_trigger_store(
             ),
             Arc::new(InlineSessionStoreFactory),
             registry,
+            lease_owner,
         )
-        .with_trigger_store(trigger_store)
-        .with_lease_owner(lease_owner),
+        .with_trigger_store(trigger_store),
     )
 }
 
@@ -938,17 +938,13 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
             runtime_host,
             Arc::new(TestSessionStoreFactory),
             Arc::clone(&registry),
+            local_owner("session-turn-worker", "host-a", "session-turn-start"),
         )
         .with_session_policy(policy.clone())
         .with_process_execution_concurrency(1)
         .expect("valid test process execution concurrency")
         .with_change_hub(driver.change_hub())
-        .with_process_work_driver(driver)
-        .with_lease_owner(local_owner(
-            "session-turn-worker",
-            "host-a",
-            "session-turn-start",
-        )),
+        .with_process_work_driver(driver),
     );
     run_handle
         .worker
@@ -1026,9 +1022,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
             runtime_host,
             Arc::new(SegmentBoundarySessionStoreFactory),
             Arc::clone(&registry),
+            local_owner("segment-worker", "host-a", "start-a"),
         )
-        .with_session_policy(policy)
-        .with_lease_owner(local_owner("segment-worker", "host-a", "start-a")),
+        .with_session_policy(policy),
     );
     registry
         .register_process(
@@ -1216,14 +1212,14 @@ async fn snapshot_recovery_fixture(
             runtime_host,
             Arc::new(TestSessionStoreFactory),
             Arc::clone(&registry),
+            local_owner(
+                "snapshot-recovery-worker",
+                "host-a",
+                "snapshot-recovery-start",
+            ),
         )
         .with_session_policy(policy)
-        .with_trigger_store(Arc::clone(&trigger_store))
-        .with_lease_owner(local_owner(
-            "snapshot-recovery-worker",
-            "host-a",
-            "snapshot-recovery-start",
-        )),
+        .with_trigger_store(Arc::clone(&trigger_store)),
     );
     (registry, trigger_store, delivery, payloads, worker)
 }

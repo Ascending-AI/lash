@@ -60,7 +60,7 @@
       </div>
       <aside class="contract">
         <strong>Start fresh when the version moves</strong>
-        <p>This release uses SQLite durable-core version 35, process-registry version 23, effect version 9, and trigger version 5, plus Postgres component version 49. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
+        <p>This release uses SQLite durable-core version 36, process-registry version 23, effect version 9, and trigger version 5, plus Postgres component version 50. Versions 36 and 50 persist the runtime-minted executor discriminator on session lease rows. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
       </aside>
       <aside class="contract">
         <strong>Provisioning Postgres yourself</strong>
@@ -281,7 +281,7 @@ if let Some(process_report) = report.process {
         </div>
         <div class="listing__row">
           <div class="listing__label">lease state</div>
-          <div class="listing__body"><p><code>core.session_lease_diagnostics(session_id)</code> for a session's execution lane (holder identity, generation, expiry, renewal state), and <code>core.processes()</code> for a process lease. Both are snapshot reads that never mutate the row; the commit compare-and-set stays the authority, so no host behavior may be gated on either. <a href="./operations.html#stuck-turn">Triaging a stuck turn</a> is the procedure they serve.</p></div>
+          <div class="listing__body"><p><code>core.session_lease_diagnostics(session_id)</code> for a session's execution lane (owner id, boot incarnation, executor id, generation, expiry, renewal state), and <code>core.processes()</code> for a process lease. Both are snapshot reads that never mutate the row; the commit compare-and-set stays the authority, so no host behavior may be gated on either. <a href="./operations.html#stuck-turn">Triaging a stuck turn</a> is the procedure they serve.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">process state</div>
@@ -346,16 +346,11 @@ match outcome {
         <p>At most one mutating runner holds the advisory session execution lease at a time. Stores check the expected head revision in the same transaction as the atomic commit; mismatch rolls back with no partial state.</p>
       </div>
       <p>Concurrent turns from two workers on the same session id normally serialize at the lease boundary. If a lane-less persistence boundary observes a busy holder after its work is already complete, it proceeds to the session-head CAS instead of discarding that work; a stale head returns a typed conflict with no partial write. Lease loss still vetoes a nested plugin or observer commit borrowing a held lane, because that write claims the holder's authority. Durable effect replay uses its separate authoritative lease lane and is unchanged.</p>
-      <p>Every host supplies <code>LashCoreBuilder::build</code> a <code>LeaseOwnerIdentity</code>: the owner id is stable per worker or process, never per turn, and the incarnation changes once per boot. The core carries it into every session runtime it constructs. Composing owner identity, lease timings, and drain into a failover policy is covered in <a href="./operations.html">running in production</a>.</p>
+      <p>Every host supplies <code>LashCoreBuilder::build</code> a <code>LeaseOwnerIdentity</code>: the owner id is stable per worker or process, never per turn, and the incarnation changes once per boot. Every runtime open mints a fresh executor id below that host identity. Reentry requires the exact triple <code>(owner_id, incarnation_id, executor_id)</code>; a parked runtime resumed by that same open retains its executor, while a second open in the same process is a distinct Busy claimant. The core carries the host owner into every session runtime it constructs.</p>
       <pre data-lang="rust" data-snippet="persistence#commit-conflict-retry"><code>use lash::runtime::RuntimeErrorCode;
 
 match session.turn(input).run().await {
     Ok(turn) =&gt; persist(turn)?,
-    Err(lash::EmbedError::Runtime(err))
-        if err.code == RuntimeErrorCode::SessionExecutionBusy =&gt;
-    {
-        retry_later(err)?;
-    }
     Err(lash::EmbedError::Runtime(err))
         if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =&gt;
     {

@@ -483,6 +483,7 @@ mod tests {
         let authority = crate::SessionExecutionLeaseAuthority {
             session_id: "session".to_string(),
             owner: owner.clone(),
+            executor_id: "session-executor".to_string(),
             lease_token: "session-lease".to_string(),
             fencing_token: 1,
         };

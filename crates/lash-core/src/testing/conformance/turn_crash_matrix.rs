@@ -280,6 +280,7 @@ struct SeamState {
     completed: Vec<TurnSeamOperation>,
     armed: Option<TurnCrashPoint>,
     hit: bool,
+    process_crashed: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -306,6 +307,7 @@ impl SeamControl {
         state.completed.clear();
         state.armed = Some(point);
         state.hit = false;
+        state.process_crashed = false;
     }
 
     fn clear(&self) {
@@ -314,6 +316,15 @@ impl SeamControl {
         state.completed.clear();
         state.armed = None;
         state.hit = false;
+        state.process_crashed = false;
+    }
+
+    fn simulate_process_crash(&self) {
+        self.state.lock_recover().process_crashed = true;
+    }
+
+    fn process_has_crashed(&self) -> bool {
+        self.state.lock_recover().process_crashed
     }
 
     fn trace(&self) -> Vec<TurnSeamOperation> {
@@ -582,6 +593,7 @@ impl SessionExecutionLeaseStore for SeamStore {
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        executor_id: &str,
         claim_nonce: &crate::LeaseClaimNonce,
         ttl: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
@@ -592,6 +604,7 @@ impl SessionExecutionLeaseStore for SeamStore {
                 self.inner.try_claim_session_execution_lease_with_token(
                     session_id,
                     owner,
+                    executor_id,
                     claim_nonce,
                     ttl,
                 ),
@@ -617,6 +630,11 @@ impl SessionExecutionLeaseStore for SeamStore {
         &self,
         completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
+        if self.control.process_has_crashed() {
+            return Err(StoreError::Backend(
+                "simulated process crash suppresses owner-side lease release".to_string(),
+            ));
+        }
         let operation = TurnSeamOperation::Store(StoreOperation::ReleaseSessionExecutionLease);
         self.control
             .around(
@@ -1754,8 +1772,13 @@ pub async fn cold_process_real_turn_driver(
                     )
                     .await
                     .expect("poll peer-reclaim lease");
-                if let Some(lease) = outcome.acquired() {
-                    break lease;
+                if let Some(acquisition) = outcome.acquisition() {
+                    let displaced = acquisition
+                        .displaced
+                        .as_ref()
+                        .expect("peer reclaim displaces the crashed executor");
+                    assert_eq!(displaced.owner.owner_id, "lash-core-test-worker");
+                    break acquisition.lease;
                 }
                 tokio::time::sleep(recovery_timings().renew_interval()).await;
             }
@@ -1799,7 +1822,49 @@ pub async fn cold_process_real_turn_driver(
                     )
                     .await
                     .expect("poll cold-process recovery lease");
-                if let Some(lease) = outcome.acquired() {
+                if let Some(acquisition) = outcome.acquisition() {
+                    if let Some(displaced) = acquisition.displaced.as_ref() {
+                        assert_eq!(displaced.owner.owner_id, "lash-core-test-worker");
+                    } else {
+                        let terminal_count = crate::load_persisted_session_state(store.as_ref())
+                            .await
+                            .expect("read already-committed cold-process state")
+                            .map(|state| {
+                                state
+                                    .session_graph
+                                    .read_model()
+                                    .messages
+                                    .iter()
+                                    .flat_map(|message| message.parts.iter())
+                                    .filter(|part| part.content == "trace turn complete")
+                                    .count()
+                            })
+                            .unwrap_or(0);
+                        let pending_count = store
+                            .list_pending_turn_inputs(&identity.session_id)
+                            .await
+                            .expect("list recovery turn inputs")
+                            .len();
+                        let queued_count = store
+                            .list_queued_work(&identity.session_id)
+                            .await
+                            .expect("list recovery queued work")
+                            .len();
+                        if scenario.starts_with("peer-reclaim-") {
+                            assert_eq!(
+                                (terminal_count, pending_count, queued_count),
+                                (0, 1, 1),
+                                "the asserted peer handoff leaves both ingress rows for recovery"
+                            );
+                        } else {
+                            assert_eq!(
+                                (terminal_count, pending_count, queued_count),
+                                (1, 0, 0),
+                                "only an already-landed final commit may leave ordinary recovery unheld"
+                            );
+                        }
+                    }
+                    let lease = acquisition.lease;
                     store
                         .release_session_execution_lease(&lease.completion())
                         .await
@@ -1934,8 +1999,12 @@ where
         .unwrap_or_else(|error| panic!("invalid durable recovery rulings: {error}"));
 }
 
-async fn wait_for_recovery_lease<F>(make: &F, scenario: &str)
-where
+async fn wait_for_recovery_lease<F>(
+    make: &F,
+    scenario: &str,
+    point: &TurnCrashPoint,
+    predecessor_claimed: bool,
+) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
@@ -1952,7 +2021,20 @@ where
                 )
                 .await
                 .expect("probe recovery lease");
-            if let Some(lease) = outcome.acquired() {
+            if let Some(acquisition) = outcome.acquisition() {
+                match (predecessor_claimed, acquisition.displaced.as_ref()) {
+                    (true, Some(displaced)) => {
+                        assert_eq!(displaced.owner.owner_id, "lash-core-test-worker");
+                    }
+                    (false, None) => {}
+                    (true, None) => panic!(
+                        "crash recovery must displace the lapsed predecessor executor: {scenario} {point:?}"
+                    ),
+                    (false, Some(displaced)) => {
+                        panic!("claim-boundary crash cannot have a predecessor, got {displaced:?}")
+                    }
+                }
+                let lease = acquisition.lease;
                 store
                     .release_session_execution_lease(&lease.completion())
                     .await
@@ -2009,10 +2091,24 @@ where
             drive_turn(runtime, effect_controller, &task_identity).await
         });
         control.wait_for_hit().await;
+        control.simulate_process_crash();
         task.abort();
         let _ = task.await;
 
-        wait_for_recovery_lease(&make, &scenario).await;
+        let predecessor_claimed = !matches!(
+            (&entry.point.operation, entry.point.placement),
+            (
+                TurnSeamOperation::Store(StoreOperation::ClaimSessionExecutionLease),
+                CrashPlacement::Boundary
+            ) | (
+                TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
+                    releases_lease: true,
+                    ..
+                }),
+                CrashPlacement::InsideCall
+            )
+        );
+        wait_for_recovery_lease(&make, &scenario, &entry.point, predecessor_claimed).await;
         let successor_control = SeamControl::default();
         let successor_store = SeamStore::wrap(make(&scenario), successor_control.clone());
         let successor = Box::pin(build_runtime(

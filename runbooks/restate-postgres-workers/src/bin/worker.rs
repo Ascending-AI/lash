@@ -170,32 +170,16 @@ impl AppState {
             "queued",
             Some(cursor_text.clone()),
         );
-        let deadline = Instant::now() + Duration::from_secs(60);
-        let turn = loop {
-            let turn = session
-                .queued_turn()
-                .drain_id(request.workflow_id.clone())
-                .effects(controller)
-                .stream_to(&sink)
-                .await
-                .map_err(terminal_error)?;
-            if turn.is_some()
-                || session
-                    .queued_work()
-                    .await
-                    .map_err(terminal_error)?
-                    .is_empty()
-                || Instant::now() >= deadline
-            {
-                break turn;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        };
-        let streamed_final_value = sink.final_values().await.into_iter().last();
+        let turn = session
+            .queued_turn()
+            .drain_id(request.workflow_id.clone())
+            .effects(controller)
+            .stream_to(&sink)
+            .await
+            .map_err(terminal_error)?;
         let final_value = turn
             .as_ref()
             .and_then(|turn| turn.final_value().cloned())
-            .or(streamed_final_value)
             .unwrap_or(serde_json::Value::Null);
         self.finish_response(
             &request,
@@ -338,13 +322,13 @@ impl AppState {
                 .await
                 .map_err(anyhow::Error::from)
         });
-        let first_turn = self
-            .run_queued_turn_with_restate(
-                &session,
-                controller,
-                format!("{}:first-drain", request.workflow_id),
-            )
-            .await?
+        let first_turn = session
+            .queued_turn()
+            .drain_id(format!("{}:first-drain", request.workflow_id))
+            .effects(controller)
+            .run()
+            .await
+            .map_err(terminal_error)?
             .ok_or_else(|| terminal_error("first queued frame-switch turn did not run"))?;
         let first_value = first_turn.final_value().cloned().ok_or_else(|| {
             terminal_error("queued frame-switch follow-on produced no final value")
@@ -363,13 +347,13 @@ impl AppState {
         let second_pending_before_drain = pending_after_follow
             .iter()
             .any(|input| input.input_id == second.input_id);
-        let second_turn = self
-            .run_queued_turn_with_restate(
-                &session,
-                controller,
-                format!("{}:second-drain", request.workflow_id),
-            )
-            .await?
+        let second_turn = session
+            .queued_turn()
+            .drain_id(format!("{}:second-drain", request.workflow_id))
+            .effects(controller)
+            .run()
+            .await
+            .map_err(terminal_error)?
             .ok_or_else(|| terminal_error("second queued turn did not run"))?;
         let second_value = second_turn
             .final_value()
@@ -430,13 +414,13 @@ impl AppState {
                     .cancel_running_turns_with_origin(Some("scripted-e2e-worker".to_string())),
             )
         });
-        let cancelled = self
-            .run_queued_turn_with_restate(
-                &session,
-                controller,
-                format!("{}:cancel-drain", request.workflow_id),
-            )
-            .await?
+        let cancelled = session
+            .queued_turn()
+            .drain_id(format!("{}:cancel-drain", request.workflow_id))
+            .effects(controller)
+            .run()
+            .await
+            .map_err(terminal_error)?
             .ok_or_else(|| terminal_error("cancellable queued turn did not run"))?;
         let cancel_count = canceller
             .await
@@ -484,35 +468,6 @@ impl AppState {
             true,
         )
         .await
-    }
-
-    async fn run_queued_turn_with_restate(
-        &self,
-        session: &lash::LashSession,
-        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
-        drain_id: String,
-    ) -> HandlerResult<Option<lash::TurnOutput>> {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        loop {
-            let turn = session
-                .queued_turn()
-                .drain_id(drain_id.clone())
-                .effects(controller)
-                .run()
-                .await
-                .map_err(terminal_error)?;
-            if turn.is_some()
-                || session
-                    .queued_work()
-                    .await
-                    .map_err(terminal_error)?
-                    .is_empty()
-                || Instant::now() >= deadline
-            {
-                return Ok(turn);
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
     }
 
     async fn finish_response(

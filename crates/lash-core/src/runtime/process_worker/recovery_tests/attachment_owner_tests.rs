@@ -188,6 +188,7 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
             runtime_host,
             factory,
             Arc::new(TestLocalProcessRegistry::default()),
+            local_owner("attachment-parent-worker", "host-a", "parent-start-a"),
         )
         .with_session_policy(policy.clone()),
     );
@@ -269,9 +270,9 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
             runtime_host,
             factory.clone() as Arc<dyn SessionStoreFactory>,
             Arc::clone(&registry),
+            local_owner("attachment-worker", "host-a", "start-a"),
         )
-        .with_session_policy(policy)
-        .with_lease_owner(local_owner("attachment-worker", "host-a", "start-a")),
+        .with_session_policy(policy),
     );
     registry
         .register_process(

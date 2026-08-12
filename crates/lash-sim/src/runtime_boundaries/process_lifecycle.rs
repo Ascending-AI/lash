@@ -46,9 +46,9 @@ pub(super) fn lifecycle_worker(
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
+            owner,
         )
-        .with_session_policy(policy)
-        .with_lease_owner(owner),
+        .with_session_policy(policy),
     )
 }
 

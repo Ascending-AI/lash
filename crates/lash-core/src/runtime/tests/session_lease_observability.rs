@@ -431,6 +431,7 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
             session_id,
             None,
             &claimant,
+            "claimant-executor",
             &StoreError::HeadRevisionConflict {
                 expected: 3,
                 actual: 4,
@@ -493,6 +494,7 @@ async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
             Arc::clone(&store),
             generation_commit(session_id, 11, 0),
             &winner,
+            "successor-winner-executor",
             LeaseTimings::default(),
             clock.clone(),
         )
@@ -512,6 +514,7 @@ async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
             Arc::clone(&store),
             generation_commit(session_id, 12, 0),
             &loser,
+            "successor-loser-executor",
             LeaseTimings::default(),
             clock.clone(),
         )
@@ -536,6 +539,7 @@ async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
             Arc::clone(&store),
             generation_commit(session_id, 13, 1),
             &foreign,
+            "foreign-successor-executor",
             LeaseTimings::default(),
             clock.clone(),
         )
@@ -569,6 +573,8 @@ async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
     let expected_owner_sha = crate::stable_hash::sha256_hex(predecessor.owner_id.as_bytes());
     let expected_incarnation_sha =
         crate::stable_hash::sha256_hex(predecessor.incarnation_id.as_bytes());
+    let expected_executor_sha =
+        crate::stable_hash::sha256_hex(predecessor_row.executor_id.as_bytes());
     for advisory in advisories {
         assert_eq!(advisory.level, "INFO");
         assert_eq!(advisory.field("session_id"), session_id);
@@ -578,12 +584,16 @@ async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
             expected_incarnation_sha
         );
         assert_eq!(
+            advisory.field("holder_executor_id_sha256"),
+            expected_executor_sha
+        );
+        assert_eq!(
             advisory.field("message"),
             "live lease holder observed: proceeding under the commit CAS fence"
         );
         assert_eq!(
             advisory.field_count(),
-            7,
+            8,
             "the event field shape is intentional"
         );
     }
@@ -623,6 +633,7 @@ async fn publish_on_one_side_of_ttl(
             Arc::clone(&store),
             generation_commit(session_id, 21, 0),
             &successor,
+            "ttl-successor-executor",
             short_timings(),
             clock.clone(),
         )
@@ -710,6 +721,7 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
             session_id,
             Some(&guard.commit_evidence()),
             &holder,
+            "holder-executor",
             &StoreError::HeadRevisionConflict {
                 expected: 7,
                 actual: 9,
@@ -721,6 +733,7 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
             session_id,
             Some(&guard.commit_evidence()),
             &holder,
+            "holder-executor",
             &StoreError::Backend("unrelated backend failure".to_string()),
         );
         guard.release_if_live().await.expect("release the lane");

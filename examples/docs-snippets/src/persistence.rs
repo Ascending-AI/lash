@@ -197,11 +197,6 @@ async fn commit_conflict_retry(
     match session.turn(input).run().await {
         Ok(turn) => persist(turn)?,
         Err(lash::EmbedError::Runtime(err))
-            if err.code == RuntimeErrorCode::SessionExecutionBusy =>
-        {
-            retry_later(err)?;
-        }
-        Err(lash::EmbedError::Runtime(err))
             if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>
         {
             // The durable lane moved to another owner before commit: reopen and retry.
