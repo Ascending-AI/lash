@@ -413,15 +413,19 @@ impl Heap {
                 attempted: next_live,
             });
         }
+        self.next_id
+            .checked_add(1)
+            .ok_or(RuntimeError::HeapIdExhausted)?;
+        Ok(self.commit_precharged_object(object, logical_bytes))
+    }
+
+    fn commit_precharged_object(&mut self, object: HeapObject, logical_bytes: u64) -> Value {
         let id = HeapId::from_counter(self.next_id);
         // IDs name exactly one object for their entire lifetime. Reusing a
         // vacant storage slot therefore never reuses or rewinds the ID.
-        self.next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or(RuntimeError::HeapIdExhausted)?;
+        self.next_id += 1;
         self.allocations = self.allocations.saturating_add(1);
-        self.live_logical_bytes = next_live;
+        self.live_logical_bytes = self.live_logical_bytes.saturating_add(logical_bytes);
         let entry = HeapEntry {
             id,
             object,
@@ -441,31 +445,66 @@ impl Heap {
             let pins = self.stress_pins.clone();
             self.collect(pins.iter());
         }
-        Ok(Value::Ref(id))
+        Value::Ref(id)
     }
 
     pub(crate) fn import(&mut self, value: Value) -> Result<Value, RuntimeError> {
+        let mut values = self.import_values(vec![value])?;
+        Ok(values.pop().expect("single import returns one value"))
+    }
+
+    pub(crate) fn import_values(&mut self, values: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
+        let mut next_id = self.next_id;
+        let mut staged = Vec::new();
+        let mut imported = Vec::with_capacity(values.len());
+        for value in values {
+            imported.push(self.stage_import(value, &mut next_id, &mut staged)?);
+        }
+        let staged_bytes = staged.iter().fold(0_u64, |total, (_, object)| {
+            total.saturating_add(object.logical_bytes())
+        });
+        let attempted = self.live_logical_bytes.saturating_add(staged_bytes);
+        if attempted > self.logical_byte_limit {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: self.logical_byte_limit,
+                attempted,
+            });
+        }
+        for (expected_id, object) in staged {
+            let logical_bytes = object.logical_bytes();
+            let committed = self.commit_precharged_object(object, logical_bytes);
+            debug_assert_eq!(committed, Value::Ref(expected_id));
+        }
+        Ok(imported)
+    }
+
+    fn stage_import(
+        &self,
+        value: Value,
+        next_id: &mut u64,
+        staged: &mut Vec<(HeapId, HeapObject)>,
+    ) -> Result<Value, RuntimeError> {
         if let Some(identity) = compound_identity(&value)
             && let Some(id) = self.boundary_id(identity)
         {
             return Ok(Value::Ref(id));
         }
-        match value {
+        let object = match value {
             Value::Tuple(values) => {
                 let values = values
                     .into_vec()
                     .into_iter()
-                    .map(|value| self.import(value))
+                    .map(|value| self.stage_import(value, next_id, staged))
                     .collect::<Result<_, _>>()?;
-                self.allocate(HeapObject::Tuple(values))
+                HeapObject::Tuple(values)
             }
             Value::List(values) => {
                 let values = values
                     .into_vec()
                     .into_iter()
-                    .map(|value| self.import(value))
+                    .map(|value| self.stage_import(value, next_id, staged))
                     .collect::<Result<_, _>>()?;
-                self.allocate(HeapObject::List(values))
+                HeapObject::List(values)
             }
             Value::Record(record) => {
                 let mut imported = record_with_capacity(record.len());
@@ -473,17 +512,23 @@ impl Heap {
                     imported.insert_symbolized(
                         entry.symbol,
                         entry.name.clone(),
-                        self.import(entry.value.clone())?,
+                        self.stage_import(entry.value.clone(), next_id, staged)?,
                     );
                 }
-                self.allocate(HeapObject::Record(Box::new(imported)))
+                HeapObject::Record(Box::new(imported))
             }
             Value::Ref(id) => {
                 self.get(id)?;
-                Ok(Value::Ref(id))
+                return Ok(Value::Ref(id));
             }
-            value => Ok(value),
-        }
+            value => return Ok(value),
+        };
+        let id = HeapId::from_counter(*next_id);
+        *next_id = next_id
+            .checked_add(1)
+            .ok_or(RuntimeError::HeapIdExhausted)?;
+        staged.push((id, object));
+        Ok(Value::Ref(id))
     }
 
     pub(crate) fn export(&self, value: &Value) -> Result<Value, RuntimeError> {
@@ -598,7 +643,7 @@ impl Heap {
         self.debug_assert_boundary_cache_invariant();
     }
 
-    fn clear_boundary_cache(&mut self) {
+    pub(crate) fn clear_boundary_cache(&mut self) {
         self.materialized.clear();
         self.boundary_refs.clear();
         self.debug_assert_boundary_cache_invariant();
@@ -916,6 +961,7 @@ impl Heap {
         Ok(Value::Ref(copy_id))
     }
 
+    #[cfg(test)]
     pub(crate) fn replace_object(
         &mut self,
         id: HeapId,

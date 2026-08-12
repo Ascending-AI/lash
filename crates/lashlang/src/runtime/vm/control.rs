@@ -480,47 +480,57 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     fn heapify_vm_state(&mut self) -> Result<(), RuntimeError> {
-        let mut heap = self.heap.clone();
-        if heap.allocation_scope_needs_roots() {
-            heap.begin_allocation_scope(self.heap_roots());
+        if self.heap.allocation_scope_needs_roots() {
+            self.heap.begin_allocation_scope(self.heap_roots());
         }
-        let stack = self
-            .stack
-            .iter()
-            .cloned()
-            .map(|value| heap.import(value))
-            .collect::<Result<Vec<_>, _>>()?;
-        let last_value = self
-            .last_value
-            .as_ref()
-            .cloned()
-            .map(|value| heap.import(value))
-            .transpose()?;
-        let mut slots = self.slots.clone();
-        for value in slots.values.iter_mut().flatten() {
-            *value = heap.import(value.clone())?;
+        self.heap.clear_boundary_cache();
+
+        let mut values = Vec::new();
+        values.extend(self.stack.iter().cloned());
+        values.extend(self.last_value.iter().cloned());
+        values.extend(self.slots.values.iter().flatten().cloned());
+        values.extend(self.slots.extras.values().cloned());
+        for iterator in &self.iter_stack {
+            if let super::IterCursor::List {
+                values: iterator_values,
+                ..
+            } = &iterator.cursor
+            {
+                values.extend(iterator_values.iter().cloned());
+            }
+            values.extend(iterator.restore.previous.iter().cloned());
         }
-        for entry in &mut slots.extras.entries {
-            entry.value = heap.import(entry.value.clone())?;
+
+        let imported = self.heap.import_values(values);
+        self.heap.end_allocation_scope();
+        let mut imported = imported?.into_iter();
+        for value in &mut self.stack {
+            *value = imported.next().expect("stack import count matches");
         }
-        let mut iter_stack = self.iter_stack.clone();
-        for iterator in &mut iter_stack {
-            if let super::IterCursor::List { values, .. } = &mut iterator.cursor {
-                for value in values.make_mut() {
-                    *value = heap.import(value.clone())?;
+        if let Some(value) = &mut self.last_value {
+            *value = imported.next().expect("last-value import count matches");
+        }
+        for value in self.slots.values.iter_mut().flatten() {
+            *value = imported.next().expect("slot import count matches");
+        }
+        for entry in &mut self.slots.extras.entries {
+            entry.value = imported.next().expect("extra import count matches");
+        }
+        for iterator in &mut self.iter_stack {
+            if let super::IterCursor::List {
+                values: iterator_values,
+                ..
+            } = &mut iterator.cursor
+            {
+                for value in iterator_values.make_mut() {
+                    *value = imported.next().expect("iterator import count matches");
                 }
             }
             if let Some(value) = &mut iterator.restore.previous {
-                *value = heap.import(value.clone())?;
+                *value = imported.next().expect("restore import count matches");
             }
         }
-
-        self.heap = heap;
-        self.stack = stack;
-        self.last_value = last_value;
-        self.slots = slots;
-        self.iter_stack = iter_stack;
-        self.heap.end_allocation_scope();
+        debug_assert!(imported.next().is_none());
         if self.heap.needs_collection() {
             let roots = self.heap_roots();
             self.heap.collect(roots.iter());
