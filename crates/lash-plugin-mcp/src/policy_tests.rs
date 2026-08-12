@@ -1812,13 +1812,15 @@ async fn dead_transport_short_circuits_before_dispatch_timeout() {
     let pool = connect_mock(
         root.path(),
         MockOptions {
-            behavior: "exit_after_list",
+            behavior: "close_streams_when_triggered_after_list",
             call_timeout_ms: 1_000,
             ..MockOptions::default()
         },
     )
     .await;
     let peer = peer(&pool).await;
+    std::fs::write(root.path().join("close"), "close")
+        .expect("release mock to close its transport streams");
     wait_until(
         || peer.is_transport_closed(),
         "mock transport did not close",
@@ -1844,13 +1846,15 @@ async fn idle_service_death_updates_status_without_a_tool_call() {
     let pool = connect_mock(
         root.path(),
         MockOptions {
-            behavior: "exit_after_list",
+            behavior: "close_streams_when_triggered_after_list",
             reconnect_initial_ms: 5_000,
             ..MockOptions::default()
         },
     )
     .await;
     let peer = peer(&pool).await;
+    std::fs::write(root.path().join("close"), "close")
+        .expect("release mock to close its transport streams");
     wait_until(
         || peer.is_transport_closed(),
         "mock transport did not close",
