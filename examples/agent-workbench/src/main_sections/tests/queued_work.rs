@@ -286,7 +286,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
         );
-        let state = recoverable_chat_test_state_with_dependencies(
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
             &data_dir,
             16,
             lash::testing::TestProvider::builder()
@@ -301,6 +301,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            32_768,
         )
         .await;
         let session_id = state.current_session_id();
@@ -805,7 +806,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
         );
-        let state = recoverable_chat_test_state_with_dependencies(
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
             &data_dir,
             16,
             lash::testing::TestProvider::builder()
@@ -816,6 +817,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            32_768,
         )
         .await;
         let session_id = state.current_session_id();

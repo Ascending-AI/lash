@@ -561,7 +561,7 @@ where
     ))
     .await;
     queued_work_exact_claim_preserves_physical_order_and_key_breaks(make("physical-order")).await;
-    process_wakes_batch_by_default(make("process-wakes-batch")).await;
+    process_wakes_batch_by_default(make("wake-default-batch")).await;
     queued_work_completion_is_lease_guarded(make("root")).await;
     queued_wake_delivery_is_source_key_idempotent_and_claimed_once(make("root")).await;
     queue_completion_and_turn_commit_stamp_are_atomic(make("root")).await;

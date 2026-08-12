@@ -338,8 +338,9 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_batches (
     session_id text NOT NULL,
     source_key text,
     delivery_policy text NOT NULL,
-    slot_policy text NOT NULL,
-    merge_key_json text NOT NULL,
+    work_kind text NOT NULL,
+    authority_json text NOT NULL,
+    merge_key text,
     available_at_ms bigint NOT NULL,
     enqueued_at_ms bigint NOT NULL,
     claim_id text,
@@ -814,7 +815,7 @@ INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-wake-
 -- Data for Name: lash_queued_work_batches; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_queued_work_batches VALUES (1, 'qwb:e0ebf551aa55f4bd6f675e408989489cf0a1de244951ae78c18d851b96bf1317', 'durable-read-fixture', 'durable-read-queue-source', 'earliest_safe_boundary', 'exclusive', '"never"', 0, 1700000000000, NULL, NULL, NULL, NULL, NULL, 0, 0);
+INSERT INTO lash_durable_read_fixture.lash_queued_work_batches VALUES (1, 'qwb:e0ebf551aa55f4bd6f675e408989489cf0a1de244951ae78c18d851b96bf1317', 'durable-read-fixture', 'durable-read-queue-source', 'earliest_safe_boundary', 'turn', '{}', NULL, 0, 1700000000000, NULL, NULL, NULL, NULL, NULL, 0, 0);
 
 
 --
@@ -844,7 +845,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 46);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 47);
 
 
 --
@@ -1447,6 +1448,13 @@ CREATE INDEX idx_lash_processes_waiting ON lash_durable_read_fixture.lash_proces
 --
 
 CREATE INDEX idx_lash_processes_wake_session ON lash_durable_read_fixture.lash_processes USING btree (wake_session_id);
+
+
+--
+-- Name: idx_lash_queued_work_claim; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_queued_work_claim ON lash_durable_read_fixture.lash_queued_work_batches USING btree (session_id, claim_id, enqueue_seq);
 
 
 --
