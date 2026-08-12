@@ -303,12 +303,12 @@ impl TraceSink for FanoutTraceSink {
         <div class="section" id="jsonl-schema">
           <div class="section-header">
             <h2>The JSONL Schema</h2>
-            <p>One line of UTF-8 JSON per record. <code>TRACE_SCHEMA_VERSION = 4</code>. Reject or warn on higher unrecognized versions. When to bump it — and when an additive change (a new variant, an optional field, a reshaped <code>Custom</code> / <code>ProtocolStep</code> payload) does not — is the <a href="./reporting.html#schema-evolution">schema-evolution policy</a>.</p>
+            <p>One line of UTF-8 JSON per record. <code>TRACE_SCHEMA_VERSION = 4</code>. Typed decoding requires that exact version and returns <code>TraceSchemaVersionError</code> for any other version before interpreting the event payload. When to bump it — and when an additive change (a new variant, an optional field, a reshaped <code>Custom</code> / <code>ProtocolStep</code> payload) does not — is the <a href="./reporting.html#schema-evolution">schema-evolution policy</a>.</p>
             <p>Restate-hosted turns can attach the same sink to <code>RestateRuntimeEffectController::with_trace_sink</code>. The viewer then shows journaled-effect start/settle, durable-wait park/resolve, durable timers, and segment boundaries alongside the ordinary session-manager turn, LLM, and tool records. The controller retains only a weak sink reference: an absent or dropped sink is a no-op. These records are live observations, may be emitted again during handler redrive, and never issue a Restate command or replace the durable journal.</p>
             <p>Completed or failed LLM and tool events may also carry an additive <code>attempts</code> ladder projected from the retry owner's existing records. The viewer shows the attempt count plus each attempt's outcome, duration, retry reason, and scheduled delay, so a throttling or transient-failure storm remains visible instead of collapsing into the final clean outcome.</p>
           </div>
           <pre data-lang="json"><code>{
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "6621dfa7-2cd0-4296-ac20-15c0f2d3cec1",
   "timestamp": "2026-05-11T11:42:01.234+00:00",
   "context": {
@@ -322,13 +322,13 @@ impl TraceSink for FanoutTraceSink {
   "output": { "outcome": { "status": "success", "payload": { "...": "..." } } },
   "duration_ms": 8
 }</code></pre>
-          <p>Record type: <code>lash_trace::TraceRecord</code>. Event variants: <code>lash_trace::TraceEvent</code>. Both <code>Deserialize</code>; parse directly with <code>serde_json::from_str::&lt;TraceRecord&gt;()</code>.</p>
+          <p>Record type: <code>lash_trace::TraceRecord</code>. Event variants: <code>lash_trace::TraceEvent</code>. Both <code>Deserialize</code>; parse directly with <code>serde_json::from_str::&lt;TraceRecord&gt;()</code>. That documented decode path enforces the exact schema version structurally.</p>
         </div>
 
         <div class="section" id="viewing">
           <div class="section-header">
             <h2>Viewing A Trace</h2>
-            <p>Renders JSONL to a self-contained HTML timeline with nested LLM calls, tool calls, and streaming chunks inline. Valid-JSON records of an unrecognized schema are preserved as raw text; a line that is not valid JSON aborts the load.</p>
+            <p>Renders JSONL to a self-contained HTML timeline with nested LLM calls, tool calls, and streaming chunks inline. The viewer uses the same version-validating <code>TraceRecord</code> decode. Valid-JSON records refused by that typed decode, including old or unrecognized schemas, are deliberately preserved through the raw fallback; a line that is not valid JSON aborts the load.</p>
           </div>
           <pre data-lang="console"><code>$ cargo run -p lash-trace-viewer -- ./.lash-data/trace.jsonl
 # Writes ./.lash-data/trace.html next to the input

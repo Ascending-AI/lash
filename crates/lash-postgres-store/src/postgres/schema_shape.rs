@@ -1368,8 +1368,11 @@ impl fmt::Display for SchemaReport {
             return write!(
                 formatter,
                 " The component schema is a reject-and-recreate boundary with no migration \
-                 chain, so a database stamped for another generation needs a fresh one: this \
-                 gate is unconditional and no `SchemaCheck` relaxes it."
+                 chain. Drain affected sessions and recreate the whole Lash trust domain with \
+                 this version: reset the tombstones, await-event revocation ledger, effect \
+                 journal, and Restate state together; see \
+                 docs/persistence.html#delete-sessions. This gate is unconditional and no \
+                 `SchemaCheck` relaxes it."
             );
         }
         write!(

@@ -175,7 +175,7 @@ impl TraceContext {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TraceRecord {
     pub schema_version: u32,
     pub id: String,
@@ -183,6 +183,45 @@ pub struct TraceRecord {
     pub context: TraceContext,
     #[serde(flatten)]
     pub event: TraceEvent,
+}
+
+#[derive(Deserialize)]
+struct TraceRecordWire {
+    schema_version: u32,
+    id: String,
+    timestamp: String,
+    context: TraceContext,
+    #[serde(flatten)]
+    event: TraceEvent,
+}
+
+impl<'de> Deserialize<'de> for TraceRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Read the self-describing JSON value first so the schema fence runs
+        // before the current event shape is interpreted. A pre-cutover record
+        // must report its version mismatch even when its payload is no longer
+        // structurally valid for this build.
+        let value = Value::deserialize(deserializer)?;
+        let schema_version = value
+            .get("schema_version")
+            .cloned()
+            .ok_or_else(|| serde::de::Error::missing_field("schema_version"))
+            .and_then(|value| serde_json::from_value(value).map_err(serde::de::Error::custom))?;
+        ensure_trace_schema_version(schema_version).map_err(serde::de::Error::custom)?;
+
+        let wire: TraceRecordWire =
+            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            schema_version: wire.schema_version,
+            id: wire.id,
+            timestamp: wire.timestamp,
+            context: wire.context,
+            event: wire.event,
+        })
+    }
 }
 
 impl TraceRecord {

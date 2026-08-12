@@ -40,6 +40,25 @@ fn pre_frame_key_trace_schema_is_rejected_with_literal_versions() {
 }
 
 #[test]
+fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation() {
+    let otherwise_current = r#"{"schema_version":3,"id":"legacy-record","timestamp":"2026-05-11T11:42:01.234+00:00","context":{},"type":"session_started"}"#;
+    let error = serde_json::from_str::<TraceRecord>(otherwise_current)
+        .expect_err("schema-3 trace records must be refused during typed decode");
+    assert_eq!(
+        error.to_string(),
+        "unsupported trace schema version 3; expected 4"
+    );
+
+    let stale_and_malformed = r#"{"schema_version":3,"payload":"not a current event"}"#;
+    let error = serde_json::from_str::<TraceRecord>(stale_and_malformed)
+        .expect_err("the version refusal must precede current-shape validation");
+    assert_eq!(
+        error.to_string(),
+        "unsupported trace schema version 3; expected 4"
+    );
+}
+
+#[test]
 fn new_records_stamp_the_schema_version() {
     let record = TraceRecord::new(
         TraceContext::default().for_session("root"),

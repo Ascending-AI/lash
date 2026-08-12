@@ -780,16 +780,28 @@ pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<boo
 }
 
 /// Build the error message for an unsupported on-disk schema. The expected and
-/// found `PRAGMA user_version` values are reported accurately. There is no
-/// migration chain — the database must be deleted before reopening.
+/// found `PRAGMA user_version` values are reported accurately. Effect replay is
+/// part of the trust domain documented in `docs/persistence.html#delete-sessions`,
+/// so its remedy must never prescribe an independent database wipe.
 pub(crate) fn unsupported_schema_message(
     database_kind: &str,
     expected_version: i32,
     found_version: i32,
 ) -> String {
+    let remedy = if database_kind == "effect replay" {
+        "drain affected sessions and recreate the whole Lash trust domain with this version. \
+         Reset the tombstones, await-event revocation ledger, effect journal, and Restate state \
+         together; see docs/persistence.html#delete-sessions."
+    } else {
+        return format!(
+            "Unsupported lash {database_kind} schema: this binary supports schema version \
+             {expected_version}, but the database reports version {found_version}. There is no \
+             migration chain — delete the {database_kind} database and start fresh."
+        );
+    };
     format!(
         "Unsupported lash {database_kind} schema: this binary supports schema version \
          {expected_version}, but the database reports version {found_version}. There is no \
-         migration chain — delete the {database_kind} database and start fresh."
+         migration chain — {remedy}"
     )
 }

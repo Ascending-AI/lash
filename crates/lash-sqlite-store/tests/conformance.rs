@@ -1153,7 +1153,9 @@ async fn sqlite_effect_controller_rejects_pre_retirement_journal_schema_before_s
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
     assert!(message.contains("supports schema version 9"));
-    assert!(message.contains("delete the effect replay database and start fresh"));
+    assert!(message.contains(
+        "drain affected sessions and recreate the whole Lash trust domain with this version"
+    ));
 }
 
 fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffectOutcome) {
@@ -1268,7 +1270,7 @@ async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
     };
     assert_eq!(
         error.to_string(),
-        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 9, but the database reports version 8. There is no migration chain — delete the effect replay database and start fresh.\")"
+        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 9, but the database reports version 8. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions.\")"
     );
 }
 
