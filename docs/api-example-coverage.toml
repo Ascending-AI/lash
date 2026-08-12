@@ -1586,7 +1586,7 @@ aliases = ["lash::prelude::LashCoreBuilder::lease_timings"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests.rs:1872#.lease_timings(lease_timings)"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1665#takeover_latency < default_ttl,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1648#takeover_latency < default_ttl,"
 
 [[api]]
 symbol = "lash::LashCoreBuilder::live_replay_store"
@@ -4578,8 +4578,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::independent", "lash_core::TurnActivity::independent"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1356#sink.emit(TurnActivity::independent("
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1378#sink.emit(TurnActivity::independent("
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivity::new"
@@ -4588,8 +4588,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::new", "lash_core::TurnActivity::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1342#sink.emit(TurnActivity::new("
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1364#sink.emit(TurnActivity::new("
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivityFanout"
@@ -4618,8 +4618,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId", "lash_core::TurnActivityId"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1343#lash::TurnActivityId::new(\"prior\"),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1365#lash::TurnActivityId::new(\"prior\"),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivityId::0"
@@ -4637,8 +4637,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId::new", "lash_core::TurnActivityId::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1343#lash::TurnActivityId::new(\"prior\"),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1365#lash::TurnActivityId::new(\"prior\"),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivitySink"
@@ -5185,8 +5185,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta", "lash_core::TurnEvent::AssistantProseDelta"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1344#TurnEvent::AssistantProseDelta {"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1295#TurnEvent::AssistantProseDelta {"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::AssistantProseDelta::text"
@@ -5195,8 +5195,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta::text", "lash_core::TurnEvent::AssistantProseDelta::text"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1345#text: \"kept \".into(),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1367#text: \"kept \".into(),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage"
@@ -5412,8 +5412,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ModelAttemptReset", "lash_core::TurnEvent::ModelAttemptReset"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1319#TurnEvent::ModelAttemptReset {"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1301#TurnEvent::ModelAttemptReset {"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ModelAttemptReset::assistant_prose_correlation_ids"
@@ -5422,8 +5422,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ModelAttemptReset::assistant_prose_correlation_ids", "lash_core::TurnEvent::ModelAttemptReset::assistant_prose_correlation_ids"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1358#assistant_prose_correlation_ids: vec![lash::TurnActivityId::new(\"failed\")],"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1380#assistant_prose_correlation_ids: vec![lash::TurnActivityId::new(\"failed\")],"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ModelAttemptReset::reasoning_correlation_ids"
@@ -5432,8 +5432,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ModelAttemptReset::reasoning_correlation_ids", "lash_core::TurnEvent::ModelAttemptReset::reasoning_correlation_ids"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1359#reasoning_correlation_ids: Vec::new(),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1375#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1381#reasoning_correlation_ids: Vec::new(),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1397#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ModelRequestStarted"
@@ -8459,8 +8459,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:175#events.send(LlmStreamEvent::Delta(text.to_string()));"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:175, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:204#events.send(LlmStreamEvent::Delta(text.to_string()));"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::direct::LlmEventSender::new"
@@ -8476,8 +8476,8 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:175#events.send(LlmStreamEvent::Delta(text.to_string()));"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:175, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:204#events.send(LlmStreamEvent::Delta(text.to_string()));"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart"
@@ -8486,7 +8486,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:8#use lash::direct::{LlmOutputPart, LlmStreamEvent};"
+usage = "examples/agent-workbench/src/failure_provider.rs:8#use lash::direct::{LlmOutputPart, LlmStreamEvent, LlmUsage};"
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Reasoning"
@@ -8612,8 +8612,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:175#events.send(LlmStreamEvent::Delta(text.to_string()));"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:175, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:204#events.send(LlmStreamEvent::Delta(text.to_string()));"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::direct::LlmStreamEvent::Delta::0"
@@ -9292,8 +9292,8 @@ availability = "default+all-features"
 aliases = ["lash_core::store::lease_timings::LeaseTimings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1663#let default_ttl = lash::durability::LeaseTimings::default().ttl();"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1665#takeover_latency < default_ttl,"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1646#let default_ttl = lash::durability::LeaseTimings::default().ttl();"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1648#takeover_latency < default_ttl,"
 
 [[api]]
 symbol = "lash::durability::LeaseTimings::from_ttl"
@@ -9311,8 +9311,8 @@ availability = "default+all-features"
 aliases = ["lash_core::store::lease_timings::LeaseTimings::new"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1585#lash::durability::LeaseTimings::new(Duration::from_millis(300), Duration::from_millis(100))"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1665#takeover_latency < default_ttl,"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1568#lash::durability::LeaseTimings::new(Duration::from_millis(300), Duration::from_millis(100))"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1648#takeover_latency < default_ttl,"
 
 [[api]]
 symbol = "lash::durability::LeaseTimings::renew_interval"
@@ -9339,8 +9339,8 @@ availability = "default+all-features"
 aliases = ["lash_core::store::lease_timings::LeaseTimings::ttl"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1663#let default_ttl = lash::durability::LeaseTimings::default().ttl();"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1665#takeover_latency < default_ttl,"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1646#let default_ttl = lash::durability::LeaseTimings::default().ttl();"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1648#takeover_latency < default_ttl,"
 
 [[api]]
 symbol = "lash::durability::LeaseTimings::ttl_ms"
@@ -15976,8 +15976,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::turn_index"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1493#read_view.turn_index(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1493#read_view.turn_index(),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1476#read_view.turn_index(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1476#read_view.turn_index(),"
 
 [[api]]
 symbol = "lash::persistence::SessionRelation"
@@ -18014,8 +18014,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputIngress::active_turn_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1453#== injected.ingress.active_turn_id()"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1413#lash::persistence::TurnInputIngress::NextTurn"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1436#== injected.ingress.active_turn_id()"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1396#lash::persistence::TurnInputIngress::NextTurn"
 
 [[api]]
 symbol = "lash::persistence::TurnInputIngress::admits_checkpoint"
@@ -25307,8 +25307,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRecord"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:956#!immediately_after_delete.is_terminal(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:957#\"session revocation must leave the independently sleeping process live\""
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:939#!immediately_after_delete.is_terminal(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:940#\"session revocation must leave the independently sleeping process live\""
 
 [[api]]
 symbol = "lash::process::ProcessRecord::abandon_request"
@@ -25454,8 +25454,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRecord::is_terminal"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:956#!immediately_after_delete.is_terminal(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:956#!immediately_after_delete.is_terminal(),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:939#!immediately_after_delete.is_terminal(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:939#!immediately_after_delete.is_terminal(),"
 
 [[api]]
 symbol = "lash::process::ProcessRecord::max_attempts"
@@ -26774,8 +26774,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatus"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1206#&& item.process.lifecycle == lash::process::ProcessStatus::Cancelled"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1198#assert!(terminal_work.iter().any(|item| {"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1189#&& item.process.lifecycle == lash::process::ProcessStatus::Cancelled"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1181#assert!(terminal_work.iter().any(|item| {"
 
 [[api]]
 symbol = "lash::process::ProcessStatus::Abandoned"
@@ -26793,8 +26793,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatus::Cancelled"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1206#&& item.process.lifecycle == lash::process::ProcessStatus::Cancelled"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1198#assert!(terminal_work.iter().any(|item| {"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1189#&& item.process.lifecycle == lash::process::ProcessStatus::Cancelled"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1181#assert!(terminal_work.iter().any(|item| {"
 
 [[api]]
 symbol = "lash::process::ProcessStatus::Completed"
@@ -26803,8 +26803,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatus::Completed"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1201#&& item.process.lifecycle == lash::process::ProcessStatus::Completed"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1198#assert!(terminal_work.iter().any(|item| {"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1184#&& item.process.lifecycle == lash::process::ProcessStatus::Completed"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1181#assert!(terminal_work.iter().any(|item| {"
 
 [[api]]
 symbol = "lash::process::ProcessStatus::Failed"
@@ -26933,8 +26933,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatusFilter::Running"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1225#status: lash::process::ProcessStatusFilter::Running,"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1238#\"timed out waiting for running process {label:?}; observed={processes:#?}\""
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1208#status: lash::process::ProcessStatusFilter::Running,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1221#\"timed out waiting for running process {label:?}; observed={processes:#?}\""
 
 [[api]]
 symbol = "lash::process::ProcessStatusFilter::Waiting"
@@ -27362,8 +27362,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:962#.events_after(&process_id, 0)"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:968#.any(|event| event.event_type == \"process.cancel_requested\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:945#.events_after(&process_id, 0)"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:951#.any(|event| event.event_type == \"process.cancel_requested\"),"
 
 [[api]]
 symbol = "lash::process::ProcessWorkObserver::events_after"
@@ -27371,8 +27371,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:962#.events_after(&process_id, 0)"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:968#.any(|event| event.event_type == \"process.cancel_requested\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:945#.events_after(&process_id, 0)"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:951#.any(|event| event.event_type == \"process.cancel_requested\"),"
 
 [[api]]
 symbol = "lash::process::ProcessWorkObserver::list"
@@ -27380,8 +27380,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1224#.list(&lash::process::ProcessListFilter {"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1238#\"timed out waiting for running process {label:?}; observed={processes:#?}\""
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1207#.list(&lash::process::ProcessListFilter {"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1221#\"timed out waiting for running process {label:?}; observed={processes:#?}\""
 
 [[api]]
 symbol = "lash::process::ProcessWorkObserver::list_observed_by"
@@ -29102,7 +29102,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:10#LlmRequest, LlmResponse, LlmTransportError, Provider, ProviderComponents, ProviderHandle,"
+usage = "examples/agent-workbench/src/failure_provider.rs:10#LlmRequest, LlmResponse, LlmTransportError, Provider, ProviderComponents, ProviderFailureKind,"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::agent_frame_id"
@@ -29643,6 +29643,38 @@ usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:88#ass
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:88#assert!(unsupported.message.contains(\"Unsupported effort `ultra`\"));"
 
 [[api]]
+symbol = "lash::provider::GenerationRetryGuarantee"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::GenerationRetryGuarantee to the agent-workbench provider setup example and assert whether retrying an interrupted generation is permitted."
+
+[[api]]
+symbol = "lash::provider::GenerationRetryGuarantee::Idempotent"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::GenerationRetryGuarantee::Idempotent to an agent-workbench provider example and assert that replay returns the same generation."
+
+[[api]]
+symbol = "lash::provider::GenerationRetryGuarantee::None"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::GenerationRetryGuarantee::None to an agent-workbench provider example and assert that output-started retry is refused."
+
+[[api]]
+symbol = "lash::provider::GenerationRetryGuarantee::Resumable"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::GenerationRetryGuarantee::Resumable to an agent-workbench provider example and assert that the interrupted generation resumes without replacement."
+
+[[api]]
 symbol = "lash::provider::Provider"
 kind = "trait"
 availability = "default+all-features"
@@ -29673,6 +29705,14 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::provider::Provider::complete to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::provider::Provider::generation_retry_guarantee"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::provider::Provider::generation_retry_guarantee to an agent-workbench provider example and assert the retry ladder honors the declared guarantee."
 
 [[api]]
 symbol = "lash::provider::Provider::kind"
@@ -29721,7 +29761,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderComponents"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::provider::ProviderComponents` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::provider::handle::ProviderHandle::new` because its canonical identity is the lash-core one. Consumer class: the agent-workbench example host and the first-party provider crates -- this type is exercised in-repo at examples/agent-workbench/src/failure_provider.rs:10, examples/agent-workbench/src/failure_provider.rs:56. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+reason = "Facade contract surface, not a closure-only discovery: `lash::provider::ProviderComponents` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::provider::handle::ProviderHandle::new` because its canonical identity is the lash-core one. Consumer class: the agent-workbench example host and the first-party provider crates -- this type is exercised in-repo at examples/agent-workbench/src/failure_provider.rs:10, examples/agent-workbench/src/failure_provider.rs:60. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::failure_classifier"
@@ -29748,8 +29788,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderComponents::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:56#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:56, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:60#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::provider"
@@ -29993,8 +30033,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderHandle::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:56#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:56, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:60#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::options"
@@ -30123,8 +30163,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::reliability"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:60#reliability: ProviderReliability::default()"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:64#reliability: ProviderReliability::default()"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:64, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::response_metadata_body_paths"
@@ -30305,8 +30345,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::max_attempts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:61#.max_attempts(2)"
-reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:61, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
+usage = "examples/agent-workbench/src/failure_provider.rs:65#.max_attempts(2)"
+reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:65, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::max_concurrency"
@@ -61365,7 +61405,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::for_session"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1439#.for_session(session_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1494#.for_session(session_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/session_isolation.rs:118#assert_eq!(report_a.started_process_ids().len(), 1);"
 
 [[api]]
@@ -62520,7 +62560,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1414#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1469#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
 assertion = "examples/agent-workbench/src/main_sections/tests/session_isolation.rs:118#assert_eq!(report_a.started_process_ids().len(), 1);"
 
 [[api]]

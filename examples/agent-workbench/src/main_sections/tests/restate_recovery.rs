@@ -780,33 +780,16 @@ fn assert_single_retry_marker_message(projection: &str, messages: &[lash::messag
 fn fold_retry_observer_prose(
     events: &[Arc<lash::observe::SessionObservationEvent>],
 ) -> (String, usize) {
-    let mut chunks = Vec::new();
-    let mut resets = 0;
-    for event in events {
+    let projection = fold_turn_activities(events.iter().filter_map(|event| {
         let lash::observe::SessionObservationEventPayload::TurnActivity(activity) = &event.payload
         else {
-            continue;
+            return None;
         };
-        match &activity.event {
-            lash::TurnEvent::AssistantProseDelta { text } => {
-                chunks.push((activity.correlation_id.clone(), text.clone()));
-            }
-            lash::TurnEvent::ModelAttemptReset {
-                assistant_prose_correlation_ids,
-                ..
-            } => {
-                resets += 1;
-                chunks.retain(|(id, _)| !assistant_prose_correlation_ids.contains(id));
-            }
-            _ => {}
-        }
-    }
+        Some(activity)
+    }));
     (
-        chunks
-            .into_iter()
-            .map(|(_, text)| text.to_string())
-            .collect(),
-        resets,
+        projection.assistant_prose(),
+        projection.model_attempt_reset_count(),
     )
 }
 

@@ -145,6 +145,7 @@ fn empty_provider_config() -> serde_json::Value {
 pub struct TestProvider {
     kind: &'static str,
     requires_streaming: bool,
+    generation_retry_guarantee: crate::provider::GenerationRetryGuarantee,
     options: ProviderOptions,
     serialize_config: Arc<SerializeConfigFn>,
     complete: Arc<CompletionFn>,
@@ -186,6 +187,7 @@ impl TestProviderBuilder {
             provider: TestProvider {
                 kind: "test",
                 requires_streaming: false,
+                generation_retry_guarantee: crate::provider::GenerationRetryGuarantee::None,
                 options: ProviderOptions::default(),
                 serialize_config: Arc::new(empty_provider_config),
                 complete: Arc::new(|_request| {
@@ -206,6 +208,15 @@ impl TestProviderBuilder {
 
     pub fn requires_streaming(mut self, requires_streaming: bool) -> Self {
         self.provider.requires_streaming = requires_streaming;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_retry_guarantee(
+        mut self,
+        guarantee: crate::provider::GenerationRetryGuarantee,
+    ) -> Self {
+        self.provider.generation_retry_guarantee = guarantee;
         self
     }
 
@@ -271,6 +282,13 @@ impl Provider for TestProvider {
 
     async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         (self.complete)(request).await
+    }
+
+    fn generation_retry_guarantee(
+        &self,
+        _request: &LlmRequest,
+    ) -> crate::provider::GenerationRetryGuarantee {
+        self.generation_retry_guarantee
     }
 
     fn requires_streaming(&self) -> bool {

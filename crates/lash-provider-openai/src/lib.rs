@@ -9,6 +9,7 @@ mod provider;
 mod provider_trace_tests;
 mod reasoning;
 mod responses;
+mod responses_output_evidence;
 mod responses_shared;
 pub mod schema;
 mod support;

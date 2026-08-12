@@ -916,19 +916,18 @@ impl RuntimeTurnDriver<'_> {
                     std::mem::take(state.assistant_prose_attempt_correlations);
                 let reasoning_correlation_ids =
                     std::mem::take(state.reasoning_attempt_correlations);
-                if !assistant_prose_correlation_ids.is_empty()
-                    || !reasoning_correlation_ids.is_empty()
-                {
-                    forwarder
-                        .send_semantic_turn_activity(
-                            TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
-                            TurnEvent::ModelAttemptReset {
-                                assistant_prose_correlation_ids,
-                                reasoning_correlation_ids,
-                            },
-                        )
-                        .await;
-                }
+                // The reset observes the provider generation boundary itself,
+                // even when the discarded attempt produced no output. Empty
+                // correlation lists are therefore meaningful host evidence.
+                forwarder
+                    .send_semantic_turn_activity(
+                        TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
+                        TurnEvent::ModelAttemptReset {
+                            assistant_prose_correlation_ids,
+                            reasoning_correlation_ids,
+                        },
+                    )
+                    .await;
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,

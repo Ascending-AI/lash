@@ -631,7 +631,8 @@ pub mod provider {
     pub use lash_core::{
         CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
         ReasoningEncoding, ReasoningSelection, SamplingCapability, StreamTermination,
-        facade_support::LlmTimeouts, facade_support::Provider, facade_support::ProviderComponents,
+        facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
+        facade_support::Provider, facade_support::ProviderComponents,
         facade_support::ProviderFactory, facade_support::ProviderHandle,
         facade_support::ProviderOptions, facade_support::ProviderSpec,
     };

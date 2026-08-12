@@ -4,10 +4,6 @@ use crate::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, 
 use crate::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_sansio::sync::MutexExt;
 
-fn test_commit_budget() -> crate::CommitBudget {
-    crate::CommitBudget::bounded(1024 * 1024, 512)
-}
-
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
@@ -24,7 +20,9 @@ pub(super) struct RecordingEffectController {
     cancel_after_llm: bool,
     controller_owned_replay: bool,
     replay_by_key: bool,
-    replay_outcomes: Arc<Mutex<std::collections::BTreeMap<String, RuntimeEffectOutcome>>>,
+    execute_llm_locally: bool,
+    pub(super) replay_outcomes:
+        Arc<Mutex<std::collections::BTreeMap<String, RuntimeEffectOutcome>>>,
     direct_gate: Option<
         Arc<(
             tokio::sync::Notify,
@@ -45,8 +43,13 @@ impl RecordingEffectController {
         self
     }
 
-    fn with_replay_by_key(mut self) -> Self {
+    pub(super) fn with_replay_by_key(mut self) -> Self {
         self.replay_by_key = true;
+        self
+    }
+
+    pub(super) fn with_local_llm_execution(mut self) -> Self {
+        self.execute_llm_locally = true;
         self
     }
 
@@ -103,12 +106,6 @@ pub(super) fn scoped_test_turn<'a>(
         ExecutionScope::turn("effect-test-session", turn_id),
     )
     .expect("scoped effect controller")
-}
-
-fn runtime_host_config_with_provider(provider: crate::ProviderHandle) -> RuntimeHostConfig {
-    let mut config = RuntimeHostConfig::in_memory(test_commit_budget());
-    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
-    config
 }
 
 #[async_trait::async_trait]
@@ -193,69 +190,78 @@ impl RuntimeEffectController for RecordingEffectController {
         self.record(&envelope.invocation);
         let outcome = match envelope.command {
             RuntimeEffectCommand::LlmCall { request } => {
-                let mut llm_calls = self.llm_calls.lock_recover();
-                *llm_calls += 1;
-                let first_call = *llm_calls == 1;
-                let prompt = format!("{:?}", request.messages);
-                let parts = if first_call && prompt.contains("use the tool") {
-                    vec![
-                        LlmOutputPart::ToolCall {
-                            call_id: "call-1".to_string(),
-                            tool_name: "echo_tool".to_string(),
-                            input_json: serde_json::json!({"value": "hi"}).to_string(),
-                            replay: None,
-                        },
-                        LlmOutputPart::ToolCall {
-                            call_id: "call-2".to_string(),
-                            tool_name: "echo_tool".to_string(),
-                            input_json: serde_json::json!({"value": "there"}).to_string(),
-                            replay: None,
-                        },
-                    ]
-                } else if first_call && prompt.contains("use direct tool") {
-                    vec![LlmOutputPart::ToolCall {
-                        call_id: "direct-call-1".to_string(),
-                        tool_name: "direct_tool".to_string(),
-                        input_json: serde_json::json!({}).to_string(),
-                        replay: None,
-                    }]
-                } else if first_call && prompt.contains("use retry tool") {
-                    vec![LlmOutputPart::ToolCall {
-                        call_id: "retry-call-1".to_string(),
-                        tool_name: "retry_once".to_string(),
-                        input_json: serde_json::json!({}).to_string(),
-                        replay: None,
-                    }]
+                if self.execute_llm_locally {
+                    local_executor
+                        .execute(RuntimeEffectEnvelope::new(
+                            envelope.invocation,
+                            RuntimeEffectCommand::LlmCall { request },
+                        ))
+                        .await
                 } else {
-                    vec![LlmOutputPart::Text {
-                        text: "finished".to_string(),
-                        response_meta: None,
-                    }]
-                };
-                Ok(RuntimeEffectOutcome::LlmCall {
-                    result: Box::new(Ok(LlmResponse {
-                        full_text: if parts
-                            .iter()
-                            .any(|part| matches!(part, LlmOutputPart::Text { .. }))
-                        {
-                            "finished".to_string()
-                        } else {
-                            String::new()
-                        },
-                        parts,
-                        usage: LlmUsage {
-                            input_tokens: 1,
-                            output_tokens: 1,
-                            cache_read_input_tokens: 0,
-                            cache_write_input_tokens: 0,
-                            reasoning_output_tokens: 0,
-                        },
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    })),
-                    text_streamed: false,
-                    call_record: None,
-                })
+                    let mut llm_calls = self.llm_calls.lock_recover();
+                    *llm_calls += 1;
+                    let first_call = *llm_calls == 1;
+                    let prompt = format!("{:?}", request.messages);
+                    let parts = if first_call && prompt.contains("use the tool") {
+                        vec![
+                            LlmOutputPart::ToolCall {
+                                call_id: "call-1".to_string(),
+                                tool_name: "echo_tool".to_string(),
+                                input_json: serde_json::json!({"value": "hi"}).to_string(),
+                                replay: None,
+                            },
+                            LlmOutputPart::ToolCall {
+                                call_id: "call-2".to_string(),
+                                tool_name: "echo_tool".to_string(),
+                                input_json: serde_json::json!({"value": "there"}).to_string(),
+                                replay: None,
+                            },
+                        ]
+                    } else if first_call && prompt.contains("use direct tool") {
+                        vec![LlmOutputPart::ToolCall {
+                            call_id: "direct-call-1".to_string(),
+                            tool_name: "direct_tool".to_string(),
+                            input_json: serde_json::json!({}).to_string(),
+                            replay: None,
+                        }]
+                    } else if first_call && prompt.contains("use retry tool") {
+                        vec![LlmOutputPart::ToolCall {
+                            call_id: "retry-call-1".to_string(),
+                            tool_name: "retry_once".to_string(),
+                            input_json: serde_json::json!({}).to_string(),
+                            replay: None,
+                        }]
+                    } else {
+                        vec![LlmOutputPart::Text {
+                            text: "finished".to_string(),
+                            response_meta: None,
+                        }]
+                    };
+                    Ok(RuntimeEffectOutcome::LlmCall {
+                        result: Box::new(Ok(LlmResponse {
+                            full_text: if parts
+                                .iter()
+                                .any(|part| matches!(part, LlmOutputPart::Text { .. }))
+                            {
+                                "finished".to_string()
+                            } else {
+                                String::new()
+                            },
+                            parts,
+                            usage: LlmUsage {
+                                input_tokens: 1,
+                                output_tokens: 1,
+                                cache_read_input_tokens: 0,
+                                cache_write_input_tokens: 0,
+                                reasoning_output_tokens: 0,
+                            },
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        })),
+                        text_streamed: false,
+                        call_record: None,
+                    })
+                }
             }
             RuntimeEffectCommand::ToolAttempt {
                 call,

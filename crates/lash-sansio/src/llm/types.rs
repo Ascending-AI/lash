@@ -828,6 +828,20 @@ impl LlmUsage {
     }
 }
 
+/// Whether an opaque provider usage payload contains at least one numeric
+/// quantity. Empty metadata objects and non-numeric labels are not usage
+/// evidence, while an explicit numeric zero is.
+pub fn provider_usage_has_quantities(usage: &serde_json::Value) -> bool {
+    match usage {
+        serde_json::Value::Number(_) => true,
+        serde_json::Value::Array(values) => values.iter().any(provider_usage_has_quantities),
+        serde_json::Value::Object(fields) => fields.values().any(provider_usage_has_quantities),
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {
+            false
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum LlmStreamEvent {
     /// A retry is starting from the original request. Consumers must discard

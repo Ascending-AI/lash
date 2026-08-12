@@ -1281,6 +1281,7 @@ async fn forward_session_observations(
 #[derive(Default)]
 struct TurnStreamState {
     assistant_prose: Vec<TurnStreamProseChunk>,
+    model_attempt_reset_count: usize,
 }
 
 struct TurnStreamProseChunk {
@@ -1289,11 +1290,37 @@ struct TurnStreamProseChunk {
 }
 
 impl TurnStreamState {
+    fn apply(&mut self, activity: &TurnActivity) {
+        match &activity.event {
+            TurnEvent::AssistantProseDelta { text } => {
+                self.assistant_prose.push(TurnStreamProseChunk {
+                    correlation_id: activity.correlation_id.clone(),
+                    text: text.to_string(),
+                });
+            }
+            TurnEvent::ModelAttemptReset {
+                assistant_prose_correlation_ids,
+                ..
+            } => {
+                self.model_attempt_reset_count += 1;
+                self.assistant_prose.retain(|chunk| {
+                    !assistant_prose_correlation_ids.contains(&chunk.correlation_id)
+                });
+            }
+            _ => {}
+        }
+    }
+
     fn assistant_prose(&self) -> String {
         self.assistant_prose
             .iter()
             .map(|chunk| chunk.text.as_str())
             .collect()
+    }
+
+    #[cfg(test)]
+    fn model_attempt_reset_count(&self) -> usize {
+        self.model_attempt_reset_count
     }
 
     fn settle_terminal(&mut self) {
@@ -1309,24 +1336,19 @@ struct ChannelTurnEvents {
 impl TurnActivitySink for ChannelTurnEvents {
     async fn emit(&self, activity: TurnActivity) {
         let mut turn_state = self.turn_state.lock_recover();
-        match activity.event {
-            TurnEvent::AssistantProseDelta { text } => {
-                turn_state.assistant_prose.push(TurnStreamProseChunk {
-                    correlation_id: activity.correlation_id,
-                    text: text.to_string(),
-                });
-            }
-            TurnEvent::ModelAttemptReset {
-                assistant_prose_correlation_ids,
-                ..
-            } => {
-                turn_state.assistant_prose.retain(|chunk| {
-                    !assistant_prose_correlation_ids.contains(&chunk.correlation_id)
-                });
-            }
-            _ => {}
-        }
+        turn_state.apply(&activity);
     }
+}
+
+#[cfg(test)]
+fn fold_turn_activities<'a>(
+    activities: impl IntoIterator<Item = &'a TurnActivity>,
+) -> TurnStreamState {
+    let mut state = TurnStreamState::default();
+    for activity in activities {
+        state.apply(activity);
+    }
+    state
 }
 
 #[cfg(test)]
@@ -1395,6 +1417,39 @@ mod turn_stream_state_tests {
             projection.settle_terminal();
             assert!(projection.assistant_prose().is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn empty_reset_throttle_storm_is_boundary_evidence_not_retract_all() {
+        let mut activities = vec![TurnActivity::new(
+            lash::TurnActivityId::new("visible-before-boundaries"),
+            TurnEvent::AssistantProseDelta {
+                text: "must remain visible".into(),
+            },
+        )];
+        activities.extend((0..11).map(|_| {
+            TurnActivity::independent(TurnEvent::ModelAttemptReset {
+                assistant_prose_correlation_ids: Vec::new(),
+                reasoning_correlation_ids: Vec::new(),
+            })
+        }));
+
+        let live_state = Arc::new(Mutex::new(TurnStreamState::default()));
+        let live_sink = ChannelTurnEvents {
+            turn_state: Arc::clone(&live_state),
+        };
+        for activity in activities.iter().cloned() {
+            live_sink.emit(activity).await;
+        }
+        {
+            let projection = live_state.lock_recover();
+            assert_eq!(projection.assistant_prose(), "must remain visible");
+            assert_eq!(projection.model_attempt_reset_count(), 11);
+        }
+
+        let replay_projection = fold_turn_activities(&activities);
+        assert_eq!(replay_projection.assistant_prose(), "must remain visible");
+        assert_eq!(replay_projection.model_attempt_reset_count(), 11);
     }
 }
 

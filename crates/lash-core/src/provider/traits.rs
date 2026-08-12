@@ -1,6 +1,22 @@
 use super::support::*;
 use crate::LlmTerminalReason;
 
+/// Provider guarantee that repeating a logical generation cannot buy and
+/// replace a second generation after output has already been observed.
+///
+/// Declaring either non-default variant is a strong billing and protocol
+/// contract. `Idempotent` means the provider returns the same generation for
+/// repeated requests; `Resumable` means it continues the interrupted
+/// generation without regenerating output already produced. Lash's bundled
+/// providers currently declare neither guarantee.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GenerationRetryGuarantee {
+    #[default]
+    None,
+    Idempotent,
+    Resumable,
+}
+
 /// A configured LLM backend: its identity, host-config serialization, its
 /// generation options, and the request transport.
 ///
@@ -21,6 +37,13 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     fn serialize_config(&self) -> serde_json::Value;
 
     async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError>;
+
+    /// Return the guarantee, if any, that makes retrying this logical request
+    /// safe after output has started. The default is deliberately no
+    /// guarantee: ordinary retryability does not imply idempotency or resume.
+    fn generation_retry_guarantee(&self, _request: &LlmRequest) -> GenerationRetryGuarantee {
+        GenerationRetryGuarantee::None
+    }
 
     fn requires_streaming(&self) -> bool {
         false

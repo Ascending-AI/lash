@@ -54,8 +54,10 @@ into attempt exhaustion.
 - The retry ladder's throttle handling is core behavior, not host policy:
   retryable `Quota` failures carrying `Retry-After` defer without consuming
   attempts, bounded by the cumulative `ProviderRetryPolicy::
-  throttle_wait_budget_ms` (default 90s, `0` disables), after which throttles
-  count as ordinary retryable failures.
+  throttle_wait_budget_ms` (default 90s, `0` disables) and eight courtesy
+  calls. Total provider calls are bounded by eight plus `max_attempts`
+  independently of `Retry-After`; after either courtesy bound is exhausted,
+  throttles count as ordinary retryable failures.
 - Nothing in core recognizes an admission decorator, so nothing in core can
   observe or persist one: hosts own the wrapper's metrics, and a provider
   rebuilt from a `ProviderSpec` comes back unwrapped.

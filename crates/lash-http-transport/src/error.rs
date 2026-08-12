@@ -19,6 +19,10 @@ pub struct HttpTransportError {
     pub headers: Box<Vec<(String, String)>>,
     pub retry_after: Option<std::time::Duration>,
     pub request_body: Option<String>,
+    /// The adapter observed provider-generated output before this failure,
+    /// including output that cannot yet be projected into an [`LlmResponse`]
+    /// part (for example unfinished tool arguments or opaque reasoning).
+    pub output_started: bool,
     /// Provider output observed before this failure. It is diagnostic and
     /// accounting evidence, never a successful response.
     pub partial_response: Option<Box<LlmResponse>>,
@@ -37,6 +41,7 @@ impl HttpTransportError {
             headers: Box::default(),
             retry_after: None,
             request_body: None,
+            output_started: false,
             partial_response: None,
         }
     }
@@ -100,6 +105,11 @@ impl HttpTransportError {
         self
     }
 
+    pub fn with_output_started(mut self, output_started: bool) -> Self {
+        self.output_started |= output_started;
+        self
+    }
+
     pub fn with_partial_response(mut self, response: LlmResponse) -> Self {
         self.partial_response = Some(Box::new(response));
         self
@@ -115,5 +125,45 @@ pub fn retry_after_from_headers(headers: &[(String, String)]) -> Option<std::tim
     if let Ok(seconds) = value.parse::<u64>() {
         return Some(std::time::Duration::from_secs(seconds));
     }
-    None
+    let retry_at = httpdate::parse_http_date(value).ok()?;
+    Some(
+        retry_at
+            .duration_since(std::time::SystemTime::now())
+            .unwrap_or_default(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retry_after_from_headers;
+    use std::time::Duration;
+
+    #[test]
+    fn retry_after_accepts_http_dates_and_clamps_past_dates_to_zero() {
+        let delta = retry_after_from_headers(&[("Retry-After".to_string(), "17".to_string())])
+            .expect("delta-seconds remains valid Retry-After");
+        assert_eq!(delta, Duration::from_secs(17));
+
+        let future = retry_after_from_headers(&[(
+            "Retry-After".to_string(),
+            "Sat, 06 Nov 2094 08:49:37 GMT".to_string(),
+        )])
+        .expect("future HTTP-date is valid Retry-After");
+        assert!(future > Duration::ZERO);
+
+        let past = retry_after_from_headers(&[(
+            "retry-after".to_string(),
+            "Sun, 06 Nov 1994 08:49:37 GMT".to_string(),
+        )])
+        .expect("past HTTP-date is valid Retry-After");
+        assert_eq!(past, Duration::ZERO);
+
+        assert_eq!(
+            retry_after_from_headers(&[(
+                "retry-after".to_string(),
+                "not an HTTP date".to_string(),
+            )]),
+            None
+        );
+    }
 }

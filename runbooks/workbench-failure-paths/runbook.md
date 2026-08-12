@@ -5,14 +5,17 @@
 > real-token rule: the Workbench's opt-in development failure provider.
 
 **Purpose.** Judge what a user sees when provider authentication fails mid-turn, a
-retryable rate limit causes an attempt reset, and a durable Runtime Process fails. Each
-fault is deterministic so the visible wording and final state are objective gates.
+pre-output rate limit causes an attempt reset, paid partial output makes regeneration unsafe,
+and a durable Runtime Process fails. Each fault is deterministic so the visible wording and
+final state are objective gates.
 
 **Deterministic companion.** `just agent-workbench-restate-e2e` asserts the auth terminal,
 same-session recovery, retry attempt reset, and single-copy live/replay observations.
-`cargo test -p agent-workbench process_work_tests` asserts the failed-process `/api/work`
-projection and UI error rendering. The browser run judges the actual transcript and work
-rail; it does not reproduce those internal assertions.
+`cargo test -p lash-core --lib retryable_mid_stream_failure_preserves_paid_output_without_retry`
+asserts the paid-output refusal and single provider call. `cargo test -p agent-workbench
+process_work_tests` asserts the failed-process `/api/work` projection and UI error rendering.
+The browser run judges the actual transcript and work rail; it does not reproduce those
+internal assertions.
 
 ## Scenario-specific golden rules
 
@@ -25,7 +28,10 @@ rail; it does not reproduce those internal assertions.
    render its real error, clear the active route, and leave the same session usable.
 4. Retry output is replace-not-append. The final rendered assistant response and
    `/api/state.messages` contain `retry observer single-copy marker` exactly once.
-5. Process failure remains process failure. The work rail must show `failed` plus the
+5. Paid partial output is preview evidence only. It must stop with a non-retryable
+   `unsafe_retry_after_output_started`, make exactly one provider attempt, and never purchase
+   or render the fixture's second-generation sentinel.
+6. Process failure remains process failure. The work rail must show `failed` plus the
    durable error; a successful parent turn must not make the process look successful.
 
 ## Working material
@@ -87,7 +93,29 @@ Screenshot `03-rate-limit-recovered.png`; save state, observations, and trace ro
 `03-rate-limit-state.json`, `03-rate-limit-observations.jsonl`, and
 `03-rate-limit-trace.json`. Teardown before Phase 3.
 
-## Phase 3 — Failed durable process in the work rail
+## Phase 3 — Paid partial output refuses regeneration
+
+Boot fresh with `partial-output-failure`. Start browser network/event capture before
+submitting `trigger deterministic paid partial failure`. Poll until the page is idle and Stop
+is hidden.
+
+Require the rendered turn to show a provider error containing `cannot be safely regenerated`,
+with no assistant success bubble. In the captured observations require
+`paid partial output marker` as preview activity, but require that marker to be absent from
+`/api/state.messages` and the settled transcript. Require `UNSAFE second generation was
+purchased` to be absent everywhere.
+
+In the matching trace require exactly one LLM call attempt, `protocol_position` equal to
+`output_started`, retry decision `scheduled: false` with reason
+`output_started_without_retry_guarantee`, observed output usage equal to 4, and terminal issue
+code `unsafe_retry_after_output_started` with `retryable: false`. Require no attempt reset or
+retry-status event and no active route.
+
+Screenshot `04-paid-output-refused.png`; save state, observations, and trace rows as
+`04-paid-output-state.json`, `04-paid-output-observations.jsonl`, and
+`04-paid-output-trace.json`. Teardown before Phase 4.
+
+## Phase 4 — Failed durable process in the work rail
 
 Boot fresh with `failed-process`. Submit `start deterministic failing process`; the parent
 turn may finish successfully. Poll `GET /api/work` until the row labelled
@@ -96,12 +124,12 @@ turn may finish successfully. Poll `GET /api/work` until the row labelled
 
 Open the **work** rail and poll until that same row visibly shows both `failed` and
 `error: deterministic durable process failure`. The UI and `/api/work` must identify the
-same process id. Screenshot `04-failed-process-work-rail.png`; save the API row as
-`04-failed-process.json`.
+same process id. Screenshot `05-failed-process-work-rail.png`; save the API row as
+`05-failed-process.json`.
 
-## Phase 4 — Teardown and score
+## Phase 5 — Teardown and score
 
-Tear down the final stack and confirm all three managed Restate containers were removed.
+Tear down the final stack and confirm all four managed Restate containers were removed.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
@@ -109,7 +137,8 @@ Tear down the final stack and confirm all three managed Restate containers were 
 | Auth failure | rendered exact error; ProviderError trace; no Cancelled evidence | | `01-auth-failed.*` |
 | Session recovery | same session commits the exact recovery response | | `02-auth-session-recovered.*` |
 | Retry convergence | one reset and one surviving marker in UI/API/observations | | `03-rate-limit-*` |
-| Durable failure | work rail and `/api/work` agree on failed + exact error | | `04-failed-process-*` |
+| Paid-output refusal | one output-started attempt; typed non-retryable error; preview not committed | | `04-paid-output-*` |
+| Durable failure | work rail and `/api/work` agree on failed + exact error | | `05-failed-process-*` |
 | Route hygiene | every settled phase has no active route | | saved state and `active-turns.json` |
 | Teardown | each port-derived stack is gone | | command log |
 

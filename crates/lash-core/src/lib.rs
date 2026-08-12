@@ -159,6 +159,7 @@ pub mod facade_support {
     pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
+    pub use crate::provider::GenerationRetryGuarantee;
     pub use crate::provider::LlmTimeouts;
     pub use crate::provider::ModelEffortValidationCategory;
     pub use crate::provider::Provider;

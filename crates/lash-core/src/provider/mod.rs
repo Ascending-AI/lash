@@ -44,5 +44,6 @@ pub use resolver::{
 };
 pub use spec::ProviderSpec;
 pub use traits::{
-    DefaultProviderFailureClassifier, Provider, ProviderFailureClassifier, is_context_overflow_text,
+    DefaultProviderFailureClassifier, GenerationRetryGuarantee, Provider,
+    ProviderFailureClassifier, is_context_overflow_text,
 };
