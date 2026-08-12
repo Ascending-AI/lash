@@ -76,8 +76,8 @@ backend and leave the granularity of a checkpoint tied to an unrelated knob.
 The constant's value follows from what each choice costs per commit — an inline
 value costs its encoded length because the root is re-encoded in full every
 commit, while a leaf costs a root reference plus a manifest row and nothing
-else. The production budget accounting measures a retained file leaf at 296
-bytes of fixed overhead and the inline/leaf break-even at a 295-byte body. The
+else. The production budget accounting measures a retained file leaf at 273
+bytes of fixed overhead and the inline/leaf break-even at a 272-byte body. The
 512-byte line stays comfortably above that marginal point without introducing
 a new fixed threshold. Small values stay inline, while values at or above the
 line become leaves under stable logical keys. Content-defined chunking is

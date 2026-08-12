@@ -140,8 +140,8 @@ pub struct ProtocolBeforeLlmCallContext {
 /// body-free reference: an inline value costs its own encoded length plus its
 /// root map entry, while a leaf costs its root reference plus its checkpoint
 /// manifest row and nothing else. Measured against the budget accounting a
-/// commit is actually charged for, a retained file leaf has 296 bytes of fixed
-/// overhead and crosses the inline layout at a 295-byte body. This line stays
+/// commit is actually charged for, a retained file leaf has 273 bytes of fixed
+/// overhead and crosses the inline layout at a 272-byte body. This line stays
 /// comfortably above that marginal point, which keeps every promotion a clear
 /// win and keeps the manifest — the per-commit floor of a session made of short
 /// values — small.

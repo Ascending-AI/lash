@@ -355,6 +355,46 @@ fn leaf_component_key(body: &[u8]) -> String {
     format!("execution_state/sha256/{:x}", Sha256::digest(body))
 }
 
+#[cfg(test)]
+pub(super) fn measure_snapshot(
+    snapshot: &lash_core::plugin::ExecutionStateSnapshot,
+) -> lash_core::testing::RuntimeCommitBudgetMeasurement {
+    let state = lash_core::RuntimeSessionState {
+        session_id: "fig-1257-snapshot-budget".to_string(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.checkpoint.components.insert(
+        "execution_state".to_string(),
+        lash_core::HydratedCheckpointComponent::changed(
+            snapshot.root.clone().expect("snapshot root"),
+        ),
+    );
+    for (key, component) in &snapshot.components {
+        let component = match component {
+            lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                lash_core::HydratedCheckpointComponent::changed(body.clone())
+            }
+            lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                let hash = key
+                    .strip_prefix("execution_state/sha256/")
+                    .expect("RLM leaf component key");
+                lash_core::HydratedCheckpointComponent::unchanged(
+                    &lash_core::CheckpointComponentDescriptor {
+                        blob_ref: lash_core::BlobRef(hash.to_string()),
+                        encoding_version: lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                    },
+                )
+            }
+        };
+        commit.checkpoint.components.insert(key.clone(), component);
+    }
+    lash_core::testing::measure_runtime_commit_budget(&commit)
+        .expect("measure RLM runtime commit budget")
+}
+
 fn resolve_leaf<'a>(
     state: &'a lash_core::plugin::HydratedExecutionState,
     logical_key: &str,
@@ -447,7 +487,7 @@ pub struct RlmExecutionState {
     /// mtime, and on Unix device/inode/ctime), which a same-length rewrite
     /// inside one filesystem timestamp tick could defeat. Any writer inside this
     /// process must therefore mark the path in `dirty_files` as
-    /// [`Self::write_scratch_file`] does, rather than rely on the stamp. Today
+    /// [`Self::write_scratch_file_for_testing`] does, rather than rely on the stamp. Today
     /// no production code writes here — code effects write through Lashlang
     /// values, and `restore_files` writes only into a fresh directory during
     /// restore — so the only writer is that test helper. A first production
@@ -508,12 +548,18 @@ impl RlmExecutionState {
 
     /// Write a scratch file and mark it changed. The marking, not the metadata
     /// stamp, is what makes a same-length rewrite safe; see [`Self::scratch_dir`].
-    #[cfg(test)]
-    fn write_scratch_file(&mut self, path: &str, body: &[u8]) -> Result<(), ScratchFileError> {
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    fn write_scratch_file_for_testing(
+        &mut self,
+        path: &str,
+        body: &[u8],
+    ) -> Result<(), SessionError> {
         restore_files(
             self.scratch_dir.path(),
             &[(path.to_string(), body.to_vec())].into_iter().collect(),
-        )?;
+        )
+        .map_err(|error| SessionError::Protocol(error.to_string()))?;
         self.dirty_files.insert(path.to_string());
         self.root_dirty = true;
         Ok(())
@@ -982,6 +1028,17 @@ impl RlmExecutionState {
         }
         out
     }
+}
+
+#[cfg(feature = "testing")]
+pub(crate) fn capture_scratch_files_for_testing(
+    files: Vec<(String, Vec<u8>)>,
+) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
+    let mut state = RlmExecutionState::new()?;
+    for (path, body) in files {
+        state.write_scratch_file_for_testing(&path, &body)?;
+    }
+    state.hydrated_execution_state()
 }
 
 #[cfg(test)]

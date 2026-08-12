@@ -4,6 +4,8 @@ mod snapshot;
 mod state;
 
 pub use state::RlmExecutionState;
+#[cfg(feature = "testing")]
+pub(crate) use state::capture_scratch_files_for_testing;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -691,43 +693,6 @@ mod tests {
                 })
                 .collect(),
         }
-    }
-
-    fn measure_snapshot(
-        snapshot: &lash_core::plugin::ExecutionStateSnapshot,
-    ) -> lash_core::testing::RuntimeCommitBudgetMeasurement {
-        let state = lash_core::RuntimeSessionState {
-            session_id: "rlm-snapshot-budget".to_string(),
-            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
-        };
-        let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
-        commit.checkpoint.components.insert(
-            "execution_state".to_string(),
-            lash_core::HydratedCheckpointComponent::changed(
-                snapshot.root.clone().expect("snapshot root"),
-            ),
-        );
-        for (key, component) in &snapshot.components {
-            let component = match component {
-                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
-                    lash_core::HydratedCheckpointComponent::changed(body.clone())
-                }
-                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
-                    lash_core::HydratedCheckpointComponent::unchanged(
-                        &lash_core::CheckpointComponentDescriptor {
-                            blob_ref: lash_core::BlobRef(key.clone()),
-                            encoding_version:
-                                lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
-                        },
-                    )
-                }
-            };
-            commit.checkpoint.components.insert(key.clone(), component);
-        }
-        lash_core::testing::measure_runtime_commit_budget(&commit)
-            .expect("measure RLM runtime commit budget")
     }
 
     async fn execute_test_code(state: RlmExecutionState, code: String) -> RlmExecutionState {
@@ -2605,14 +2570,10 @@ mod tests {
             );
             assert_eq!(unchanged_refs, 11, "all other large bindings ride as refs");
 
-            let initial_budget = measure_snapshot(&initial);
-            let changed_budget = measure_snapshot(&changed);
-            assert!(
-                changed_budget.checkpoint_bytes * 3 < initial_budget.checkpoint_bytes,
-                "measured changed commit must exclude unchanged leaf bodies: initial={}, changed={}",
-                initial_budget.checkpoint_bytes,
-                changed_budget.checkpoint_bytes
-            );
+            let initial_budget = state::measure_snapshot(&initial);
+            let changed_budget = state::measure_snapshot(&changed);
+            assert_eq!(initial_budget.checkpoint_bytes, 82_054);
+            assert_eq!(changed_budget.checkpoint_bytes, 13_671);
         });
     }
 
@@ -2820,7 +2781,7 @@ mod tests {
                     1,
                     "turn {turn} must submit one changed leaf body"
                 );
-                measured.push(measure_snapshot(&snapshot).checkpoint_bytes);
+                measured.push(state::measure_snapshot(&snapshot).checkpoint_bytes);
                 state.acknowledge_execution_state_capture();
             }
             let minimum = *measured.iter().min().expect("measurements");
@@ -2829,14 +2790,9 @@ mod tests {
                 "FIG1195_FLAT_GROWTH full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
                 measured.len()
             );
-            assert!(
-                maximum - minimum < 1024,
-                "per-commit bytes must stay flat: min={minimum}, max={maximum}"
-            );
-            assert!(
-                maximum * 6 < full_state_bytes,
-                "changed-state commit {maximum} must stay far below retained state {full_state_bytes}"
-            );
+            assert_eq!(full_state_bytes, 136_126);
+            assert_eq!(minimum, 20_318);
+            assert_eq!(maximum, 20_372);
         });
     }
 
@@ -2862,10 +2818,7 @@ mod tests {
                 .to_canonical_bytes()
                 .expect("accumulated canonical state")
                 .len();
-            assert!(
-                full_state_bytes > 1024 * 1024,
-                "the jitindex geometry must accumulate more than the historical 1 MiB cap: {full_state_bytes}"
-            );
+            assert_eq!(full_state_bytes, 1_095_692);
             let _initial = state.snapshot_execution_state().expect("initial snapshot");
             state.acknowledge_execution_state_capture();
 
@@ -2895,7 +2848,7 @@ mod tests {
                     1,
                     "turn {turn} must submit one changed leaf body"
                 );
-                measured.push(measure_snapshot(&snapshot).checkpoint_bytes);
+                measured.push(state::measure_snapshot(&snapshot).checkpoint_bytes);
                 state.acknowledge_execution_state_capture();
             }
             let minimum = *measured.iter().min().expect("measurements");
@@ -2904,14 +2857,8 @@ mod tests {
                 "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
                 measured.len()
             );
-            assert!(
-                maximum - minimum < 1024,
-                "per-commit bytes must stay flat: min={minimum}, max={maximum}"
-            );
-            assert!(
-                maximum * 4 < full_state_bytes,
-                "a mid-size-binding session's changed-state commit {maximum} must stay far below its retained state {full_state_bytes}"
-            );
+            assert_eq!(minimum, 94_285);
+            assert_eq!(maximum, 94_287);
         });
     }
 
@@ -2930,11 +2877,7 @@ mod tests {
             let mut state =
                 execute_test_code(RlmExecutionState::new().expect("state"), source).await;
             let initial = state.snapshot_execution_state().expect("initial snapshot");
-            assert!(
-                initial.components.is_empty(),
-                "short composites must stay inline in the root: {} leaves",
-                initial.components.len()
-            );
+            assert_eq!(initial.components.len(), 0);
             state.acknowledge_execution_state_capture();
 
             state = execute_test_code(
@@ -2943,21 +2886,15 @@ mod tests {
             )
             .await;
             let changed = state.snapshot_execution_state().expect("changed snapshot");
-            let commit_bytes = measure_snapshot(&changed).checkpoint_bytes;
+            let commit_bytes = state::measure_snapshot(&changed).checkpoint_bytes;
             println!(
                 "FIG1195_SHORT_BINDING_FLOOR commit_bytes={commit_bytes} leaves={}",
                 changed.components.len()
             );
-            assert!(
-                changed.components.is_empty(),
-                "a changed short binding must not mint a leaf"
-            );
+            assert_eq!(changed.components.len(), 0);
             // 200 leaves would charge ~200 root refs plus ~200 manifest rows on
             // every commit; inline short values charge their own bytes once.
-            assert!(
-                commit_bytes < 32 * 1024,
-                "many short bindings must keep the per-commit floor low: {commit_bytes}"
-            );
+            assert_eq!(commit_bytes, 31_227);
         });
     }
 

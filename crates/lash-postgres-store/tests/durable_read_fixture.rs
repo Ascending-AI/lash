@@ -49,6 +49,25 @@ async fn postgres_durable_fixture_reads_with_identical_semantics_when_configured
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_configured() {
+    let Some(database_url) = support::database_url() else {
+        eprintln!("skipping Postgres component-version refusal fixture: not configured");
+        return;
+    };
+    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
+    restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
+    assert_eq!(PostgresStorage::schema_version(), 46);
+    let fixture_database_url = fixture_database_url(&database_url);
+    let storage = PostgresStorage::connect(&fixture_database_url)
+        .await
+        .expect("open Postgres component-version refusal fixture");
+    let store = storage.session_store(fixture::SESSION_ID);
+    fixture::assert_prior_component_encoding_is_refused(&store).await;
+    storage.pool().close().await;
+    drop_fixture_schema(&database_url).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "writes the committed golden fixture; set LASH_REGENERATE_DURABLE_READ_FIXTURES=1"]
 async fn regenerate_postgres_durable_fixture() {
     assert_eq!(
@@ -153,13 +172,17 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
 }
 
 async fn restore_dump(database_url: &str) {
+    restore_dump_from(database_url, &fixture_dir()).await;
+}
+
+async fn restore_dump_from(database_url: &str, source: &Path) {
     drop_fixture_schema(database_url).await;
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database_url)
         .await
         .expect("connect for Postgres durable-fixture restore");
-    let dump = std::fs::read_to_string(fixture_dir().join("fixture.sql"))
+    let dump = std::fs::read_to_string(source.join("fixture.sql"))
         .expect("read committed Postgres durable fixture dump");
     sqlx::raw_sql(&dump)
         .execute(&pool)
@@ -284,6 +307,11 @@ fn pg_dump(database_url: &str) -> Vec<u8> {
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/durable-read/v1/postgres")
+}
+
+fn prior_component_fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/checkpoint-component-v1-refusal/postgres")
 }
 
 fn json_with_newline(value: &impl Serialize) -> Vec<u8> {

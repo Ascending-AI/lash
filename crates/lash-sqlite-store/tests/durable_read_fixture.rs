@@ -95,6 +95,22 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_prior_component_encoding_fixture_is_refused_at_hydration() {
+    let temp = tempfile::tempdir().expect("SQLite refusal fixture tempdir");
+    let database = temp.path().join("durable-core.db");
+    std::fs::copy(
+        prior_component_fixture_dir().join("durable-core.db"),
+        &database,
+    )
+    .expect("copy committed SQLite component-version refusal fixture");
+    assert_eq!(user_version(&database), 33);
+    let store = Store::open(&database)
+        .await
+        .expect("open SQLite component-version refusal fixture");
+    fixture::assert_prior_component_encoding_is_refused(&store).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "writes the committed golden fixture; set LASH_REGENERATE_DURABLE_READ_FIXTURES=1"]
 async fn regenerate_sqlite_durable_fixture() {
     assert_eq!(
@@ -260,6 +276,11 @@ fn database_names() -> [&'static str; 4] {
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/durable-read/v1/sqlite")
+}
+
+fn prior_component_fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/checkpoint-component-v1-refusal/sqlite")
 }
 
 fn json_with_newline(value: &impl Serialize) -> Vec<u8> {
