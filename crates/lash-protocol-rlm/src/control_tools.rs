@@ -494,10 +494,13 @@ mod tests {
             run_continue_as_at_call(&provider, Arc::clone(&manager), &args, "redriven-call").await;
         let redriven = run_continue_as_at_call(&provider, manager, &args, "redriven-call").await;
 
-        assert_eq!(frame_key(&first), frame_key(&redriven));
         assert_eq!(
-            lash_core::facade_support::frame_node_id("test-session", frame_key(&first).as_str()),
-            lash_core::facade_support::frame_node_id("test-session", frame_key(&redriven).as_str())
+            frame_key(&first).as_str(),
+            "frame-key/v1/3b35d2eb3ad01d5b6726ec50183b3d7d6f8894efc9f5dab86af1510f56673efa"
+        );
+        assert_eq!(
+            frame_key(&redriven).as_str(),
+            "frame-key/v1/3b35d2eb3ad01d5b6726ec50183b3d7d6f8894efc9f5dab86af1510f56673efa"
         );
     }
 
@@ -511,7 +514,14 @@ mod tests {
             run_continue_as_at_call(&provider, Arc::clone(&manager), &args, "call-one").await;
         let second = run_continue_as_at_call(&provider, manager, &args, "call-two").await;
 
-        assert_ne!(frame_key(&first), frame_key(&second));
+        assert_eq!(
+            frame_key(&first).as_str(),
+            "frame-key/v1/0b572cf5e408d770c7febfbf5b801b2ddb92c474b84a8af92982af81f3de2572"
+        );
+        assert_eq!(
+            frame_key(&second).as_str(),
+            "frame-key/v1/624fd5579b368c383f70175b3374ab3885bf8598867583340143971ca984c837"
+        );
     }
 
     #[tokio::test]

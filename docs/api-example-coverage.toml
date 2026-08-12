@@ -1142,6 +1142,22 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party protocol and tool implementors preserve caller-owned frame naming while Lash derives the key representation."
 
 [[api]]
+symbol = "lash_core::FrameKeyError"
+kind = "enum"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party protocol and tool implementors match the typed rejection returned when caller-owned frame naming material is invalid."
+
+[[api]]
+symbol = "lash_core::FrameKeyError::EmptyCallerMaterial"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party protocol and tool implementors distinguish blank or whitespace-only caller-owned frame names without parsing an error string."
+
+[[api]]
 symbol = "lash::GenerationOverlay"
 kind = "enum"
 availability = "default+all-features"

@@ -780,7 +780,8 @@ mod tests {
 
     #[test]
     fn agent_frame_switch_decodes_event_without_initial_nodes() {
-        let frame_key = crate::FrameKey::from_caller_material("frame-2");
+        let frame_key =
+            crate::FrameKey::from_caller_material("frame-2").expect("non-empty caller material");
         let event_json = format!(
             r#"{{
             "type":"turn_outcome",

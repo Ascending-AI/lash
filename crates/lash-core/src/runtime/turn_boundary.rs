@@ -810,7 +810,8 @@ mod tests {
         let mut state = state_with_graph(graph);
         state.ensure_agent_frame_initialized();
         let previous_frame_node_id = state.current_frame_node_id.clone();
-        let frame_key = crate::FrameKey::from_caller_material("frame-2");
+        let frame_key =
+            crate::FrameKey::from_caller_material("frame-2").expect("non-empty caller material");
         let seed_node = crate::SessionAppendNode::message(crate::PluginMessage::text(
             MessageRole::User,
             "seed message",

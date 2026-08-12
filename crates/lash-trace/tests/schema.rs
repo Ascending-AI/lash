@@ -19,13 +19,24 @@ use lash_trace::{
 use serde_json::json;
 
 #[test]
-fn trace_schema_version_is_pinned_at_3() {
+fn trace_schema_version_is_pinned_at_4() {
     // Tripwire. This is the current on-disk trace schema version. Every reader
     // (viewer, exporter, OTel bridge) keys off it, so a change here must be a
     // deliberate, documented schema bump — see the crate-level rustdoc and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy. If this fails,
     // read that policy before touching the constant.
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 3);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 4);
+}
+
+#[test]
+fn pre_frame_key_trace_schema_is_rejected_with_literal_versions() {
+    assert_eq!(
+        lash_trace::ensure_trace_schema_version(3),
+        Err(lash_trace::TraceSchemaVersionError {
+            actual: 3,
+            expected: 4,
+        })
+    );
 }
 
 #[test]
@@ -38,7 +49,7 @@ fn new_records_stamp_the_schema_version() {
     );
     assert_eq!(record.schema_version, lash_trace::TRACE_SCHEMA_VERSION);
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["schema_version"], 3);
+    assert_eq!(json["schema_version"], 4);
 }
 
 fn token_usage_sample() -> TraceTokenUsage {
@@ -452,7 +463,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
     assert_eq!(json["attempts"][0]["delay_ms"], 250);
     assert!(json["attempts"][1].get("reason").is_none());
     assert!(json["attempts"][1].get("delay_ms").is_none());
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 3);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 4);
 }
 
 #[test]
@@ -598,7 +609,7 @@ fn jsonl_round_trip_preserves_records() {
 
     assert_eq!(parsed, records, "JSONL round-trip must preserve records");
     for record in &parsed {
-        assert_eq!(record.schema_version, 3);
+        assert_eq!(record.schema_version, 4);
     }
 
     // Pin the diagnostic's `tool_calls` entry fields explicitly on the parsed
@@ -617,7 +628,7 @@ fn jsonl_round_trip_preserves_records() {
 }
 
 #[test]
-fn durable_step_events_are_additive_at_schema_version_three() {
+fn durable_step_events_are_additive_at_schema_version_four() {
     let events = vec![
         TraceEvent::JournaledEffectStarted {
             effect_name: "lash:turn:llm:1".to_string(),
@@ -657,7 +668,7 @@ fn durable_step_events_are_additive_at_schema_version_three() {
         let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
         let json = serde_json::to_value(&record).expect("serialize durable trace event");
         assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 3);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 4);
         assert_eq!(json["type"], expected_kind);
         let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
         assert_eq!(decoded.event.kind(), expected_kind);

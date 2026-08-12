@@ -5080,7 +5080,8 @@ fn require_rlm_agent_frame_switch(
     initial_node_count: usize,
     contract: &str,
 ) -> Result<(), String> {
-    let expected_frame_key = lash_core::FrameKey::from_caller_material(frame_key_material);
+    let expected_frame_key = lash_core::FrameKey::from_caller_material(frame_key_material)
+        .expect("non-empty frame key material");
     if result
         .get("turn_outcomes")
         .and_then(Value::as_array)
@@ -7213,7 +7214,9 @@ mod tests {
                     .pointer_mut("/result/turn_outcomes/0/frame_key")
                     .expect("frame switch key")
                     .clone_from(&json!(
-                        lash_core::FrameKey::from_caller_material("wrong-frame").as_str()
+                        lash_core::FrameKey::from_caller_material("wrong-frame")
+                            .expect("non-empty caller material")
+                            .as_str()
                     ));
             },
         );

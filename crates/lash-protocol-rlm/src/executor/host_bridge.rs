@@ -154,9 +154,20 @@ impl<'run> HostBridge<'run> {
     ) -> String {
         if let Some(call_site) = call_site {
             let scope = self
-                .lashlang_execution_trace
-                .as_ref()
-                .map(|trace| trace.identity().graph_key())
+                .ctx
+                .parent_invocation()
+                .and_then(|invocation| {
+                    invocation.effect_id().map(|effect_id| {
+                        if let Some(turn_id) = invocation.scope.turn_id.as_deref() {
+                            format!(
+                                "effect:{}:{turn_id}:{effect_id}",
+                                invocation.scope.session_id
+                            )
+                        } else {
+                            format!("effect:{}:{effect_id}", invocation.scope.session_id)
+                        }
+                    })
+                })
                 .unwrap_or_else(|| self.ctx.session_id().to_string());
             let mut call_id = format!(
                 "lashlang:{scope}:resource:{host_operation}:{}:{}",

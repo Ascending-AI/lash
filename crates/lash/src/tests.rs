@@ -1510,7 +1510,8 @@ impl ToolProvider for AgentFrameSwitchTools {
             .to_string();
         lash_core::ToolResult::ok(serde_json::json!({ "ok": true })).with_control(
             lash_core::ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("durable-follow-frame"),
+                frame_key: lash_core::FrameKey::from_caller_material("durable-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some(task),
             },

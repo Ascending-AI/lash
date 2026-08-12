@@ -453,15 +453,16 @@ pub use lash_sansio::llm::types::{
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CheckpointDelivery,
     CheckpointKind, CompactToolContract, ExecImage, ExecResponse, ExecutedCallOutcome,
-    ExecutedCallRecord, FrameKey, LashSchema, LlmCallError, MediaType, Message, MessageOrigin,
-    MessageRole, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode, PromptBuiltin,
-    PromptContribution, PromptContributionGate, PromptLayer, PromptSlot, PromptSlotLayer,
-    PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PruneState, SchemaContract,
-    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata,
-    TokenUsage, TokenUsageOverflow, ToolActivation, ToolArgumentProjectionPolicy, ToolCallOutcome,
-    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract,
-    ToolControl, ToolDefinition, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
-    ToolManifest, ToolOutputContract, ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
+    ExecutedCallRecord, FrameKey, FrameKeyError, LashSchema, LlmCallError, MediaType, Message,
+    MessageOrigin, MessageRole, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
+    PromptBuiltin, PromptContribution, PromptContributionGate, PromptLayer, PromptSlot,
+    PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PruneState,
+    SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode,
+    TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
+    ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
+    ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolManifest, ToolOutputContract,
+    ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -927,7 +928,8 @@ mod tests {
 
     #[test]
     fn invalid_agent_frame_seed_is_rejected_at_the_serde_boundary() {
-        let frame_key = FrameKey::from_caller_material("delegate");
+        let frame_key =
+            FrameKey::from_caller_material("delegate").expect("non-empty caller material");
         let err = serde_json::from_value::<ToolControl>(serde_json::json!({
             "type": "switch_agent_frame",
             "frame_key": frame_key,

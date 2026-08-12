@@ -815,7 +815,8 @@ impl RlmProtocolExpectations {
             );
         }
         if let Some((frame_key_material, task)) = self.agent_frame_switch {
-            let expected_frame_key = lash_core::FrameKey::from_caller_material(frame_key_material);
+            let expected_frame_key = lash_core::FrameKey::from_caller_material(frame_key_material)
+                .expect("non-empty frame key material");
             assert!(
                 run.turn_outcomes.iter().any(|outcome| matches!(
                     outcome,

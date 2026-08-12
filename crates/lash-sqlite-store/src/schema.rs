@@ -650,7 +650,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // Version 7 rejects live-serde await-event and direct replay identities.
 // Version 8 rejects the former live-serde tool-batch and process-transfer
 // replay names.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 8;
+// Version 9 rejects completed tool-attempt outcomes whose frame-switch control
+// still carries the pre-cutover `frame_id` field.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 9;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

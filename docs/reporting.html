@@ -53,7 +53,7 @@
             <td><code>TraceSink</code> / <code>TraceRecord</code></td>
             <td><code>lash_trace::TraceRecord</code> (<code>TraceEvent</code>)</td>
             <td>Durable diagnostics: every provider call, tool call, prompt build, usage delta, protocol step, and Lashlang graph update.</td>
-            <td>Versioned JSONL schema. <code>TRACE_SCHEMA_VERSION = 3</code>.</td>
+            <td>Versioned JSONL schema. <code>TRACE_SCHEMA_VERSION = 4</code>.</td>
             <td>You need billing, audit, offline analysis, OpenTelemetry export, or a rendered trace. See <a href="./tracing.html">Tracing</a>.</td>
           </tr>
           <tr>
@@ -67,7 +67,7 @@
             <td><code>RemoteTurnActivity</code></td>
             <td><code>lash_remote_protocol::RemoteTurnActivity</code></td>
             <td>Versioned wire mirror of <code>TurnActivity</code>, deliberately narrower than the in-process enum.</td>
-            <td>External stability boundary. <code>protocol_version == REMOTE_PROTOCOL_VERSION</code> (currently <code>26</code>). Version 26 requires an explicit <code>TurnBudget</code> in process execution policies and uses <code>process-env:v3</code> refs. Version 24 coordinated required session-turn <code>definition_key</code> values, <code>process-env:v2</code> refs, and trigger definition/operation fingerprints.</td>
+            <td>External stability boundary. <code>protocol_version == REMOTE_PROTOCOL_VERSION</code> (currently <code>33</code>). Version 33 renames the agent-frame switch field from <code>frame_id</code> to <code>frame_key</code>; version 32 is allocated to the concurrent wake-coalesce wire change. Version 31 requires an explicit <code>TurnBudget</code> in process execution policies and uses <code>process-env:v3</code> refs. Version 24 coordinated required session-turn <code>definition_key</code> values, <code>process-env:v2</code> refs, and trigger definition/operation fingerprints.</td>
             <td>Activity crosses HTTP, queues, or another process. See <a href="./remote-protocol.html">Remote protocol</a>.</td>
           </tr>
         </tbody>

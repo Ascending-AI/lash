@@ -57,7 +57,40 @@ pub use lashlang_graph::{
 ///   payloads are opaque `serde_json::Value`; adding to or reshaping the data
 ///   inside them never forces a bump. (This is why the `exec_code_completed`
 ///   diagnostic's `tool_calls` payload was purely additive.)
-pub const TRACE_SCHEMA_VERSION: u32 = 3;
+///
+/// Version 4 renames `TraceAgentFrameSwitch.frame_id` to `frame_key`.
+pub const TRACE_SCHEMA_VERSION: u32 = 4;
+
+/// A durable trace record was written under a schema this reader does not support.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TraceSchemaVersionError {
+    pub actual: u32,
+    pub expected: u32,
+}
+
+impl std::fmt::Display for TraceSchemaVersionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "unsupported trace schema version {}; expected {}",
+            self.actual, self.expected
+        )
+    }
+}
+
+impl std::error::Error for TraceSchemaVersionError {}
+
+/// Refuses a durable trace record whose exact schema version is unsupported.
+pub fn ensure_trace_schema_version(actual: u32) -> Result<(), TraceSchemaVersionError> {
+    if actual == TRACE_SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(TraceSchemaVersionError {
+            actual,
+            expected: TRACE_SCHEMA_VERSION,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

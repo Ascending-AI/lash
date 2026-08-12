@@ -16,6 +16,25 @@ const FRAME_KEY_VERSION: u8 = 1;
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FrameKey(String);
 
+/// A caller attempted to derive an agent-frame key from invalid naming material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameKeyError {
+    /// Caller-owned naming material must identify a frame rather than collapse
+    /// unrelated callers onto the same blank-derived key.
+    EmptyCallerMaterial,
+}
+
+impl std::fmt::Display for FrameKeyError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyCallerMaterial => formatter
+                .write_str("frame key caller material must not be empty or whitespace-only"),
+        }
+    }
+}
+
+impl std::error::Error for FrameKeyError {}
+
 impl FrameKey {
     /// Derives a frame key for one tool call in one frame lineage.
     ///
@@ -26,8 +45,11 @@ impl FrameKey {
     }
 
     /// Derives a frame key from explicit caller-owned naming material.
-    pub fn from_caller_material(material: &str) -> Self {
-        Self::derive(1, [material])
+    pub fn from_caller_material(material: &str) -> Result<Self, FrameKeyError> {
+        if material.trim().is_empty() {
+            return Err(FrameKeyError::EmptyCallerMaterial);
+        }
+        Ok(Self::derive(1, [material]))
     }
 
     /// Returns the derived key consumed by Lash's durable frame-id derivation.
@@ -111,9 +133,41 @@ mod tests {
 
     #[test]
     fn caller_material_uses_the_same_derived_representation_in_its_own_domain() {
-        let caller = FrameKey::from_caller_material("frame");
+        let caller = FrameKey::from_caller_material("frame").expect("non-empty caller material");
         assert!(FrameKey::is_derived(caller.as_str()));
         assert_ne!(caller, FrameKey::from_call_site("", "", "frame"));
+    }
+
+    #[test]
+    fn caller_material_rejects_empty_and_whitespace_with_a_typed_error() {
+        assert_eq!(
+            FrameKey::from_caller_material(""),
+            Err(FrameKeyError::EmptyCallerMaterial)
+        );
+        assert_eq!(
+            FrameKey::from_caller_material("  "),
+            Err(FrameKeyError::EmptyCallerMaterial)
+        );
+    }
+
+    #[test]
+    fn caller_material_separates_callers_and_preserves_deliberate_reuse() {
+        let first = FrameKey::from_caller_material("caller-one").expect("non-empty material");
+        let second = FrameKey::from_caller_material("caller-two").expect("non-empty material");
+        let reused = FrameKey::from_caller_material("caller-one").expect("non-empty material");
+
+        assert_eq!(
+            first.as_str(),
+            "frame-key/v1/9e829bdb41a166346de53fb889e2fe9431bb780f82da1b3641b5d40b2d237636"
+        );
+        assert_eq!(
+            second.as_str(),
+            "frame-key/v1/f57a44b8290e2661a739b9441f8fb8444771405ee60f00c5e26ee76ae4213ae8"
+        );
+        assert_eq!(
+            reused.as_str(),
+            "frame-key/v1/9e829bdb41a166346de53fb889e2fe9431bb780f82da1b3641b5d40b2d237636"
+        );
     }
 
     #[test]
@@ -122,7 +176,7 @@ mod tests {
             .expect_err("raw strings must not construct FrameKey");
         assert!(error.to_string().contains("must be derived by Lash"));
 
-        let key = FrameKey::from_caller_material("named-frame");
+        let key = FrameKey::from_caller_material("named-frame").expect("non-empty caller material");
         let encoded = serde_json::to_value(&key).expect("serialize derived key");
         assert_eq!(
             serde_json::from_value::<FrameKey>(encoded).expect("deserialize derived key"),

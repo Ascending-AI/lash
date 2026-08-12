@@ -24,7 +24,7 @@ pub use attachment::{
     InvalidMediaType, MediaType,
 };
 pub use causal::CausalRef;
-pub use frame_key::FrameKey;
+pub use frame_key::{FrameKey, FrameKeyError};
 pub use llm::capability::{
     ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
     ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,

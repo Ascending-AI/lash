@@ -345,7 +345,8 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
                     json!({}),
                     lash_core::ToolCallOutput::success(json!({ "ok": true })).with_control(
                         lash_core::ToolControl::SwitchAgentFrame {
-                            frame_key: lash_core::FrameKey::from_caller_material("next-frame"),
+                            frame_key: lash_core::FrameKey::from_caller_material("next-frame")
+                                .expect("non-empty caller material"),
                             initial_nodes,
                             task: Some("continue".to_string()),
                         },
