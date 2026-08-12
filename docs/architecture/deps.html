@@ -47,7 +47,7 @@ flowchart TD
   CLI --> FileIndex["lash-file-index<br/>ignore + notify + nucleo"]
   Runtime["LashRuntime"] --> StoreContract["RuntimePersistence<br/>lash-core"]
   StoreContract --> Store["store implementations<br/>SQLite, Postgres, or host DB"]
-  Runtime --> Trace["lash-trace schema v4<br/>JSONL + language execution graphs + OTel"]
+  Runtime --> Trace["lash-trace schema v4<br/>JSONL + language execution events + Lashlang graph projection + OTel"]
   Export["external lash-export"] --> Runtime
   Export --> Trace
   HostService["HTTP / queue / workflow host"] --> Remote["lash-remote-protocol<br/>versioned remote DTOs"]

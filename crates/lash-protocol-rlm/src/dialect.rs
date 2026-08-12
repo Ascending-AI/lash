@@ -14,6 +14,22 @@ pub(crate) struct CellTags {
     pub(crate) close: &'static str,
 }
 
+pub(crate) struct BoundVariablesPromptRender {
+    render: Box<dyn FnOnce() -> Arc<str> + Send>,
+}
+
+impl BoundVariablesPromptRender {
+    pub(crate) fn new(render: impl FnOnce() -> Arc<str> + Send + 'static) -> Self {
+        Self {
+            render: Box::new(render),
+        }
+    }
+
+    pub(crate) fn render(self) -> Arc<str> {
+        (self.render)()
+    }
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub(crate) enum DialectRegistryError {
     #[error("RLM language `{language}` is not registered")]
@@ -43,16 +59,19 @@ pub(crate) trait RlmDialectSession: Send {
         &self,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError>;
 
-    fn acknowledge_execution_state_capture(&mut self);
+    fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError>;
 
-    fn abort_execution_state_capture(&mut self);
+    fn abort_execution_state_capture(&mut self) -> Result<(), SessionError>;
 
     fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError>;
 
-    fn prune_protected_globals(&mut self, protected_names: &BTreeSet<String>);
+    fn prune_protected_globals(
+        &mut self,
+        protected_names: &BTreeSet<String>,
+    ) -> Result<(), SessionError>;
 
     fn patch_globals(
         &mut self,
@@ -60,7 +79,10 @@ pub(crate) trait RlmDialectSession: Send {
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError>;
 
-    fn render_bound_variables(&mut self, exclude: &BTreeSet<String>) -> Arc<str>;
+    fn prepare_bound_variables_prompt(
+        &self,
+        exclude: &BTreeSet<String>,
+    ) -> Result<BoundVariablesPromptRender, SessionError>;
 }
 
 pub(crate) trait RlmDialect: Send + Sync {

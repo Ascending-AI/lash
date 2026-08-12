@@ -5,7 +5,7 @@ use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError
 use lash_lashlang_runtime::{LashlangArtifactStore, LashlangSurface, SharedDeferredToolResolver};
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
-use super::{CellTags, RlmDialect, RlmDialectSession};
+use super::{BoundVariablesPromptRender, CellTags, RlmDialect, RlmDialectSession};
 use crate::executor::{
     RlmExecutionState, RlmLashlangExecutionTraceConfig, execute_code_with_bounds,
 };
@@ -70,7 +70,9 @@ impl RlmDialect for LashlangDialect {
             state: Some(RlmExecutionState::for_engine(self.snapshot_engine_id())?),
             surface: self.surface.clone(),
             services,
-            bound_variable_render_cache: BoundVariableRenderCache::default(),
+            bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
+                BoundVariableRenderCache::default(),
+            )),
         }))
     }
 
@@ -192,20 +194,20 @@ struct LashlangDialectSession {
     state: Option<RlmExecutionState>,
     surface: LashlangSurface,
     services: LashlangDialectServices,
-    bound_variable_render_cache: BoundVariableRenderCache,
+    bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
 }
 
 impl LashlangDialectSession {
-    fn state(&self) -> &RlmExecutionState {
+    fn state(&self) -> Result<&RlmExecutionState, SessionError> {
         self.state
             .as_ref()
-            .expect("dialect session state is present outside execution")
+            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))
     }
 
-    fn state_mut(&mut self) -> &mut RlmExecutionState {
+    fn state_mut(&mut self) -> Result<&mut RlmExecutionState, SessionError> {
         self.state
             .as_mut()
-            .expect("dialect session state is present outside execution")
+            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))
     }
 }
 
@@ -217,6 +219,14 @@ impl RlmDialectSession for LashlangDialectSession {
         request: ExecRequest,
         session_projected_bindings: RlmProjectedBindings,
     ) -> Result<ExecResponse, SessionError> {
+        if self.state.is_none() {
+            return Err(SessionError::Protocol(
+                "RLM execution state is busy".to_string(),
+            ));
+        }
+        // Construct the recovery state before taking the live state. If this
+        // allocation fails, the session remains usable instead of being left busy.
+        let reset_state = RlmExecutionState::for_engine(LANGUAGE_ID)?;
         let state = self
             .state
             .take()
@@ -240,7 +250,7 @@ impl RlmDialectSession for LashlangDialectSession {
                 Ok(response)
             }
             Err(error) => {
-                self.state = Some(RlmExecutionState::for_engine(LANGUAGE_ID)?);
+                self.state = Some(reset_state);
                 Err(error)
             }
         }
@@ -256,38 +266,44 @@ impl RlmDialectSession for LashlangDialectSession {
     fn snapshot_execution_state(
         &mut self,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.state_mut().snapshot_execution_state()
+        self.state_mut()?.snapshot_execution_state()
     }
 
     fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state_mut().probe_execution_state_capture()
+        self.state_mut()?.probe_execution_state_capture()
     }
 
     fn hydrated_execution_state(
         &self,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        self.state().hydrated_execution_state()
+        self.state()?.hydrated_execution_state()
     }
 
-    fn acknowledge_execution_state_capture(&mut self) {
-        self.state_mut().acknowledge_execution_state_capture();
+    fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.state_mut()?.acknowledge_execution_state_capture();
+        Ok(())
     }
 
-    fn abort_execution_state_capture(&mut self) {
-        self.state_mut().abort_execution_state_capture();
+    fn abort_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.state_mut()?.abort_execution_state_capture();
+        Ok(())
     }
 
     fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
-        self.state_mut()
+        self.state_mut()?
             .restore_execution_state(state)
             .map_err(|error| SessionError::Protocol(error.to_string()))
     }
 
-    fn prune_protected_globals(&mut self, protected_names: &BTreeSet<String>) {
-        self.state_mut().prune_protected_globals(protected_names);
+    fn prune_protected_globals(
+        &mut self,
+        protected_names: &BTreeSet<String>,
+    ) -> Result<(), SessionError> {
+        self.state_mut()?.prune_protected_globals(protected_names);
+        Ok(())
     }
 
     fn patch_globals(
@@ -295,11 +311,63 @@ impl RlmDialectSession for LashlangDialectSession {
         patch: &RlmGlobalsPatchPluginBody,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        self.state_mut().patch_globals(patch, protected_names)
+        self.state_mut()?.patch_globals(patch, protected_names)
     }
 
-    fn render_bound_variables(&mut self, exclude: &BTreeSet<String>) -> Arc<str> {
-        let globals = self.state().bound_variable_values(exclude);
-        render_bound_variables(&mut self.bound_variable_render_cache, &globals)
+    fn prepare_bound_variables_prompt(
+        &self,
+        exclude: &BTreeSet<String>,
+    ) -> Result<BoundVariablesPromptRender, SessionError> {
+        let globals = self.state()?.bound_variable_values(exclude);
+        let cache = Arc::clone(&self.bound_variable_render_cache);
+        Ok(BoundVariablesPromptRender::new(move || {
+            let mut cache = cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            render_bound_variables(&mut cache, &globals)
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn busy_session() -> LashlangDialectSession {
+        LashlangDialectSession {
+            state: None,
+            surface: LashlangSurface::default(),
+            services: LashlangDialectServices {
+                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+            bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
+                BoundVariableRenderCache::default(),
+            )),
+        }
+    }
+
+    #[test]
+    fn missing_execution_state_returns_typed_busy_error() {
+        let mut session = busy_session();
+
+        for error in [
+            session
+                .state()
+                .err()
+                .expect("missing shared state must fail"),
+            session
+                .state_mut()
+                .err()
+                .expect("missing mutable state must fail"),
+        ] {
+            assert!(matches!(
+                error,
+                SessionError::Protocol(message) if message == "RLM execution state is busy"
+            ));
+        }
     }
 }

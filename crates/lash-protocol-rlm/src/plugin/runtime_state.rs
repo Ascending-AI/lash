@@ -7,7 +7,9 @@ use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
 use crate::dialect::{RlmDialect, RlmDialectRegistry, RlmDialectSession};
 use crate::projection::{RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event};
-use crate::rlm_support::SharedBoundVariablesPrompt;
+use crate::rlm_support::{
+    BoundVariableRenderCache, SharedBoundVariablesPrompt, render_bound_variables,
+};
 
 pub(super) struct RlmRuntimeState {
     dialect_registry: RlmDialectRegistry,
@@ -23,9 +25,11 @@ impl RlmRuntimeState {
         dialect_registry: RlmDialectRegistry,
         dialect: Arc<dyn RlmDialect>,
     ) -> Result<Self, SessionError> {
-        let mut execution = dialect.create_session()?;
+        let execution = dialect.create_session()?;
         let bound_variables_prompt = Arc::new(std::sync::RwLock::new(
-            execution.render_bound_variables(&BTreeSet::new()),
+            execution
+                .prepare_bound_variables_prompt(&BTreeSet::new())?
+                .render(),
         ));
         Ok(Self {
             execution: tokio::sync::Mutex::new(Some(execution)),
@@ -63,19 +67,27 @@ impl RlmRuntimeState {
         Arc::clone(&self.bound_variables_prompt)
     }
 
-    async fn refresh_bound_variables_prompt(&self) {
+    async fn refresh_bound_variables_prompt(&self) -> Result<(), SessionError> {
         let exclude = self.protected_projected_binding_names().await;
-        let rendered = self
+        let prepared = self
             .execution
             .lock()
             .await
-            .as_mut()
-            .map(|execution| execution.render_bound_variables(&exclude))
-            .unwrap_or_else(|| Arc::from(""));
+            .as_ref()
+            .map(|execution| execution.prepare_bound_variables_prompt(&exclude))
+            .transpose()?;
+        let rendered = prepared.map_or_else(
+            || {
+                let mut cache = BoundVariableRenderCache::default();
+                render_bound_variables(&mut cache, &[])
+            },
+            crate::dialect::BoundVariablesPromptRender::render,
+        );
         *self
             .bound_variables_prompt
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = rendered;
+        Ok(())
     }
 
     async fn protected_projected_binding_names(&self) -> BTreeSet<String> {
@@ -106,7 +118,7 @@ impl RlmRuntimeState {
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
         *guard = merged;
         drop(guard);
-        self.refresh_bound_variables_prompt().await;
+        self.refresh_bound_variables_prompt().await?;
         Ok(())
     }
 
@@ -156,7 +168,7 @@ impl RlmRuntimeState {
                 })?
         {
             execution.restore_execution_state(&snapshot)?;
-            execution.prune_protected_globals(&protected_names);
+            execution.prune_protected_globals(&protected_names)?;
         }
         for event in state.read_view().active_events() {
             if let SessionHistoryRecord::Protocol(event) = event
@@ -168,7 +180,7 @@ impl RlmRuntimeState {
         }
         drop(execution_guard);
         drop(active_agent_frame_id);
-        self.refresh_bound_variables_prompt().await;
+        self.refresh_bound_variables_prompt().await?;
         Ok(())
     }
 
@@ -181,7 +193,7 @@ impl RlmRuntimeState {
             .as_mut()
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
         let protected_names = self.protected_projected_binding_names().await;
-        execution.prune_protected_globals(&protected_names);
+        execution.prune_protected_globals(&protected_names)?;
         for node in nodes {
             if let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node
                 && let Some(event) = decode_rlm_protocol_event(event)
@@ -191,7 +203,7 @@ impl RlmRuntimeState {
             }
         }
         drop(execution_guard);
-        self.refresh_bound_variables_prompt().await;
+        self.refresh_bound_variables_prompt().await?;
         Ok(())
     }
 
@@ -214,7 +226,7 @@ impl RlmRuntimeState {
             .await;
         *guard = Some(state);
         drop(guard);
-        self.refresh_bound_variables_prompt().await;
+        self.refresh_bound_variables_prompt().await?;
         result
     }
 
@@ -264,13 +276,13 @@ impl RlmRuntimeState {
 
     pub(super) async fn acknowledge_execution_state_capture(&self) {
         if let Some(execution) = self.execution.lock().await.as_mut() {
-            execution.acknowledge_execution_state_capture();
+            let _ = execution.acknowledge_execution_state_capture();
         }
     }
 
     pub(super) async fn abort_execution_state_capture(&self) {
         if let Some(execution) = self.execution.lock().await.as_mut() {
-            execution.abort_execution_state_capture();
+            let _ = execution.abort_execution_state_capture();
         }
     }
 
@@ -284,7 +296,7 @@ impl RlmRuntimeState {
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
             .restore_execution_state(state)?;
         drop(execution);
-        self.refresh_bound_variables_prompt().await;
+        self.refresh_bound_variables_prompt().await?;
         Ok(())
     }
 
@@ -424,6 +436,31 @@ pub(super) fn reject_reserved_projected_binding_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_dialect_session_renders_canonical_empty_bound_variables_prompt() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
+                *state.execution.lock().await = None;
+
+                state
+                    .refresh_bound_variables_prompt()
+                    .await
+                    .expect("refresh empty prompt");
+
+                let prompt = state.bound_variables_prompt.read().unwrap().clone();
+                assert!(prompt.starts_with("These variables are already bound in lashlang."));
+                assert!(
+                    prompt.contains(
+                        "Available variables:\n- `history`: `list[HistoryItem]`, read-only"
+                    )
+                );
+            });
+    }
 
     #[test]
     fn executing_code_refreshes_the_driver_bound_variables_snapshot() {
