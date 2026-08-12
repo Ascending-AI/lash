@@ -46,8 +46,8 @@ that it is registry-served and reissues no journal command. Registry-only
 `validate_visible` and `complete_external` do not cross the choke point.
 `ToolContext::triggers().emit()` and `ToolContext::sessions().start_turn()` keep
 their corresponding ordinal-tier guards because they are not process commands.
-Each refusal names the route and tier, directs authors to process-step
-decomposition, and notes the pending intent protocol.
+Each refusal names the route and tier and directs legacy authors to process-step
+decomposition.
 
 The 20-row attempt-atomicity matrix and its controller-decorating sentinel are
 the standing inventory mechanism. The sentinel records every controller
@@ -59,12 +59,34 @@ proves the converse: its controller is key-addressed by stable replay key, so
 nested commands remain safe and all guarded capabilities stay available there.
 Runtime-owned tiers are likewise unaffected.
 
-This guard is the fail-closed backstop, not the final authoring model. The
-capability-separated result/intent protocol described by the determinism survey
-remains the intended redesign; track it as **FIG-INTENT (to be filed)**. The
-separate journal-addressing and durable-workflow capabilities should eventually
-move onto one consolidated controller-traits surface without conflating their
-semantics.
+FIG-1291 ships the capability-separated authoring model. A provider opts in with
+`supports_attempt_context` and receives the sealed, controller-free
+`AttemptContext`. A completed attempt returns `ToolAttemptResult::Done` with a
+`ToolResultDone` and versioned `ToolIntents`; a deferred attempt returns
+`ToolAttemptResult::Pending`, whose type cannot carry intents. Lash records the
+final attempt first, then admits and drains its declarations in source order.
+Retries discard non-final declarations. Each v1 declaration derives one stable
+identity from `(session_id, execution_scope_id, tool_call_id, intent_index)`;
+the execution-scope component is the turn id in turn scope and the process id
+in process scope. FIG-1203 remains the rebase point for frame-key-grade call
+identity.
+
+Realization is journal-first. The recorded intent issues exactly one process
+command with its identity-derived replay key. It does not re-read visibility,
+existence, terminal state, the live tool filter, or live host configuration
+before that durable boundary. Deterministic admission uses only recorded data.
+Unknown/terminal/conflict results are recorded command outcomes, so redrive
+replays identical evidence even if the live registry changes. A start's env
+spec, observers, input, and parent-end policy all come from the recorded
+payload. Tool visibility is therefore an authoring-time catalog decision, not
+a replay-time intent gate; a future contract requiring such a gate must record
+it as a separate admission fact.
+
+After the enclosing turn or process reaches its end, recorded start intents are
+handled by a deterministic parent-end step: `Abandon` emits no command, while
+`Cancel` and `Terminate` emit one replay-keyed cancellation command with a
+policy-specific reason. The old `ToolContext` guards remain only for providers
+that have not yet moved to the FIG-1291 leaf signature.
 
 The former `ToolContext::durable_effects()` facade and its `DurableStep`
 producer are removed, including the serialized command and outcome. External

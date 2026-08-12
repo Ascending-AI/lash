@@ -50,6 +50,16 @@
           </div>
         </div>
 
+        <div class="section" id="attempt-context-intents">
+          <div class="section-header">
+            <h2>Atomic Leaf Tools and Durable Intents</h2>
+            <p>Leaf providers opt into <code>AttemptContext</code> and return recorded declarations for durable follow-on work.</p>
+          </div>
+          <p>Return <code>ToolAttemptResult::Done { result: ToolResultDone, intents: ToolIntents::v1(...) }</code>. The type deliberately makes <code>Pending</code> plus intents impossible. <code>AttemptContext</code> exposes recorded reads and local capabilities but no process-command or trigger-command client; use <code>StartProcess</code>, <code>SignalProcess</code>, <code>CancelProcess</code>, or <code>EmitProcessEvent</code> declarations instead.</p>
+          <p>Lash commits the final attempt before draining its declarations in source order. Each declaration receives a stable identity derived from the session, enclosing execution scope (turn id or process id), tool call id, and intent index. Realization is journal-first: command-time unknown, terminal, conflict, or replay outcomes are durable evidence, not decisions recomputed from live visibility. <code>StartProcessIntent</code> also records its complete environment/observer input and an <code>on_parent_end</code> policy of <code>Abandon</code>, <code>Cancel</code>, or <code>Terminate</code>.</p>
+          <p>Declare <code>attempt_may_defer</code> only when the leaf can actually return <code>Pending</code>; Lash reserves a process-lifetime completion key only for declared-deferable providers.</p>
+        </div>
+
         <div class="section" id="fixed-tools">
           <div class="section-header">
             <h2>Fixed Tools</h2>
@@ -154,7 +164,7 @@ async fn lookup_weather(args: WeatherArgs) -&gt; WeatherReport {
                 <tr><td><code>context.sessions()</code></td><td>Cloneable child-session client: <code>create_session</code>, <code>close_session</code>, and one-shot <code>start_turn</code>. Inside atomic tool attempts, <code>start_turn</code> is available on runtime-owned and key-addressed tiers but returns a typed refusal on ordinal-addressed Restate tiers; decompose it into a process step. Durable background work uses process handles observed by sessions, not child-turn handles.</td></tr>
                 <tr><td><code>context.processes()</code></td><td>Session-scoped process admin. Runtime-owned and key-addressed tiers allow start, await, cancel, signal, list, and external completion from a tool. Inside an atomic tool attempt on an ordinal-addressed Restate tier, start, await, cancel, and signal return typed refusals; list remains available because its replay is journal-neutral, and external completion does not cross the journal. Decompose refused commands into process steps.</td></tr>
                 <tr><td><code>context.triggers().emit(...).await?</code></td><td>Emit a trigger occurrence. Inside atomic tool attempts this is available on runtime-owned and key-addressed tiers, but ordinal-addressed Restate tiers return a typed refusal; emit from a process step.</td></tr>
-                <tr><td><code>context.process_events().emit(...).await?</code></td><td>Append typed process events from a tool that is already executing inside a durable process.</td></tr>
+                <tr><td><code>context.process_events().emit(...).await?</code></td><td>Append typed process events from legacy <code>ToolContext</code> code already executing inside a durable process. Interim hazard: this registry-authorized route is outside the effect journal and is not available from sealed <code>AttemptContext</code>; new leaf providers return <code>EmitProcessEvent</code> instead.</td></tr>
                 <tr><td><code>context.direct_completions().complete(request, source).await?</code></td><td>Run a one-shot LLM request. Missing <code>session_id</code> and <code>caused_by</code> are filled from the current tool call for tracing and usage attribution. Inside a tool attempt, the provider call is opaque work in that atomic attempt; outside an attempt it is an independently journaled direct effect.</td></tr>
               </tbody>
             </table>

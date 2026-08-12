@@ -305,13 +305,16 @@ recorded. Recovery must never re-execute an uncertain tool merely to rebuild UI
 state; rebuild from durable snapshots, and make externally visible tool effects
 idempotent or split them into explicit durable process steps.
 
-The workbench is an ordinal-addressed Restate host. Consequently
-`shell.start` (including `detach: true`), `shell.write`, `spawn_agent`, and
-`processes.cancel` return typed refusals when called inside atomic tool attempts;
-those commands must be expressed as process steps. `processes.list` remains
-available because its Restate replay is journal-neutral. Runtime-owned and
-key-addressed PostgreSQL effect hosts do not have this restriction. A
-capability-separated intent protocol is planned but is not yet available.
+The workbench is an ordinal-addressed Restate host. Legacy providers using
+`ToolContext` still receive typed refusals for nested process commands. FIG-1291
+leaf providers instead use sealed `AttemptContext` and return versioned
+`ToolIntents`; Lash records the final attempt before realizing each declaration
+as one journal-first command. `shell.start`/detach, signalling, cancellation,
+and typed process-event emission can therefore migrate to declarations without
+nested Restate ordinals. A detached start records `on_parent_end: Abandon`;
+owned children choose `Cancel` or `Terminate`. Command-time failures and replay
+outcomes are durable evidence and do not depend on live visibility during
+redrive.
 
 The chat composer can upload one PNG (up to 1 MiB) through
 `POST /api/attachments`, then includes the returned content-addressed id as

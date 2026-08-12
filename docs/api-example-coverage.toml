@@ -26495,6 +26495,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
+symbol = "lash::process::ProcessService::cancel_recorded_intent"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessService::cancel_recorded_intent"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host contract for journal-first tool-intent realization; application examples consume the coordinator rather than implement process substrates."
+
+[[api]]
 symbol = "lash::process::ProcessService::cancel_all_visible"
 kind = "function"
 availability = "default+all-features"
@@ -26531,6 +26540,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
+symbol = "lash::process::ProcessService::emit_event_recorded_intent"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessService::emit_event_recorded_intent"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host contract for journal-first tool-intent realization; application examples consume the coordinator rather than implement process substrates."
+
+[[api]]
 symbol = "lash::process::ProcessService::signal"
 kind = "function"
 availability = "default+all-features"
@@ -26538,6 +26556,15 @@ aliases = ["lash_core::ProcessService::signal"]
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash::process::ProcessService::signal_recorded_intent"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessService::signal_recorded_intent"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host contract for journal-first tool-intent realization; application examples consume the coordinator rather than implement process substrates."
 
 [[api]]
 symbol = "lash::process::ProcessService::signal_possessed"
@@ -26556,6 +26583,15 @@ aliases = ["lash_core::ProcessService::start"]
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash::process::ProcessService::start_from_recorded_intent"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessService::start_from_recorded_intent"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host contract for journal-first tool-intent realization; application examples consume the coordinator rather than implement process substrates."
 
 [[api]]
 symbol = "lash::process::ProcessService::start_from_request"
@@ -37690,6 +37726,15 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:249#replay: Some(RemoteRu
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::remote::processes::RemoteRuntimeReplay::attribution"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:250#attribution: None,"
+reason = "The remote process provenance example explicitly constructs an unattributed replay frame; intent-attributed frames are runtime evidence rather than author input."
+
+[[api]]
 symbol = "lash::remote::processes::RemoteRuntimeReplay::key"
 kind = "field"
 availability = "default+all-features"
@@ -40798,6 +40843,14 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::remote::turn_result::RemoteToolCallSummary::duration_ms to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::remote::turn_result::RemoteToolCallSummary::intent_outcomes"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::remote::turn_result::RemoteToolCallSummary::intent_outcomes to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::turn_result::RemoteToolCallSummary::outcome"
@@ -69217,7 +69270,7 @@ disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::runtime::AssistantOutput::state` hands `OutputState` to hosts (runtime embedders). Consumer class: the remote-protocol crate and the deterministic simulation harness -- this variant is exercised in-repo at crates/lash-remote-protocol/src/core_conversions_tests.rs:837, crates/lash-remote-protocol/src/core_conversions/turn_result.rs:164, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::runtime::effect::envelope::RuntimeReplay"
+symbol = "lash_core::RuntimeReplay"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
@@ -69225,12 +69278,44 @@ disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ProcessEventAppendRequest::replay` hands `RuntimeReplay` to hosts (runtime embedders). Consumer class: the remote-protocol crate and the deterministic simulation harness -- this type is exercised in-repo at crates/lash-remote-protocol/src/core_conversions/processes.rs:842, crates/lash-remote-protocol/src/core_conversions/processes.rs:843, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::runtime::effect::envelope::RuntimeReplay::key"
+symbol = "lash_core::RuntimeReplay::attribution"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Structural journal attribution is produced by the runtime intent executor and consumed by sentinel and remote-protocol adapters; host examples do not author it."
+
+[[api]]
+symbol = "lash_core::RuntimeReplay::key"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ProcessEventAppendRequest::replay` hands `RuntimeReplay` to hosts (runtime embedders). Consumer class: the remote-protocol crate and core runtime internals -- this field is exercised in-repo at crates/lash-remote-protocol/src/core_conversions/processes.rs:333, crates/lash-remote-protocol/src/core_conversions/processes.rs:338, and no example reaches it, which is what keeps the row unused."
+
+[[api]]
+symbol = "lash_core::RuntimeReplayAttribution"
+kind = "enum"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Structural journal attribution is produced by the runtime intent executor and consumed by sentinel and remote-protocol adapters; host examples do not author it."
+
+[[api]]
+symbol = "lash_core::RuntimeReplayAttribution::ToolIntent"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Structural journal attribution is produced by the runtime intent executor and consumed by sentinel and remote-protocol adapters; host examples do not author it."
+
+[[api]]
+symbol = "lash_core::RuntimeReplayAttribution::ToolIntent::0"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Structural journal attribution is produced by the runtime intent executor and consumed by sentinel and remote-protocol adapters; host examples do not author it."
 
 [[api]]
 symbol = "lash_core::runtime::effect::envelope::RuntimeSubject"
@@ -72948,7 +73033,7 @@ reason = "Host extension contract for attempt-pure tool providers and durable in
 
 [[api]]
 symbol = "lash::tools::ToolAttemptResult"
-kind = "struct"
+kind = "enum"
 aliases = ["lash_core::ToolAttemptResult"]
 availability = "default+all-features"
 area = "plugins"
@@ -72956,40 +73041,121 @@ disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
 
 [[api]]
-symbol = "lash::tools::ToolAttemptResult::intents"
+symbol = "lash::tools::ToolAttemptResult::Done"
+kind = "variant"
+aliases = ["lash_core::ToolAttemptResult::Done"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::Done::intents"
 kind = "field"
-aliases = ["lash_core::ToolAttemptResult::intents"]
+aliases = ["lash_core::ToolAttemptResult::Done::intents"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
 
 [[api]]
-symbol = "lash::tools::ToolAttemptResult::new"
-kind = "function"
-aliases = ["lash_core::ToolAttemptResult::new"]
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
-
-[[api]]
-symbol = "lash::tools::ToolAttemptResult::result"
+symbol = "lash::tools::ToolAttemptResult::Done::result"
 kind = "field"
-aliases = ["lash_core::ToolAttemptResult::result"]
+aliases = ["lash_core::ToolAttemptResult::Done::result"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
 
 [[api]]
-symbol = "lash::tools::ToolAttemptResult::without_intents"
-kind = "function"
-aliases = ["lash_core::ToolAttemptResult::without_intents"]
+symbol = "lash::tools::ToolAttemptResult::Pending"
+kind = "variant"
+aliases = ["lash_core::ToolAttemptResult::Pending"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::Pending::0"
+kind = "field"
+aliases = ["lash_core::ToolAttemptResult::Pending::0"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::done"
+kind = "function"
+aliases = ["lash_core::ToolAttemptResult::done"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::done_without_intents"
+kind = "function"
+aliases = ["lash_core::ToolAttemptResult::done_without_intents"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::pending"
+kind = "function"
+aliases = ["lash_core::ToolAttemptResult::pending"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolResultDone"
+kind = "struct"
+aliases = ["lash_core::ToolResultDone"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for the completed half of the attempt result sum type; examples do not implement third-party attempt providers."
+
+[[api]]
+symbol = "lash::tools::ToolResultDone::failure"
+kind = "function"
+aliases = ["lash_core::ToolResultDone::failure"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for the completed half of the attempt result sum type; examples do not implement third-party attempt providers."
+
+[[api]]
+symbol = "lash::tools::ToolResultDone::from_output"
+kind = "function"
+aliases = ["lash_core::ToolResultDone::from_output"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for the completed half of the attempt result sum type; examples do not implement third-party attempt providers."
+
+[[api]]
+symbol = "lash::tools::ToolResultDone::into_output"
+kind = "function"
+aliases = ["lash_core::ToolResultDone::into_output"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for the completed half of the attempt result sum type; examples do not implement third-party attempt providers."
+
+[[api]]
+symbol = "lash::tools::ToolResultDone::ok"
+kind = "function"
+aliases = ["lash_core::ToolResultDone::ok"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for the completed half of the attempt result sum type; examples do not implement third-party attempt providers."
 
 [[api]]
 symbol = "lash::tools::ToolIntent"
@@ -73172,6 +73338,15 @@ disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
 
 [[api]]
+symbol = "lash::tools::ToolProvider::attempt_may_defer"
+kind = "function"
+aliases = ["lash_core::ToolProvider::attempt_may_defer"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension declaration that bounds completion-key reservation to tools whose attempts may return Pending; examples do not implement third-party providers."
+
+[[api]]
 symbol = "lash_core::TOOL_INTENT_MAX_CANONICAL_BYTES"
 kind = "constant"
 availability = "default+all-features"
@@ -73292,6 +73467,22 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::ProtocolRefused"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed empty-batch protocol-version refusal evidence; application examples do not fabricate retained protocol records."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::ProtocolRefused::refusal"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed empty-batch protocol-version refusal evidence; application examples do not fabricate retained protocol records."
+
+[[api]]
 symbol = "lash_core::ToolIntentExecutionOutcome::kind"
 kind = "function"
 availability = "default+all-features"
@@ -73348,7 +73539,7 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentIdentity::turn_id"
+symbol = "lash_core::ToolIntentIdentity::execution_scope_id"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
