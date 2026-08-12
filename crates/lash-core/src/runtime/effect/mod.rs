@@ -377,6 +377,7 @@ mod tests {
                     output: crate::ToolCallOutput::success(serde_json::json!({"done": "call-1"})),
                     duration_ms: 7,
                 }),
+                intents: crate::ToolIntents::default(),
             }),
             triggers: Vec::new(),
         }

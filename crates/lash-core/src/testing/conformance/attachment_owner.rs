@@ -282,6 +282,7 @@ fn tool_attempt_outcome(
                 output,
                 duration_ms: 0,
             }),
+            intents: crate::ToolIntents::default(),
         }),
         triggers: Vec::new(),
     }
@@ -291,7 +292,7 @@ fn assert_plain_json_outcome(outcome: &crate::RuntimeEffectOutcome, id: &crate::
     let crate::RuntimeEffectOutcome::ToolAttempt { launch, .. } = outcome else {
         panic!("expected completed tool attempt")
     };
-    let crate::ToolAttemptLaunch::Done { record } = launch.as_ref() else {
+    let crate::ToolAttemptLaunch::Done { record, .. } = launch.as_ref() else {
         panic!("expected completed tool attempt")
     };
     assert!(record.output.attachments().is_empty());
@@ -309,7 +310,7 @@ fn assert_typed_outcome(outcome: &crate::RuntimeEffectOutcome, id: &crate::Attac
     let crate::RuntimeEffectOutcome::ToolAttempt { launch, .. } = outcome else {
         panic!("expected completed tool attempt")
     };
-    let crate::ToolAttemptLaunch::Done { record } = launch.as_ref() else {
+    let crate::ToolAttemptLaunch::Done { record, .. } = launch.as_ref() else {
         panic!("expected completed tool attempt")
     };
     assert_eq!(

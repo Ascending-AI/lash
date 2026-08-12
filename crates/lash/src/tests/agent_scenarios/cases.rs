@@ -363,13 +363,13 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=5.9KB
+        root                     tool_state            stored logical=6.2KB
         root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=341B
-        session-001              tool_state            stored logical=6.6KB
+        session-001              tool_state            stored logical=6.9KB
         session-001              plugin_snapshot       stored logical=342B
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
@@ -488,13 +488,13 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=5.9KB
+        root                     tool_state            stored logical=6.2KB
         root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=346B
-        session-001              tool_state            stored logical=6.6KB
+        session-001              tool_state            stored logical=6.9KB
         session-001              plugin_snapshot       stored logical=342B
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0

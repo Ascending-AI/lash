@@ -6413,6 +6413,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/001",
@@ -6555,6 +6559,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/001",

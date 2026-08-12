@@ -6,6 +6,7 @@ mod runner;
 mod session;
 mod tool;
 
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use control::guard_process_command_in_recorded_body;
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContext<'run> {

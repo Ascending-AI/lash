@@ -1084,6 +1084,36 @@ fn remote_activity_preserves_semantic_fields_and_collapses_runtime_diagnostics()
 }
 
 #[test]
+fn remote_activity_preserves_typed_tool_intent_refusal_payload() {
+    let activity = lash_core::TurnActivity::independent(lash_core::TurnEvent::ToolIntentOutcome {
+        call_id: "call-1".to_string(),
+        outcome: lash_core::ToolIntentExecutionOutcome::Refused {
+            identity: None,
+            intent_index: 0,
+            kind: lash_core::ToolIntentKind::SignalProcess,
+            refusal: lash_core::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 2 },
+        },
+    });
+    let remote = RemoteTurnActivity::from_core(10, activity);
+    assert_eq!(remote.sequence, 10);
+    assert_eq!(
+        remote.event,
+        RemoteTurnEvent::ToolIntentOutcome {
+            call_id: "call-1".to_string(),
+            outcome: serde_json::json!({
+                "status": "refused",
+                "intent_index": 0,
+                "kind": "signal_process",
+                "refusal": {
+                    "reason": "unsupported_protocol_version",
+                    "recorded": 2,
+                },
+            }),
+        }
+    );
+}
+
+#[test]
 fn remote_activity_preserves_model_attempt_reset_targets() {
     let activity = lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelAttemptReset {
         assistant_prose_correlation_ids: vec![lash_core::TurnActivityId::new("prose")],

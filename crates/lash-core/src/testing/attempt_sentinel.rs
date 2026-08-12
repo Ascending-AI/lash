@@ -49,6 +49,7 @@ struct LedgerState {
     open_attempts: usize,
     attempt_bodies_opened: usize,
     crossings: Vec<String>,
+    intent_crossings: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// Records controller-boundary crossings observed while a recorded
@@ -85,6 +86,25 @@ impl NestedJournalLedger {
         state.crossings.push(crossing);
     }
 
+    fn record_intent_crossing(&self, replay_key: Option<&str>, crossing: &str) {
+        let Some(replay_key) = replay_key else {
+            return;
+        };
+        let Some(boundary) = replay_key.find(":process:") else {
+            return;
+        };
+        let intent_id = &replay_key[..boundary];
+        if !intent_id.starts_with("tool-intent:v1:sha256:") {
+            return;
+        }
+        self.state
+            .lock_recover()
+            .intent_crossings
+            .entry(intent_id.to_string())
+            .or_default()
+            .push(crossing.to_string());
+    }
+
     /// Every crossing recorded while a recorded attempt was open, in order.
     pub fn crossings_inside_attempt(&self) -> Vec<String> {
         self.state.lock_recover().crossings.clone()
@@ -99,6 +119,16 @@ impl NestedJournalLedger {
     /// recorded attempt body.
     pub fn tripped(&self) -> bool {
         !self.state.lock_recover().crossings.is_empty()
+    }
+
+    /// Controller crossings attributed to one derived tool-intent replay key.
+    pub fn crossings_for_intent(&self, replay_key: &str) -> Vec<String> {
+        self.state
+            .lock_recover()
+            .intent_crossings
+            .get(replay_key)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -217,7 +247,10 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let opens_attempt =
             envelope.invocation.effect_kind() == Some(RuntimeEffectKind::ToolAttempt);
-        self.ledger.record(effect_crossing_label(&envelope));
+        let crossing = effect_crossing_label(&envelope);
+        self.ledger
+            .record_intent_crossing(envelope.invocation.replay_key(), &crossing);
+        self.ledger.record(crossing);
         if opens_attempt {
             self.ledger.open_attempt();
         }

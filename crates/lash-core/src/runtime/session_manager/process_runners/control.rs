@@ -28,12 +28,13 @@ pub(crate) fn guard_process_command_in_recorded_body(
             crate::ProcessCommand::Await { .. } => "processes().await_process()",
             crate::ProcessCommand::Cancel { .. } => "processes().cancel()",
             crate::ProcessCommand::Signal { .. } => "processes().signal()",
+            crate::ProcessCommand::EmitEvent { .. } => "process_events().emit()",
             crate::ProcessCommand::Transfer { .. } => "processes().transfer()",
             crate::ProcessCommand::DeleteSession { .. } => "processes().delete_session()",
             crate::ProcessCommand::List { .. } => unreachable!("list is journal-neutral"),
         };
         return Err(crate::PluginError::Session(format!(
-            "ToolContext::{route} is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
+            "ToolContext::{route} is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed"
         )));
     }
     Ok(())
@@ -113,11 +114,15 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
-    async fn cancel(&self, process_id: &str) -> Result<crate::ProcessRecord, crate::PluginError> {
+    async fn cancel(
+        &self,
+        process_id: &str,
+        reason: Option<String>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Cancel {
                 process_id: process_id.to_string(),
-                reason: Some("requested by host".to_string()),
+                reason,
             })
             .await?
         {
@@ -192,6 +197,23 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         }
         Ok(event)
+    }
+
+    async fn emit_event(
+        &self,
+        process_id: &str,
+        request: crate::ProcessEventAppendRequest,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        match self
+            .run(crate::ProcessCommand::EmitEvent {
+                process_id: process_id.to_string(),
+                request,
+            })
+            .await?
+        {
+            crate::ProcessEffectOutcome::EmitEvent { event } => Ok(*event),
+            _ => Err(wrong_process_outcome("emit_event")),
+        }
     }
 
     async fn transfer(
@@ -482,6 +504,26 @@ impl ProcessCapability {
         ))
     }
 
+    pub(in crate::runtime::session_manager) async fn list_model_tool_process_handles_for_attempt(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        mode: crate::ProcessListMode,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        let registry = current.host.process_registry.as_ref().ok_or_else(|| {
+            crate::PluginError::Session(
+                "process registry is unavailable in this runtime".to_string(),
+            )
+        })?;
+        let records = match mode {
+            crate::ProcessListMode::Live => registry.list_live_observed_by(session_id).await?,
+            crate::ProcessListMode::All => registry.list_observed_by(session_id).await?,
+        };
+        Ok(Self::narrow_tool_visible_records(
+            current, session_id, records,
+        ))
+    }
+
     pub(in crate::runtime::session_manager) async fn cancel_process(
         &self,
         current: &CurrentSessionCapability,
@@ -497,7 +539,48 @@ impl ProcessCapability {
             )));
         }
         let _ = (managed, session_id);
-        runner.cancel(process_id).await
+        runner
+            .cancel(process_id, Some("requested by host".to_string()))
+            .await
+    }
+
+    pub(in crate::runtime::session_manager) async fn cancel_process_with_reason(
+        &self,
+        current: &CurrentSessionCapability,
+        managed: &ManagedSessionCapability,
+        session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let runner = self.command_runner(current, &scope)?;
+        if runner.registry().get_process(process_id).await?.is_none() {
+            return Err(crate::PluginError::Session(format!(
+                "unknown process `{process_id}`"
+            )));
+        }
+        let _ = (managed, session_id);
+        runner.cancel(process_id, reason).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::runtime::session_manager) async fn emit_process_event(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.validate_model_tool_process_handles(current, session_id, &[process_id.to_string()])
+            .await?;
+        let request =
+            crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
+        self.command_runner(current, &scope)?
+            .emit_event(process_id, request)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]

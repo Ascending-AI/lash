@@ -131,6 +131,10 @@ pub enum RemoteTurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_call_id: Option<String>,
     },
+    ToolIntentOutcome {
+        call_id: String,
+        outcome: serde_json::Value,
+    },
     FinalValue {
         value: serde_json::Value,
     },

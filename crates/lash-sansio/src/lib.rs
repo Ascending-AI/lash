@@ -76,7 +76,8 @@ pub use tool_contract::{
 pub use tool_output::{
     ModelToolReturn, ModelToolReturnPart, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureClass,
-    ToolFailureSource, ToolRetryDisposition, ToolValue, format_tool_output_content,
+    ToolFailureSource, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+    ToolIntentRefusalReason, ToolRetryDisposition, ToolValue, format_tool_output_content,
     model_parts_from_tool_output,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};

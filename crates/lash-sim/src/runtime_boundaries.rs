@@ -254,6 +254,7 @@ impl RuntimeBoundaryHarness {
                                 output: ToolCallOutput::success(scripted_result),
                                 duration_ms: 0,
                             }),
+                            intents: lash_core::ToolIntents::default(),
                         }),
                         triggers: Vec::new(),
                     })
@@ -266,7 +267,7 @@ impl RuntimeBoundaryHarness {
                 "durable effect controller returned non-tool-attempt outcome",
             ));
         };
-        let ToolAttemptLaunch::Done { record } = &**launch else {
+        let ToolAttemptLaunch::Done { record, .. } = &**launch else {
             return Err(RuntimeBoundaryError::new(
                 "durable effect controller returned pending tool attempt",
             ));
@@ -369,6 +370,7 @@ impl RuntimeBoundaryHarness {
                                 output: ToolCallOutput::success(output_for_executor),
                                 duration_ms: 0,
                             }),
+                            intents: lash_core::ToolIntents::default(),
                         }),
                         triggers: Vec::new(),
                     })
@@ -381,7 +383,7 @@ impl RuntimeBoundaryHarness {
                 "tool controller returned non-tool-attempt outcome",
             ));
         };
-        let ToolAttemptLaunch::Done { record } = *launch else {
+        let ToolAttemptLaunch::Done { record, .. } = *launch else {
             return Err(RuntimeBoundaryError::new(
                 "sim tool boundary unexpectedly returned pending tool launch",
             ));

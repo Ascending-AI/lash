@@ -1263,6 +1263,10 @@ impl ModelStore {
                         "output": lash_core::ToolCallOutput::success(projected_result),
                         "duration_ms": 0,
                     },
+                    "intents": {
+                        "protocol_version": lash_core::TOOL_INTENT_PROTOCOL_V1,
+                        "intents": [],
+                    },
                 },
             },
         })

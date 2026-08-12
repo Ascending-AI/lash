@@ -844,7 +844,7 @@ impl Fig1127NestedRoute {
     fn expected_refusal(self) -> &'static str {
         match self {
             Self::Processes => {
-                "plugin session error: ToolContext::processes().start() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
+                "plugin session error: ToolContext::processes().start() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed"
             }
             Self::Triggers => {
                 "plugin session error: ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; emit the trigger from a process step; a first-class intent protocol is pending"
@@ -853,13 +853,13 @@ impl Fig1127NestedRoute {
                 "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; start the nested turn from a process step; a first-class intent protocol is pending"
             }
             Self::ProcessesCancel => {
-                "plugin session error: ToolContext::processes().cancel() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
+                "plugin session error: ToolContext::processes().cancel() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed"
             }
             Self::ProcessesSignal => {
-                "plugin session error: ToolContext::processes().signal() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
+                "plugin session error: ToolContext::processes().signal() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed"
             }
             Self::ProcessesAwait => {
-                "plugin session error: ToolContext::processes().await_process() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending"
+                "plugin session error: ToolContext::processes().await_process() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed"
             }
             Self::ProcessesList => unreachable!("process list remains available"),
         }
@@ -1129,6 +1129,7 @@ impl Fig1127NestedRouteRedrive for Fig1127NestedRouteRedriveImpl {
                                 output,
                                 duration_ms: 0,
                             }),
+                            intents: lash_core::ToolIntents::default(),
                         }),
                         triggers: Vec::new(),
                     })
@@ -1139,7 +1140,7 @@ impl Fig1127NestedRouteRedrive for Fig1127NestedRouteRedriveImpl {
         let RuntimeEffectOutcome::ToolAttempt { launch, .. } = outcome else {
             return Err(TerminalError::new("FIG-1127 fixture expected a tool outcome").into());
         };
-        let lash_core::ToolAttemptLaunch::Done { record } = *launch else {
+        let lash_core::ToolAttemptLaunch::Done { record, .. } = *launch else {
             return Err(TerminalError::new("FIG-1127 fixture expected a completed tool").into());
         };
 
@@ -5709,6 +5710,7 @@ async fn restate_positional_replay_records_tool_attempt_as_one_command() {
                     Ok(RuntimeEffectOutcome::ToolAttempt {
                         launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                             record: Box::new(completed_tool_record("call-fast", "fast_tool")),
+                            intents: lash_core::ToolIntents::default(),
                         }),
                         triggers: Vec::new(),
                     })
@@ -5723,7 +5725,7 @@ async fn restate_positional_replay_records_tool_attempt_as_one_command() {
     };
     assert!(matches!(
         &*launch,
-        lash_core::ToolAttemptLaunch::Done { record } if record.call_id.as_deref() == Some("call-fast")
+        lash_core::ToolAttemptLaunch::Done { record, .. } if record.call_id.as_deref() == Some("call-fast")
     ));
     assert_eq!(context.record_count(), 1);
     assert_eq!(context.runs().len(), 1);
@@ -5745,7 +5747,7 @@ async fn restate_positional_replay_records_tool_attempt_as_one_command() {
     };
     assert!(matches!(
         &*launch,
-        lash_core::ToolAttemptLaunch::Done { record } if record.call_id.as_deref() == Some("call-fast")
+        lash_core::ToolAttemptLaunch::Done { record, .. } if record.call_id.as_deref() == Some("call-fast")
     ));
     assert_eq!(context.record_count(), 1);
     assert_eq!(context.runs().len(), 2);
@@ -8369,6 +8371,7 @@ fn restate_segment_tool_attempt_outcome(ordinal: u64) -> RuntimeEffectOutcome {
                 &format!("matrix-call-{ordinal}"),
                 "matrix_tool",
             )),
+            intents: lash_core::ToolIntents::default(),
         }),
         triggers: Vec::new(),
     }

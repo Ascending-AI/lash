@@ -1,0 +1,5 @@
+error[E0599]: no method named `cancel` found for struct `AttemptProcessReads` in the current scope
+ --> tests/ui/attempt_context_has_no_journal_capability.rs:2:33
+  |
+2 |     let _ = context.processes().cancel("process-1").await;
+  |                                 ^^^^^^ method not found in `AttemptProcessReads`

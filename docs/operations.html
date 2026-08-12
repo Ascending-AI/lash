@@ -532,7 +532,8 @@ Ok(())</code></pre>
     <div class="section" id="monitoring">
       <div class="section-header">
         <h2>Monitoring</h2>
-        <p>Per-turn timing, cumulative token usage, and traces come off the runtime directly; wire them into whatever metrics and tracing stack the host already runs.</p>
+      <p>Per-turn timing, cumulative token usage, and traces come off the runtime directly; wire them into whatever metrics and tracing stack the host already runs.</p>
+      <p>Tool-intent drains emit a <code>tool_intent.execute</code> span per declaration with <code>session_id</code>, <code>turn_id</code>, <code>tool_call_id</code>, <code>intent_index</code>, <code>intent_kind</code>, and the stable <code>replay_key</code>. Every refusal also emits a <code>lash::tool_intent</code> warning whose <code>refusal_reason</code> is one of <code>unsupported_protocol_version</code>, <code>missing_tool_call_id</code>, <code>intent_index_overflow</code>, <code>count_budget_exceeded</code>, <code>canonical_byte_budget_exceeded</code>, <code>per_kind_budget_exceeded</code>, <code>session_mismatch</code>, or <code>command_failed</code>. The durable <code>ToolIntentOutcome</code> turn event carries the same typed reason. OpenTelemetry hosts receive <code>lash.tool_intent.executed</code> by <code>lash.tool_intent.kind</code> and <code>lash.tool_intent.refused</code> by kind plus <code>lash.tool_intent.refusal_reason</code>.</p>
       </div>
       <pre data-lang="rust" data-snippet="operations#monitoring"><code>// Per-turn timing, straight off the runtime clock.
 let started_at = output.result.started_at(); // SystemTime the turn was claimed

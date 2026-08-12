@@ -170,28 +170,28 @@ const ROUTE_MATRIX: &[MatrixRow] = &[
         route: Route::ProcessStart,
         label: "processes().start()",
         classification: Classification::Guarded,
-        outcome: "plugin session error: ToolContext::processes().start() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        outcome: "plugin session error: ToolContext::processes().start() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed",
         crossings: &[],
     },
     MatrixRow {
         route: Route::ProcessAwait,
         label: "processes().await_process()",
         classification: Classification::Guarded,
-        outcome: "plugin session error: ToolContext::processes().await_process() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        outcome: "plugin session error: ToolContext::processes().await_process() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed",
         crossings: &[],
     },
     MatrixRow {
         route: Route::ProcessCancel,
         label: "processes().cancel()",
         classification: Classification::Guarded,
-        outcome: "plugin session error: ToolContext::processes().cancel() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        outcome: "plugin session error: ToolContext::processes().cancel() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed",
         crossings: &[],
     },
     MatrixRow {
         route: Route::ProcessSignal,
         label: "processes().signal()",
         classification: Classification::Guarded,
-        outcome: "plugin session error: ToolContext::processes().signal() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        outcome: "plugin session error: ToolContext::processes().signal() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed",
         crossings: &[],
     },
     MatrixRow {
@@ -212,7 +212,7 @@ const ROUTE_MATRIX: &[MatrixRow] = &[
         route: Route::ProcessTransfer,
         label: "ProcessCommand::Transfer",
         classification: Classification::Guarded,
-        outcome: "plugin session error: ToolContext::processes().transfer() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; decompose the process command into a process step; a first-class intent protocol is pending",
+        outcome: "plugin session error: ToolContext::processes().transfer() is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed",
         crossings: &[],
     },
     MatrixRow {
@@ -762,6 +762,14 @@ struct AttemptRun {
 /// Executes `route` inside a real controller-owned recorded `ToolAttempt`,
 /// through the sentinel, and reports what the sentinel saw.
 async fn run_route_on_tier(route: Route, tier: &ControllerOwnedTier) -> AttemptRun {
+    run_route_on_tier_with_guard(route, tier, true).await
+}
+
+async fn run_route_on_tier_with_guard(
+    route: Route,
+    tier: &ControllerOwnedTier,
+    guard_metadata_present: bool,
+) -> AttemptRun {
     let fixtures = fixtures().await;
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(tier, Arc::clone(&ledger));
@@ -770,7 +778,10 @@ async fn run_route_on_tier(route: Route, tier: &ControllerOwnedTier) -> AttemptR
         crate::ExecutionScope::turn(SESSION, TURN),
     )
     .expect("scoped attempt-atomicity controller");
-    let context = tool_context(scoped, &fixtures);
+    let mut context = tool_context(scoped, &fixtures);
+    if !guard_metadata_present {
+        context.parent_invocation = None;
+    }
     let body_runs = Arc::new(AtomicUsize::new(0));
     let outcome_slot: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
     let envelope = crate::RuntimeEffectEnvelope::new(
@@ -803,6 +814,7 @@ async fn run_route_on_tier(route: Route, tier: &ControllerOwnedTier) -> AttemptR
                             output: crate::ToolCallOutput::success(serde_json::json!("ok")),
                             duration_ms: 0,
                         }),
+                        intents: crate::ToolIntents::default(),
                     }),
                     triggers: Vec::new(),
                 })
@@ -984,7 +996,7 @@ async fn key_addressed_controller_preserves_the_full_tool_context_matrix() {
     }
     assert_eq!(
         process_routes_succeeded, 6,
-        "all six ToolContext process routes succeed on key-addressed tiers"
+        "all six ToolContext process routes remain during the layer-1 migration window on key-addressed tiers"
     );
 }
 
@@ -1045,11 +1057,10 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
     );
 }
 
-/// Anti-vacuity for the sentinel itself: the sentinel must not report a
-/// crossing for a command issued outside a recorded attempt, and must report
-/// one issued inside.
+/// Red proof for the sentinel itself: a deliberately leaked test-only command
+/// must be caught while an attempt body is open.
 #[tokio::test]
-async fn sentinel_discriminates_inside_and_outside_a_recorded_attempt() {
+async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     let fixtures = fixtures().await;
     let tier = ControllerOwnedTier::ordinal_addressed();
     let ledger = NestedJournalLedger::new();
@@ -1084,11 +1095,228 @@ async fn sentinel_discriminates_inside_and_outside_a_recorded_attempt() {
         "no crossings are recorded outside a recorded attempt"
     );
 
-    let inside =
-        run_route_on_tier(Route::ProcessCancel, &ControllerOwnedTier::key_addressed()).await;
+    let registry = Arc::clone(&fixtures.registry);
+    let nested_sentinel = &sentinel;
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        crate::RuntimeEffectEnvelope::new(
+            attempt_invocation(),
+            crate::RuntimeEffectCommand::ToolAttempt {
+                call: prepared_tool_call(),
+                execution_grant: None,
+                attempt: 1,
+                max_attempts: 1,
+            },
+        ),
+        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            let command = crate::ProcessCommand::Cancel {
+                process_id: LIVE_PROCESS.to_string(),
+                reason: Some("test-only sentinel leak".to_string()),
+            };
+            let effect_id = command.effect_id();
+            crate::RuntimeEffectController::execute_effect(
+                nested_sentinel,
+                crate::RuntimeEffectEnvelope::new(
+                    crate::RuntimeInvocation::effect(
+                        crate::RuntimeScope::new(SESSION),
+                        effect_id.clone(),
+                        crate::RuntimeEffectKind::Process,
+                        effect_id,
+                    ),
+                    crate::RuntimeEffectCommand::process(command),
+                ),
+                crate::RuntimeEffectLocalExecutor::processes(registry, None),
+            )
+            .await?;
+            Ok(crate::RuntimeEffectOutcome::ToolAttempt {
+                launch: Box::new(crate::ToolAttemptLaunch::Done {
+                    record: Box::new(crate::ToolCallRecord {
+                        call_id: Some(CALL_ID.to_string()),
+                        tool: "attempt_atomicity".to_string(),
+                        args: serde_json::Value::Null,
+                        output: crate::ToolCallOutput::success(serde_json::json!("ok")),
+                        duration_ms: 0,
+                    }),
+                    intents: crate::ToolIntents::default(),
+                }),
+                triggers: Vec::new(),
+            })
+        }),
+    )
+    .await
+    .expect("test-only nested leak executes");
+    assert_eq!(
+        ledger.crossings_inside_attempt(),
+        vec!["execute_effect:process:process:cancel:attempt-atomicity-live".to_string()],
+        "the literal test-only leak proves the sentinel fails red when a command escapes"
+    );
+}
+
+/// Red proof for the permanent choke-point guard: if its attempt metadata is
+/// neutralized, the production-shaped route reaches the sentinel immediately.
+#[tokio::test]
+async fn sentinel_catches_a_process_route_when_the_guard_is_neutralized() {
+    let inside = run_route_on_tier_with_guard(
+        Route::ProcessCancel,
+        &ControllerOwnedTier::ordinal_addressed(),
+        false,
+    )
+    .await;
+    assert_eq!(inside.outcome, "cancel ok");
     assert_eq!(
         inside.crossings,
         vec!["execute_effect:process:process:cancel:attempt-atomicity-live".to_string()],
-        "the same command inside a recorded attempt is recorded as nested"
+        "neutralizing the guard must make the sentinel visibly red"
     );
+}
+
+/// Each admitted v1 declaration realizes exactly one controller command, and
+/// the sentinel attributes that command to the literal stable intent id.
+#[tokio::test]
+async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
+    let fixtures = fixtures().await;
+    let tier = ControllerOwnedTier::key_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let scoped = crate::ScopedEffectController::borrowed(
+        &sentinel,
+        crate::ExecutionScope::turn(SESSION, TURN),
+    )
+    .expect("scoped intent sentinel controller");
+    let tool = tool_context(scoped, &fixtures);
+    let mut dispatch = tool
+        .runtime_dispatch
+        .as_ref()
+        .map(|context| context.as_ref().clone())
+        .expect("runtime dispatch context");
+    dispatch.parent_invocation = Some(crate::RuntimeInvocation::effect(
+        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+        "intent-drain",
+        crate::RuntimeEffectKind::ToolBatch,
+        "intent-drain",
+    ));
+
+    let intents = crate::ToolIntents::v1(vec![
+        crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+            session_id: SESSION.to_string(),
+            request: crate::ProcessStartRequest::external(
+                "ignored-by-stable-intent-id",
+                crate::ProcessOriginator::host_scoped("intent-test"),
+                serde_json::json!({"step": "start"}),
+            ),
+            on_parent_end: crate::ProcessParentEndPolicy::Abandon,
+        })),
+        crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
+            session_id: SESSION.to_string(),
+            process_id: LIVE_PROCESS.to_string(),
+            signal_name: "resume".to_string(),
+            payload: serde_json::json!({"step": "signal"}),
+        }),
+        crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+            session_id: SESSION.to_string(),
+            process_id: LIVE_PROCESS.to_string(),
+            event_type: "attempt.atomicity.note".to_string(),
+            payload: serde_json::json!({"step": "event"}),
+        }),
+        crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
+            session_id: SESSION.to_string(),
+            process_id: LIVE_PROCESS.to_string(),
+            reason: Some("intent test complete".to_string()),
+        }),
+    ]);
+    let outcomes =
+        crate::tool_dispatch::execute_final_tool_intents(&dispatch, Some(CALL_ID), &intents, None)
+            .await;
+    assert_eq!(outcomes.len(), 4, "one typed outcome per intent");
+    let literal_ids = [
+        "tool-intent:v1:sha256:d637b38a6e29a2fdba6263273a49fe3cfc55b37ec8196c90a14293e46911cfde",
+        "tool-intent:v1:sha256:7dd01aae6fbd504ff82c32241f5070a31c25ff685469d12ff2c7b179bcc88a50",
+        "tool-intent:v1:sha256:96b311b993750b668dc3d87b7b2697d132ce6fe8f2b5f102c7f20f089220d64a",
+        "tool-intent:v1:sha256:d4e5390c7ffdc00fde49a69219a623f95c49146c8865ac27c20b10aa713325bc",
+    ];
+    let actual_ids = outcomes
+        .iter()
+        .map(|outcome| match outcome {
+            crate::ToolIntentExecutionOutcome::Executed { identity, .. } => {
+                identity.replay_key.as_str()
+            }
+            crate::ToolIntentExecutionOutcome::Refused { refusal, .. } => {
+                panic!("fixture intent was refused: {refusal:?}")
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual_ids, literal_ids);
+    for literal_id in literal_ids {
+        assert_eq!(
+            ledger.crossings_for_intent(literal_id).len(),
+            1,
+            "intent {literal_id} must issue exactly one command"
+        );
+    }
+}
+
+/// Literal overflow law: admission refuses the complete recorded batch and no
+/// process command reaches the controller.
+#[tokio::test]
+async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_commands() {
+    let fixtures = fixtures().await;
+    let tier = ControllerOwnedTier::key_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let scoped = crate::ScopedEffectController::borrowed(
+        &sentinel,
+        crate::ExecutionScope::turn(SESSION, TURN),
+    )
+    .expect("scoped overflow sentinel controller");
+    let tool = tool_context(scoped, &fixtures);
+    let dispatch = tool
+        .runtime_dispatch
+        .as_ref()
+        .map(|context| context.as_ref().clone())
+        .expect("runtime dispatch context");
+    let intents = crate::ToolIntents::v1(
+        (0..=crate::TOOL_INTENT_MAX_COUNT)
+            .map(|index| {
+                crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
+                    session_id: SESSION.to_string(),
+                    process_id: LIVE_PROCESS.to_string(),
+                    signal_name: "resume".to_string(),
+                    payload: serde_json::json!({"index": index}),
+                })
+            })
+            .collect(),
+    );
+    let outcomes =
+        crate::tool_dispatch::execute_final_tool_intents(&dispatch, Some(CALL_ID), &intents, None)
+            .await;
+    assert_eq!(outcomes.len(), 33, "every declaration gets a refusal");
+    assert!(outcomes.iter().all(|outcome| matches!(
+        outcome,
+        crate::ToolIntentExecutionOutcome::Refused {
+            refusal: crate::ToolIntentRefusalReason::CountBudgetExceeded {
+                actual: 33,
+                maximum: 32,
+            },
+            ..
+        }
+    )));
+    assert_eq!(
+        ledger.crossings_inside_attempt(),
+        Vec::<String>::new(),
+        "the drain is outside the attempt body"
+    );
+    for outcome in outcomes {
+        let identity = match outcome {
+            crate::ToolIntentExecutionOutcome::Refused {
+                identity: Some(identity),
+                ..
+            } => identity,
+            other => panic!("expected identity-bearing refusal, got {other:?}"),
+        };
+        assert_eq!(
+            ledger.crossings_for_intent(&identity.replay_key),
+            Vec::<String>::new(),
+            "over-budget admission issues zero commands"
+        );
+    }
 }

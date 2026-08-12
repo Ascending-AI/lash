@@ -39,6 +39,7 @@ mod test_watchdog;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod tool_dispatch;
+mod tool_intent;
 mod tool_provider;
 pub mod tool_registry;
 mod tool_result;
@@ -476,8 +477,8 @@ pub use lash_sansio::{
     TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
     ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
-    ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolManifest, ToolOutputContract,
-    ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
+    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
+    ToolManifest, ToolOutputContract, ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -933,9 +934,16 @@ pub(crate) use store::{
     GraphAppend, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
     SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
+pub use tool_intent::{
+    CancelProcessIntent, EmitProcessEventIntent, ProcessParentEndPolicy, SignalProcessIntent,
+    StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
+    TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptResult, ToolIntent, ToolIntents,
+    derive_tool_intent_identity,
+};
 pub use tool_provider::{
-    PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext,
-    ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall, PreparedToolBatch,
+    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,
+    ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 
 #[cfg(test)]

@@ -157,12 +157,15 @@ pub mod tools {
     /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
     pub use lash_core::ToolRetryPolicy;
     pub use lash_core::{
-        CancelHint, PendingCompletion, PreparedToolCall, TimeoutBehavior, ToolActivation,
-        ToolArgumentProjectionPolicy, ToolCall, ToolCallOutput, ToolCallRecord, ToolContext,
-        ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailure, ToolFailureClass,
-        ToolFailureSource, ToolManifest, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
-        ToolProvider, ToolResult, ToolRetryDisposition, ToolValue,
-        facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
+        AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall, CancelHint,
+        CancelProcessIntent, EmitProcessEventIntent, PendingCompletion, PreparedToolCall,
+        ProcessParentEndPolicy, SignalProcessIntent, StartProcessIntent, TimeoutBehavior,
+        ToolActivation, ToolArgumentProjectionPolicy, ToolAttemptResult, ToolCall, ToolCallOutput,
+        ToolCallRecord, ToolContext, ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailure,
+        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntents, ToolManifest,
+        ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolResult,
+        ToolRetryDisposition, ToolValue, facade_support::ToolSourceHandle,
+        facade_support::ToolTriggerClient,
     };
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,

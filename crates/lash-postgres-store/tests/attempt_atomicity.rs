@@ -84,6 +84,7 @@ fn attempt_outcome(call_id: &str, value: &str) -> RuntimeEffectOutcome {
                 output: lash_core::ToolCallOutput::success(serde_json::json!(value)),
                 duration_ms: 0,
             }),
+            intents: lash_core::ToolIntents::default(),
         }),
         triggers: Vec::new(),
     }
@@ -93,7 +94,7 @@ fn projected_output(outcome: &RuntimeEffectOutcome) -> String {
     let RuntimeEffectOutcome::ToolAttempt { launch, .. } = outcome else {
         panic!("expected a tool-attempt outcome");
     };
-    let lash_core::ToolAttemptLaunch::Done { record } = launch.as_ref() else {
+    let lash_core::ToolAttemptLaunch::Done { record, .. } = launch.as_ref() else {
         panic!("expected a completed tool attempt");
     };
     record.output.value_for_projection().to_string()

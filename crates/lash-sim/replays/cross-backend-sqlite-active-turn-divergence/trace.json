@@ -6971,6 +6971,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/001",
@@ -8033,6 +8037,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/001",
@@ -8322,6 +8330,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/002",
@@ -8549,6 +8561,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/002",
@@ -9030,6 +9046,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/001",
@@ -9610,6 +9630,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/001",
@@ -9888,6 +9912,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/002",
@@ -9974,6 +10002,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/002",
@@ -11733,6 +11765,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/003",
@@ -11819,6 +11855,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/003",
@@ -15381,6 +15421,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/001",
@@ -15467,6 +15511,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/001",
@@ -16121,6 +16169,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/002",
@@ -16207,6 +16259,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/002",
@@ -17669,6 +17725,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/003",
@@ -17755,6 +17815,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/002",
@@ -18137,6 +18201,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/004",
@@ -18370,6 +18438,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/001",
@@ -19131,6 +19203,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/003",
@@ -19217,6 +19293,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/001",
@@ -19303,6 +19383,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/002",
@@ -19389,6 +19473,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/004",
@@ -19537,6 +19625,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/003",
@@ -19623,6 +19715,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/003",
@@ -21018,6 +21114,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/004",
@@ -21104,6 +21204,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/004",
@@ -21190,6 +21294,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/003",
@@ -21276,6 +21384,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/003",
@@ -22388,6 +22500,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/005",
@@ -22474,6 +22590,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/005",
@@ -22935,6 +23055,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/006",
@@ -23021,6 +23145,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/006",
@@ -23387,6 +23515,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/004",
@@ -23473,6 +23605,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/004",
@@ -23821,6 +23957,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/004",
@@ -23907,6 +24047,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/004",
@@ -24702,6 +24846,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/007",
@@ -24788,6 +24936,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/007",
@@ -26143,6 +26295,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/005",
@@ -26229,6 +26385,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/005",
@@ -27307,6 +27467,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/005",
@@ -27393,6 +27557,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/005",
@@ -27479,6 +27647,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/008",
@@ -27565,6 +27737,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/008",
@@ -27651,6 +27827,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/006",
@@ -27737,6 +27917,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/006",
@@ -28187,6 +28371,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/009",
@@ -28273,6 +28461,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-002/009",
@@ -28780,6 +28972,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/007",
@@ -28866,6 +29062,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/007",
@@ -29114,6 +29314,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/008",
@@ -29200,6 +29404,10 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "protocol_version": 1,
+              "intents": []
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/008",

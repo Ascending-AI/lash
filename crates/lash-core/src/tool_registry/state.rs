@@ -213,6 +213,20 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         args: &serde_json::Value,
         context: &ToolContext<'_>,
     ) -> ToolResult;
+    fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
+        false
+    }
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        let _ = (args, context);
+        crate::ToolAttemptResult::without_intents(ToolResult::err_fmt(format_args!(
+            "AttemptContext execution is unsupported for tool id `{tool_id}`"
+        )))
+    }
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,

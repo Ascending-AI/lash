@@ -82,10 +82,13 @@ impl RuntimeSessionServices {
                 process_id: registration.id.clone(),
             },
             Some(await_cancellation.clone()),
-            || {
+            None,
+            None,
+            |completion_key| {
                 crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
                     Arc::clone(&dispatch),
                     tool_context.clone(),
+                    completion_key,
                 )
             },
         )

@@ -18,8 +18,8 @@ use lash_core::runtime::QueuedWorkClaimBoundary;
 use lash_core::{
     AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin,
     MessageRole, PluginMessage, PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput,
-    ToolFailure, ToolFailureClass, TurnActivity, TurnActivityId, TurnCause, TurnEvent,
-    TurnInputApplication,
+    ToolFailure, ToolFailureClass, ToolIntentExecutionOutcome, ToolIntentIdentity,
+    ToolIntentKind, TurnActivity, TurnActivityId, TurnCause, TurnEvent, TurnInputApplication,
 };
 use serde_json::json;
 
@@ -37,6 +37,7 @@ fn expected_type_tag(event: &TurnEvent) -> &'static str {
         TurnEvent::CodeBlockCompleted { .. } => "code_block_completed",
         TurnEvent::ToolCallStarted { .. } => "tool_call_started",
         TurnEvent::ToolCallCompleted { .. } => "tool_call_completed",
+        TurnEvent::ToolIntentOutcome { .. } => "tool_intent_outcome",
         TurnEvent::FinalValue { .. } => "final_value",
         TurnEvent::ToolValue { .. } => "tool_value",
         TurnEvent::Usage { .. } => "usage",
@@ -62,6 +63,7 @@ const ALL_TURN_EVENT_TAGS: &[&str] = &[
     "code_block_completed",
     "tool_call_started",
     "tool_call_completed",
+    "tool_intent_outcome",
     "final_value",
     "tool_value",
     "usage",
@@ -349,6 +351,39 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                     },
                 },
                 "duration_ms": 7,
+            }),
+        ),
+        (
+            "tool_intent_outcome",
+            TurnEvent::ToolIntentOutcome {
+                call_id: "call-1".to_string(),
+                outcome: ToolIntentExecutionOutcome::Executed {
+                    identity: ToolIntentIdentity {
+                        session_id: "session-1".to_string(),
+                        turn_id: "turn-1".to_string(),
+                        tool_call_id: "call-1".to_string(),
+                        intent_index: 0,
+                        replay_key: "tool-intent:v1:sha256:literal".to_string(),
+                    },
+                    kind: ToolIntentKind::StartProcess,
+                    result: json!({"process_id": "p-1"}),
+                },
+            },
+            json!({
+                "type": "tool_intent_outcome",
+                "call_id": "call-1",
+                "outcome": {
+                    "status": "executed",
+                    "identity": {
+                        "session_id": "session-1",
+                        "turn_id": "turn-1",
+                        "tool_call_id": "call-1",
+                        "intent_index": 0,
+                        "replay_key": "tool-intent:v1:sha256:literal",
+                    },
+                    "kind": "start_process",
+                    "result": {"process_id": "p-1"},
+                },
             }),
         ),
         (

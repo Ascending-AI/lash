@@ -2,6 +2,7 @@ mod attempt_coordinator;
 mod context;
 mod directives;
 mod execution;
+mod intent_executor;
 mod preparation;
 mod retry;
 mod scheduling;
@@ -10,7 +11,9 @@ mod tests;
 
 pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};
 
-pub(crate) use attempt_coordinator::{ToolAttemptEffectIdentity, coordinate_tool_invocation};
+pub(crate) use attempt_coordinator::{
+    BatchIntentDrainGate, IntentDrainSlot, ToolAttemptEffectIdentity, coordinate_tool_invocation,
+};
 pub(crate) use context::{
     CheckpointMessageBuffer, PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchOutcome,
     ToolPreparationOutcome, ToolTriggerOutcomeBuffer,
@@ -20,6 +23,7 @@ pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_co
 pub(crate) use execution::{
     execute_prepared_tool_attempt_effect, finalize_tool_result_with_execution_context,
 };
+pub(crate) use intent_executor::execute_final_tool_intents;
 #[cfg(test)]
 pub(crate) use preparation::dispatch_tool_call;
 #[cfg(test)]

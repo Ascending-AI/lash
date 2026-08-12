@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) mod control;
 mod controller_error;
+mod process_local;
 mod scoped;
 mod task_panic;
 mod trigger;
@@ -107,123 +108,6 @@ pub struct ProcessLocalExecution {
     pub turn_cancellation: Option<ProcessTurnCancellation>,
 }
 
-impl ProcessLocalExecution {
-    pub async fn execute(
-        self,
-        command: ProcessCommand,
-    ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
-        let Self {
-            registry,
-            process_work_driver,
-            turn_cancellation,
-        } = self;
-        match command {
-            ProcessCommand::Start {
-                registration,
-                observers,
-                execution_context: _,
-            } => {
-                let record =
-                    InlineRuntimeEffectController::start_process(registry, registration, observers)
-                        .await?;
-                if let Some(driver) = process_work_driver.as_ref() {
-                    driver.claim_and_run_pending("process_start").await?;
-                }
-                Ok(ProcessEffectOutcome::Start {
-                    record: Box::new(record),
-                })
-            }
-            ProcessCommand::List {
-                session_scope,
-                mode,
-            } => {
-                let entries = match mode {
-                    crate::ProcessListMode::Live => {
-                        registry
-                            .list_live_observed_by(&session_scope.session_id)
-                            .await?
-                    }
-                    crate::ProcessListMode::All => {
-                        registry.list_observed_by(&session_scope.session_id).await?
-                    }
-                };
-                Ok(ProcessEffectOutcome::List { entries })
-            }
-            ProcessCommand::Transfer {
-                from_scope,
-                to_scope,
-                process_ids,
-            } => {
-                registry
-                    .transfer_observers(
-                        &from_scope.session_id,
-                        &to_scope.session_id,
-                        &process_ids,
-                        crate::ProcessObserverBy::host("runtime-effect-transfer"),
-                    )
-                    .await?;
-                Ok(ProcessEffectOutcome::Transfer)
-            }
-            ProcessCommand::DeleteSession { session_id } => {
-                let report = registry.delete_session_process_state(&session_id).await?;
-                Ok(ProcessEffectOutcome::DeleteSession { report })
-            }
-            ProcessCommand::Await { process_id } => {
-                let await_terminal = || async {
-                    if let Some(driver) = process_work_driver.as_ref() {
-                        driver.await_terminal(&process_id).await
-                    } else {
-                        crate::ProcessAwaiter::polling(Arc::clone(&registry))
-                            .await_terminal(&process_id)
-                            .await
-                    }
-                };
-                let output = if let Some(turn_cancellation) = turn_cancellation {
-                    tokio::select! {
-                        biased;
-                        output = await_terminal() => output?,
-                        _ = turn_cancellation.cancellation.cancelled() => {
-                            InlineRuntimeEffectController::request_process_cancel(
-                                Arc::clone(&registry),
-                                &process_id,
-                                Some("turn cancelled while awaiting process".to_string()),
-                            )
-                            .await?;
-                            await_terminal().await?
-                        }
-                    }
-                } else {
-                    await_terminal().await?
-                };
-                Ok(ProcessEffectOutcome::Await {
-                    output: Box::new(output),
-                })
-            }
-            ProcessCommand::Cancel { process_id, reason } => {
-                let record = InlineRuntimeEffectController::request_process_cancel(
-                    registry,
-                    &process_id,
-                    reason,
-                )
-                .await?;
-                Ok(ProcessEffectOutcome::Cancel {
-                    record: Box::new(record),
-                })
-            }
-            ProcessCommand::Signal {
-                process_id,
-                request,
-                ..
-            } => {
-                let result = registry.append_event(&process_id, request).await?;
-                Ok(ProcessEffectOutcome::Signal {
-                    event: Box::new(result.event),
-                })
-            }
-        }
-    }
-}
-
 #[allow(private_interfaces)]
 pub(crate) struct TurnEffectStateUpdate {
     pub(crate) policy: crate::RuntimeSessionPolicy,
@@ -251,11 +135,13 @@ pub(super) struct LocalDirectEffectRunner {
 struct LocalToolBatchEffectRunner<'run> {
     context: crate::RuntimeExecutionContext<'run>,
     child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+    completion_key: Option<crate::AwaitEventKey>,
 }
 
 struct LocalPreparedToolAttemptEffectRunner<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     tool_context: crate::ToolContext<'run>,
+    completion_key: Option<crate::AwaitEventKey>,
 }
 
 struct RemoteEffectRunner {
@@ -580,6 +466,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub(crate) fn tool_batch(
         context: crate::RuntimeExecutionContext<'run>,
         child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+        completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = context.replay_validation_trace();
         if let Some(context) = context.to_static() {
@@ -588,6 +475,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     LocalToolBatchEffectRunner {
                         context,
                         child_trace_hooks,
+                        completion_key,
                     },
                 )),
                 replay_trace,
@@ -597,6 +485,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Runner(Box::new(LocalToolBatchEffectRunner {
                 context,
                 child_trace_hooks,
+                completion_key,
             })),
             replay_trace,
         }
@@ -605,6 +494,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub(crate) fn prepared_tool_attempt(
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
         tool_context: crate::ToolContext<'run>,
+        completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = tool_context.replay_validation_trace();
         if let (Some(dispatch), Some(tool_context)) =
@@ -615,6 +505,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     LocalPreparedToolAttemptEffectRunner {
                         dispatch: Arc::new(dispatch),
                         tool_context,
+                        completion_key,
                     },
                 )),
                 replay_trace,
@@ -625,6 +516,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 LocalPreparedToolAttemptEffectRunner {
                     dispatch,
                     tool_context,
+                    completion_key,
                 },
             )),
             replay_trace,
@@ -993,6 +885,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                     max_attempts,
                     envelope.invocation,
                     child_execution_trace_hook,
+                    self.completion_key,
                 ))
                 .await?;
                 Ok(RuntimeEffectOutcome::ToolAttempt {
@@ -1040,6 +933,7 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         let tool_context = self
             .tool_context
             .with_attempt_dispatch(Arc::clone(&dispatch), envelope.invocation);
+        tool_context.install_prederived_completion_key(self.completion_key);
         let outcome = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
             dispatch.as_ref(),
             call,

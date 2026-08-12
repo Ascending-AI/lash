@@ -513,6 +513,10 @@ pub enum ProcessCommand {
         signal_id: String,
         request: crate::ProcessEventAppendRequest,
     },
+    EmitEvent {
+        process_id: String,
+        request: crate::ProcessEventAppendRequest,
+    },
 }
 
 fn boxed_process_execution_context_is_empty(context: &ProcessExecutionContext) -> bool {
@@ -571,6 +575,17 @@ impl ProcessCommand {
             } => {
                 format!("process:signal:{process_id}:signal.{signal_name}:{signal_id}")
             }
+            Self::EmitEvent {
+                process_id,
+                request,
+            } => format!(
+                "process:emit-event:{process_id}:{}",
+                request
+                    .replay
+                    .as_ref()
+                    .map(|replay| replay.key.as_str())
+                    .unwrap_or("missing-replay-key")
+            ),
         }
     }
 }
@@ -603,6 +618,9 @@ pub enum ProcessEffectOutcome {
     Signal {
         // Boxed for the same reason as the record variants: a fat event should
         // not size the outcome enum inline through the recursive executor.
+        event: Box<crate::ProcessEvent>,
+    },
+    EmitEvent {
         event: Box<crate::ProcessEvent>,
     },
 }
@@ -644,6 +662,7 @@ pub enum ToolCallLaunch {
 pub enum ToolAttemptLaunch {
     Done {
         record: Box<crate::ToolCallRecord>,
+        intents: crate::ToolIntents,
     },
     Pending {
         // See `ToolCallLaunch::Pending`.

@@ -72318,3 +72318,1311 @@ area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/commit_budget.rs:17#assert_eq!(host.durability.queued_work_batching, batching);"
 assertion = "examples/agent-workbench/src/main_sections/tests/commit_budget.rs:17#assert_eq!(host.durability.queued_work_batching, batching);"
+
+[[api]]
+symbol = "lash::TurnEvent::ToolIntentOutcome"
+kind = "variant"
+aliases = ["lash::prelude::TurnEvent::ToolIntentOutcome", "lash_core::TurnEvent::ToolIntentOutcome"]
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Observation schema consumed by host event-stream clients; examples do not implement an event-stream consumer."
+
+[[api]]
+symbol = "lash::TurnEvent::ToolIntentOutcome::call_id"
+kind = "field"
+aliases = ["lash::prelude::TurnEvent::ToolIntentOutcome::call_id", "lash_core::TurnEvent::ToolIntentOutcome::call_id"]
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Observation schema consumed by host event-stream clients; examples do not implement an event-stream consumer."
+
+[[api]]
+symbol = "lash::TurnEvent::ToolIntentOutcome::outcome"
+kind = "field"
+aliases = ["lash::prelude::TurnEvent::ToolIntentOutcome::outcome", "lash_core::TurnEvent::ToolIntentOutcome::outcome"]
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Observation schema consumed by host event-stream clients; examples do not implement an event-stream consumer."
+
+[[api]]
+symbol = "lash::process::ProcessService::cancel_with_reason"
+kind = "function"
+aliases = ["lash_core::ProcessService::cancel_with_reason"]
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Durable process-host contract used by the tool-intent executor; examples do not implement alternative process substrates."
+
+[[api]]
+symbol = "lash::process::ProcessService::emit_event"
+kind = "function"
+aliases = ["lash_core::ProcessService::emit_event"]
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Durable process-host contract used by the tool-intent executor; examples do not implement alternative process substrates."
+
+[[api]]
+symbol = "lash::process::ProcessService::list_visible_for_attempt"
+kind = "function"
+aliases = ["lash_core::ProcessService::list_visible_for_attempt"]
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Durable process-host contract used by the tool-intent executor; examples do not implement alternative process substrates."
+
+[[api]]
+symbol = "lash::remote::usage::RemoteTurnEvent::ToolIntentOutcome"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Remote observation schema consumed by event-stream clients; examples do not implement a remote event consumer."
+
+[[api]]
+symbol = "lash::remote::usage::RemoteTurnEvent::ToolIntentOutcome::call_id"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Remote observation schema consumed by event-stream clients; examples do not implement a remote event consumer."
+
+[[api]]
+symbol = "lash::remote::usage::RemoteTurnEvent::ToolIntentOutcome::outcome"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Remote observation schema consumed by event-stream clients; examples do not implement a remote event consumer."
+
+[[api]]
+symbol = "lash::runtime::ProcessCommand::EmitEvent"
+kind = "variant"
+aliases = ["lash_core::ProcessCommand::EmitEvent"]
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Durable process-host contract used by the tool-intent executor; examples do not implement alternative process substrates."
+
+[[api]]
+symbol = "lash::runtime::ProcessCommand::EmitEvent::process_id"
+kind = "field"
+aliases = ["lash_core::ProcessCommand::EmitEvent::process_id"]
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Durable process-host contract used by the tool-intent executor; examples do not implement alternative process substrates."
+
+[[api]]
+symbol = "lash::runtime::ProcessCommand::EmitEvent::request"
+kind = "field"
+aliases = ["lash_core::ProcessCommand::EmitEvent::request"]
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Durable process-host contract used by the tool-intent executor; examples do not implement alternative process substrates."
+
+[[api]]
+symbol = "lash::runtime::ProcessEffectOutcome::EmitEvent"
+kind = "variant"
+aliases = ["lash_core::ProcessEffectOutcome::EmitEvent"]
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Durable process-host contract used by the tool-intent executor; examples do not implement alternative process substrates."
+
+[[api]]
+symbol = "lash::runtime::ProcessEffectOutcome::EmitEvent::event"
+kind = "field"
+aliases = ["lash_core::ProcessEffectOutcome::EmitEvent::event"]
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Durable process-host contract used by the tool-intent executor; examples do not implement alternative process substrates."
+
+[[api]]
+symbol = "lash::tools::AttemptContext"
+kind = "struct"
+aliases = ["lash_core::AttemptContext"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::agent_frame_id"
+kind = "function"
+aliases = ["lash_core::AttemptContext::agent_frame_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::async_process_id"
+kind = "function"
+aliases = ["lash_core::AttemptContext::async_process_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::attachments"
+kind = "function"
+aliases = ["lash_core::AttemptContext::attachments"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::attempt_number"
+kind = "function"
+aliases = ["lash_core::AttemptContext::attempt_number"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::cancellation_token"
+kind = "function"
+aliases = ["lash_core::AttemptContext::cancellation_token"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::completion_key"
+kind = "function"
+aliases = ["lash_core::AttemptContext::completion_key"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::decode_prepared_payload"
+kind = "function"
+aliases = ["lash_core::AttemptContext::decode_prepared_payload"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::direct_completions"
+kind = "function"
+aliases = ["lash_core::AttemptContext::direct_completions"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::intent_identity"
+kind = "function"
+aliases = ["lash_core::AttemptContext::intent_identity"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::max_attempts"
+kind = "function"
+aliases = ["lash_core::AttemptContext::max_attempts"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::named_phase"
+kind = "function"
+aliases = ["lash_core::AttemptContext::named_phase"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::prepared_payload"
+kind = "function"
+aliases = ["lash_core::AttemptContext::prepared_payload"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::processes"
+kind = "function"
+aliases = ["lash_core::AttemptContext::processes"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::provider"
+kind = "function"
+aliases = ["lash_core::AttemptContext::provider"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::replay_key"
+kind = "function"
+aliases = ["lash_core::AttemptContext::replay_key"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::runtime_process_id"
+kind = "function"
+aliases = ["lash_core::AttemptContext::runtime_process_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::session_id"
+kind = "function"
+aliases = ["lash_core::AttemptContext::session_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::sessions"
+kind = "function"
+aliases = ["lash_core::AttemptContext::sessions"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::tool_call_id"
+kind = "function"
+aliases = ["lash_core::AttemptContext::tool_call_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::tool_execution_binding"
+kind = "function"
+aliases = ["lash_core::AttemptContext::tool_execution_binding"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptContext::turn_id"
+kind = "function"
+aliases = ["lash_core::AttemptContext::turn_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptProcessReads"
+kind = "struct"
+aliases = ["lash_core::AttemptProcessReads"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptProcessReads::list_handles_filtered"
+kind = "function"
+aliases = ["lash_core::AttemptProcessReads::list_handles_filtered"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptSessionReads"
+kind = "struct"
+aliases = ["lash_core::AttemptSessionReads"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptSessionReads::model"
+kind = "function"
+aliases = ["lash_core::AttemptSessionReads::model"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptSessionReads::shared_tool_catalog"
+kind = "function"
+aliases = ["lash_core::AttemptSessionReads::shared_tool_catalog"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptSessionReads::snapshot"
+kind = "function"
+aliases = ["lash_core::AttemptSessionReads::snapshot"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptSessionReads::snapshot_current"
+kind = "function"
+aliases = ["lash_core::AttemptSessionReads::snapshot_current"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptSessionReads::tool_catalog"
+kind = "function"
+aliases = ["lash_core::AttemptSessionReads::tool_catalog"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptToolCall"
+kind = "struct"
+aliases = ["lash_core::AttemptToolCall"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptToolCall::args"
+kind = "field"
+aliases = ["lash_core::AttemptToolCall::args"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptToolCall::context"
+kind = "field"
+aliases = ["lash_core::AttemptToolCall::context"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::AttemptToolCall::name"
+kind = "field"
+aliases = ["lash_core::AttemptToolCall::name"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::CancelProcessIntent"
+kind = "struct"
+aliases = ["lash_core::CancelProcessIntent"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::CancelProcessIntent::process_id"
+kind = "field"
+aliases = ["lash_core::CancelProcessIntent::process_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::CancelProcessIntent::reason"
+kind = "field"
+aliases = ["lash_core::CancelProcessIntent::reason"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::CancelProcessIntent::session_id"
+kind = "field"
+aliases = ["lash_core::CancelProcessIntent::session_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::EmitProcessEventIntent"
+kind = "struct"
+aliases = ["lash_core::EmitProcessEventIntent"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::EmitProcessEventIntent::event_type"
+kind = "field"
+aliases = ["lash_core::EmitProcessEventIntent::event_type"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::EmitProcessEventIntent::payload"
+kind = "field"
+aliases = ["lash_core::EmitProcessEventIntent::payload"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::EmitProcessEventIntent::process_id"
+kind = "field"
+aliases = ["lash_core::EmitProcessEventIntent::process_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::EmitProcessEventIntent::session_id"
+kind = "field"
+aliases = ["lash_core::EmitProcessEventIntent::session_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ProcessParentEndPolicy"
+kind = "enum"
+aliases = ["lash_core::ProcessParentEndPolicy"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ProcessParentEndPolicy::Abandon"
+kind = "variant"
+aliases = ["lash_core::ProcessParentEndPolicy::Abandon"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ProcessParentEndPolicy::Cancel"
+kind = "variant"
+aliases = ["lash_core::ProcessParentEndPolicy::Cancel"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ProcessParentEndPolicy::Terminate"
+kind = "variant"
+aliases = ["lash_core::ProcessParentEndPolicy::Terminate"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::SignalProcessIntent"
+kind = "struct"
+aliases = ["lash_core::SignalProcessIntent"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::SignalProcessIntent::payload"
+kind = "field"
+aliases = ["lash_core::SignalProcessIntent::payload"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::SignalProcessIntent::process_id"
+kind = "field"
+aliases = ["lash_core::SignalProcessIntent::process_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::SignalProcessIntent::session_id"
+kind = "field"
+aliases = ["lash_core::SignalProcessIntent::session_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::SignalProcessIntent::signal_name"
+kind = "field"
+aliases = ["lash_core::SignalProcessIntent::signal_name"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::StartProcessIntent"
+kind = "struct"
+aliases = ["lash_core::StartProcessIntent"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::StartProcessIntent::on_parent_end"
+kind = "field"
+aliases = ["lash_core::StartProcessIntent::on_parent_end"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::StartProcessIntent::request"
+kind = "field"
+aliases = ["lash_core::StartProcessIntent::request"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::StartProcessIntent::session_id"
+kind = "field"
+aliases = ["lash_core::StartProcessIntent::session_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult"
+kind = "struct"
+aliases = ["lash_core::ToolAttemptResult"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::intents"
+kind = "field"
+aliases = ["lash_core::ToolAttemptResult::intents"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::new"
+kind = "function"
+aliases = ["lash_core::ToolAttemptResult::new"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::result"
+kind = "field"
+aliases = ["lash_core::ToolAttemptResult::result"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolAttemptResult::without_intents"
+kind = "function"
+aliases = ["lash_core::ToolAttemptResult::without_intents"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent"
+kind = "enum"
+aliases = ["lash_core::ToolIntent"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::CancelProcess"
+kind = "variant"
+aliases = ["lash_core::ToolIntent::CancelProcess"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::CancelProcess::0"
+kind = "field"
+aliases = ["lash_core::ToolIntent::CancelProcess::0"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::EmitProcessEvent"
+kind = "variant"
+aliases = ["lash_core::ToolIntent::EmitProcessEvent"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::EmitProcessEvent::0"
+kind = "field"
+aliases = ["lash_core::ToolIntent::EmitProcessEvent::0"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::SignalProcess"
+kind = "variant"
+aliases = ["lash_core::ToolIntent::SignalProcess"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::SignalProcess::0"
+kind = "field"
+aliases = ["lash_core::ToolIntent::SignalProcess::0"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::StartProcess"
+kind = "variant"
+aliases = ["lash_core::ToolIntent::StartProcess"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::StartProcess::0"
+kind = "field"
+aliases = ["lash_core::ToolIntent::StartProcess::0"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::kind"
+kind = "function"
+aliases = ["lash_core::ToolIntent::kind"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::session_id"
+kind = "function"
+aliases = ["lash_core::ToolIntent::session_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntents"
+kind = "struct"
+aliases = ["lash_core::ToolIntents"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntents::intents"
+kind = "field"
+aliases = ["lash_core::ToolIntents::intents"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntents::is_empty"
+kind = "function"
+aliases = ["lash_core::ToolIntents::is_empty"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntents::protocol_version"
+kind = "field"
+aliases = ["lash_core::ToolIntents::protocol_version"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolIntents::v1"
+kind = "function"
+aliases = ["lash_core::ToolIntents::v1"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::execute_attempt"
+kind = "function"
+aliases = ["lash_core::ToolProvider::execute_attempt"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::execute_attempt_by_id"
+kind = "function"
+aliases = ["lash_core::ToolProvider::execute_attempt_by_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::execute_granted_attempt"
+kind = "function"
+aliases = ["lash_core::ToolProvider::execute_granted_attempt"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::supports_attempt_context"
+kind = "function"
+aliases = ["lash_core::ToolProvider::supports_attempt_context"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+
+[[api]]
+symbol = "lash_core::TOOL_INTENT_MAX_CANONICAL_BYTES"
+kind = "constant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::TOOL_INTENT_MAX_COUNT"
+kind = "constant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::TOOL_INTENT_MAX_PER_KIND"
+kind = "constant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::TOOL_INTENT_PROTOCOL_V1"
+kind = "constant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolAttemptLaunch::Done::intents"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Executed"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Executed::identity"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Executed::kind"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Executed::result"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Refused"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Refused::identity"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Refused::intent_index"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Refused::kind"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::Refused::refusal"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::kind"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentExecutionOutcome::model_addendum"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentIdentity"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentIdentity::intent_index"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentIdentity::replay_key"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentIdentity::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentIdentity::tool_call_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentIdentity::turn_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentKind"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentKind::CancelProcess"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentKind::EmitProcessEvent"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentKind::SignalProcess"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentKind::StartProcess"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentKind::as_str"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CanonicalByteBudgetExceeded"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CanonicalByteBudgetExceeded::actual"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CanonicalByteBudgetExceeded::maximum"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CommandFailed"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CommandFailed::code"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CommandFailed::message"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CountBudgetExceeded"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CountBudgetExceeded::actual"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::CountBudgetExceeded::maximum"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::IntentIndexOverflow"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::MissingToolCallId"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::PerKindBudgetExceeded"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::PerKindBudgetExceeded::actual"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::PerKindBudgetExceeded::kind"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::PerKindBudgetExceeded::maximum"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::SessionMismatch"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::SessionMismatch::expected"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::SessionMismatch::recorded"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::UnsupportedProtocolVersion"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::UnsupportedProtocolVersion::recorded"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentRefusalReason::code"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::derive_tool_intent_identity"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::tool_provider::session::ToolSessionModel"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::tool_provider::session::ToolSessionModel::generation"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::tool_provider::session::ToolSessionModel::model"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::tool_provider::session::ToolSessionModel::model_capability"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::tool_provider::session::ToolSessionModel::model_variant"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."

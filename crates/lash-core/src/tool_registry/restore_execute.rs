@@ -282,6 +282,24 @@ impl ToolProvider for ToolRegistry {
             .await
     }
 
+    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
+        self.resolve_execution_source(tool_id)
+            .is_ok_and(|(source, _)| source.supports_attempt_context(tool_id))
+    }
+
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        let (source, _) = match self.resolve_execution_source(tool_id) {
+            Ok(resolved) => resolved,
+            Err(result) => return crate::ToolAttemptResult::without_intents(result),
+        };
+        source.execute_attempt_by_id(tool_id, args, context).await
+    }
+
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
@@ -310,6 +328,21 @@ impl ToolProvider for ToolRegistry {
         };
         source
             .execute_by_id(&grant.manifest.id, args, context)
+            .await
+    }
+
+    async fn execute_granted_attempt(
+        &self,
+        grant: &ToolExecutionGrant,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        let source = match self.resolve_granted_execution_source(grant) {
+            Ok(source) => source,
+            Err(result) => return crate::ToolAttemptResult::without_intents(result),
+        };
+        source
+            .execute_attempt_by_id(&grant.manifest.id, args, context)
             .await
     }
 }

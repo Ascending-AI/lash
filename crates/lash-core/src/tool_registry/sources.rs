@@ -210,6 +210,27 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
             .await
     }
 
+    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
+        self.provider_index_for_id(tool_id)
+            .is_some_and(|index| self.providers[index].supports_attempt_context(tool_id))
+    }
+
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
+            return crate::ToolAttemptResult::without_intents(ToolResult::err_fmt(format_args!(
+                "Unknown tool id: {tool_id}"
+            )));
+        };
+        self.providers[provider_idx]
+            .execute_attempt_by_id(tool_id, args, context)
+            .await
+    }
+
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
@@ -283,6 +304,21 @@ impl ToolSourceExecutor for ToolProviderSource {
                 args,
                 context,
             })
+            .await
+    }
+
+    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
+        self.provider.supports_attempt_context(tool_id)
+    }
+
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        self.provider
+            .execute_attempt_by_id(tool_id, args, context)
             .await
     }
 

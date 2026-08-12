@@ -411,6 +411,12 @@ impl<'run> RuntimeExecutionContext<'run> {
         crate::runtime::RuntimeNamedPhase::begin(self.turn_phase_probe.clone(), phase)
     }
 
+    pub(crate) fn attempt_phase_probe(
+        &self,
+    ) -> Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>> {
+        self.turn_phase_probe.clone()
+    }
+
     pub(crate) fn with_cancellation_token(mut self, cancellation_token: CancellationToken) -> Self {
         self.cancellation_token = Some(cancellation_token);
         self

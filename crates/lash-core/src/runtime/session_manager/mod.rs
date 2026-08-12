@@ -14,6 +14,7 @@ mod process_runners;
 mod turns;
 mod usage;
 
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use process_runners::guard_process_command_in_recorded_body;
 
 pub use direct::DirectCompletionClient;

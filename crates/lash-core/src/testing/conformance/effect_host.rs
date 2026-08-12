@@ -1631,6 +1631,7 @@ fn replay_conformance_tool_attempt_outcome(
                 })),
                 duration_ms: 0,
             }),
+            intents: crate::ToolIntents::default(),
         }),
         triggers: Vec::new(),
     }
@@ -1675,7 +1676,7 @@ fn assert_replay_conformance_tool_attempt_marker(
     let RuntimeEffectOutcome::ToolAttempt { launch, .. } = outcome else {
         panic!("expected tool-attempt effect outcome");
     };
-    let crate::ToolAttemptLaunch::Done { record } = *launch else {
+    let crate::ToolAttemptLaunch::Done { record, .. } = *launch else {
         panic!("expected completed tool-attempt launch");
     };
     assert_eq!(record.call_id.as_deref(), Some(expected_call_id));

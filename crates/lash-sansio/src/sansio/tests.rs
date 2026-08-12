@@ -201,6 +201,7 @@ fn completed_tool(
             parts: vec![ModelToolReturnPart::text(format!("{tool_name} result"))],
         },
         duration_ms: 1,
+        intent_outcomes: Vec::new(),
         replay: None,
     }
 }

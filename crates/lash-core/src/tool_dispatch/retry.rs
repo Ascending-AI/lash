@@ -7,14 +7,14 @@ use lash_sansio::core_support::*;
 
 use super::context::ToolDispatchContext;
 
-pub(super) async fn execute_tool_attempt<'run>(
+pub(super) async fn execute_leaf_tool_attempt<'run>(
     context: &ToolDispatchContext<'run>,
     manifest: &ToolManifest,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
     attempt: u32,
     max_attempts: u32,
-) -> ToolResult {
+) -> crate::ToolAttemptResult {
     let tool_name = manifest.name.as_str();
     execute_once(
         context,
@@ -24,14 +24,14 @@ pub(super) async fn execute_tool_attempt<'run>(
     .await
 }
 
-pub(super) async fn execute_granted_tool_attempt<'run>(
+pub(super) async fn execute_granted_leaf_tool_attempt<'run>(
     context: &ToolDispatchContext<'run>,
     grant: &crate::ToolExecutionGrant,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
     attempt: u32,
     max_attempts: u32,
-) -> ToolResult {
+) -> crate::ToolAttemptResult {
     let tool_name = grant.manifest.name.as_str();
     execute_granted_once(
         context,
@@ -46,18 +46,25 @@ async fn execute_once<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
-) -> ToolResult {
+) -> crate::ToolAttemptResult {
     let args = &prepared.args;
-    let mut result = std::panic::AssertUnwindSafe(context.tools.execute_by_id(
-        &prepared.tool_id,
-        args,
-        &tool_context,
-    ))
-    .catch_unwind()
-    .await
-    .unwrap_or_else(tool_panicked);
-    normalize_tool_result_attachments(context, &prepared.tool_name, &mut result).await;
-    result
+    let mut attempt_result = if context.tools.supports_attempt_context(&prepared.tool_id) {
+        execute_with_attempt_context(context, prepared, &tool_context).await
+    } else {
+        crate::ToolAttemptResult::without_intents(
+            std::panic::AssertUnwindSafe(context.tools.execute_by_id(
+                &prepared.tool_id,
+                args,
+                &tool_context,
+            ))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(tool_panicked),
+        )
+    };
+    normalize_tool_result_attachments(context, &prepared.tool_name, &mut attempt_result.result)
+        .await;
+    attempt_result
 }
 
 async fn execute_granted_once<'run>(
@@ -65,17 +72,92 @@ async fn execute_granted_once<'run>(
     grant: &crate::ToolExecutionGrant,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
-) -> ToolResult {
-    let mut result = std::panic::AssertUnwindSafe(context.tools.execute_granted(
-        grant,
+) -> crate::ToolAttemptResult {
+    let mut attempt_result = if context.tools.supports_attempt_context(&prepared.tool_id) {
+        let attempt_context = build_attempt_context(prepared, &tool_context).await;
+        match attempt_context {
+            Ok(attempt_context) => std::panic::AssertUnwindSafe(
+                context
+                    .tools
+                    .execute_granted_attempt(grant, &prepared.args, &attempt_context),
+            )
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|payload| {
+                crate::ToolAttemptResult::without_intents(tool_panicked(payload))
+            }),
+            Err(result) => crate::ToolAttemptResult::without_intents(result),
+        }
+    } else {
+        crate::ToolAttemptResult::without_intents(
+            std::panic::AssertUnwindSafe(context.tools.execute_granted(
+                grant,
+                &prepared.args,
+                &tool_context,
+            ))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(tool_panicked),
+        )
+    };
+    normalize_tool_result_attachments(context, &grant.manifest.name, &mut attempt_result.result)
+        .await;
+    attempt_result
+}
+
+async fn execute_with_attempt_context(
+    context: &ToolDispatchContext<'_>,
+    prepared: &PreparedToolCall,
+    tool_context: &ToolContext<'_>,
+) -> crate::ToolAttemptResult {
+    let attempt_context = match build_attempt_context(prepared, tool_context).await {
+        Ok(context) => context,
+        Err(result) => return crate::ToolAttemptResult::without_intents(result),
+    };
+    std::panic::AssertUnwindSafe(context.tools.execute_attempt_by_id(
+        &prepared.tool_id,
         &prepared.args,
-        &tool_context,
+        &attempt_context,
     ))
     .catch_unwind()
     .await
-    .unwrap_or_else(tool_panicked);
-    normalize_tool_result_attachments(context, &grant.manifest.name, &mut result).await;
-    result
+    .unwrap_or_else(|payload| crate::ToolAttemptResult::without_intents(tool_panicked(payload)))
+}
+
+async fn build_attempt_context<'run>(
+    prepared: &PreparedToolCall,
+    tool_context: &ToolContext<'run>,
+) -> Result<crate::AttemptContext<'run>, ToolResult> {
+    let scoped = tool_context.effect_controller.scoped();
+    let completion_supported = scoped
+        .controller()
+        .allows_process_lifetime_completion_keys();
+    let completion_key = if completion_supported {
+        match tool_context.completion.load() {
+            Some(key) => Some(key),
+            None => {
+                return Err(ToolResult::failure(crate::ToolFailure {
+                    class: crate::ToolFailureClass::Internal,
+                    code: "tool_completion_key_prederive_failed".to_string(),
+                    message: format!(
+                        "completion key for `{}` was not derived before the recorded attempt body",
+                        prepared.call_id
+                    ),
+                    source: crate::ToolFailureSource::Runtime,
+                    retry: crate::ToolRetryDisposition::Never,
+                    raw: None,
+                }));
+            }
+        }
+    } else {
+        None
+    };
+    Ok(crate::AttemptContext::from_tool_context(
+        tool_context,
+        scoped.scope_id().to_string(),
+        completion_key,
+        completion_supported,
+    ))
 }
 
 fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolResult {

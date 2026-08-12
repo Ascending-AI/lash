@@ -31,6 +31,18 @@ pub trait ProcessToolVisibilityFilter: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait ProcessService: Send + Sync {
+    /// Controller-free read view used by recorded leaf attempts.
+    async fn list_visible_for_attempt(
+        &self,
+        session_id: &str,
+        mode: ProcessListMode,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
+        let _ = (session_id, mode);
+        Err(PluginError::Session(
+            "controller-free process reads are unavailable in this service".to_string(),
+        ))
+    }
+
     async fn start_from_request(
         &self,
         session_id: &str,
@@ -97,6 +109,17 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
 
+    async fn cancel_with_reason(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessRecord, PluginError> {
+        let _ = reason;
+        self.cancel(session_id, process_id, scope).await
+    }
+
     async fn cancel_visible(
         &self,
         session_id: &str,
@@ -139,6 +162,20 @@ pub trait ProcessService: Send + Sync {
         payload: serde_json::Value,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessEvent, PluginError>;
+
+    async fn emit_event(
+        &self,
+        _session_id: &str,
+        _process_id: &str,
+        _event_type: String,
+        _replay_key: String,
+        _payload: serde_json::Value,
+        _scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessEvent, PluginError> {
+        Err(PluginError::Session(
+            "process event emission is unavailable in this runtime".to_string(),
+        ))
+    }
 
     /// Signal a process whose handle is possessed by the current run.
     ///

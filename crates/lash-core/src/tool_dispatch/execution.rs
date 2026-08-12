@@ -10,7 +10,7 @@ use super::context::{
     runtime_failure,
 };
 use super::directives::apply_after_tool_directives;
-use super::retry::{execute_granted_tool_attempt, execute_tool_attempt};
+use super::retry::{execute_granted_leaf_tool_attempt, execute_leaf_tool_attempt};
 
 #[cfg(test)]
 pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
@@ -54,10 +54,13 @@ pub(crate) async fn coordinate_prepared_tool_call_launch_with_execution_context<
             parent: context.parent_invocation.clone(),
         },
         cancellation,
-        || {
+        None,
+        None,
+        |completion_key| {
             crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
                 Arc::clone(&dispatch),
                 tool_context.clone(),
+                completion_key,
             )
         },
     )
@@ -93,7 +96,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     let tool_start = context.clock.now();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let completion_context = tool_context.clone();
-    let result = execute_tool_attempt(
+    let attempt_result = execute_leaf_tool_attempt(
         context,
         &manifest,
         &prepared,
@@ -103,9 +106,22 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     )
     .await;
     let duration_ms = context.clock.now().duration_since(tool_start).as_millis() as u64;
+    let crate::ToolAttemptResult { result, intents } = attempt_result;
     let result = match result {
         ToolResult::Done(_) => result,
         ToolResult::Pending(pending) => {
+            if !intents.is_empty() {
+                return launch_done(outcome(
+                    tool_name,
+                    args,
+                    runtime_failure(
+                        ToolFailureClass::Internal,
+                        "pending_tool_declared_intents",
+                        "a Pending tool result cannot carry intents",
+                    ),
+                    duration_ms,
+                ));
+            }
             let key = match completion_context.take_completion_key() {
                 Some(key) => key,
                 None => {
@@ -141,7 +157,9 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     )
     .await;
 
-    launch_done(outcome(tool_name, args, result, duration_ms))
+    let mut outcome = outcome(tool_name, args, result, duration_ms);
+    outcome.intents = intents;
+    launch_done(outcome)
 }
 
 pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution_context<'run>(
@@ -175,7 +193,7 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
         .with_prepared_payload(prepared.prepared_payload.clone())
         .with_tool_execution_binding(grant.execution_binding.clone());
     let completion_context = tool_context.clone();
-    let result = execute_granted_tool_attempt(
+    let attempt_result = execute_granted_leaf_tool_attempt(
         context,
         grant,
         &prepared,
@@ -185,9 +203,22 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
     )
     .await;
     let duration_ms = context.clock.now().duration_since(tool_start).as_millis() as u64;
+    let crate::ToolAttemptResult { result, intents } = attempt_result;
     let result = match result {
         ToolResult::Done(_) => result,
         ToolResult::Pending(pending) => {
+            if !intents.is_empty() {
+                return launch_done(outcome(
+                    tool_name,
+                    args,
+                    runtime_failure(
+                        ToolFailureClass::Internal,
+                        "pending_tool_declared_intents",
+                        "a Pending tool result cannot carry intents",
+                    ),
+                    duration_ms,
+                ));
+            }
             let key = match completion_context.take_completion_key() {
                 Some(key) => key,
                 None => {
@@ -223,7 +254,9 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
     )
     .await;
 
-    launch_done(outcome(tool_name, args, result, duration_ms))
+    let mut outcome = outcome(tool_name, args, result, duration_ms);
+    outcome.intents = intents;
+    launch_done(outcome)
 }
 
 pub(crate) async fn execute_prepared_tool_attempt_effect<'run>(
@@ -265,6 +298,7 @@ pub(crate) async fn execute_prepared_tool_attempt_effect<'run>(
             record.call_id = Some(call_id);
             crate::ToolAttemptLaunch::Done {
                 record: Box::new(record),
+                intents: outcome.intents,
             }
         }
         ToolCallLaunch::Pending(pending) => crate::ToolAttemptLaunch::Pending {

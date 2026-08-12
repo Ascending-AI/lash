@@ -35,6 +35,7 @@ mod session_manager;
 pub(crate) use session_manager::append_receipt_mixed_usage_envelope_conformance;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use session_manager::append_usage_cancellation_exactly_once_conformance;
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use session_manager::guard_process_command_in_recorded_body;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use session_manager::{
@@ -1197,6 +1198,10 @@ pub enum TurnEvent {
         /// a `batch` dispatch. `None` for top-level tool calls.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_call_id: Option<String>,
+    },
+    ToolIntentOutcome {
+        call_id: String,
+        outcome: crate::ToolIntentExecutionOutcome,
     },
     FinalValue {
         value: serde_json::Value,

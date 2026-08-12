@@ -122,6 +122,10 @@ pub(crate) struct ToolDispatchOutcome {
     pub record: ToolCallRecord,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<lash_trace::TraceRetryAttempt>,
+    #[serde(default, skip_serializing_if = "crate::ToolIntents::is_empty")]
+    pub intents: crate::ToolIntents,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -172,6 +176,8 @@ pub(super) fn outcome(
     ToolDispatchOutcome {
         record,
         attempts: Vec::new(),
+        intents: crate::ToolIntents::default(),
+        intent_outcomes: Vec::new(),
     }
 }
 

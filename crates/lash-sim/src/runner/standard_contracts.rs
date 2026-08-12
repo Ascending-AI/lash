@@ -286,6 +286,7 @@ impl StandardContractToolResult {
                 )],
             },
             duration_ms: 1,
+            intent_outcomes: Vec::new(),
             replay: None,
         }
     }

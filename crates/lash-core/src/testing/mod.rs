@@ -831,6 +831,26 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
+    async fn emit_event(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let command = crate::ProcessCommand::EmitEvent {
+            process_id: process_id.to_string(),
+            request: crate::ProcessEventAppendRequest::new(event_type, payload)
+                .with_replay_key(replay_key),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::EmitEvent { event } => Ok(*event),
+            _ => unreachable!("emit-event command returns emit-event outcome"),
+        }
+    }
+
     async fn transfer(
         &self,
         from_session_id: &str,

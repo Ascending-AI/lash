@@ -1082,6 +1082,15 @@ where
                 event: Box::new(result.event),
             })
         }
+        ProcessCommand::EmitEvent {
+            process_id,
+            request,
+        } => {
+            let result = registry.append_event(&process_id, request).await?;
+            Ok(ProcessEffectOutcome::EmitEvent {
+                event: Box::new(result.event),
+            })
+        }
     }
 }
 
