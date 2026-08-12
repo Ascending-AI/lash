@@ -647,6 +647,63 @@ fn list_comprehension_compiles_to_iterator_and_append_bytecode() {
 }
 
 #[test]
+fn every_container_insertion_lowering_emits_value_isolation() {
+    let compiled = compile_source(
+        r#"
+        source = []
+        target = {}
+        target.plain = source
+        target.effect = await tools.echo({ value: source })?
+        copied = [item for item in [source]]
+        acc = []
+        acc = push(acc, source)
+        finish copied
+        "#,
+    )
+    .expect("container insertion program should compile");
+    let code = &compiled.chunk.code;
+    let listing = compiled_instruction_listing(&compiled);
+
+    let isolated_paths = code
+        .windows(2)
+        .filter(|pair| {
+            matches!(pair, [Instruction::DeepCopy, Instruction::PathAssign { .. }])
+        })
+        .count();
+    assert_eq!(
+        isolated_paths, 2,
+        "plain and forced-effect paths must both copy:\n{listing}"
+    );
+    assert!(
+        code.windows(2).any(|pair| matches!(
+            pair,
+            [Instruction::DeepCopy, Instruction::ListAppend]
+        )),
+        "comprehension accumulation must copy:\n{listing}"
+    );
+    assert!(
+        code.windows(2).any(|pair| matches!(
+            pair,
+            [
+                Instruction::DeepCopy,
+                Instruction::Intrinsic(IntrinsicOp::PushAssign(_))
+            ]
+        )),
+        "push insertion must copy:\n{listing}"
+    );
+    assert!(
+        code.windows(2).any(|pair| matches!(
+            pair,
+            [
+                Instruction::IterNext { .. },
+                Instruction::DeepCopyLoopBinding(_)
+            ]
+        )),
+        "iterator bindings must copy:\n{listing}"
+    );
+}
+
+#[test]
 fn effectful_loop_bodies_compile_to_generic_iterator_bytecode() {
     let program = crate::parse(
         r#"

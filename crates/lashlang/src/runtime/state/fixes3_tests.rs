@@ -5,11 +5,11 @@ fn canonical_decode_rejects_first_over_limit_value_depth_for_every_nested_shape(
     fn decode(value: CanonicalValue) -> Result<Snapshot, SnapshotDecodeError> {
         let wire = CanonicalSnapshot {
             version: LASHLANG_SNAPSHOT_VERSION,
-            globals: vec![CanonicalBinding {
+            globals: Some(vec![CanonicalBinding {
                 name: "root".to_string(),
                 value,
-            }],
-            heap: CanonicalHeap::default(),
+            }]),
+            heap: None,
         };
         Snapshot::from_canonical_bytes(
             &rmp_serde::to_vec_named(&wire).expect("hand-crafted canonical wire"),

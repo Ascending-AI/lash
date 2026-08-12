@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use super::{
-    ContinuationError, HEAP_SIZE_SCHEDULE_VERSION, Heap, HeapEntry, HeapId, HeapObject, ImageValue,
-    ProjectedValue, Record, ResourceHandle, RuntimeError, Value, record_with_capacity,
+    ContinuationError, HEAP_SIZE_SCHEDULE_VERSION, Heap, HeapId, HeapObject, HeapRestoreWire,
+    ImageValue, ProjectedValue, Record, ResourceHandle, RuntimeError, Value, record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+mod wire;
+use wire::child_location;
 
 mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
@@ -36,6 +39,8 @@ pub struct State {
 impl PartialEq for State {
     fn eq(&self, other: &Self) -> bool {
         self.globals == other.globals
+            && self.runtime_globals == other.runtime_globals
+            && self.heap == other.heap
     }
 }
 
@@ -46,6 +51,53 @@ impl State {
 
     pub fn globals(&self) -> &Record {
         &self.globals
+    }
+
+    pub fn set_default(
+        &mut self,
+        name: impl Into<String>,
+        value: Value,
+    ) -> Result<bool, RuntimeError> {
+        let name = name.into();
+        if self.globals.get(&name).is_some() {
+            return Ok(false);
+        }
+        self.insert_global(name, value)?;
+        Ok(true)
+    }
+
+    pub fn insert_global(
+        &mut self,
+        name: impl Into<String>,
+        value: Value,
+    ) -> Result<Option<Value>, RuntimeError> {
+        let name = name.into();
+        if self.runtime_globals.is_empty() && !self.heap.has_runtime_state() {
+            return Ok(self.globals.insert(name, value));
+        }
+
+        let mut heap = self.heap.clone();
+        let mut runtime_globals = self.runtime_globals.clone();
+        runtime_globals.remove(&name);
+        let roots = runtime_globals.values().cloned().collect::<Vec<_>>();
+        heap.collect(roots.iter());
+        let runtime_value = heap.import(value.clone())?;
+        runtime_globals.insert(name.clone(), runtime_value);
+        let previous = self.globals.insert(name, value);
+        self.runtime_globals = runtime_globals;
+        self.heap = heap;
+        Ok(previous)
+    }
+
+    pub fn remove_global(&mut self, name: &str) -> Option<Value> {
+        let previous = self.globals.remove(name);
+        if self.runtime_globals.is_empty() && !self.heap.has_runtime_state() {
+            return previous;
+        }
+        self.runtime_globals.remove(name);
+        let roots = self.runtime_globals.values().cloned().collect::<Vec<_>>();
+        self.heap.collect(roots.iter());
+        previous
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -65,7 +117,10 @@ impl State {
     }
 
     pub(super) fn take_runtime(&mut self) -> (Record, Heap) {
-        let globals = if self.runtime_globals.is_empty() && !self.globals.is_empty() {
+        let globals = if self.runtime_globals.is_empty()
+            && !self.heap.has_runtime_state()
+            && !self.globals.is_empty()
+        {
             std::mem::take(&mut self.globals)
         } else {
             std::mem::take(&mut self.runtime_globals)
@@ -95,7 +150,7 @@ impl State {
 
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
-    pub globals: Record,
+    globals: Record,
     runtime_globals: Record,
     heap: Heap,
 }
@@ -103,6 +158,8 @@ pub struct Snapshot {
 impl PartialEq for Snapshot {
     fn eq(&self, other: &Self) -> bool {
         self.globals == other.globals
+            && self.runtime_globals == other.runtime_globals
+            && self.heap == other.heap
     }
 }
 
@@ -113,6 +170,14 @@ impl Snapshot {
             runtime_globals: Record::new(),
             heap: Heap::default(),
         }
+    }
+
+    pub fn globals(&self) -> &Record {
+        &self.globals
+    }
+
+    pub fn into_globals(self) -> Record {
+        self.globals
     }
     /// Encodes this snapshot as canonical, named-field MessagePack.
     ///
@@ -143,15 +208,17 @@ impl Snapshot {
                 found: wire.version,
             });
         }
-        let canonical = rmp_serde::to_vec_named(&wire)
+        let snapshot: Self = wire.try_into()?;
+        let canonical = snapshot
+            .to_canonical_bytes()
             .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
-        if canonical != bytes {
+        if canonical.as_slice() != bytes {
             return Err(SnapshotDecodeError::NonCanonicalEncoding {
                 location: "snapshot".to_string(),
                 reason: "wire is not a byte-for-byte canonical fixed point".to_string(),
             });
         }
-        wire.try_into()
+        Ok(snapshot)
     }
 }
 
@@ -172,8 +239,10 @@ pub enum SnapshotDecodeError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CanonicalSnapshot {
     version: u32,
-    globals: Vec<CanonicalBinding>,
-    heap: CanonicalHeap,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    globals: Option<Vec<CanonicalBinding>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    heap: Option<CanonicalHeap>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -265,39 +334,35 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
     fn try_from(snapshot: &Snapshot) -> Result<Self, Self::Error> {
         let mut globals = snapshot.globals.iter().collect::<Vec<_>>();
         globals.sort_unstable_by_key(|(name, _)| *name);
-        let (mut heap, runtime_globals) = if snapshot.runtime_globals.is_empty() {
-            let mut heap = Heap::default();
-            let mut runtime_globals = Record::new();
-            for (name, value) in &globals {
-                let value = heap.import((*value).clone()).map_err(|_| {
-                    ContinuationError::UnserializableValue {
-                        location: child_location("globals", name),
-                        variant: "value rejected by heap import",
-                    }
-                })?;
-                runtime_globals.insert((*name).to_string(), value);
-            }
-            (heap, runtime_globals)
-        } else {
-            (snapshot.heap.clone(), snapshot.runtime_globals.clone())
-        };
+        if snapshot.runtime_globals.is_empty() && !snapshot.heap.has_runtime_state() {
+            return Ok(Self {
+                version: LASHLANG_SNAPSHOT_VERSION,
+                globals: Some(
+                    globals
+                        .into_iter()
+                        .map(|(name, value)| {
+                            let location = child_location("globals", name);
+                            Ok(CanonicalBinding {
+                                name: name.to_string(),
+                                value: CanonicalValue::from_runtime(value, &location, 0)?,
+                            })
+                        })
+                        .collect::<Result<_, ContinuationError>>()?,
+                ),
+                heap: None,
+            });
+        }
+
+        let mut heap = snapshot.heap.clone();
+        let runtime_globals = snapshot.runtime_globals.clone();
         let root_values = runtime_globals.values().cloned().collect::<Vec<_>>();
         heap.collect(root_values.iter());
         let mut roots = runtime_globals.iter().collect::<Vec<_>>();
         roots.sort_unstable_by_key(|(name, _)| *name);
         Ok(Self {
             version: LASHLANG_SNAPSHOT_VERSION,
-            globals: globals
-                .into_iter()
-                .map(|(name, value)| {
-                    let location = child_location("globals", name);
-                    Ok(CanonicalBinding {
-                        name: name.to_string(),
-                        value: CanonicalValue::from_runtime(value, &location, 0)?,
-                    })
-                })
-                .collect::<Result<_, ContinuationError>>()?,
-            heap: CanonicalHeap {
+            globals: None,
+            heap: Some(CanonicalHeap {
                 next_id: heap.next_id,
                 allocation_counter: heap.allocations(),
                 live_logical_bytes: heap.live_logical_bytes(),
@@ -324,7 +389,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
                         })
                     })
                     .collect::<Result<_, ContinuationError>>()?,
-            },
+            }),
         })
     }
 }
@@ -333,352 +398,88 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
     type Error = SnapshotDecodeError;
 
     fn try_from(snapshot: CanonicalSnapshot) -> Result<Self, Self::Error> {
-        if snapshot.heap.size_schedule_version != HEAP_SIZE_SCHEDULE_VERSION {
-            return Err(SnapshotDecodeError::InvalidEncoding(format!(
-                "unsupported heap size schedule version {}",
-                snapshot.heap.size_schedule_version
-            )));
-        }
-        let globals = snapshot
-            .globals
-            .into_iter()
-            .map(|binding| {
-                binding
-                    .value
-                    .into_runtime()
-                    .map(|value| (binding.name, value))
-            })
-            .collect::<Result<_, _>>()?;
-        let mut heap = Heap::default();
-        heap.next_id = snapshot.heap.next_id;
-        heap.allocations = snapshot.heap.allocation_counter;
-        heap.schedule_version = snapshot.heap.size_schedule_version;
-        heap.restore_collection_schedule();
-        for entry in snapshot.heap.objects {
-            let id_index = usize::try_from(entry.id.get()).map_err(|_| {
-                SnapshotDecodeError::InvalidEncoding(
-                    "heap object ID exceeds the platform storage index".to_string(),
+        match (snapshot.globals, snapshot.heap) {
+            (Some(globals), None) => Ok(Self {
+                globals: bindings_into_record(globals, "globals")?,
+                runtime_globals: Record::new(),
+                heap: Heap::default(),
+            }),
+            (None, Some(heap_wire)) => {
+                let CanonicalHeap {
+                    next_id,
+                    allocation_counter,
+                    live_logical_bytes,
+                    size_schedule_version,
+                    roots,
+                    objects,
+                } = heap_wire;
+                let runtime_globals = bindings_into_record(roots, "heap.roots")?;
+                let objects = objects
+                    .into_iter()
+                    .map(|entry| entry.object.into_runtime().map(|object| (entry.id, object)))
+                    .collect::<Result<_, _>>()?;
+                let heap = Heap::from_wire(
+                    HeapRestoreWire {
+                        next_id,
+                        allocation_counter,
+                        live_logical_bytes,
+                        size_schedule_version,
+                        objects,
+                    },
+                    &runtime_globals.values().cloned().collect::<Vec<_>>(),
                 )
-            })?;
-            if entry.id.get() >= heap.next_id
-                || heap.id_to_slot.get(id_index).is_some_and(Option::is_some)
-            {
-                return Err(SnapshotDecodeError::InvalidEncoding(
-                    "heap object IDs must be unique, ordered, and below next_id".to_string(),
-                ));
-            }
-            let object = entry.object.into_runtime()?;
-            let logical_bytes = object.logical_bytes();
-            let slot = heap.slots.len();
-            heap.slots.push(Some(HeapEntry {
-                id: entry.id,
-                object,
-                logical_bytes,
-            }));
-            if heap.id_to_slot.len() <= id_index {
-                heap.id_to_slot.resize(id_index + 1, None);
-            }
-            heap.id_to_slot[id_index] = Some(slot);
-            heap.live_logical_bytes = heap.live_logical_bytes.saturating_add(logical_bytes);
-        }
-        if heap.live_logical_bytes != snapshot.heap.live_logical_bytes {
-            return Err(SnapshotDecodeError::InvalidEncoding(
-                "heap logical-byte counter does not match live objects".to_string(),
-            ));
-        }
-        let runtime_globals = snapshot
-            .heap
-            .roots
-            .into_iter()
-            .map(|binding| {
-                binding
-                    .value
-                    .into_runtime()
-                    .map(|value| (binding.name, value))
-            })
-            .collect::<Result<_, _>>()?;
-        Ok(Self {
-            globals,
-            runtime_globals,
-            heap,
-        })
-    }
-}
-
-impl CanonicalHeapObject {
-    fn from_runtime(object: &HeapObject, id: HeapId) -> Result<Self, ContinuationError> {
-        let location = format!("heap.objects[{}]", id.get());
-        Ok(match object {
-            HeapObject::Tuple(values) => Self::Tuple {
-                items: canonical_items(values, &location, 0)?,
-            },
-            HeapObject::List(values) => Self::List {
-                items: canonical_items(values, &location, 0)?,
-            },
-            HeapObject::Record(record) => {
-                let mut fields = record.iter().collect::<Vec<_>>();
-                fields.sort_unstable_by_key(|(name, _)| *name);
-                Self::Record {
-                    fields: fields
-                        .into_iter()
-                        .map(|(name, value)| {
-                            Ok(CanonicalBinding {
-                                name: name.to_string(),
-                                value: CanonicalValue::from_runtime(
-                                    value,
-                                    &child_location(&location, name),
-                                    0,
-                                )?,
-                            })
-                        })
-                        .collect::<Result<_, ContinuationError>>()?,
-                }
-            }
-        })
-    }
-
-    fn into_runtime(self) -> Result<HeapObject, SnapshotDecodeError> {
-        Ok(match self {
-            Self::Tuple { items } => HeapObject::Tuple(
-                items
-                    .into_iter()
-                    .map(CanonicalValue::into_runtime)
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::List { items } => HeapObject::List(
-                items
-                    .into_iter()
-                    .map(CanonicalValue::into_runtime)
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::Record { fields } => HeapObject::Record(Box::new(
-                fields
-                    .into_iter()
-                    .map(|field| field.value.into_runtime().map(|value| (field.name, value)))
-                    .collect::<Result<_, _>>()?,
-            )),
-        })
-    }
-}
-
-impl CanonicalValue {
-    fn from_runtime(
-        value: &Value,
-        location: &str,
-        depth: usize,
-    ) -> Result<Self, ContinuationError> {
-        if depth > MAX_SNAPSHOT_VALUE_DEPTH {
-            return Err(ContinuationError::UnserializableValue {
-                location: location.to_string(),
-                variant: "value beyond the snapshot depth limit",
-            });
-        }
-        Ok(match value {
-            Value::Null => Self::Null {},
-            Value::Bool(value) => Self::Bool { value: *value },
-            Value::Number(value) => Self::Number {
-                value: normalize_number(*value),
-            },
-            Value::String(value) => Self::String {
-                value: value.to_string(),
-            },
-            Value::Image(value) => Self::Image {
-                value: (**value).clone(),
-            },
-            Value::Resource(value) => Self::Resource {
-                value: value.clone(),
-            },
-            Value::Ref(value) => Self::Ref { value: *value },
-            Value::Tuple(values) => Self::Tuple {
-                items: canonical_items(values, location, depth)?,
-            },
-            Value::List(values) => Self::List {
-                items: canonical_items(values, location, depth)?,
-            },
-            Value::Record(record) => {
-                let mut fields = record.iter().collect::<Vec<_>>();
-                fields.sort_unstable_by_key(|(name, _)| *name);
-                Self::Record {
-                    fields: fields
-                        .into_iter()
-                        .map(|(name, value)| {
-                            let location = child_location(location, name);
-                            Ok(CanonicalBinding {
-                                name: name.to_string(),
-                                value: Self::from_runtime(value, &location, depth + 1)?,
-                            })
-                        })
-                        .collect::<Result<_, ContinuationError>>()?,
-                }
-            }
-            Value::Projected(projected) => Self::Projected {
-                value: CanonicalProjectedValue {
-                    name: projected.name().to_string(),
-                    type_name: projected.value_type_name().to_string(),
-                    projection_ref: projected
-                        .projection_ref()
-                        .map(|value| {
-                            CanonicalJsonValue::from_json(
-                                value,
-                                &format!("{location}.projection_ref"),
-                                depth + 1,
-                            )
-                        })
-                        .transpose()?,
-                },
-            },
-        })
-    }
-
-    fn into_runtime(self) -> Result<Value, SnapshotDecodeError> {
-        Ok(match self {
-            Self::Null {} => Value::Null,
-            Self::Bool { value } => Value::Bool(value),
-            Self::Number { value } => Value::Number(normalize_number(value)),
-            Self::String { value } => Value::String(value.into()),
-            Self::Image { value } => Value::Image(Box::new(value)),
-            Self::Resource { value } => Value::Resource(value),
-            Self::Ref { value } => Value::Ref(value),
-            Self::Tuple { items } => Value::Tuple(
-                items
-                    .into_iter()
-                    .map(Self::into_runtime)
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into(),
-            ),
-            Self::List { items } => Value::List(
-                items
-                    .into_iter()
-                    .map(Self::into_runtime)
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into(),
-            ),
-            Self::Record { fields } => Value::Record(Arc::new(
-                fields
-                    .into_iter()
-                    .map(|field| field.value.into_runtime().map(|value| (field.name, value)))
-                    .collect::<Result<_, _>>()?,
-            )),
-            Self::Projected { value } => Value::Projected(
-                ProjectedValue::unavailable_after_restore_with_projection_ref(
-                    value.name,
-                    value.type_name,
-                    value
-                        .projection_ref
-                        .map(CanonicalJsonValue::into_json)
-                        .transpose()?,
-                ),
-            ),
-        })
-    }
-}
-
-fn canonical_items(
-    values: &[Value],
-    location: &str,
-    depth: usize,
-) -> Result<Vec<CanonicalValue>, ContinuationError> {
-    values
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            CanonicalValue::from_runtime(value, &format!("{location}[{index}]"), depth + 1)
-        })
-        .collect()
-}
-
-impl CanonicalJsonValue {
-    fn from_json(
-        value: &serde_json::Value,
-        location: &str,
-        depth: usize,
-    ) -> Result<Self, ContinuationError> {
-        if depth > MAX_SNAPSHOT_VALUE_DEPTH {
-            return Err(ContinuationError::UnserializableValue {
-                location: location.to_string(),
-                variant: "value beyond the snapshot depth limit",
-            });
-        }
-        Ok(match value {
-            serde_json::Value::Null => Self::Null {},
-            serde_json::Value::Bool(value) => Self::Bool { value: *value },
-            serde_json::Value::Number(value) => Self::Number {
-                value: value.clone(),
-            },
-            serde_json::Value::String(value) => Self::String {
-                value: value.clone(),
-            },
-            serde_json::Value::Array(items) => Self::Array {
-                items: items
+                .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                heap.validate_wire_graph(
+                    &runtime_globals.values().cloned().collect::<Vec<_>>(),
+                    true,
+                )
+                .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                heap.validate_isolated_roots(
+                    runtime_globals.iter().map(|(name, value)| (name, value)),
+                )
+                .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                let globals = runtime_globals
                     .iter()
-                    .enumerate()
-                    .map(|(index, value)| {
-                        Self::from_json(value, &format!("{location}[{index}]"), depth + 1)
-                    })
-                    .collect::<Result<_, _>>()?,
-            },
-            serde_json::Value::Object(fields) => {
-                let mut fields = fields.iter().collect::<Vec<_>>();
-                fields.sort_unstable_by_key(|(name, _)| *name);
-                Self::Object {
-                    fields: fields
-                        .into_iter()
-                        .map(|(name, value)| {
-                            let location = child_location(location, name);
-                            Ok(CanonicalJsonField {
-                                name: name.clone(),
-                                value: Self::from_json(value, &location, depth + 1)?,
+                    .map(|(name, value)| {
+                        heap.export(value)
+                            .map(|value| (name.to_string(), value))
+                            .map_err(|error| {
+                                SnapshotDecodeError::InvalidEncoding(error.to_string())
                             })
-                        })
-                        .collect::<Result<_, ContinuationError>>()?,
-                }
+                    })
+                    .collect::<Result<_, _>>()?;
+                Ok(Self {
+                    globals,
+                    runtime_globals,
+                    heap,
+                })
             }
-        })
-    }
-
-    fn into_json(self) -> Result<serde_json::Value, SnapshotDecodeError> {
-        Ok(match self {
-            Self::Null {} => serde_json::Value::Null,
-            Self::Bool { value } => serde_json::Value::Bool(value),
-            Self::Number { value } => serde_json::Value::Number(value),
-            Self::String { value } => serde_json::Value::String(value),
-            Self::Array { items } => serde_json::Value::Array(
-                items
-                    .into_iter()
-                    .map(Self::into_json)
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::Object { fields } => serde_json::Value::Object(
-                fields
-                    .into_iter()
-                    .map(|field| field.value.into_json().map(|value| (field.name, value)))
-                    .collect::<Result<_, _>>()?,
-            ),
-        })
+            _ => Err(SnapshotDecodeError::InvalidEncoding(
+                "snapshot must contain exactly one of globals or heap".to_string(),
+            )),
+        }
     }
 }
 
-fn normalize_number(value: f64) -> f64 {
-    if value.is_nan() {
-        f64::from_bits(CANONICAL_NAN_BITS)
-    } else {
-        value
+fn bindings_into_record(
+    bindings: Vec<CanonicalBinding>,
+    location: &str,
+) -> Result<Record, SnapshotDecodeError> {
+    let mut previous: Option<&str> = None;
+    let mut record = Record::new();
+    for binding in &bindings {
+        if previous.is_some_and(|prior| prior >= binding.name.as_str()) {
+            return Err(SnapshotDecodeError::NonCanonicalEncoding {
+                location: location.to_string(),
+                reason: "binding names must be strictly sorted and unique".to_string(),
+            });
+        }
+        previous = Some(binding.name.as_str());
     }
-}
-
-fn child_location(parent: &str, name: &str) -> String {
-    if is_path_identifier(name) {
-        format!("{parent}.{name}")
-    } else {
-        let quoted = serde_json::to_string(name).expect("string serialization cannot fail");
-        format!("{parent}[{quoted}]")
+    for binding in bindings {
+        record.insert(binding.name, binding.value.into_runtime()?);
     }
-}
-
-fn is_path_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some('_' | 'a'..='z' | 'A'..='Z'))
-        && chars.all(|character| matches!(character, '_' | 'a'..='z' | 'A'..='Z' | '0'..='9'))
+    Ok(record)
 }
 
 #[derive(Clone, Copy)]
@@ -805,15 +606,24 @@ fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError
 fn validate_snapshot_globals(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
     let mut cursor = 0;
     let fields = take_map_length(bytes, &mut cursor, "snapshot", "snapshot")?;
-    if fields != 3 {
+    if fields != 2 {
         return Err(non_canonical(
             "snapshot",
-            "snapshot must contain exactly three fields",
+            "snapshot must contain exactly two fields",
         ));
     }
     expect_key(bytes, &mut cursor, "version", "snapshot")?;
     skip_messagepack_value(bytes, &mut cursor)?;
-    expect_key(bytes, &mut cursor, "globals", "snapshot")?;
+    let representation = take_canonical_string(bytes, &mut cursor, "snapshot")?;
+    if representation == "heap" {
+        return Ok(());
+    }
+    if representation != "globals" {
+        return Err(non_canonical(
+            "snapshot",
+            "snapshot representation must be globals or heap",
+        ));
+    }
     let globals_start = cursor;
     skip_messagepack_value(bytes, &mut cursor)?;
     let globals = &bytes[globals_start..cursor];

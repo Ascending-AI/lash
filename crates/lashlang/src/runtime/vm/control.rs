@@ -229,20 +229,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         while let Some(instruction) = self.chunk.code.get(self.ip).copied() {
             let instruction_ip = self.ip;
-            let uses_heap_values = matches!(instruction, super::Instruction::DeepCopy)
-                || matches!(
-                    instruction,
-                    super::Instruction::Intrinsic(super::IntrinsicOp::PushAssign(_))
-                )
-                || matches!(
-                    instruction,
-                    super::Instruction::AddAssignIndexNumber { .. }
-                        | super::Instruction::AddAssignIndexSlotNumber { .. }
-                )
-                || matches!(
-                    instruction,
-                    super::Instruction::Binary(BinaryOp::Equal | BinaryOp::NotEqual)
-                );
+            let uses_heap_values = matches!(
+                instruction,
+                super::Instruction::DeepCopy | super::Instruction::DeepCopyLoopBinding(_)
+            ) || matches!(
+                instruction,
+                super::Instruction::Intrinsic(super::IntrinsicOp::PushAssign(_))
+            ) || matches!(
+                instruction,
+                super::Instruction::AddAssignIndexNumber { .. }
+                    | super::Instruction::AddAssignIndexSlotNumber { .. }
+            ) || matches!(
+                instruction,
+                super::Instruction::Binary(BinaryOp::Equal | BinaryOp::NotEqual)
+            );
             if !uses_heap_values
                 && let Err(error) = self.materialize_instruction_operands(instruction)
             {
@@ -480,34 +480,46 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     fn heapify_vm_state(&mut self) -> Result<(), RuntimeError> {
-        if self.heap.allocation_scope_needs_roots() {
-            let pre_import_roots = self.heap_roots();
-            self.heap.begin_allocation_scope(pre_import_roots);
+        let mut heap = self.heap.clone();
+        if heap.allocation_scope_needs_roots() {
+            heap.begin_allocation_scope(self.heap_roots());
         }
-        for value in &mut self.stack {
-            *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+        let stack = self
+            .stack
+            .iter()
+            .cloned()
+            .map(|value| heap.import(value))
+            .collect::<Result<Vec<_>, _>>()?;
+        let last_value = self
+            .last_value
+            .as_ref()
+            .cloned()
+            .map(|value| heap.import(value))
+            .transpose()?;
+        let mut slots = self.slots.clone();
+        for value in slots.values.iter_mut().flatten() {
+            *value = heap.import(value.clone())?;
         }
-        if let Some(value) = &mut self.last_value {
-            *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+        for entry in &mut slots.extras.entries {
+            entry.value = heap.import(entry.value.clone())?;
         }
-        for value in self.slots.values.iter_mut().flatten() {
-            *value = self.heap.import(std::mem::replace(value, Value::Null))?;
-        }
-        for entry in &mut self.slots.extras.entries {
-            entry.value = self
-                .heap
-                .import(std::mem::replace(&mut entry.value, Value::Null))?;
-        }
-        for iterator in &mut self.iter_stack {
+        let mut iter_stack = self.iter_stack.clone();
+        for iterator in &mut iter_stack {
             if let super::IterCursor::List { values, .. } = &mut iterator.cursor {
                 for value in values.make_mut() {
-                    *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+                    *value = heap.import(value.clone())?;
                 }
             }
             if let Some(value) = &mut iterator.restore.previous {
-                *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+                *value = heap.import(value.clone())?;
             }
         }
+
+        self.heap = heap;
+        self.stack = stack;
+        self.last_value = last_value;
+        self.slots = slots;
+        self.iter_stack = iter_stack;
         self.heap.end_allocation_scope();
         if self.heap.needs_collection() {
             let roots = self.heap_roots();

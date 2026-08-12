@@ -486,6 +486,7 @@ impl Compiler {
                 && first_arg == name
             {
                 self.compile_expr(item);
+                self.code.push(Instruction::DeepCopy);
                 self.code
                     .push(Instruction::Intrinsic(IntrinsicOp::PushAssign(slot)));
                 self.set_const_slot(slot, None);
@@ -545,6 +546,7 @@ impl Compiler {
             }
         }
         self.compile_expr(expr);
+        self.code.push(Instruction::DeepCopy);
         let path = self.push_assign_path(&target.steps);
         self.code.push(Instruction::PathAssign { slot, path });
         self.set_const_slot(slot, None);
@@ -565,7 +567,7 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
-            self.compile_for_loop_body(body);
+            self.compile_for_loop_body(body, binding);
             self.push_null_if(leave_value);
             return;
         }
@@ -574,16 +576,17 @@ impl Compiler {
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
-        self.compile_for_loop_body(body);
+        self.compile_for_loop_body(body, binding);
         self.push_null_if(leave_value);
     }
 
-    fn compile_for_loop_body(&mut self, body: &Expr) {
+    fn compile_for_loop_body(&mut self, body: &Expr, binding: usize) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
+        self.code.push(Instruction::DeepCopyLoopBinding(binding));
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
             break_jumps: SmallVec::new(),
@@ -617,6 +620,7 @@ impl Compiler {
     ) {
         let Some(clause) = clauses.get(index) else {
             self.compile_expr(element);
+            self.code.push(Instruction::DeepCopy);
             self.code.push(Instruction::ListAppend);
             return;
         };
@@ -656,7 +660,7 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
-            self.compile_list_comprehension_for_body(element, clauses, next_clause);
+            self.compile_list_comprehension_for_body(element, clauses, next_clause, binding);
             return;
         }
 
@@ -664,7 +668,7 @@ impl Compiler {
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
-        self.compile_list_comprehension_for_body(element, clauses, next_clause);
+        self.compile_list_comprehension_for_body(element, clauses, next_clause, binding);
     }
 
     fn compile_list_comprehension_for_body(
@@ -672,12 +676,14 @@ impl Compiler {
         element: &Expr,
         clauses: &[ListComprehensionClause],
         next_clause: usize,
+        binding: usize,
     ) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
+        self.code.push(Instruction::DeepCopyLoopBinding(binding));
         self.compile_list_comprehension_clause(element, clauses, next_clause);
         self.code.push(Instruction::Jump(loop_start));
         let loop_end = self.code.len();

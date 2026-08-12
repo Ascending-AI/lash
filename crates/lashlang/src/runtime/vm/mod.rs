@@ -860,6 +860,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 };
                 self.slots.assign_loop_binding(iter_state.binding, value);
             }
+            Instruction::DeepCopyLoopBinding(binding) => self.deep_copy_loop_binding(binding)?,
             Instruction::EndIter => {
                 if let Some(iter_state) = self.iter_stack.pop() {
                     self.slots
@@ -1319,6 +1320,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::Pop
             | Instruction::Jump(_)
             | Instruction::IterNext { .. }
+            | Instruction::DeepCopyLoopBinding(_)
             | Instruction::EndIter => {
                 unreachable!("opcode is always completed by step_instruction_fast")
             }

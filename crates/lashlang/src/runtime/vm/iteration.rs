@@ -1,9 +1,11 @@
+#[derive(Clone)]
 pub(crate) struct IterState {
     cursor: IterCursor,
     binding: usize,
     restore: LoopRestore,
 }
 
+#[derive(Clone)]
 enum IterCursor {
     List { values: ListValue, index: usize },
     Range { next: i64, end: i64, step: i64 },
@@ -29,10 +31,20 @@ impl IterCursor {
     }
 }
 
+#[derive(Clone)]
 struct LoopRestore {
     previous: Option<Value>,
 }
 
 pub(super) fn range_has_next(start: i64, end: i64, step: i64) -> bool {
     (step > 0 && start < end) || (step < 0 && start > end)
+}
+
+impl<'a, H: ExecutionHost> Vm<'a, H> {
+    fn deep_copy_loop_binding(&mut self, binding: usize) -> Result<(), RuntimeError> {
+        let source = self.load_slot(binding)?.clone();
+        self.slots
+            .assign_loop_binding(binding, self.heap.deep_copy(&source)?);
+        Ok(())
+    }
 }

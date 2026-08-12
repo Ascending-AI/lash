@@ -921,6 +921,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             )
         }
         Instruction::IterNext { jump_to } => format!("iter_next {jump_to}"),
+        Instruction::DeepCopyLoopBinding(slot) => format!("deep_copy_loop_binding ${slot}"),
         Instruction::EndIter => "end_iter".to_string(),
         Instruction::ResolveTypeRef(slot) => {
             format!("resolve_type_ref {slot}:{}", slot_name(chunk, slot))

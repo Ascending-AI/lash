@@ -62,7 +62,7 @@
             matches!(
                 &error,
                 SnapshotDecodeError::NonCanonicalEncoding { location, reason }
-                    if location == "snapshot.heap.roots[0].value.value.projection_ref.value"
+                    if location == "globals.root.value.projection_ref.value"
                         && reason.contains("integer width is not minimal")
             ),
             "{error:?}"
@@ -99,11 +99,11 @@
     fn canonical_decode_rejects_sequence_form_structs() {
         let wire = CanonicalSnapshot {
             version: LASHLANG_SNAPSHOT_VERSION,
-            globals: vec![CanonicalBinding {
+            globals: Some(vec![CanonicalBinding {
                 name: "root".to_string(),
                 value: CanonicalValue::Null {},
-            }],
-            heap: CanonicalHeap::default(),
+            }]),
+            heap: None,
         };
         let bytes = rmp_serde::to_vec(&wire).expect("sequence-form bytes");
 
@@ -124,14 +124,16 @@
         for names in [["z", "a"], ["same", "same"]] {
             let wire = CanonicalSnapshot {
                 version: LASHLANG_SNAPSHOT_VERSION,
-                globals: names
-                    .into_iter()
-                    .map(|name| CanonicalBinding {
-                        name: name.to_string(),
-                        value: CanonicalValue::Null {},
-                    })
-                    .collect(),
-                heap: CanonicalHeap::default(),
+                globals: Some(
+                    names
+                        .into_iter()
+                        .map(|name| CanonicalBinding {
+                            name: name.to_string(),
+                            value: CanonicalValue::Null {},
+                        })
+                        .collect(),
+                ),
+                heap: None,
             };
             let bytes = rmp_serde::to_vec_named(&wire).expect("non-canonical bytes");
 
@@ -184,11 +186,11 @@
         }
         let bomb = CanonicalSnapshot {
             version: LASHLANG_SNAPSHOT_VERSION,
-            globals: vec![CanonicalBinding {
+            globals: Some(vec![CanonicalBinding {
                 name: "bomb".to_string(),
                 value,
-            }],
-            heap: CanonicalHeap::default(),
+            }]),
+            heap: None,
         };
         let bytes = rmp_serde::to_vec_named(&bomb).expect("construct depth bomb");
 
@@ -257,13 +259,13 @@
         );
         let bytes = snapshot.to_canonical_bytes().expect("golden snapshot");
         use sha2::Digest as _;
-        assert_eq!(bytes.len(), 1_931);
+        assert_eq!(bytes.len(), 884);
         assert_eq!(
             sha2::Sha256::digest(&bytes).as_slice(),
             &[
-                0xbf, 0x7f, 0x90, 0xd2, 0x67, 0xe3, 0xa5, 0x2f, 0xbc, 0x5c, 0xb2, 0xab, 0xc7, 0x7e,
-                0x91, 0x37, 0xfc, 0xc4, 0xff, 0xac, 0xf4, 0xb4, 0x2c, 0x81, 0x8a, 0xa8, 0x01, 0x6b,
-                0x22, 0x6f, 0xee, 0xa8,
+                0x89, 0xb2, 0x49, 0xb1, 0x7e, 0x9b, 0xf7, 0xa6, 0xba, 0x2b, 0xbe, 0xe5, 0xff, 0x32,
+                0xdc, 0x1a, 0xf1, 0xaa, 0x92, 0xeb, 0x7a, 0x51, 0xc6, 0x6d, 0x0d, 0x8b, 0xbc, 0xff,
+                0xd3, 0xba, 0x19, 0xb9,
             ]
         );
     }
@@ -279,13 +281,22 @@
             .collect::<String>();
         assert_eq!(
             hex,
-            concat!(
-                "83a776657273696f6e02a7676c6f62616c7390a46865617086a76e6578745f696401",
-                "b2616c6c6f636174696f6e5f636f756e74657200b26c6976655f6c6f676963616c",
-                "5f627974657300b573697a655f7363686564756c655f76657273696f6e01a5726f6f",
-                "747390a76f626a6563747390"
-            )
+            "82a776657273696f6e02a7676c6f62616c7390"
         );
+    }
+
+    #[test]
+    fn plain_scalar_snapshot_has_no_heap_duplicate() {
+        let bytes = Snapshot::new(
+            [("value".to_string(), Value::Null)]
+                .into_iter()
+                .collect(),
+        )
+        .to_canonical_bytes()
+        .expect("scalar snapshot");
+
+        assert_eq!(bytes.len(), 48, "scalar snapshot shape changed");
+        assert!(!String::from_utf8_lossy(&bytes).contains("heap"));
     }
 
     #[test]
@@ -324,4 +335,221 @@
                 Some(projection_ref),
             ),
         ));
+    }
+
+    fn canonical_heap_with(
+        roots: Vec<CanonicalBinding>,
+        objects: Vec<CanonicalHeapEntry>,
+        next_id: u64,
+        allocation_counter: u64,
+        live_logical_bytes: u64,
+    ) -> CanonicalSnapshot {
+        CanonicalSnapshot {
+            version: LASHLANG_SNAPSHOT_VERSION,
+            globals: None,
+            heap: Some(CanonicalHeap {
+                next_id,
+                allocation_counter,
+                live_logical_bytes,
+                size_schedule_version: HEAP_SIZE_SCHEDULE_VERSION,
+                roots,
+                objects,
+            }),
+        }
+    }
+
+    fn named_bytes(wire: &CanonicalSnapshot) -> Vec<u8> {
+        rmp_serde::to_vec_named(wire).expect("encode test wire")
+    }
+
+    #[test]
+    fn canonical_decode_rejects_descending_heap_ids() {
+        let wire = canonical_heap_with(
+            vec![CanonicalBinding {
+                name: "root".to_string(),
+                value: CanonicalValue::Ref {
+                    value: HeapId::from_counter(1),
+                },
+            }],
+            vec![
+                CanonicalHeapEntry {
+                    id: HeapId::from_counter(2),
+                    object: CanonicalHeapObject::List { items: Vec::new() },
+                },
+                CanonicalHeapEntry {
+                    id: HeapId::from_counter(1),
+                    object: CanonicalHeapObject::List { items: Vec::new() },
+                },
+            ],
+            3,
+            2,
+            2 * super::super::heap::HeapObject::List(Vec::new()).logical_bytes(),
+        );
+
+        let error = Snapshot::from_canonical_bytes(&named_bytes(&wire))
+            .expect_err("descending IDs must be rejected");
+        assert!(error.to_string().contains("strictly ordered by ID"));
+    }
+
+    #[test]
+    fn canonical_decode_rejects_dangling_root_and_nested_references() {
+        let dangling_root = canonical_heap_with(
+            vec![CanonicalBinding {
+                name: "root".to_string(),
+                value: CanonicalValue::Ref {
+                    value: HeapId::from_counter(99),
+                },
+            }],
+            Vec::new(),
+            1,
+            0,
+            0,
+        );
+        let error = Snapshot::from_canonical_bytes(&named_bytes(&dangling_root))
+            .expect_err("dangling root must be rejected");
+        assert!(error.to_string().contains("dangling heap reference 99"));
+
+        let object = super::super::heap::HeapObject::List(vec![Value::List(
+            vec![Value::Ref(HeapId::from_counter(99))].into(),
+        )]);
+        let dangling_nested = canonical_heap_with(
+            Vec::new(),
+            vec![CanonicalHeapEntry {
+                id: HeapId::from_counter(1),
+                object: CanonicalHeapObject::List {
+                    items: vec![CanonicalValue::List {
+                        items: vec![CanonicalValue::Ref {
+                            value: HeapId::from_counter(99),
+                        }],
+                    }],
+                },
+            }],
+            2,
+            1,
+            object.logical_bytes(),
+        );
+        let error = Snapshot::from_canonical_bytes(&named_bytes(&dangling_nested))
+            .expect_err("nested dangling ref must be rejected");
+        assert!(error.to_string().contains("dangling heap reference 99"));
+    }
+
+    #[test]
+    fn canonical_decode_rejects_counter_accounting_schedule_and_root_order() {
+        let empty_object_bytes = super::super::heap::HeapObject::List(Vec::new()).logical_bytes();
+        let object = CanonicalHeapEntry {
+            id: HeapId::from_counter(1),
+            object: CanonicalHeapObject::List { items: Vec::new() },
+        };
+        let counter = canonical_heap_with(Vec::new(), vec![object.clone()], 1000, 1, empty_object_bytes);
+        assert!(
+            Snapshot::from_canonical_bytes(&named_bytes(&counter))
+                .expect_err("counter mismatch")
+                .to_string()
+                .contains("allocation counter plus one")
+        );
+
+        let accounting = canonical_heap_with(Vec::new(), vec![object.clone()], 2, 1, 0);
+        assert!(
+            Snapshot::from_canonical_bytes(&named_bytes(&accounting))
+                .expect_err("accounting mismatch")
+                .to_string()
+                .contains("logical byte counter")
+        );
+
+        let mut schedule = canonical_heap_with(Vec::new(), vec![object], 2, 1, empty_object_bytes);
+        schedule.heap.as_mut().expect("heap").size_schedule_version += 1;
+        assert!(
+            Snapshot::from_canonical_bytes(&named_bytes(&schedule))
+                .expect_err("schedule mismatch")
+                .to_string()
+                .contains("size schedule version")
+        );
+
+        let roots = vec![
+            CanonicalBinding {
+                name: "z".to_string(),
+                value: CanonicalValue::Null {},
+            },
+            CanonicalBinding {
+                name: "a".to_string(),
+                value: CanonicalValue::Null {},
+            },
+        ];
+        let root_order = canonical_heap_with(roots, Vec::new(), 1, 0, 0);
+        assert!(matches!(
+            Snapshot::from_canonical_bytes(&named_bytes(&root_order)),
+            Err(SnapshotDecodeError::NonCanonicalEncoding { location, .. })
+                if location == "heap.roots"
+        ));
+    }
+
+    #[test]
+    fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
+        let id = HeapId::from_counter(1);
+        let empty_bytes = super::super::heap::HeapObject::List(Vec::new()).logical_bytes();
+        let shared = canonical_heap_with(
+            vec![
+                CanonicalBinding {
+                    name: "a".to_string(),
+                    value: CanonicalValue::Ref { value: id },
+                },
+                CanonicalBinding {
+                    name: "b".to_string(),
+                    value: CanonicalValue::Ref { value: id },
+                },
+            ],
+            vec![CanonicalHeapEntry {
+                id,
+                object: CanonicalHeapObject::List { items: Vec::new() },
+            }],
+            2,
+            1,
+            empty_bytes,
+        );
+        assert!(
+            Snapshot::from_canonical_bytes(&named_bytes(&shared))
+                .expect_err("shared roots must be rejected")
+                .to_string()
+                .contains("must not share object")
+        );
+
+        let cyclic_object = super::super::heap::HeapObject::List(vec![Value::Ref(id)]);
+        let cycle = canonical_heap_with(
+            vec![CanonicalBinding {
+                name: "root".to_string(),
+                value: CanonicalValue::Ref { value: id },
+            }],
+            vec![CanonicalHeapEntry {
+                id,
+                object: CanonicalHeapObject::List {
+                    items: vec![CanonicalValue::Ref { value: id }],
+                },
+            }],
+            2,
+            1,
+            cyclic_object.logical_bytes(),
+        );
+        assert!(
+            Snapshot::from_canonical_bytes(&named_bytes(&cycle))
+                .expect_err("cycles must be rejected")
+                .to_string()
+                .contains("acyclic")
+        );
+
+        let unreachable = canonical_heap_with(
+            Vec::new(),
+            vec![CanonicalHeapEntry {
+                id,
+                object: CanonicalHeapObject::List { items: Vec::new() },
+            }],
+            2,
+            1,
+            empty_bytes,
+        );
+        assert!(
+            Snapshot::from_canonical_bytes(&named_bytes(&unreachable))
+                .expect_err("unreachable objects must be rejected")
+                .to_string()
+                .contains("unreachable objects")
+        );
     }

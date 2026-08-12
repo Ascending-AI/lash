@@ -46,7 +46,7 @@ pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
     HeapId,
 };
-pub(crate) use heap::{Heap, HeapEntry, HeapObject};
+pub(crate) use heap::{Heap, HeapObject, HeapRestoreWire};
 pub use host::{
     AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
     ExecutionHostError, ExecutionMode, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart,

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -55,14 +55,17 @@ impl HeapObject {
     }
 
     fn children(&self) -> impl Iterator<Item = HeapId> + '_ {
-        let values: Box<dyn Iterator<Item = &Value>> = match self {
-            Self::Tuple(values) | Self::List(values) => Box::new(values.iter()),
-            Self::Record(record) => Box::new(record.values()),
-        };
-        values.filter_map(|value| match value {
+        self.values().filter_map(|value| match value {
             Value::Ref(id) => Some(*id),
             _ => None,
         })
+    }
+
+    fn values(&self) -> Box<dyn Iterator<Item = &Value> + '_> {
+        match self {
+            Self::Tuple(values) | Self::List(values) => Box::new(values.iter()),
+            Self::Record(record) => Box::new(record.values()),
+        }
     }
 }
 
@@ -105,7 +108,7 @@ pub(crate) struct HeapEntry {
 #[derive(Debug)]
 pub(crate) struct Heap {
     pub(crate) slots: Vec<Option<HeapEntry>>,
-    pub(crate) id_to_slot: Vec<Option<usize>>,
+    pub(crate) id_to_slot: BTreeMap<HeapId, usize>,
     pub(crate) free_slots: Vec<usize>,
     pub(crate) next_id: u64,
     pub(crate) allocations: u64,
@@ -115,15 +118,23 @@ pub(crate) struct Heap {
     collect_every_allocation: bool,
     stress_pins: Vec<Value>,
     boundary_refs: Vec<((u8, usize), HeapId)>,
-    materialized: Vec<Option<Value>>,
+    materialized: FxHashMap<HeapId, Value>,
     logical_byte_limit: u64,
+}
+
+pub(crate) struct HeapRestoreWire {
+    pub(crate) next_id: u64,
+    pub(crate) allocation_counter: u64,
+    pub(crate) live_logical_bytes: u64,
+    pub(crate) size_schedule_version: u32,
+    pub(crate) objects: Vec<(HeapId, HeapObject)>,
 }
 
 impl Default for Heap {
     fn default() -> Self {
         Self {
             slots: Vec::new(),
-            id_to_slot: Vec::new(),
+            id_to_slot: BTreeMap::new(),
             free_slots: Vec::new(),
             next_id: 1,
             allocations: 0,
@@ -133,7 +144,7 @@ impl Default for Heap {
             collect_every_allocation: false,
             stress_pins: Vec::new(),
             boundary_refs: Vec::new(),
-            materialized: Vec::new(),
+            materialized: FxHashMap::default(),
             logical_byte_limit: DEFAULT_HEAP_LOGICAL_BYTE_LIMIT,
         }
     }
@@ -145,6 +156,166 @@ impl Heap {
             logical_byte_limit,
             ..Self::default()
         }
+    }
+
+    pub(crate) fn from_wire(wire: HeapRestoreWire, roots: &[Value]) -> Result<Self, String> {
+        if wire.size_schedule_version != HEAP_SIZE_SCHEDULE_VERSION {
+            return Err(format!(
+                "unsupported heap size schedule version {}",
+                wire.size_schedule_version
+            ));
+        }
+        let expected_next_id = wire
+            .allocation_counter
+            .checked_add(1)
+            .ok_or_else(|| "heap allocation counter cannot advance to a next ID".to_string())?;
+        if wire.next_id != expected_next_id {
+            return Err("heap next ID must equal the allocation counter plus one".to_string());
+        }
+
+        let mut heap = Self::default();
+        heap.next_id = wire.next_id;
+        heap.allocations = wire.allocation_counter;
+        heap.schedule_version = wire.size_schedule_version;
+        let mut prior_id = None;
+        for (id, object) in wire.objects {
+            if prior_id.is_some_and(|prior| id <= prior) {
+                return Err("heap objects must be strictly ordered by ID".to_string());
+            }
+            if id.get() == 0 || id.get() >= heap.next_id {
+                return Err(
+                    "heap object ID must be nonzero and below the next allocation ID".to_string(),
+                );
+            }
+            prior_id = Some(id);
+            let logical_bytes = object.logical_bytes();
+            heap.live_logical_bytes = heap
+                .live_logical_bytes
+                .checked_add(logical_bytes)
+                .ok_or_else(|| "heap live logical byte counter overflowed".to_string())?;
+            let slot = heap.slots.len();
+            heap.slots.push(Some(HeapEntry {
+                id,
+                object,
+                logical_bytes,
+            }));
+            heap.id_to_slot.insert(id, slot);
+        }
+        if heap.live_logical_bytes != wire.live_logical_bytes {
+            return Err("heap live logical byte counter does not match its objects".to_string());
+        }
+        for root in roots {
+            heap.validate_resolvable_refs(root)?;
+        }
+        for entry in heap.slots.iter().flatten() {
+            for value in entry.object.values() {
+                heap.validate_resolvable_refs(value)?;
+            }
+        }
+        heap.restore_collection_schedule();
+        Ok(heap)
+    }
+
+    pub(crate) fn validate_wire_graph(
+        &self,
+        roots: &[Value],
+        require_acyclic: bool,
+    ) -> Result<(), String> {
+        #[derive(Clone, Copy)]
+        enum Visit {
+            Enter(HeapId),
+            Leave(HeapId),
+        }
+
+        let mut state = BTreeMap::<HeapId, u8>::new();
+        let mut stack = Vec::new();
+        for root in roots {
+            collect_value_refs(root, &mut stack);
+        }
+        let mut visits = stack.into_iter().map(Visit::Enter).collect::<Vec<_>>();
+        while let Some(visit) = visits.pop() {
+            match visit {
+                Visit::Enter(id) => match state.get(&id) {
+                    Some(1) if require_acyclic => {
+                        return Err("heap object graph must be acyclic".to_string());
+                    }
+                    Some(1) => continue,
+                    Some(2) => continue,
+                    _ => {
+                        state.insert(id, 1);
+                        visits.push(Visit::Leave(id));
+                        let object = self
+                            .get(id)
+                            .map_err(|_| format!("dangling heap reference {}", id.get()))?;
+                        let mut children = Vec::new();
+                        for value in object.values() {
+                            collect_value_refs(value, &mut children);
+                        }
+                        visits.extend(children.into_iter().rev().map(Visit::Enter));
+                    }
+                },
+                Visit::Leave(id) => {
+                    state.insert(id, 2);
+                }
+            }
+        }
+        if state.len() != self.id_to_slot.len() {
+            return Err("heap wire must not contain unreachable objects".to_string());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_isolated_roots<'a>(
+        &self,
+        roots: impl IntoIterator<Item = (&'a str, &'a Value)>,
+    ) -> Result<(), String> {
+        let mut owner = BTreeMap::<HeapId, &str>::new();
+        for (name, root) in roots {
+            let mut pending = Vec::new();
+            collect_value_refs(root, &mut pending);
+            let mut seen = BTreeSet::new();
+            while let Some(id) = pending.pop() {
+                if !seen.insert(id) {
+                    continue;
+                }
+                if let Some(previous) = owner.insert(id, name)
+                    && previous != name
+                {
+                    return Err(format!(
+                        "heap roots `{previous}` and `{name}` must not share object {}",
+                        id.get()
+                    ));
+                }
+                let object = self
+                    .get(id)
+                    .map_err(|_| format!("dangling heap reference {}", id.get()))?;
+                for value in object.values() {
+                    collect_value_refs(value, &mut pending);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_resolvable_refs(&self, value: &Value) -> Result<(), String> {
+        match value {
+            Value::Ref(id) => {
+                self.get(*id)
+                    .map_err(|_| format!("dangling heap reference {}", id.get()))?;
+            }
+            Value::Tuple(values) | Value::List(values) => {
+                for value in values.iter() {
+                    self.validate_resolvable_refs(value)?;
+                }
+            }
+            Value::Record(record) => {
+                for value in record.values() {
+                    self.validate_resolvable_refs(value)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     pub(crate) fn set_collect_every_allocation(&mut self, enabled: bool) {
@@ -205,6 +376,10 @@ impl Heap {
         self.allocations
     }
 
+    pub(crate) fn has_runtime_state(&self) -> bool {
+        self.allocations != 0 || self.live_logical_bytes != 0
+    }
+
     pub(crate) fn live_logical_bytes(&self) -> u64 {
         self.live_logical_bytes
     }
@@ -218,10 +393,10 @@ impl Heap {
     }
 
     pub(crate) fn get(&self, id: HeapId) -> Result<&HeapObject, RuntimeError> {
-        let slot = usize::try_from(id.get())
-            .ok()
-            .and_then(|index| self.id_to_slot.get(index))
-            .and_then(|slot| *slot)
+        let slot = self
+            .id_to_slot
+            .get(&id)
+            .copied()
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         self.slots[slot]
             .as_ref()
@@ -259,11 +434,7 @@ impl Heap {
             self.slots.push(Some(entry));
             self.slots.len() - 1
         };
-        let id_index = usize::try_from(id.get()).expect("live heap ID must fit a storage index");
-        if self.id_to_slot.len() <= id_index {
-            self.id_to_slot.resize(id_index + 1, None);
-        }
-        self.id_to_slot[id_index] = Some(slot);
+        self.id_to_slot.insert(id, slot);
         if self.collect_every_allocation {
             let allocated = Value::Ref(id);
             self.stress_pins.push(allocated.clone());
@@ -339,8 +510,7 @@ impl Heap {
                 continue;
             }
             pending.extend(self.get(id)?.children());
-            self.uncache_materialized(id);
-            self.boundary_refs.retain(|(_, cached_id)| *cached_id != id);
+            self.forget(id);
         }
         Ok(())
     }
@@ -392,12 +562,12 @@ impl Heap {
             self.cache_boundary(identity, *id);
         }
         self.cache_materialized(*id, exported.clone());
+        self.debug_assert_boundary_cache_invariant();
         Ok(exported)
     }
 
     fn cached_materialized(&self, id: HeapId) -> Option<&Value> {
-        let index = usize::try_from(id.get()).ok()?;
-        self.materialized.get(index).and_then(Option::as_ref)
+        self.materialized.get(&id)
     }
 
     fn boundary_id(&self, identity: (u8, usize)) -> Option<HeapId> {
@@ -419,20 +589,25 @@ impl Heap {
     }
 
     fn cache_materialized(&mut self, id: HeapId, value: Value) {
-        let index = usize::try_from(id.get()).expect("live heap ID must fit a storage index");
-        if self.materialized.len() <= index {
-            self.materialized.resize(index + 1, None);
-        }
-        self.materialized[index] = Some(value);
+        self.materialized.insert(id, value);
     }
 
-    fn uncache_materialized(&mut self, id: HeapId) {
-        let Ok(index) = usize::try_from(id.get()) else {
-            return;
-        };
-        if let Some(value) = self.materialized.get_mut(index) {
-            *value = None;
-        }
+    fn forget(&mut self, id: HeapId) {
+        self.materialized.remove(&id);
+        self.boundary_refs.retain(|(_, cached_id)| *cached_id != id);
+        self.debug_assert_boundary_cache_invariant();
+    }
+
+    fn clear_boundary_cache(&mut self) {
+        self.materialized.clear();
+        self.boundary_refs.clear();
+        self.debug_assert_boundary_cache_invariant();
+    }
+
+    fn debug_assert_boundary_cache_invariant(&self) {
+        debug_assert!(self.boundary_refs.iter().all(|(_, id)| {
+            self.materialized.contains_key(id) && self.id_to_slot.contains_key(id)
+        }));
     }
 
     fn export_inner(
@@ -495,10 +670,10 @@ impl Heap {
                 attempted: next_live,
             });
         }
-        let slot = usize::try_from(id.get())
-            .ok()
-            .and_then(|index| self.id_to_slot.get(index))
-            .and_then(|slot| *slot)
+        let slot = self
+            .id_to_slot
+            .get(id)
+            .copied()
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         let entry = self.slots[slot]
             .as_mut()
@@ -509,8 +684,7 @@ impl Heap {
         values.push(item);
         entry.logical_bytes = entry.logical_bytes.saturating_add(added_bytes);
         self.live_logical_bytes = next_live;
-        self.uncache_materialized(*id);
-        self.boundary_refs.retain(|(_, cached_id)| cached_id != id);
+        self.clear_boundary_cache();
         Ok(Value::Ref(*id))
     }
 
@@ -525,14 +699,20 @@ impl Heap {
                 actual: super::value_type_name(target).to_string(),
             });
         };
-        let slot = usize::try_from(id.get())
-            .ok()
-            .and_then(|index| self.id_to_slot.get(index))
-            .and_then(|slot| *slot)
+        let slot = self
+            .id_to_slot
+            .get(id)
+            .copied()
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         enum Target {
-            List(usize),
-            Record(compact_str::CompactString),
+            List {
+                index: usize,
+                old_member_bytes: u64,
+            },
+            Record {
+                key: compact_str::CompactString,
+                old_member_bytes: u64,
+            },
         }
         let (target_kind, current) = match &self.slots[slot]
             .as_ref()
@@ -541,18 +721,33 @@ impl Heap {
         {
             HeapObject::List(values) => {
                 let index = resolve_existing_list_assignment_index(index, values.len())?;
-                (Target::List(index), values[index].clone())
+                let current = values[index].clone();
+                (
+                    Target::List {
+                        index,
+                        old_member_bytes: value_logical_bytes(&current),
+                    },
+                    current,
+                )
             }
             HeapObject::Record(record) => {
                 let key = match index {
                     Value::String(key) => key.clone(),
                     _ => compact_str::CompactString::from(coerce_string(index)?.as_ref()),
                 };
-                let current = record
-                    .get(key.as_str())
-                    .cloned()
-                    .unwrap_or(Value::Number(0.0));
-                (Target::Record(key), current)
+                let stored = record.get(key.as_str()).cloned();
+                let old_member_bytes = stored.as_ref().map_or(0, |value| {
+                    RECORD_FIELD_BYTES
+                        .saturating_add(key.len() as u64)
+                        .saturating_add(value_logical_bytes(value))
+                });
+                (
+                    Target::Record {
+                        key,
+                        old_member_bytes,
+                    },
+                    stored.unwrap_or(Value::Number(0.0)),
+                )
             }
             HeapObject::Tuple(_) => return Err(RuntimeError::ImmutableTupleIndexes),
         };
@@ -560,36 +755,52 @@ impl Heap {
             Value::Number(left) => Value::Number(left + right),
             left => add_values(left, Value::Number(right))?,
         };
-        let old_bytes = self.slots[slot]
+        let (old_member_bytes, new_member_bytes) = match &target_kind {
+            Target::List {
+                old_member_bytes, ..
+            } => (*old_member_bytes, value_logical_bytes(&value)),
+            Target::Record {
+                key,
+                old_member_bytes,
+            } => (
+                *old_member_bytes,
+                RECORD_FIELD_BYTES
+                    .saturating_add(key.len() as u64)
+                    .saturating_add(value_logical_bytes(&value)),
+            ),
+        };
+        let entry_bytes = self.slots[slot]
             .as_ref()
             .expect("heap slot exists")
-            .logical_bytes;
-        match (
-            &mut self.slots[slot].as_mut().expect("heap slot exists").object,
-            target_kind,
-        ) {
-            (HeapObject::List(values), Target::List(index)) => values[index] = value.clone(),
-            (HeapObject::Record(record), Target::Record(key)) => {
-                record.insert_str(key.as_str(), value.clone());
-            }
-            _ => unreachable!("object kind was checked"),
-        }
-        let entry = self.slots[slot].as_mut().expect("heap slot exists");
-        let new_bytes = entry.object.logical_bytes();
+            .logical_bytes
+            .saturating_sub(old_member_bytes)
+            .saturating_add(new_member_bytes);
         let next_live = self
             .live_logical_bytes
-            .saturating_sub(old_bytes)
-            .saturating_add(new_bytes);
+            .saturating_sub(old_member_bytes)
+            .saturating_add(new_member_bytes);
         if next_live > self.logical_byte_limit {
             return Err(RuntimeError::MemoryLimitExceeded {
                 limit: self.logical_byte_limit,
                 attempted: next_live,
             });
         }
-        entry.logical_bytes = new_bytes;
+        match (
+            &mut self.slots[slot].as_mut().expect("heap slot exists").object,
+            target_kind,
+        ) {
+            (HeapObject::List(values), Target::List { index, .. }) => {
+                values[index] = value.clone();
+            }
+            (HeapObject::Record(record), Target::Record { key, .. }) => {
+                record.insert_str(key.as_str(), value.clone());
+            }
+            _ => unreachable!("object kind was checked"),
+        }
+        let entry = self.slots[slot].as_mut().expect("heap slot exists");
+        entry.logical_bytes = entry_bytes;
         self.live_logical_bytes = next_live;
-        self.uncache_materialized(*id);
-        self.boundary_refs.retain(|(_, cached_id)| cached_id != id);
+        self.clear_boundary_cache();
         Ok(value)
     }
 
@@ -695,10 +906,10 @@ impl Heap {
         id: HeapId,
         object: HeapObject,
     ) -> Result<(), RuntimeError> {
-        let slot = usize::try_from(id.get())
-            .ok()
-            .and_then(|index| self.id_to_slot.get(index))
-            .and_then(|slot| *slot)
+        let slot = self
+            .id_to_slot
+            .get(&id)
+            .copied()
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         let old_bytes = self
             .slots
@@ -723,8 +934,7 @@ impl Heap {
         entry.object = object;
         entry.logical_bytes = new_bytes;
         self.live_logical_bytes = next_live;
-        self.uncache_materialized(id);
-        self.boundary_refs.retain(|(_, cached_id)| *cached_id != id);
+        self.clear_boundary_cache();
         Ok(())
     }
 
@@ -750,14 +960,8 @@ impl Heap {
                 continue;
             }
             let entry = self.slots[slot].take().expect("live heap slot was checked");
-            if let Ok(index) = usize::try_from(entry.id.get())
-                && let Some(slot) = self.id_to_slot.get_mut(index)
-            {
-                *slot = None;
-            }
-            self.uncache_materialized(entry.id);
-            self.boundary_refs
-                .retain(|(_, cached_id)| *cached_id != entry.id);
+            self.id_to_slot.remove(&entry.id);
+            self.forget(entry.id);
             self.live_logical_bytes = self.live_logical_bytes.saturating_sub(entry.logical_bytes);
             self.free_slots.push(slot);
         }
@@ -772,12 +976,9 @@ impl Heap {
     }
 
     pub(crate) fn objects_in_id_order(&self) -> impl Iterator<Item = (HeapId, &HeapObject)> {
-        self.id_to_slot.iter().enumerate().filter_map(|(id, slot)| {
-            let slot = (*slot)?;
-            self.slots[slot]
-                .as_ref()
-                .map(|entry| (HeapId::from_counter(id as u64), &entry.object))
-        })
+        self.id_to_slot
+            .iter()
+            .filter_map(|(id, slot)| self.slots[*slot].as_ref().map(|entry| (*id, &entry.object)))
     }
 
     pub(crate) fn restore_collection_schedule(&mut self) {
@@ -787,6 +988,23 @@ impl Heap {
             .and_then(|period| period.checked_add(1))
             .and_then(|period| period.checked_mul(HEAP_GC_ALLOCATION_INTERVAL))
             .unwrap_or(u64::MAX);
+    }
+}
+
+fn collect_value_refs(value: &Value, refs: &mut Vec<HeapId>) {
+    match value {
+        Value::Ref(id) => refs.push(*id),
+        Value::Tuple(values) | Value::List(values) => {
+            for value in values.iter() {
+                collect_value_refs(value, refs);
+            }
+        }
+        Value::Record(record) => {
+            for value in record.values() {
+                collect_value_refs(value, refs);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -804,7 +1022,7 @@ impl Clone for Heap {
             collect_every_allocation: self.collect_every_allocation,
             stress_pins: Vec::new(),
             boundary_refs: Vec::new(),
-            materialized: Vec::new(),
+            materialized: FxHashMap::default(),
             logical_byte_limit: self.logical_byte_limit,
         }
     }
@@ -897,6 +1115,81 @@ mod tests {
         assert!(
             heap.structural_eq(&Value::Ref(original), &Value::Ref(copy))
                 .expect("compare cycles")
+        );
+    }
+
+    #[test]
+    fn sparse_object_bookkeeping_stays_bounded_by_live_objects() {
+        let mut heap = Heap::default();
+        for _ in 0..5_000 {
+            heap.allocate(HeapObject::List(Vec::new()))
+                .expect("allocate transient object");
+            heap.collect(std::iter::empty());
+        }
+
+        assert_eq!(heap.slots.len(), 1, "vacant storage slot should be reused");
+        assert!(heap.id_to_slot.is_empty(), "no dead ID bookkeeping remains");
+        assert!(heap.materialized.is_empty());
+        assert!(heap.boundary_refs.is_empty());
+    }
+
+    #[test]
+    fn indexed_add_charges_before_record_growth_and_updates_incrementally() {
+        let key = Value::String("a-long-new-key".into());
+        let added_bytes = RECORD_FIELD_BYTES
+            + "a-long-new-key".len() as u64
+            + value_logical_bytes(&Value::Number(1.0));
+        let base_bytes = HeapObject::Record(Box::default()).logical_bytes();
+
+        let mut exact = Heap::with_limit(base_bytes + added_bytes);
+        let target = exact
+            .allocate(HeapObject::Record(Box::default()))
+            .expect("allocate exact-limit record");
+        exact
+            .add_assign_index_number(&target, &key, 1.0)
+            .expect("exact limit must succeed");
+        assert_eq!(exact.live_logical_bytes(), base_bytes + added_bytes);
+
+        let mut over = Heap::with_limit(base_bytes + added_bytes - 1);
+        let target = over
+            .allocate(HeapObject::Record(Box::default()))
+            .expect("allocate one-byte-over record");
+        assert!(matches!(
+            over.add_assign_index_number(&target, &key, 1.0),
+            Err(RuntimeError::MemoryLimitExceeded { .. })
+        ));
+        assert_eq!(over.live_logical_bytes(), base_bytes);
+        assert_eq!(
+            over.export(&target)
+                .expect("post-error record remains valid"),
+            Value::Record(std::sync::Arc::new(Record::new()))
+        );
+    }
+
+    #[test]
+    fn child_mutation_invalidates_materialized_ancestor_cache() {
+        let mut heap = Heap::default();
+        let child = heap
+            .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+            .expect("allocate child");
+        let parent = heap
+            .allocate(HeapObject::List(vec![child.clone()]))
+            .expect("allocate parent");
+
+        assert_eq!(
+            heap.export(&parent).expect("materialize parent"),
+            Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into())
+        );
+        heap.push_list(&child, Value::Number(2.0))
+            .expect("mutate child");
+        assert_eq!(
+            heap.export(&parent).expect("rematerialize parent"),
+            Value::List(
+                vec![Value::List(
+                    vec![Value::Number(1.0), Value::Number(2.0)].into()
+                )]
+                .into()
+            )
         );
     }
 }

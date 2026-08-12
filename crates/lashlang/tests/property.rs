@@ -923,7 +923,7 @@ proptest! {
         prop_assert_eq!(&reencoded, &encoded);
         for (index, expected) in values.iter().enumerate() {
             let actual = decoded
-                .globals
+                .globals()
                 .get(&format!("variant_{index}"))
                 .expect("round-tripped global");
             assert_canonical_value_round_trip(expected, actual);

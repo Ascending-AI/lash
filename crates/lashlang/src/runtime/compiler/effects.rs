@@ -90,6 +90,7 @@ impl Compiler {
         if !self.compile_expr_with_forced_effect_site(expr, site) {
             return false;
         }
+        self.code.push(Instruction::DeepCopy);
         let path = self.push_assign_path(&target.steps);
         self.code.push(Instruction::PathAssign { slot, path });
         self.set_const_slot(slot, None);
