@@ -61,6 +61,11 @@ pub enum StoreError {
         bound_session_id: String,
         attempted_session_id: String,
     },
+    /// An unbound read found multiple candidate sessions and cannot choose one safely.
+    #[error(
+        "unbound store cannot resolve one session from {session_count} candidates; bind an explicit session"
+    )]
+    SessionResolutionAmbiguous { session_count: u64 },
     #[error("session `{session_id}` was admitted without durable session metadata")]
     SessionBindingNotMaterialized { session_id: String },
     #[error("invalid session id: {reason}")]
@@ -412,6 +417,7 @@ impl StoreError {
             Self::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
             Self::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",
             Self::SessionBindingMismatch { .. } => "SessionBindingMismatch",
+            Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
             Self::InvalidSessionId { .. } => "InvalidSessionId",
             Self::SessionDeleted { .. } => "SessionDeleted",

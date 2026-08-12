@@ -54,6 +54,10 @@ impl SessionCommitStore for FacadeStore {
         Ok(None)
     }
 
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        Ok(None)
+    }
+
     async fn load_node(&self, _node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
         Ok(None)
     }

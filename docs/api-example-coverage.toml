@@ -14808,6 +14808,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::SessionCommitStore::load_session_head_meta"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SessionCommitStore::load_session_head_meta"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
 symbol = "lash::persistence::SessionCommitStore::load_session_meta"
 kind = "function"
 availability = "default+all-features"
@@ -15409,6 +15418,7 @@ reason = "Add lash::persistence::SessionHead::token_ledger to the agent-service 
 symbol = "lash::persistence::SessionHeadMeta"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta to the agent-service persistence setup example and assert its externally observable result."
@@ -15417,6 +15427,7 @@ reason = "Add lash::persistence::SessionHeadMeta to the agent-service persistenc
 symbol = "lash::persistence::SessionHeadMeta::assemble"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::assemble"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::assemble to the agent-service persistence setup example and assert its externally observable result."
@@ -15425,6 +15436,7 @@ reason = "Add lash::persistence::SessionHeadMeta::assemble to the agent-service 
 symbol = "lash::persistence::SessionHeadMeta::checkpoint_ref"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::checkpoint_ref"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::checkpoint_ref to the agent-service persistence setup example and assert its externally observable result."
@@ -15433,6 +15445,7 @@ reason = "Add lash::persistence::SessionHeadMeta::checkpoint_ref to the agent-se
 symbol = "lash::persistence::SessionHeadMeta::config"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::config"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::config to the agent-service persistence setup example and assert its externally observable result."
@@ -15441,6 +15454,7 @@ reason = "Add lash::persistence::SessionHeadMeta::config to the agent-service pe
 symbol = "lash::persistence::SessionHeadMeta::current_frame_node_id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::current_frame_node_id"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::current_frame_node_id to the agent-service persistence setup example and assert its externally observable result."
@@ -15449,6 +15463,7 @@ reason = "Add lash::persistence::SessionHeadMeta::current_frame_node_id to the a
 symbol = "lash::persistence::SessionHeadMeta::head_revision"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::head_revision"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::head_revision to the agent-service persistence setup example and assert its externally observable result."
@@ -15457,6 +15472,7 @@ reason = "Add lash::persistence::SessionHeadMeta::head_revision to the agent-ser
 symbol = "lash::persistence::SessionHeadMeta::leaf_node_id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::leaf_node_id"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::leaf_node_id to the agent-service persistence setup example and assert its externally observable result."
@@ -15465,6 +15481,7 @@ reason = "Add lash::persistence::SessionHeadMeta::leaf_node_id to the agent-serv
 symbol = "lash::persistence::SessionHeadMeta::payload"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::payload"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::payload to the agent-service persistence setup example and assert its externally observable result."
@@ -15473,6 +15490,7 @@ reason = "Add lash::persistence::SessionHeadMeta::payload to the agent-service p
 symbol = "lash::persistence::SessionHeadMeta::schema_version"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::schema_version"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::schema_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
@@ -15481,6 +15499,7 @@ reason = "Add lash::persistence::SessionHeadMeta::schema_version to the docs-sni
 symbol = "lash::persistence::SessionHeadMeta::session_id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadMeta::session_id"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadMeta::session_id to the agent-service persistence setup example and assert its externally observable result."
@@ -15489,6 +15508,7 @@ reason = "Add lash::persistence::SessionHeadMeta::session_id to the agent-servic
 symbol = "lash::persistence::SessionHeadPayload"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadPayload"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadPayload to the agent-service persistence setup example and assert its externally observable result."
@@ -15497,6 +15517,7 @@ reason = "Add lash::persistence::SessionHeadPayload to the agent-service persist
 symbol = "lash::persistence::SessionHeadPayload::config"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadPayload::config"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadPayload::config to the agent-service persistence setup example and assert its externally observable result."
@@ -15505,6 +15526,7 @@ reason = "Add lash::persistence::SessionHeadPayload::config to the agent-service
 symbol = "lash::persistence::SessionHeadPayload::current_frame_node_id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadPayload::current_frame_node_id"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadPayload::current_frame_node_id to the agent-service persistence setup example and assert its externally observable result."
@@ -15513,6 +15535,7 @@ reason = "Add lash::persistence::SessionHeadPayload::current_frame_node_id to th
 symbol = "lash::persistence::SessionHeadPayload::schema_version"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadPayload::schema_version"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadPayload::schema_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
@@ -15521,6 +15544,7 @@ reason = "Add lash::persistence::SessionHeadPayload::schema_version to the docs-
 symbol = "lash::persistence::SessionHeadPayload::session_id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::store::SessionHeadPayload::session_id"]
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHeadPayload::session_id to the agent-service persistence setup example and assert its externally observable result."
@@ -17396,6 +17420,24 @@ aliases = ["lash_core::StoreError::SessionExecutionLeaseRenewalRefused::session_
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers identify the session whose token-guarded renewal was refused."
+
+[[api]]
+symbol = "lash::persistence::StoreError::SessionResolutionAmbiguous"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::SessionResolutionAmbiguous"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers and unbound-session embedders match this typed refusal; bundled examples bind their sessions explicitly and never resolve ambiguously."
+
+[[api]]
+symbol = "lash::persistence::StoreError::SessionResolutionAmbiguous::session_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::SessionResolutionAmbiguous::session_count"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers and unbound-session embedders match this typed refusal; bundled examples bind their sessions explicitly and never resolve ambiguously."
 
 [[api]]
 symbol = "lash::persistence::StoreError::StorageFailure"
@@ -51385,6 +51427,62 @@ disposition = "unused-justify"
 reason = "Backend conformance hook removes the implementation-specific zero-row renewal control after the law runs."
 
 [[api]]
+symbol = "lash::testing::conformance::UnboundSessionAdmissionState"
+kind = "enum"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionAdmissionState::AdmittedOnly"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionAdmissionState::Committed"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionResolutionHandles"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::backend_name"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::factory"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
+symbol = "lash::testing::conformance::UnboundSessionResolutionHandles::open_unbound"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law seam: the SQLite and PostgreSQL store test suites supply unbound handles to the shared session-resolution ambiguity law."
+
+[[api]]
 symbol = "lash::testing::conformance::session_execution_lease_zero_row_renewal_is_refused"
 kind = "function"
 availability = "all-features"
@@ -52743,6 +52841,14 @@ availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::turn_work_driver to the docs-snippets embedding/turns example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::unbound_session_reads_resolve_the_same_session"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law is executed by the in-memory, SQLite, and PostgreSQL store test suites."
 
 [[api]]
 symbol = "lash::testing::conformance::wake_delivery_crash_matrix"

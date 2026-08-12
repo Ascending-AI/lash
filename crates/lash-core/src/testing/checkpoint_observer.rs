@@ -17,7 +17,7 @@ use crate::{
     GcReport, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelResult, PendingTurnInputCancelTarget, PendingTurnInputDraft,
     SessionAdmission, SessionBinding, SessionExecutionLease, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, StoreMaintenance, TurnInputApplication,
     TurnInputClaim, TurnInputStore, VacuumReport,
 };
@@ -433,6 +433,10 @@ impl AttachmentManifest for ObservedSessionStore {
 impl SessionCommitStore for ObservedSessionStore {
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
         self.inner.load_session().await
+    }
+
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        self.inner.load_session_head_meta().await
     }
 
     async fn load_node(

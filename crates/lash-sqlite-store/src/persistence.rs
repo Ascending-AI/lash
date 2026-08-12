@@ -208,6 +208,10 @@ impl SessionCommitStore for Store {
             .map_err(sqlite_error)?
     }
 
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        Store::load_session_head_meta(self).await
+    }
+
     async fn load_node(
         &self,
         node_id: &str,

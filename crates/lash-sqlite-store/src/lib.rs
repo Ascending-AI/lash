@@ -353,11 +353,16 @@ impl Store {
             .call(|conn| {
                 let mut stmt = conn.prepare(
                     "SELECT session_id FROM (
-                         SELECT session_id FROM session_head
+                         SELECT session_id FROM (
+                             SELECT session_id FROM session_head
+                             LIMIT 2
+                         )
                          UNION
-                         SELECT session_id FROM session_meta
+                         SELECT session_id FROM (
+                             SELECT session_id FROM session_meta
+                             LIMIT 2
+                         )
                      )
-                     ORDER BY session_id ASC
                      LIMIT 2",
                 )?;
                 stmt.query_map([], |row| row.get::<_, String>(0))?
@@ -365,8 +370,13 @@ impl Store {
             })
             .await
             .map_err(sqlite_error)?;
-        if session_ids.len() != 1 {
+        if session_ids.is_empty() {
             return Ok(None);
+        }
+        if session_ids.len() > 1 {
+            return Err(StoreError::SessionResolutionAmbiguous {
+                session_count: session_ids.len() as u64,
+            });
         }
         self.bind_session(&session_ids[0])?;
         Ok(self.session_id.get().cloned())

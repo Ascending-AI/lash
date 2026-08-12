@@ -4701,8 +4701,13 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
     assert_eq!(run.turns.len(), 2);
     assert_eq!(
         store.load_session_count(),
+        0,
+        "the initial head probe and retained-lease follow-on must not hydrate an unchanged graph"
+    );
+    assert_eq!(
+        store.load_session_head_meta_count(),
         1,
-        "the follow-on physical turn must reuse the graph committed under the retained lease"
+        "the first physical turn must establish durable head freshness exactly once"
     );
     for node in &run.turns[0].state.session_graph.nodes {
         assert!(
@@ -4728,8 +4733,13 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
         .expect("turn after lease reacquisition succeeds");
     assert_eq!(
         store.load_session_count(),
+        0,
+        "reacquiring an unchanged durable head must not hydrate its graph"
+    );
+    assert_eq!(
+        store.load_session_head_meta_count(),
         2,
-        "a released and reacquired lease generation must force a graph reload"
+        "a released and reacquired lease generation must force a durable head recheck"
     );
 }
 
@@ -4826,8 +4836,13 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
     assert_eq!(issue.retryable, Some(false));
     assert_eq!(
         store.load_session_count(),
+        0,
+        "the fenced handoff claim must reject the lost lease before a full reload"
+    );
+    assert_eq!(
+        store.load_session_head_meta_count(),
         1,
-        "the fenced handoff claim must reject the lost lease before a follow-on turn starts"
+        "the first turn must establish durable head freshness exactly once"
     );
 
     runtime
@@ -4842,8 +4857,13 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
         .expect("turn after lease loss and reacquisition succeeds");
     assert_eq!(
         store.load_session_count(),
-        3,
-        "a lease acquired after loss must reload both invalidated resident state and the graph"
+        1,
+        "a lease acquired after loss must reload invalidated resident state exactly once"
+    );
+    assert_eq!(
+        store.load_session_head_meta_count(),
+        2,
+        "the rebuilt turn must recheck the durable head without a second graph hydration"
     );
 }
 

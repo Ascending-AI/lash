@@ -23,6 +23,7 @@ mod plugin_lifecycle;
 mod projection;
 mod replay_mismatch;
 mod runtime_scenarios;
+mod session_freshness;
 mod session_lease_observability;
 mod stream_accumulator;
 mod tool_surface_lifecycle;

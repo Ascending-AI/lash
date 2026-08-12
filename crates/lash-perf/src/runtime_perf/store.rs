@@ -567,6 +567,10 @@ impl SessionCommitStore for RuntimePerfStore {
         }))
     }
 
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, store::StoreError> {
+        Ok(self.session_head_meta.lock_recover().clone())
+    }
+
     async fn load_node(
         &self,
         node_id: &str,

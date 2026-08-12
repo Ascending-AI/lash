@@ -20,8 +20,8 @@
     "effect_executions_l1": 1
   },
   {
-    "point": { "operation": { "seam": "store", "operation": { "kind": "load_session" } }, "placement": "boundary" },
-    "outcome": "No runtime progress was durable; the successor reloads the same head and reclaims ingress.",
+    "point": { "operation": { "seam": "store", "operation": { "kind": "load_session_head_meta" } }, "placement": "boundary" },
+    "outcome": "No runtime progress was durable; the successor probes the same head and reclaims ingress.",
     "effect_executions_l1": 1
   },
   {

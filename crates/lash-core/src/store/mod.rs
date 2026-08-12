@@ -952,6 +952,18 @@ impl Default for SessionHeadPayload {
 pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError>;
 
+    /// Read the current session head without hydrating graph, checkpoint, or
+    /// usage history.
+    ///
+    /// Implementations must project this from at most one durable row. Runtime
+    /// freshness checks depend on the revision, leaf, and checkpoint reference
+    /// all being present in this read. The read must use the same session
+    /// resolution and binding semantics as [`SessionCommitStore::load_session`]
+    /// so the two projections agree about session presence. `Ok(None)` means
+    /// resolution completed and found no readable session; inability to
+    /// determine the head must be returned as `Err`, never collapsed to absence.
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError>;
+
     async fn load_node(
         &self,
         node_id: &str,

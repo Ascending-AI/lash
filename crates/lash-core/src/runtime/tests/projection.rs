@@ -677,7 +677,7 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
     let state_before_retry = runtime.state.clone();
     protocol_dirty.store(false, Ordering::SeqCst);
     restore_called.store(false, Ordering::SeqCst);
-    store.fail_load_session_on_call(store.load_session_count() + 2);
+    store.fail_load_session_on_call(store.load_session_count() + 1);
 
     let error = runtime
         .append_session_nodes(request)

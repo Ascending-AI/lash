@@ -242,7 +242,7 @@ impl Store {
     }
 
     pub async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
-        let Some(session_id) = self.session_id.get().cloned() else {
+        let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(None);
         };
         self.conn

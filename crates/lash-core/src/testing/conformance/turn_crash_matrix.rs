@@ -60,8 +60,9 @@ use crate::{
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, SessionAdmission,
     SessionBinding, SessionExecutionLease, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta, StoreError,
-    StoreMaintenance, TurnInputApplication, TurnInputClaim, TurnInputStore, VacuumReport,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta, SessionMeta,
+    StoreError, StoreMaintenance, TurnInputApplication, TurnInputClaim, TurnInputStore,
+    VacuumReport,
 };
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
@@ -120,6 +121,7 @@ impl TurnSeamOperation {
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum StoreOperation {
     LoadSession,
+    LoadSessionHeadMeta,
     ClaimSessionExecutionLease,
     RenewSessionExecutionLease,
     ReleaseSessionExecutionLease,
@@ -441,6 +443,15 @@ impl SessionCommitStore for SeamStore {
             .around(
                 TurnSeamOperation::Store(StoreOperation::LoadSession),
                 self.inner.load_session(),
+            )
+            .await
+    }
+
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
+                self.inner.load_session_head_meta(),
             )
             .await
     }
@@ -2131,7 +2142,7 @@ mod tests {
             .position(|entry| {
                 entry.point
                     == TurnCrashPoint {
-                        operation: TurnSeamOperation::Store(StoreOperation::LoadSession),
+                        operation: TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
                         placement: CrashPlacement::Boundary,
                     }
             })

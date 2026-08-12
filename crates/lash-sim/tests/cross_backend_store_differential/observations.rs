@@ -228,7 +228,19 @@ pub(super) struct RawDurableState {
 pub(super) struct StepObservation {
     pub(super) store_error: Option<String>,
     pub(super) runtime_commit_result: Option<ComparableRuntimeCommitResult>,
+    pub(super) freshness_head: FreshnessHeadObservation,
     pub(super) durable_state: RawDurableState,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum FreshnessHeadObservation {
+    Present {
+        head_revision: u64,
+        leaf_node_id: Option<String>,
+        checkpoint_ref: Option<BlobRef>,
+    },
+    Missing,
+    Error(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
