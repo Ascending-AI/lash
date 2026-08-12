@@ -175,10 +175,12 @@ impl Heap {
             return Err("heap next ID must equal the allocation counter plus one".to_string());
         }
 
-        let mut heap = Self::default();
-        heap.next_id = wire.next_id;
-        heap.allocations = wire.allocation_counter;
-        heap.schedule_version = wire.size_schedule_version;
+        let mut heap = Self {
+            next_id: wire.next_id,
+            allocations: wire.allocation_counter,
+            schedule_version: wire.size_schedule_version,
+            ..Self::default()
+        };
         let mut prior_id = None;
         for (id, object) in wire.objects {
             if prior_id.is_some_and(|prior| id <= prior) {

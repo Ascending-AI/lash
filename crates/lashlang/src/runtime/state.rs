@@ -434,10 +434,8 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     true,
                 )
                 .map_err(SnapshotDecodeError::InvalidEncoding)?;
-                heap.validate_isolated_roots(
-                    runtime_globals.iter().map(|(name, value)| (name, value)),
-                )
-                .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                heap.validate_isolated_roots(runtime_globals.iter())
+                    .map_err(SnapshotDecodeError::InvalidEncoding)?;
                 let globals = runtime_globals
                     .iter()
                     .map(|(name, value)| {
