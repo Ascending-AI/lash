@@ -1878,6 +1878,51 @@ async fn idle_service_death_updates_status_without_a_tool_call() {
     pool.shutdown_all().await;
 }
 
+#[tokio::test]
+async fn discovery_publishes_received_catalog_before_observing_same_burst_quit() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = Arc::new(McpConnectionPool::empty());
+    let entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "exit_after_list",
+                reconnect_initial_ms: 5_000,
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    );
+    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
+
+    entry
+        .establish()
+        .await
+        .expect("a received tools/list catalog must publish before transport EOF is observed");
+    wait_until(
+        || !pool.server_statuses()[0].connected,
+        "same-burst service quit was not observed after catalog publication",
+    )
+    .await;
+
+    let status = &pool.server_statuses()[0];
+    assert!(!status.connected);
+    assert_eq!(
+        status.last_error,
+        Some("MCP server `mock` service quit: Ok(Closed)".to_string())
+    );
+    assert_eq!(status.tool_count, 1);
+    assert_eq!(
+        pool.advertised_tools()
+            .into_iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>(),
+        ["mcp__mock__work"]
+    );
+    pool.shutdown_all().await;
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {

@@ -256,6 +256,7 @@ impl LifecycleActor {
         tokio::pin!(discovery);
         let tools = loop {
             tokio::select! {
+                biased;
                 result = &mut discovery => {
                     break match result {
                         Ok(Ok(tools)) => tools,
