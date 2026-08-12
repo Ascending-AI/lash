@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 /// Stable semantic reference to the runtime fact that caused another fact.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CausalRef {
     Turn {
         session_id: String,

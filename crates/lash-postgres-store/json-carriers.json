@@ -1,0 +1,110 @@
+{
+  "lash_sessions.head_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "SessionHeadPayload carries schema_version and is rejected by decode_versioned_json_record before typed decode."
+  },
+  "lash_graph_nodes.node_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "Unversioned StoredSessionNodeBody spans the broad session-history graph model; enrolling that model is a separate durability cutover."
+  },
+  "lash_usage_deltas.entry_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "TokenLedgerEntry identity is pinned by payload_encoding_version and payload_hash columns with a permanent tag registry."
+  },
+  "lash_session_meta.meta_json": {
+    "verdict": "enroll-now",
+    "reason": "FIG-1219's unversioned SessionMeta carrier is the concrete blind spot covered by this gate."
+  },
+  "lash_runtime_turn_commits.result_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "RuntimeCommitResult is a receipt coupled to turn_commit_hash and identity_encoding_version; enrolling the full receipt DTO is a separate cutover."
+  },
+  "lash_session_execution_leases.lease_owner_liveness_json": {
+    "verdict": "not-serialized-struct",
+    "reason": "Reserved compatibility column; current writes always bind NULL and reads ignore its value."
+  },
+  "lash_queued_work_batches.merge_key_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "QueuedWorkMergeKey belongs to the shared queue protocol and lacks a JsonSchema durability contract; enroll with that protocol as a unit."
+  },
+  "lash_queued_work_batches.claim_owner_liveness_json": {
+    "verdict": "not-serialized-struct",
+    "reason": "Reserved compatibility column; current claim writes always bind NULL and projection ignores its value."
+  },
+  "lash_queued_work_items.payload_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "QueuedWorkPayload is a shared runtime sum type; enrolling all command and wake variants is a separate queue-schema cutover."
+  },
+  "lash_pending_turn_inputs.ingress_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "TurnInputIngress is a shared admission protocol sum type; enroll together with its cross-backend representation."
+  },
+  "lash_pending_turn_inputs.input_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "TurnInput includes host-facing content and attachments and has no bounded JsonSchema durability contract yet."
+  },
+  "lash_pending_turn_inputs.claim_owner_liveness_json": {
+    "verdict": "not-serialized-struct",
+    "reason": "Reserved compatibility column; current claim writes always bind NULL and projection ignores its value."
+  },
+  "lash_processes.record_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "ProcessRecord spans the durable process model; enrolling its nested specs, waits, provenance, and status is a separate process-schema cutover."
+  },
+  "lash_process_events.event_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "ProcessEvent spans all durable process event variants and must be enrolled with ProcessRecord as one process-schema cutover."
+  },
+  "lash_process_wake_deliveries.delivery_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "WakeDelivery is part of the process wake protocol and must be enrolled with the process carrier family."
+  },
+  "lash_process_leases.lease_owner_liveness_json": {
+    "verdict": "not-serialized-struct",
+    "reason": "Reserved compatibility column; current writes always bind NULL and reads ignore its value."
+  },
+  "lash_process_segment_handovers.handover_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "ProcessSegmentHandover is part of the process execution protocol and must be enrolled with the process carrier family."
+  },
+  "lash_runtime_effect_replay.envelope_json": {
+    "verdict": "not-serialized-struct",
+    "reason": "The PostgreSQL backend stores and returns the controller-owned opaque JSON string without deserializing a Rust struct."
+  },
+  "lash_runtime_effect_replay.outcome_json": {
+    "verdict": "not-serialized-struct",
+    "reason": "The PostgreSQL backend stores and returns the controller-owned opaque terminal JSON string without typed deserialization."
+  },
+  "lash_runtime_effect_replay.error_json": {
+    "verdict": "not-serialized-struct",
+    "reason": "The PostgreSQL backend stores and returns the controller-owned opaque terminal JSON string without typed deserialization."
+  },
+  "lash_await_event_waits.scope_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "Await scope identity is encoded and compared by the shared await-event coordinator; enroll the whole keyed-promise protocol together."
+  },
+  "lash_await_event_waits.wait_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "Await wait identity is encoded and compared by the shared await-event coordinator; enroll the whole keyed-promise protocol together."
+  },
+  "lash_await_event_waits.terminal_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "Await terminal values are controller-owned Resolution JSON; enroll them with scope and wait as one keyed-promise protocol."
+  },
+  "lash_trigger_subscriptions.record_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "TriggerSubscriptionRecord is coupled to indexed projection columns and belongs to the complete trigger-store schema cutover."
+  },
+  "lash_trigger_occurrences.record_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "TriggerOccurrenceRecord is coupled to indexed projection columns and belongs to the complete trigger-store schema cutover."
+  },
+  "lash_trigger_deliveries.subscription_snapshot_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "The subscription snapshot is a TriggerSubscriptionRecord copy and must move with the trigger carrier family."
+  },
+  "lash_trigger_mutation_receipts.result_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "Trigger command results are replay receipts tied to request_fingerprint and must move with the trigger carrier family."
+  }
+}

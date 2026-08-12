@@ -59,6 +59,24 @@ repos:
         files: '^(fixtures/durable-read/|crates/lash-core/tests/support/durable_read_fixture\.rs$)'
         pass_filenames: false
 
+      # Every *_json column must stay explicitly enrolled, excluded, or proven
+      # not to carry a serialized struct.
+      - id: postgres-json-carrier-coverage
+        name: PostgreSQL JSON carrier coverage
+        language: system
+        entry: python3 scripts/check-postgres-json-carrier-coverage.py
+        files: '^(crates/lash-postgres-store/(schema\.sql|schema-shape\.txt|json-carriers\.json)|scripts/check-postgres-json-carrier-coverage\.py)$'
+        pass_filenames: false
+
+      # Blob payload fields are outside PostgreSQL's catalog. Once a registered
+      # type changes, its owning component version must move with the artifact.
+      - id: postgres-payload-shape-version
+        name: PostgreSQL payload-shape component version
+        language: system
+        entry: python3 scripts/check-postgres-payload-shape-version.py --cached
+        files: '^(crates/lash-postgres-store/(?:schema-shape|payload-schema-fingerprints)\.txt|crates/lash-postgres-store/src/lib\.rs|crates/lash-sqlite-store/src/schema\.rs)$'
+        pass_filenames: false
+
       # Mirrors CI Lint "Clippy (workspace, all targets)". Warm-cache this is
       # tens of seconds; run at push so commits stay instant.
       - id: cargo-clippy-workspace

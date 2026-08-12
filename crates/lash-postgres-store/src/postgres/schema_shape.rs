@@ -33,8 +33,12 @@
 //!   `pg_constraint` row — matched by column *set*, since key order changes which
 //!   index prefixes can be scanned rather than which rows are rejected;
 //! - foreign keys with their on-delete action.
+//! - registered structured JSON columns, whose field/type shape is derived from
+//!   the Rust type because PostgreSQL's catalog can describe only the carrier
+//!   column. Payload values are never sampled or recorded.
 //!
-//! Deliberately out of scope: `CHECK` constraints, non-unique indexes, triggers,
+//! Deliberately out of scope: unregistered JSON values, `CHECK` constraints,
+//! non-unique indexes, triggers,
 //! row-level security, constraint and index names, column ordinal positions, and
 //! default expression text. Every attribute that remains renders identically on
 //! PostgreSQL 14 through 18, which the version matrix in CI asserts —
@@ -52,6 +56,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::{SCHEMA_COMPONENT, SCHEMA_VERSION};
+
+#[path = "schema_shape/payload_shape.rs"]
+mod payload_shape;
+use payload_shape::PayloadShape;
 
 /// Generated description of the schema this build expects, regenerated from
 /// [`crate::PostgresStorage::schema_ddl`] by the `schema_shape` test suite.
@@ -418,6 +426,8 @@ pub(crate) struct TableShape {
     pub(crate) unique_guards: BTreeSet<UniqueGuard>,
     /// Every foreign key declared on the table.
     pub(crate) foreign_keys: BTreeSet<ForeignKeyShape>,
+    /// Structured JSON payloads keyed by the column that stores them.
+    pub(crate) payload_shapes: BTreeMap<String, PayloadShape>,
 }
 
 /// The shape of every table lash owns, as either expected by this build or read
@@ -453,6 +463,7 @@ impl SchemaShape {
         let mut version: Option<i32> = None;
         let mut shape = Self::default();
         let mut current: Option<String> = None;
+        let mut current_payload: Option<String> = None;
         for (index, raw_line) in text.lines().enumerate() {
             let line = raw_line.trim_end();
             let number = index + 1;
@@ -473,6 +484,7 @@ impl SchemaShape {
                     return Err(bad("duplicate table"));
                 }
                 current = Some(name);
+                current_payload = None;
             } else {
                 let table_name = current.as_ref().ok_or_else(|| bad("no enclosing table"))?;
                 let table = shape
@@ -480,16 +492,73 @@ impl SchemaShape {
                     .get_mut(table_name)
                     .expect("the current table was inserted before its members");
                 if let Some(rest) = trimmed.strip_prefix("column ") {
+                    current_payload = None;
                     let column = parse_column_line(rest).ok_or_else(|| bad("bad column"))?;
                     table.columns.insert(column.name.clone(), column);
+                } else if let Some(rest) = trimmed.strip_prefix("payload-shape ") {
+                    let (column_identity, rust_type) = rest
+                        .split_once(' ')
+                        .ok_or_else(|| bad("bad payload shape"))?;
+                    if column_identity.is_empty() || rust_type.is_empty() || rust_type.contains(' ')
+                    {
+                        return Err(bad("bad payload shape"));
+                    }
+                    let column =
+                        if let Some((payload_table, column)) = column_identity.split_once('.') {
+                            if payload_table != table_name || column.is_empty() {
+                                return Err(bad("payload shape identity does not match its table"));
+                            }
+                            column
+                        } else {
+                            column_identity
+                        };
+                    if !table.columns.contains_key(column) {
+                        return Err(bad("payload shape names an unknown column"));
+                    }
+                    let shape = PayloadShape {
+                        rust_type: rust_type.to_string(),
+                        entries: BTreeMap::new(),
+                    };
+                    if table
+                        .payload_shapes
+                        .insert(column.to_string(), shape)
+                        .is_some()
+                    {
+                        return Err(bad("duplicate payload shape"));
+                    }
+                    current_payload = Some(column.to_string());
+                } else if let Some(rest) = trimmed.strip_prefix("shape ") {
+                    let (path, value) = rest
+                        .split_once(' ')
+                        .ok_or_else(|| bad("bad payload shape entry"))?;
+                    if !path.starts_with('/') || value.is_empty() {
+                        return Err(bad("bad payload shape entry"));
+                    }
+                    let payload_column = current_payload
+                        .as_ref()
+                        .ok_or_else(|| bad("no enclosing payload shape"))?;
+                    let payload = table
+                        .payload_shapes
+                        .get_mut(payload_column)
+                        .expect("the current payload shape was inserted before its entries");
+                    if payload
+                        .entries
+                        .insert(path.to_string(), value.to_string())
+                        .is_some()
+                    {
+                        return Err(bad("duplicate payload shape entry"));
+                    }
                 } else if let Some(rest) = trimmed.strip_prefix("primary-key ") {
+                    current_payload = None;
                     let guard =
                         parse_guard_line(rest, true).ok_or_else(|| bad("bad primary key"))?;
                     table.unique_guards.insert(guard);
                 } else if let Some(rest) = trimmed.strip_prefix("unique ") {
+                    current_payload = None;
                     let guard = parse_guard_line(rest, false).ok_or_else(|| bad("bad unique"))?;
                     table.unique_guards.insert(guard);
                 } else if let Some(rest) = trimmed.strip_prefix("foreign-key ") {
+                    current_payload = None;
                     let key = parse_foreign_key_line(rest).ok_or_else(|| bad("bad foreign key"))?;
                     table.foreign_keys.insert(key);
                 } else {
@@ -531,6 +600,15 @@ impl SchemaShape {
                     out.push_str(&format!(" {token}"));
                 }
                 out.push('\n');
+                if let Some(payload) = table.payload_shapes.get(&column.name) {
+                    out.push_str(&format!(
+                        "  payload-shape {name}.{} {}\n",
+                        column.name, payload.rust_type
+                    ));
+                    for (path, value) in &payload.entries {
+                        out.push_str(&format!("    shape {path} {value}\n"));
+                    }
+                }
             }
             for guard in &table.unique_guards {
                 out.push_str(&format!(
@@ -568,6 +646,7 @@ impl SchemaShape {
                 continue;
             };
             diff_columns(name, expected_table, found_table, &mut findings);
+            diff_payload_shapes(name, expected_table, found_table, &mut findings);
             diff_paired_objects(
                 name,
                 &expected_table.unique_guards,
@@ -606,6 +685,13 @@ const ARTIFACT_HEADER: &str = "\
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
+#
+# A payload-shape block names its full table/column identity and describes fields
+# serialized inside that registered blob column.
+# Its shape paths come from the owning Rust type through schemars, never from a sample
+# row, and contain structural names/types plus literals that control decoding. Once
+# registered, changing those lines requires every durable backend named by the
+# payload projection to advance its component version.
 ";
 
 fn parse_column_line(rest: &str) -> Option<ColumnShape> {
@@ -723,6 +809,75 @@ fn diff_columns(
             });
         }
     }
+}
+
+fn diff_payload_shapes(
+    table: &str,
+    expected: &TableShape,
+    found: &TableShape,
+    findings: &mut Vec<SchemaFinding>,
+) {
+    let columns = expected
+        .payload_shapes
+        .keys()
+        .chain(found.payload_shapes.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for column in columns {
+        let expected_payload = expected.payload_shapes.get(&column);
+        let found_payload = found.payload_shapes.get(&column);
+        if expected_payload == found_payload {
+            continue;
+        }
+        let detail = match (expected_payload, found_payload) {
+            (None, Some(found)) => format!(
+                "the artifact omits the registered Rust payload type `{}`",
+                found.rust_type
+            ),
+            (Some(expected), None) => format!(
+                "the artifact declares payload type `{}`, but this build has no registered type",
+                expected.rust_type
+            ),
+            (Some(expected), Some(found)) if expected.rust_type != found.rust_type => format!(
+                "artifact type `{}` differs from registered Rust type `{}`",
+                expected.rust_type, found.rust_type
+            ),
+            (Some(expected), Some(found)) => payload_shape_difference(expected, found),
+            (None, None) => unreachable!("equal absent payloads were skipped"),
+        };
+        findings.push(SchemaFinding::PayloadShapeMismatch {
+            table: table.to_string(),
+            column,
+            detail,
+        });
+    }
+}
+
+fn payload_shape_difference(expected: &PayloadShape, found: &PayloadShape) -> String {
+    let removed = expected
+        .entries
+        .iter()
+        .filter(|entry| !found.entries.contains_key(entry.0))
+        .map(|(path, value)| format!("removed {path} {value}"));
+    let changed = expected
+        .entries
+        .iter()
+        .filter_map(|(path, expected_value)| {
+            found.entries.get(path).and_then(|found_value| {
+                (found_value != expected_value)
+                    .then(|| format!("retyped {path} {expected_value} -> {found_value}"))
+            })
+        });
+    let added = found
+        .entries
+        .iter()
+        .filter(|entry| !expected.entries.contains_key(entry.0))
+        .map(|(path, value)| format!("added {path} {value}"));
+    removed
+        .chain(changed)
+        .chain(added)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// An object class matched by *what it enforces* rather than by how it was
@@ -934,6 +1089,16 @@ pub enum SchemaFinding {
         /// Column the database has.
         found: ColumnShape,
     },
+    /// The shape derived from the Rust type serialized into a blob column does
+    /// not match the published artifact.
+    PayloadShapeMismatch {
+        /// Table carrying the serialized payload.
+        table: String,
+        /// Column carrying the serialized payload.
+        column: String,
+        /// Field-level shape difference.
+        detail: String,
+    },
     /// A uniqueness guarantee lash depends on is absent.
     MissingUniqueGuard {
         /// Table that should carry the guard.
@@ -1010,6 +1175,7 @@ impl SchemaFinding {
             Self::MissingColumn { .. }
             | Self::ColumnMismatch { .. }
             | Self::UnexpectedColumn { .. } => "COLUMN DRIFT",
+            Self::PayloadShapeMismatch { .. } => "PAYLOAD SHAPE DRIFT",
             Self::MissingUniqueGuard { .. }
             | Self::UniqueGuardMismatch { .. }
             | Self::UnexpectedUniqueGuard { .. } => "UNIQUE GUARD DRIFT",
@@ -1063,6 +1229,11 @@ impl fmt::Display for SchemaFinding {
                 "{table}.{}: unexpected column, found {found}",
                 found.name
             ),
+            Self::PayloadShapeMismatch {
+                table,
+                column,
+                detail,
+            } => write!(formatter, "{table}.{column}: {detail}"),
             Self::MissingUniqueGuard { table, expected } => {
                 write!(formatter, "{table}: missing {expected}")
             }
@@ -1163,6 +1334,7 @@ impl fmt::Display for SchemaReport {
             "MISSING TABLES",
             "SHADOWED TABLES",
             "COLUMN DRIFT",
+            "PAYLOAD SHAPE DRIFT",
             "UNIQUE GUARD DRIFT",
             "FOREIGN KEY DRIFT",
             "SEED ROWS",

@@ -305,7 +305,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Version 30 removes the CLI-era session name, creation timestamp, model, and
 /// working-directory columns from session metadata. Older databases are
 /// rejected and recreated; there is no compatibility read path.
-pub(crate) const SCHEMA_VERSION: i32 = 30;
+/// Version 32 makes nested session metadata strict. Version 31 is already
+/// selected by an unmerged sibling lane, so this shared PostgreSQL/SQLite
+/// payload cutover advances past it.
+pub(crate) const SCHEMA_VERSION: i32 = 32;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

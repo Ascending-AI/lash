@@ -60,12 +60,26 @@ resolves *outside* the anchored namespace is reported rather than used, because
 that is where lash would actually write.
 
 The scope is narrow and chosen for cross-version stability: per lash-owned table,
-columns as (name, type, nullability, value source), every uniqueness guarantee read
+columns as (name, type, nullability, value source), registered structured JSON
+payloads as Rust-type-derived field/type paths, every uniqueness guarantee read
 from `pg_index.indisunique` including normalized partial predicates and
 `NULLS NOT DISTINCT`, and foreign keys with their on-delete action. `CHECK`
-constraints, non-unique indexes, triggers, row-level security, and default
-expression text are out of scope. The predicate of a partial unique index is the
-only free-text element in the whole comparison.
+constraints, unregistered or intentionally opaque JSON values, non-unique indexes,
+triggers, row-level security, and default expression text are out of scope. The
+predicate of a partial unique index is the only free-text catalog element in the
+comparison.
+
+PostgreSQL's catalog sees a serialized struct only as its carrier column, so the
+payload registry supplies the missing type authority. `schema-shape.txt` records a
+shape-only projection of `schemars` output: serialized field names, JSON types,
+requiredness, references, and composition, never defaults, examples, literal enum
+values, or sampled row values. A database sample is deliberately not the source:
+an optional field absent from the chosen row would recreate the same blind spot one
+level down. The database-free artifact test compares that listing to the current
+Rust type, while the live verifier attaches the same derived listing to the catalog
+shape. A diff gate additionally requires the PostgreSQL component version to move
+when an already-registered payload listing changes, so regenerating the artifact at
+the old version cannot bless a cross-version decode hazard.
 
 Objects are matched by **what they enforce**, never by how they were written.
 Columns are matched by name and never by ordinal position. Guards and keys are

@@ -1523,7 +1523,7 @@ pub enum ProcessChange {
     Deleted { tombstone: ProcessTombstone },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ObserverInheritance {
     #[default]
