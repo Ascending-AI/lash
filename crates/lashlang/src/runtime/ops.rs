@@ -1189,6 +1189,7 @@ pub(crate) fn coerce_string(value: &Value) -> Result<Cow<'_, str>, RuntimeError>
         | Value::Tuple(_)
         | Value::List(_)
         | Value::Record(_)
+        | Value::Ref(_)
         | Value::Projected(_) => Err(RuntimeError::ExpectedText {
             actual: value_type_name(value).to_string(),
         }),
@@ -1300,6 +1301,7 @@ pub(crate) fn is_truthy(value: &Value) -> bool {
         Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => true,
         Value::Tuple(values) => !values.is_empty(),
         Value::Projected(value) => futures_executor::block_on(value.truthy()),
+        Value::Ref(_) => unreachable!("heap references must be exported before truthiness"),
     }
 }
 
@@ -1354,6 +1356,7 @@ pub(crate) fn value_type_name(value: &Value) -> &str {
         Value::List(_) => "list",
         Value::Record(_) => "record",
         Value::Projected(value) => value.value_type_name(),
+        Value::Ref(_) => "heap_ref",
     }
 }
 
@@ -1368,7 +1371,8 @@ pub(crate) fn value_contains_projected(value: &Value) -> bool {
         | Value::Number(_)
         | Value::String(_)
         | Value::Image(_)
-        | Value::Resource(_) => false,
+        | Value::Resource(_)
+        | Value::Ref(_) => false,
     }
 }
 

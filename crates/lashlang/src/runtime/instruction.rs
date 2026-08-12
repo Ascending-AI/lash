@@ -133,6 +133,7 @@ pub(crate) enum Instruction {
     PushBool(bool),
     PushNumber(f64),
     LoadName(usize),
+    DeepCopy,
     StoreName(usize),
     StoreConst {
         slot: usize,
@@ -336,6 +337,7 @@ impl Instruction {
             | Instruction::PushBool(_)
             | Instruction::PushNumber(_) => InstructionProfileTag::PushConst,
             Instruction::LoadName(_) => InstructionProfileTag::LoadName,
+            Instruction::DeepCopy => InstructionProfileTag::StoreName,
             Instruction::StoreName(_)
             | Instruction::StoreConst { .. }
             | Instruction::PathAssign { .. } => InstructionProfileTag::StoreName,

@@ -212,8 +212,9 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
     scratch: Option<&mut ExecutionScratch>,
 ) -> Result<ExecutionOutcome, RuntimeError> {
     if let Some(scratch) = scratch {
+        let (globals, heap) = state.take_runtime();
         let slots = SlotState::from_globals_with_scratch(
-            std::mem::take(&mut state.globals),
+            globals,
             &program.chunk.slot_names,
             scratch,
             projected,
@@ -225,18 +226,19 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
             scratch,
             host.execution_mode(),
         );
+        vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
-        state.globals = vm.recycle_into_globals(scratch);
+        let (runtime_globals, heap) = vm.recycle_into_state_parts(scratch)?;
+        state.install_runtime(runtime_globals, heap)?;
         result
     } else {
-        let slots = SlotState::from_globals(
-            std::mem::take(&mut state.globals),
-            &program.chunk.slot_names,
-            projected,
-        );
+        let (globals, heap) = state.take_runtime();
+        let slots = SlotState::from_globals(globals, &program.chunk.slot_names, projected);
         let mut vm = Vm::new_with_mode(&program.chunk, slots, host, host.execution_mode());
+        vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
-        state.globals = vm.into_globals();
+        let (runtime_globals, heap) = vm.into_state_parts()?;
+        state.install_runtime(runtime_globals, heap)?;
         result
     }
 }

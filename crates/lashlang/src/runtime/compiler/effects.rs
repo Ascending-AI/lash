@@ -74,6 +74,7 @@ impl Compiler {
             if !self.compile_expr_with_forced_effect_site(expr, site) {
                 return false;
             }
+            self.code.push(Instruction::DeepCopy);
             self.code.push(Instruction::StoreName(slot));
             self.set_const_slot(slot, None);
             self.push_null_if(leave_value);

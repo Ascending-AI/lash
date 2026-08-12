@@ -40,6 +40,20 @@ pub enum RuntimeError {
     /// Active VM execution exceeded its explicit deadline.
     #[error("lashlang execution deadline of {limit_ms}ms exceeded")]
     ExecutionDeadlineExceeded { limit_ms: u128 },
+    /// Logical heap usage exceeded the versioned memory schedule limit.
+    #[error(
+        "lashlang logical memory limit of {limit} bytes exceeded (allocation would reach {attempted} bytes)"
+    )]
+    MemoryLimitExceeded { limit: u64, attempted: u64 },
+    /// A heap reference named an object that has already been swept.
+    #[error("dangling lashlang heap reference {id}")]
+    DanglingHeapReference { id: u64 },
+    /// The deterministic allocation identity counter was exhausted.
+    #[error("lashlang heap allocation identity space exhausted")]
+    HeapIdExhausted,
+    /// A host boundary cannot represent cyclic heap values.
+    #[error("lashlang heap value contains a cycle through object {id}")]
+    CyclicHostValue { id: u64 },
     /// Execution referenced a binding that is not defined.
     #[error("unknown name `{name}`")]
     UndefinedVariable { name: String },
@@ -358,7 +372,9 @@ impl RuntimeError {
     pub fn is_execution_bound_exhausted(&self) -> bool {
         matches!(
             self,
-            Self::InstructionBudgetExceeded { .. } | Self::ExecutionDeadlineExceeded { .. }
+            Self::InstructionBudgetExceeded { .. }
+                | Self::ExecutionDeadlineExceeded { .. }
+                | Self::MemoryLimitExceeded { .. }
         )
     }
 }
@@ -600,6 +616,14 @@ mod tests {
                 RuntimeError::ExecutionDeadlineExceeded { .. } => {
                     "lashlang execution deadline of 20ms exceeded"
                 }
+                RuntimeError::MemoryLimitExceeded { .. } => {
+                    "lashlang logical memory limit exceeded"
+                }
+                RuntimeError::DanglingHeapReference { .. } => "dangling lashlang heap reference",
+                RuntimeError::HeapIdExhausted => {
+                    "lashlang heap allocation identity space exhausted"
+                }
+                RuntimeError::CyclicHostValue { .. } => "lashlang heap value contains a cycle",
                 RuntimeError::UndefinedVariable { .. } => "unknown name `name`",
                 RuntimeError::NonListIteration => "`for` expects a list or tuple",
                 RuntimeError::SessionProcessAdminOutsideProcess { .. } => {

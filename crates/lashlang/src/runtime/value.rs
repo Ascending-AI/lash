@@ -21,10 +21,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::record::{Symbol, intern_symbol, symbol_name};
 use super::{
-    Name, Record, RuntimeError, RuntimeJson, append_tuple_literal_direct, execute_contains_direct,
-    from_json, is_truthy as value_truthy, materialize_projected_async, read_field_ref_direct,
-    read_index_ref_direct, stringify_value_async, value_contains_projected, value_len,
-    value_type_name, write_number,
+    HeapId, Name, Record, RuntimeError, RuntimeJson, append_tuple_literal_direct,
+    execute_contains_direct, from_json, is_truthy as value_truthy, materialize_projected_async,
+    read_field_ref_direct, read_index_ref_direct, stringify_value_async, value_contains_projected,
+    value_len, value_type_name, write_number,
 };
 
 /// Marker key that wraps a Type literal at its outermost level so a host-side
@@ -54,6 +54,10 @@ impl ListValue {
 
     pub(crate) fn make_mut(&mut self) -> &mut Vec<Value> {
         Arc::make_mut(&mut self.values)
+    }
+
+    pub(crate) fn identity(&self) -> usize {
+        Arc::as_ptr(&self.values) as usize
     }
 }
 
@@ -187,6 +191,7 @@ pub enum Value {
     // keep the payload behind a pointer.
     Image(Box<ImageValue>),
     Resource(ResourceHandle),
+    Ref(HeapId),
     Tuple(ListValue),
     List(ListValue),
     Record(Arc<Record>),
@@ -215,6 +220,7 @@ impl PartialEq for Value {
             (Self::String(left), Self::String(right)) => left == right,
             (Self::Image(left), Self::Image(right)) => left == right,
             (Self::Resource(left), Self::Resource(right)) => left == right,
+            (Self::Ref(left), Self::Ref(right)) => left == right,
             (Self::Tuple(left), Self::Tuple(right)) => left == right,
             (Self::List(left), Self::List(right)) => left == right,
             (Self::Record(left), Self::Record(right)) => left == right,
@@ -819,6 +825,7 @@ impl fmt::Display for Value {
             }
             Self::Image(_)
             | Self::Resource(_)
+            | Self::Ref(_)
             | Self::List(_)
             | Self::Record(_)
             | Self::Projected(_) => write!(

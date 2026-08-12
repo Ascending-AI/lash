@@ -6,6 +6,7 @@ use super::super::{
 };
 use super::effects::VmEffect;
 use super::{Vm, VmRunOutcome};
+use crate::ast::BinaryOp;
 use crate::lexer::Span;
 
 pub(super) enum VmStep {
@@ -216,8 +217,46 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 span: None,
             });
         }
+        if !self.heap_initialized {
+            if let Err(error) = self.heapify_vm_state() {
+                return Err(VmTrap {
+                    error,
+                    instruction_ip: self.ip.min(self.chunk.code.len().saturating_sub(1)),
+                    span: None,
+                });
+            }
+            self.heap_initialized = true;
+        }
         while let Some(instruction) = self.chunk.code.get(self.ip).copied() {
             let instruction_ip = self.ip;
+            let uses_heap_values = matches!(instruction, super::Instruction::DeepCopy)
+                || matches!(
+                    instruction,
+                    super::Instruction::Intrinsic(super::IntrinsicOp::PushAssign(_))
+                )
+                || matches!(
+                    instruction,
+                    super::Instruction::AddAssignIndexNumber { .. }
+                        | super::Instruction::AddAssignIndexSlotNumber { .. }
+                )
+                || matches!(
+                    instruction,
+                    super::Instruction::Binary(BinaryOp::Equal | BinaryOp::NotEqual)
+                );
+            if !uses_heap_values
+                && let Err(error) = self.materialize_instruction_operands(instruction)
+            {
+                return Err(VmTrap {
+                    error,
+                    instruction_ip,
+                    span: None,
+                });
+            }
+            if uses_heap_values && self.heap.allocation_scope_needs_roots() {
+                let roots = self.heap_roots();
+                self.heap.begin_allocation_scope(roots);
+            }
+            active_started = Instant::now();
             self.ip += 1;
             self.instructions_executed = self.instructions_executed.saturating_add(1);
             let profile = self
@@ -247,6 +286,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 Err(error) => Err(error),
             };
+            if result.is_ok()
+                && let Err(error) = self.heapify_vm_state()
+            {
+                return Err(VmTrap {
+                    error,
+                    instruction_ip,
+                    span: None,
+                });
+            }
             if let Some((tag, start)) = profile {
                 self.record_instruction_profile(tag, start.elapsed().as_nanos());
             }
@@ -349,6 +397,136 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 limit_ms: limit.as_millis(),
             });
         }
+        if let ExecutionBound::Bounded(limit) = bounds.memory_limit
+            && self.heap.live_logical_bytes() > limit.get()
+        {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: limit.get(),
+                attempted: self.heap.live_logical_bytes(),
+            });
+        }
         Ok(())
+    }
+
+    fn materialize_instruction_operands(
+        &mut self,
+        instruction: super::Instruction,
+    ) -> Result<(), RuntimeError> {
+        for value in &mut self.stack {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        match instruction {
+            super::Instruction::LoadField { slot, .. }
+            | super::Instruction::LoadFieldUnwrap { slot, .. }
+            | super::Instruction::SlotNumberBinary { slot, .. }
+            | super::Instruction::SlotNumberCompare { slot, .. }
+            | super::Instruction::SlotNumberBinaryCompare { slot, .. }
+            | super::Instruction::JumpIfSlotNumberCompareFalse { slot, .. }
+            | super::Instruction::JumpIfSlotNumberBinaryCompareFalse { slot, .. }
+            | super::Instruction::ResolveTypeRef(slot) => self.materialize_slot(slot)?,
+            super::Instruction::PathAssign { slot, .. }
+            | super::Instruction::AddAssign(slot)
+            | super::Instruction::AddAssignNumber { slot, .. }
+            | super::Instruction::AppendAssign(slot) => self.materialize_mutable_slot(slot)?,
+            super::Instruction::AddAssignSlot { slot, right } => {
+                self.materialize_mutable_slot(slot)?;
+                self.materialize_slot(right)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn materialize_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
+        if let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        Ok(())
+    }
+
+    fn materialize_mutable_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
+        if let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) {
+            *value = self.heap.export_for_mutation(value)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn materialize_vm_state(&mut self) -> Result<(), RuntimeError> {
+        for value in &mut self.stack {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        if let Some(value) = &mut self.last_value {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        for value in self.slots.values.iter_mut().flatten() {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        for entry in &mut self.slots.extras.entries {
+            entry.value = self.heap.export_for_instruction(&entry.value)?;
+        }
+        for iterator in &mut self.iter_stack {
+            if let super::IterCursor::List { values, .. } = &mut iterator.cursor {
+                let materialized = values
+                    .iter()
+                    .map(|value| self.heap.export_for_instruction(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                *values = materialized.into();
+            }
+            if let Some(value) = &mut iterator.restore.previous {
+                *value = self.heap.export_for_instruction(value)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn heapify_vm_state(&mut self) -> Result<(), RuntimeError> {
+        if self.heap.allocation_scope_needs_roots() {
+            let pre_import_roots = self.heap_roots();
+            self.heap.begin_allocation_scope(pre_import_roots);
+        }
+        for value in &mut self.stack {
+            *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+        }
+        if let Some(value) = &mut self.last_value {
+            *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+        }
+        for value in self.slots.values.iter_mut().flatten() {
+            *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+        }
+        for entry in &mut self.slots.extras.entries {
+            entry.value = self
+                .heap
+                .import(std::mem::replace(&mut entry.value, Value::Null))?;
+        }
+        for iterator in &mut self.iter_stack {
+            if let super::IterCursor::List { values, .. } = &mut iterator.cursor {
+                for value in values.make_mut() {
+                    *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+                }
+            }
+            if let Some(value) = &mut iterator.restore.previous {
+                *value = self.heap.import(std::mem::replace(value, Value::Null))?;
+            }
+        }
+        self.heap.end_allocation_scope();
+        if self.heap.needs_collection() {
+            let roots = self.heap_roots();
+            self.heap.collect(roots.iter());
+        }
+        Ok(())
+    }
+
+    pub(super) fn heap_roots(&self) -> Vec<Value> {
+        let mut roots = self.stack.clone();
+        roots.extend(self.last_value.iter().cloned());
+        roots.extend(self.slots.values.iter().flatten().cloned());
+        roots.extend(self.slots.extras.values().cloned());
+        for iterator in &self.iter_stack {
+            if let super::IterCursor::List { values, .. } = &iterator.cursor {
+                roots.push(Value::List(values.clone()));
+            }
+            roots.extend(iterator.restore.previous.iter().cloned());
+        }
+        roots
     }
 }

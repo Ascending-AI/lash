@@ -84,6 +84,7 @@ impl PrimitiveMask {
                 _ => Self::OBJECT.0,
             },
             Value::Number(_) => 0,
+            Value::Ref(_) => unreachable!("heap references must be exported before validation"),
         };
         self.0 & value_mask != 0
     }
@@ -441,6 +442,7 @@ fn schema_value_type_name(value: &Value) -> &'static str {
             "tuple" | "list" => "array",
             _ => "object",
         },
+        Value::Ref(_) => "heap_ref",
     }
 }
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::super::ExecutionBound;
+use super::super::{ExecutionBound, HEAP_SIZE_SCHEDULE_VERSION, HeapEntry, HeapObject};
 use super::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -69,6 +69,53 @@ pub struct VmContinuation {
     pub pending_error_span: Option<Span>,
     pub instructions_executed: u64,
     pub active_execution_elapsed: std::time::Duration,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_heap",
+        deserialize_with = "continuation_serde::deserialize_heap"
+    )]
+    pub heap: VmHeapContinuation,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VmHeapContinuation {
+    heap: Heap,
+}
+
+impl VmHeapContinuation {
+    fn new(heap: Heap) -> Self {
+        Self { heap }
+    }
+
+    fn into_heap(self) -> Heap {
+        self.heap
+    }
+
+    pub fn allocation_counter(&self) -> u64 {
+        self.heap.allocations()
+    }
+
+    pub fn live_logical_bytes(&self) -> u64 {
+        self.heap.live_logical_bytes()
+    }
+
+    pub fn size_schedule_version(&self) -> u32 {
+        self.heap.schedule_version()
+    }
+
+    pub fn materialize(&self, value: &Value) -> Result<Value, ContinuationError> {
+        self.heap
+            .export(value)
+            .map_err(|_| ContinuationError::UnserializableValue {
+                location: "continuation heap".to_string(),
+                variant: "invalid heap reference",
+            })
+    }
+}
+
+impl Default for VmHeapContinuation {
+    fn default() -> Self {
+        Self::new(Heap::default())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -139,19 +186,26 @@ pub enum ContinuationError {
     InstructionBudgetExceeded { limit: u64 },
     #[error("lashlang active-execution deadline of {limit_ms}ms was already exceeded")]
     ExecutionDeadlineExceeded { limit_ms: u128 },
+    #[error(
+        "lashlang logical memory limit of {limit} bytes was already exceeded by {live} live bytes"
+    )]
+    MemoryLimitExceeded { limit: u64, live: u64 },
 }
 
 impl ContinuationError {
     pub fn is_execution_bound_exhausted(&self) -> bool {
         matches!(
             self,
-            Self::InstructionBudgetExceeded { .. } | Self::ExecutionDeadlineExceeded { .. }
+            Self::InstructionBudgetExceeded { .. }
+                | Self::ExecutionDeadlineExceeded { .. }
+                | Self::MemoryLimitExceeded { .. }
         )
     }
 }
 
 mod continuation_serde {
     use super::*;
+    use crate::HeapId;
 
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -169,9 +223,33 @@ mod continuation_serde {
         String(String),
         Image(super::ImageValue),
         Resource(super::ResourceHandle),
+        Ref(HeapId),
         Tuple(Vec<ValueWire>),
         List(Vec<ValueWire>),
         Record(Vec<(String, ValueWire)>),
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct HeapWire {
+        next_id: u64,
+        allocation_counter: u64,
+        live_logical_bytes: u64,
+        size_schedule_version: u32,
+        objects: Vec<HeapEntryWire>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct HeapEntryWire {
+        id: HeapId,
+        object: HeapObjectWire,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case")]
+    enum HeapObjectWire {
+        Tuple { items: Vec<ValueWire> },
+        List { items: Vec<ValueWire> },
+        Record { fields: Vec<(String, ValueWire)> },
     }
 
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
@@ -182,6 +260,7 @@ mod continuation_serde {
             Value::String(value) => ValueWire::String(value.to_string()),
             Value::Image(value) => ValueWire::Image((**value).clone()),
             Value::Resource(value) => ValueWire::Resource(value.clone()),
+            Value::Ref(value) => ValueWire::Ref(*value),
             Value::Tuple(values) => {
                 ValueWire::Tuple(values.iter().map(value_to_wire).collect::<Result<_, _>>()?)
             }
@@ -206,6 +285,7 @@ mod continuation_serde {
             ValueWire::String(value) => Value::String(value.into()),
             ValueWire::Image(value) => Value::Image(Box::new(value)),
             ValueWire::Resource(value) => Value::Resource(value),
+            ValueWire::Ref(value) => Value::Ref(value),
             ValueWire::Tuple(values) => {
                 Value::Tuple(values.into_iter().map(value_from_wire).collect())
             }
@@ -220,6 +300,128 @@ mod continuation_serde {
                 Value::Record(Arc::new(record))
             }
         }
+    }
+
+    fn object_to_wire(object: &HeapObject) -> Result<HeapObjectWire, &'static str> {
+        Ok(match object {
+            HeapObject::Tuple(values) => HeapObjectWire::Tuple {
+                items: values.iter().map(value_to_wire).collect::<Result<_, _>>()?,
+            },
+            HeapObject::List(values) => HeapObjectWire::List {
+                items: values.iter().map(value_to_wire).collect::<Result<_, _>>()?,
+            },
+            HeapObject::Record(record) => HeapObjectWire::Record {
+                fields: record
+                    .iter()
+                    .map(|(key, value)| Ok((key.to_string(), value_to_wire(value)?)))
+                    .collect::<Result<_, &'static str>>()?,
+            },
+        })
+    }
+
+    fn object_from_wire(object: HeapObjectWire) -> HeapObject {
+        match object {
+            HeapObjectWire::Tuple { items } => {
+                HeapObject::Tuple(items.into_iter().map(value_from_wire).collect())
+            }
+            HeapObjectWire::List { items } => {
+                HeapObject::List(items.into_iter().map(value_from_wire).collect())
+            }
+            HeapObjectWire::Record { fields } => {
+                let mut record = record_with_capacity(fields.len());
+                for (key, value) in fields {
+                    record.insert(key, value_from_wire(value));
+                }
+                HeapObject::Record(Box::new(record))
+            }
+        }
+    }
+
+    pub(super) fn serialize_heap<S>(
+        continuation: &VmHeapContinuation,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let heap = &continuation.heap;
+        let objects = heap
+            .objects_in_id_order()
+            .map(|(id, object)| {
+                Ok(HeapEntryWire {
+                    id,
+                    object: object_to_wire(object)?,
+                })
+            })
+            .collect::<Result<Vec<_>, &'static str>>()
+            .map_err(serde::ser::Error::custom)?;
+        HeapWire {
+            next_id: heap.next_id,
+            allocation_counter: heap.allocations(),
+            live_logical_bytes: heap.live_logical_bytes(),
+            size_schedule_version: heap.schedule_version(),
+            objects,
+        }
+        .serialize(serializer)
+    }
+
+    pub(super) fn deserialize_heap<'de, D>(deserializer: D) -> Result<VmHeapContinuation, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = HeapWire::deserialize(deserializer)?;
+        if wire.size_schedule_version != HEAP_SIZE_SCHEDULE_VERSION {
+            return Err(serde::de::Error::custom(format!(
+                "unsupported heap size schedule version {}",
+                wire.size_schedule_version
+            )));
+        }
+        let mut heap = Heap::default();
+        heap.next_id = wire.next_id;
+        heap.allocations = wire.allocation_counter;
+        heap.schedule_version = wire.size_schedule_version;
+        heap.restore_collection_schedule();
+        let mut prior_id = None;
+        for entry in wire.objects {
+            if prior_id.is_some_and(|prior| entry.id <= prior) {
+                return Err(serde::de::Error::custom(
+                    "heap objects must be strictly ordered by ID",
+                ));
+            }
+            if entry.id.get() >= heap.next_id {
+                return Err(serde::de::Error::custom(
+                    "heap object ID must be below the next allocation ID",
+                ));
+            }
+            prior_id = Some(entry.id);
+            let object = object_from_wire(entry.object);
+            let logical_bytes = object.logical_bytes();
+            let slot = heap.slots.len();
+            heap.slots.push(Some(HeapEntry {
+                id: entry.id,
+                object,
+                logical_bytes,
+            }));
+            let id_index = usize::try_from(entry.id.get()).map_err(|_| {
+                serde::de::Error::custom("heap object ID exceeds the platform storage index")
+            })?;
+            if heap.id_to_slot.len() <= id_index {
+                heap.id_to_slot.resize(id_index + 1, None);
+            }
+            heap.id_to_slot[id_index] = Some(slot);
+            heap.live_logical_bytes = heap.live_logical_bytes.saturating_add(logical_bytes);
+        }
+        if heap.live_logical_bytes != wire.live_logical_bytes {
+            return Err(serde::de::Error::custom(
+                "heap live logical byte counter does not match its objects",
+            ));
+        }
+        if heap.allocations < heap.id_to_slot.iter().flatten().count() as u64 {
+            return Err(serde::de::Error::custom(
+                "heap allocation counter is smaller than the live object count",
+            ));
+        }
+        Ok(VmHeapContinuation::new(heap))
     }
 
     fn optional_to_wire(value: &Option<Value>) -> Result<OptionalValueWire, &'static str> {
@@ -349,6 +551,39 @@ fn validate_continuation(continuation: &VmContinuation) -> Result<(), Continuati
             validate_values(values, &format!("iterator {depth} values"))?;
         }
     }
+    for (id, object) in continuation.heap.heap.objects_in_id_order() {
+        match object {
+            HeapObject::Tuple(values) | HeapObject::List(values) => {
+                validate_values(values, &format!("heap object {}", id.get()))?;
+                validate_heap_references(&continuation.heap.heap, values)?;
+            }
+            HeapObject::Record(record) => {
+                for (key, value) in record.iter() {
+                    validate_value(value, &format!("heap object {}.{key}", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, value)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_heap_references(heap: &Heap, values: &[Value]) -> Result<(), ContinuationError> {
+    for value in values {
+        validate_heap_reference(heap, value)?;
+    }
+    Ok(())
+}
+
+fn validate_heap_reference(heap: &Heap, value: &Value) -> Result<(), ContinuationError> {
+    if let Value::Ref(id) = value
+        && heap.get(*id).is_err()
+    {
+        return Err(ContinuationError::UnserializableValue {
+            location: format!("heap reference {}", id.get()),
+            variant: "dangling heap reference",
+        });
+    }
     Ok(())
 }
 
@@ -395,7 +630,8 @@ fn validate_value(value: &Value, location: &str) -> Result<(), ContinuationError
         | Value::Number(_)
         | Value::String(_)
         | Value::Image(_)
-        | Value::Resource(_) => Ok(()),
+        | Value::Resource(_)
+        | Value::Ref(_) => Ok(()),
     }
 }
 
@@ -423,6 +659,26 @@ fn profile_from_continuation(
 }
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
+    fn new_heap(host: &H) -> Heap {
+        let limit = match host.execution_bounds().memory_limit {
+            ExecutionBound::Bounded(limit) => limit.get(),
+            ExecutionBound::Unbounded => u64::MAX,
+        };
+        let mut heap = Heap::with_limit(limit);
+        heap.set_collect_every_allocation(host.collect_heap_every_allocation());
+        heap
+    }
+
+    pub(crate) fn install_heap(&mut self, mut heap: Heap) {
+        let limit = match self.host.execution_bounds().memory_limit {
+            ExecutionBound::Bounded(limit) => limit.get(),
+            ExecutionBound::Unbounded => u64::MAX,
+        };
+        heap.set_limit(limit);
+        heap.set_collect_every_allocation(self.host.collect_heap_every_allocation());
+        self.heap = heap;
+    }
+
     pub(crate) fn new_with_mode(
         chunk: &'a Chunk,
         slots: SlotState,
@@ -444,6 +700,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: None,
             instructions_executed: 0,
             active_execution_elapsed: std::time::Duration::ZERO,
+            heap: Self::new_heap(host),
+            heap_initialized: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -472,6 +730,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: None,
             instructions_executed: 0,
             active_execution_elapsed: std::time::Duration::ZERO,
+            heap: Self::new_heap(host),
+            heap_initialized: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -521,6 +781,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             });
         }
 
+        let mut heap = self.heap.clone();
+        let roots = self.heap_roots();
+        heap.collect(roots.iter());
         let continuation = VmContinuation {
             instruction_pointer: self.ip,
             operand_stack: self.stack.clone(),
@@ -544,6 +807,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: self.pending_error_span,
             instructions_executed: self.instructions_executed,
             active_execution_elapsed: self.active_execution_elapsed,
+            heap: VmHeapContinuation::new(heap),
         };
         validate_continuation(&continuation)?;
         Ok(continuation)
@@ -596,6 +860,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 limit_ms: limit.as_millis(),
             });
         }
+        if let ExecutionBound::Bounded(limit) = bounds.memory_limit
+            && continuation.heap.live_logical_bytes() > limit.get()
+        {
+            return Err(ContinuationError::MemoryLimitExceeded {
+                limit: limit.get(),
+                live: continuation.heap.live_logical_bytes(),
+            });
+        }
         let profile = continuation
             .profile
             .map(profile_from_continuation)
@@ -638,6 +910,17 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: continuation.pending_error_span,
             instructions_executed: continuation.instructions_executed,
             active_execution_elapsed: continuation.active_execution_elapsed,
+            heap: {
+                let mut heap = continuation.heap.into_heap();
+                let limit = match bounds.memory_limit {
+                    ExecutionBound::Bounded(limit) => limit.get(),
+                    ExecutionBound::Unbounded => u64::MAX,
+                };
+                heap.set_limit(limit);
+                heap.set_collect_every_allocation(host.collect_heap_every_allocation());
+                heap
+            },
+            heap_initialized: true,
             // A resumed VM records assignments from here on. Continuations are
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are
@@ -646,5 +929,60 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn continuation_heap_round_trip_is_canonical_and_cycle_safe() {
+        let mut heap = Heap::default();
+        let Value::Ref(root) = heap
+            .allocate(HeapObject::List(Vec::new()))
+            .expect("allocate cyclic root")
+        else {
+            unreachable!()
+        };
+        heap.replace_object(
+            root,
+            HeapObject::List(vec![Value::Number(-0.0), Value::Ref(root)]),
+        )
+        .expect("close cycle");
+        let continuation = VmContinuation {
+            instruction_pointer: 0,
+            operand_stack: vec![Value::Ref(root)],
+            last_value: None,
+            slots: Vec::new(),
+            projected_slots: Vec::new(),
+            globals: Record::new(),
+            iterator_stack: Vec::new(),
+            occurrence_counters: Default::default(),
+            mode: ExecutionMode::Process,
+            profile: None,
+            pending_error_span: None,
+            instructions_executed: 0,
+            active_execution_elapsed: std::time::Duration::ZERO,
+            heap: VmHeapContinuation::new(heap),
+        };
+        validate_continuation(&continuation).expect("cycle should validate by identity");
+        let bytes = serde_json::to_vec(&continuation).expect("serialize cyclic heap");
+        let restored: VmContinuation = serde_json::from_slice(&bytes).expect("restore cyclic heap");
+        assert_eq!(
+            serde_json::to_vec(&restored).expect("redump cyclic heap"),
+            bytes
+        );
+        assert!(matches!(
+            restored.heap.heap.export(&Value::Ref(root)),
+            Err(RuntimeError::CyclicHostValue { .. })
+        ));
+        let HeapObject::List(values) = restored.heap.heap.get(root).expect("restored root") else {
+            panic!("root should remain a list")
+        };
+        let Value::Number(number) = values[0] else {
+            panic!("first cycle member should be a number")
+        };
+        assert_eq!(number.to_bits(), (-0.0_f64).to_bits());
     }
 }

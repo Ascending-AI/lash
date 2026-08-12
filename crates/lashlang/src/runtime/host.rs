@@ -1,6 +1,9 @@
 use crate::{HostRequirementsRef, LashlangExecutionCallSite, ModuleRef, ProcessRef};
 
-use super::{ExecutionScratch, ProfileReport, ProjectedBindings, Record, RuntimeFailure, Value};
+use super::{
+    DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, ExecutionScratch, ProfileReport, ProjectedBindings, Record,
+    RuntimeFailure, Value,
+};
 use crate::LashlangExecutionObservation;
 use lash_sansio::sync::MutexExt;
 use std::future::Future;
@@ -233,6 +236,7 @@ impl<'de> serde::Deserialize<'de> for ExecutionBound<Duration> {
 pub struct ExecutionBounds {
     pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
     pub deadline: ExecutionBound<Duration>,
+    pub memory_limit: ExecutionBound<std::num::NonZeroU64>,
 }
 
 impl ExecutionBounds {
@@ -243,11 +247,21 @@ impl ExecutionBounds {
         Self {
             instruction_budget,
             deadline,
+            memory_limit: ExecutionBound::instructions(DEFAULT_HEAP_LOGICAL_BYTE_LIMIT),
         }
+    }
+
+    pub const fn with_memory_limit(
+        mut self,
+        memory_limit: ExecutionBound<std::num::NonZeroU64>,
+    ) -> Self {
+        self.memory_limit = memory_limit;
+        self
     }
 
     pub const fn unbounded() -> Self {
         Self::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded)
+            .with_memory_limit(ExecutionBound::Unbounded)
     }
 }
 
@@ -279,6 +293,11 @@ pub trait ExecutionHost: Sync {
 
     fn execution_bounds(&self) -> ExecutionBounds {
         ExecutionBounds::unbounded()
+    }
+
+    /// Deterministic GC stress mode used by the conformance suite.
+    fn collect_heap_every_allocation(&self) -> bool {
+        false
     }
 
     fn take_scratch(&self) -> Option<ExecutionScratch> {

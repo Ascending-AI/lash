@@ -116,6 +116,9 @@ impl BudgetedJsonProjector {
                     serde_json::to_string(resource).unwrap_or_else(|_| "null".to_string())
                 }
                 Value::Projected(projected) => projected.render().await,
+                Value::Ref(_) => {
+                    unreachable!("heap references must be exported before projection")
+                }
                 Value::Tuple(values) | Value::List(values) => {
                     if self.config.max_depth != usize::MAX && depth >= self.config.max_depth {
                         return depth_marker(self.config.max_depth);

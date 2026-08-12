@@ -503,6 +503,7 @@ impl Compiler {
             }
 
             self.compile_expr(expr);
+            self.code.push(Instruction::DeepCopy);
             self.code.push(Instruction::StoreName(slot));
             self.set_const_slot(slot, const_value);
             self.push_null_if(leave_value);
