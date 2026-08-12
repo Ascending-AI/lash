@@ -259,17 +259,40 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let claim_available = |entry: &super::InMemoryQueuedBatch| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
         };
-        let claimable_indices = queued
+        let requested_indices = queued
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
                 entry.batch.session_id == session_id
                     && entry.batch.available_at_ms <= now
                     && claim_available(entry)
+                    && requested_ids.contains(&entry.batch.batch_id)
             })
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        let candidate_batch_claims = claimable_indices
+        if requested_indices.len() != requested_ids.len() {
+            return Ok(None);
+        }
+        let involved_claim_ids = requested_indices
+            .iter()
+            .filter_map(|index| queued[*index].claim_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut validation_indices = requested_indices.clone();
+        if !involved_claim_ids.is_empty() {
+            validation_indices.extend(queued.iter().enumerate().filter_map(|(index, entry)| {
+                (entry.batch.session_id == session_id
+                    && entry.batch.available_at_ms <= now
+                    && claim_available(entry)
+                    && entry
+                        .claim_id
+                        .as_ref()
+                        .is_some_and(|claim_id| involved_claim_ids.contains(claim_id)))
+                .then_some(index)
+            }));
+            validation_indices.sort_unstable();
+            validation_indices.dedup();
+        }
+        let validation_batch_claims = validation_indices
             .iter()
             .map(|index| {
                 (
@@ -280,7 +303,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .collect::<Vec<_>>();
         let interrupted_indices =
             crate::store::queued_work::select_interrupted_exact_claim_indices(
-                &candidate_batch_claims,
+                &validation_batch_claims,
                 batch_ids,
             )
             .map_err(|required_batch_ids| {
@@ -291,17 +314,24 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let mut indices = if let Some(interrupted_indices) = interrupted_indices {
             interrupted_indices
                 .into_iter()
-                .map(|position| claimable_indices[position])
+                .map(|position| validation_indices[position])
                 .collect::<Vec<_>>()
         } else {
-            let requested_indices = claimable_indices
+            let min_enqueue_seq = queued[requested_indices[0]].batch.enqueue_seq;
+            let max_enqueue_seq = queued[*requested_indices.last().expect("requested rows exist")]
+                .batch
+                .enqueue_seq;
+            let span_indices = queued
                 .iter()
-                .copied()
-                .filter(|index| requested_ids.contains(&queued[*index].batch.batch_id))
+                .enumerate()
+                .filter(|(_, entry)| {
+                    entry.batch.session_id == session_id
+                        && entry.batch.available_at_ms <= now
+                        && claim_available(entry)
+                        && (min_enqueue_seq..=max_enqueue_seq).contains(&entry.batch.enqueue_seq)
+                })
+                .map(|(index, _)| index)
                 .collect::<Vec<_>>();
-            if requested_indices.len() != requested_ids.len() {
-                return Ok(None);
-            }
             for index in &requested_indices {
                 if Self::queued_batch_work_class(&queued[*index].batch)?
                     != crate::store::QueuedWorkClass::TurnWork
@@ -310,13 +340,13 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 }
             }
             let first_requested = requested_indices[0];
-            let Some(first_position) = claimable_indices
+            let Some(first_position) = span_indices
                 .iter()
                 .position(|index| *index == first_requested)
             else {
                 return Ok(None);
             };
-            claimable_indices[first_position..]
+            span_indices[first_position..]
                 .iter()
                 .copied()
                 .take_while(|index| requested_ids.contains(&queued[*index].batch.batch_id))
@@ -353,6 +383,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let first = &queued[indices[0]];
+        let abandon_restore_claim_id = first.claim_id.clone();
         let fencing_token = next_fencing_tokens[0];
         let claim_id = crate::store::queued_work::derive_claim_id(
             crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
@@ -380,7 +411,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            data: crate::QueuedWorkClaimData { batches },
+            data: crate::QueuedWorkClaimData {
+                batches,
+                abandon_restore_claim_id,
+            },
         }))
     }
 
@@ -397,7 +431,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 #[cfg(test)]
                 self.abandoned_queued_work_claim_count
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                entry.claim_id = None;
+                entry.claim_id = claim.abandon_restore_claim_id.clone();
                 entry.claim_token = None;
                 entry.claim_owner = None;
                 entry.claim_session_lease_generation = 0;

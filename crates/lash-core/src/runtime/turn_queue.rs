@@ -494,6 +494,11 @@ pub type QueuedWorkCompletion = crate::WorkCompletion<QueuedWorkCompletionData>;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueuedWorkClaimData {
     pub batches: Vec<QueuedWorkBatch>,
+    /// Interrupted predecessor identity a store implementor must restore if
+    /// this successor claim is abandoned. This is claim-control metadata, not
+    /// durable protocol payload, so it is deliberately omitted from serde.
+    #[serde(skip)]
+    pub(crate) abandon_restore_claim_id: Option<String>,
 }
 
 /// A shared work claim carrying queued-work batches.

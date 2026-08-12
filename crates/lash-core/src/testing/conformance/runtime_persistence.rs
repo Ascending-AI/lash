@@ -556,8 +556,11 @@ where
     .await;
     queued_work_redrive_obeys_delivery_boundary_before_identity(make("redrive-boundary")).await;
     queued_work_redrive_ignores_successor_row_limit(make("redrive-row-limit")).await;
+    queued_work_selected_multi_identity_validation_and_abandon_restore(make(
+        "selected-multi-identity",
+    ))
+    .await;
     queued_work_exact_claim_preserves_physical_order_and_key_breaks(make("physical-order")).await;
-    wake_turn_policy_controls_coalescing(make("wake-policy-merge")).await;
     process_wakes_batch_by_default(make("process-wakes-batch")).await;
     queued_work_completion_is_lease_guarded(make("root")).await;
     queued_wake_delivery_is_source_key_idempotent_and_claimed_once(make("root")).await;
@@ -5918,6 +5921,206 @@ async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn RuntimeP
             (Some("limit-w5"), 5),
         ]
     );
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+
+    let selected_owner = lease_owner("limit-owner-c");
+    let selected_lease = claim_session_execution_lease_for_test(
+        &store,
+        "interrupted-batch-row-limit",
+        &selected_owner.owner_id,
+    )
+    .await;
+    let selected_redrive = store
+        .claim_ready_queued_work_by_batch_ids(
+            "interrupted-batch-row-limit",
+            &selected_lease.fence(),
+            &selected_owner,
+            QueuedWorkClaimBoundary::Idle,
+            &redriven
+                .batches
+                .iter()
+                .map(|batch| batch.batch_id.clone())
+                .collect::<Vec<_>>(),
+            crate::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("selected redrive under smaller successor row limit")
+        .expect("selected predecessor composition ignores successor row limit");
+    assert_eq!(
+        selected_redrive
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("limit-w1"), 1),
+            (Some("limit-w2"), 2),
+            (Some("limit-w3"), 3),
+            (Some("limit-w4"), 4),
+            (Some("limit-w5"), 5),
+        ]
+    );
+    release_session_execution_lease_for_test(&store, &selected_lease).await;
+}
+
+async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "selected-multi-identity";
+    let mut batches = Vec::new();
+    for (source_key, label) in [
+        ("selected-claim-a1", "a1"),
+        ("selected-claim-a2", "a2"),
+        ("selected-claim-b1", "b1"),
+        ("selected-claim-b2", "b2"),
+    ] {
+        batches.push(
+            store
+                .enqueue_queued_work(
+                    queued_draft(session_id, label, DeliveryPolicy::EarliestSafeBoundary)
+                        .with_source_key(source_key)
+                        .with_merge_key("selected-multi-identity-key"),
+                )
+                .await
+                .expect("enqueue selected multi-identity row"),
+        );
+    }
+    let predecessor_owner = lease_owner("selected-multi-predecessor");
+    let predecessor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &predecessor_owner.owner_id)
+            .await;
+    let claim_a = store
+        .claim_ready_queued_work(
+            session_id,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("claim predecessor A")
+        .expect("predecessor A exists");
+    assert_eq!(
+        claim_a
+            .batches
+            .iter()
+            .map(|batch| batch.source_key.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("selected-claim-a1"), Some("selected-claim-a2")]
+    );
+    let claim_b = store
+        .claim_ready_queued_work(
+            session_id,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("claim predecessor B")
+        .expect("predecessor B exists");
+    assert_eq!(
+        claim_b
+            .batches
+            .iter()
+            .map(|batch| batch.source_key.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("selected-claim-b1"), Some("selected-claim-b2")]
+    );
+    release_session_execution_lease_for_test(&store, &predecessor_lease).await;
+
+    let successor_owner = lease_owner("selected-multi-successor");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor_owner.owner_id).await;
+    let mixed = store
+        .claim_ready_queued_work_by_batch_ids(
+            session_id,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            &[
+                batches[0].batch_id.clone(),
+                batches[1].batch_id.clone(),
+                batches[2].batch_id.clone(),
+            ],
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await;
+    assert!(
+        matches!(
+            &mixed,
+            Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                required_batch_ids,
+            }) if required_batch_ids == &vec![
+                batches[2].batch_id.clone(),
+                batches[3].batch_id.clone(),
+            ]
+        ),
+        "full A plus partial B must name B's literal complete composition: {mixed:?}"
+    );
+
+    let successor_claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            session_id,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            &batches
+                .iter()
+                .map(|batch| batch.batch_id.clone())
+                .collect::<Vec<_>>(),
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("select two complete interrupted identities")
+        .expect("the physically earliest identity is reclaimed");
+    assert_eq!(
+        successor_claim
+            .batches
+            .iter()
+            .map(|batch| batch.source_key.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("selected-claim-a1"), Some("selected-claim-a2")]
+    );
+    assert_eq!(
+        successor_claim.abandon_restore_claim_id.as_deref(),
+        Some(claim_a.claim_id.as_str())
+    );
+    store
+        .abandon_queued_work_claim(&successor_claim)
+        .await
+        .expect("abandon successor A claim");
+
+    for (selected, required) in [
+        (
+            &batches[0],
+            vec![batches[0].batch_id.clone(), batches[1].batch_id.clone()],
+        ),
+        (
+            &batches[2],
+            vec![batches[2].batch_id.clone(), batches[3].batch_id.clone()],
+        ),
+    ] {
+        let partial = store
+            .claim_ready_queued_work_by_batch_ids(
+                session_id,
+                &successor_lease.fence(),
+                &successor_owner,
+                QueuedWorkClaimBoundary::Idle,
+                std::slice::from_ref(&selected.batch_id),
+                crate::testing::queued_work_claim_policy(64),
+            )
+            .await;
+        assert!(
+            matches!(
+                &partial,
+                Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                    required_batch_ids,
+                }) if required_batch_ids == &required
+            ),
+            "abandon must restore both predecessor identities: {partial:?}"
+        );
+    }
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 

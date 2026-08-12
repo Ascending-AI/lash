@@ -97,12 +97,6 @@ pub(super) fn runtime_host_config_with_inline_controller(
     config
 }
 
-fn test_runtime_host_config() -> RuntimeHostConfig {
-    RuntimeHostConfig::in_memory(
-        test_commit_budget(),
-        crate::QueuedWorkBatchingConfig::new(1),
-    )
-}
 pub(super) fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
     turn_id: &str,
@@ -112,12 +106,6 @@ pub(super) fn scoped_test_turn<'a>(
         ExecutionScope::turn("effect-test-session", turn_id),
     )
     .expect("scoped effect controller")
-}
-
-fn runtime_host_config_with_provider(provider: crate::ProviderHandle) -> RuntimeHostConfig {
-    let mut config = test_runtime_host_config();
-    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
-    config
 }
 
 #[async_trait::async_trait]
@@ -1831,7 +1819,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         .expect("plugins");
     let mut runtime = LashRuntime::from_embedded_state(
         policy,
-        EmbeddedRuntimeHost::new(runtime_host_config_with_provider(
+        EmbeddedRuntimeHost::new(test_runtime_host_config_with_provider(
             mock_provider(Vec::new()).into_handle(),
         )),
         RuntimeServices::new(plugin_session),

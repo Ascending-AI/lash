@@ -492,10 +492,17 @@ pub(crate) fn test_commit_budget() -> crate::CommitBudget {
     crate::CommitBudget::bounded(1024 * 1024, 512)
 }
 
-pub(crate) fn runtime_host_config_with_provider(
+pub(crate) fn test_runtime_host_config() -> RuntimeHostConfig {
+    RuntimeHostConfig::in_memory(
+        test_commit_budget(),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+}
+
+pub(crate) fn test_runtime_host_config_with_provider(
     provider: crate::ProviderHandle,
 ) -> RuntimeHostConfig {
-    let mut config = RuntimeHostConfig::in_memory(test_commit_budget());
+    let mut config = test_runtime_host_config();
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     config
 }

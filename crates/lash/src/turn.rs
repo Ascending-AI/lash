@@ -840,23 +840,23 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
     } else {
         match writer.stream_selected_queued_work(opts, batch_ids).await {
             Ok(turn) => turn,
-            Err(lash_core::SelectedQueuedWorkDrainError::Runtime(error)) => {
+            Err(lash_core::facade_support::SelectedQueuedWorkDrainError::Runtime(error)) => {
                 return Err(error.into());
             }
-            Err(lash_core::SelectedQueuedWorkDrainError::Refused { cause }) => {
+            Err(lash_core::facade_support::SelectedQueuedWorkDrainError::Refused { cause }) => {
                 return Err(EmbedError::SelectedQueuedWorkDrainRefused {
                     cause: match cause {
-                        lash_core::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                        lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
                             unclaimed_batch_ids,
                         } => SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
                             unclaimed_batch_ids,
                         },
-                        lash_core::SelectedQueuedWorkDrainRefusalCause::
+                        lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::
                             InterruptedBatchRequiresFullComposition { required_batch_ids } => {
                             SelectedQueuedWorkDrainRefusalCause::
                                 InterruptedBatchRequiresFullComposition { required_batch_ids }
                         }
-                        lash_core::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
+                        lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
                             SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
                         }
                     },

@@ -1585,7 +1585,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::lease_timings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1872#.lease_timings(lease_timings)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1875#.lease_timings(lease_timings)"
 assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1648#takeover_latency < default_ttl,"
 
 [[api]]

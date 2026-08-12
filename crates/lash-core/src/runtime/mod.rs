@@ -50,7 +50,7 @@ pub(crate) mod turn_control;
 mod turn_driver;
 mod turn_graph_editor;
 pub(crate) mod turn_input_ingress;
-mod turn_loop;
+pub(crate) mod turn_loop;
 mod turn_queue;
 mod usage;
 mod wake_delivery_driver;
@@ -391,8 +391,6 @@ pub use turn_input_ingress::{
     TurnInputState,
 };
 pub use turn_loop::ensure_durable_effect_input;
-#[doc(hidden)]
-pub use turn_loop::{SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainRefusalCause};
 pub use turn_queue::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,

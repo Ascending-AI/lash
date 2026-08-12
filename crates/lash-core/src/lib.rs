@@ -47,6 +47,27 @@ pub mod triggers;
 
 #[doc(hidden)]
 pub mod store_backend_support {
+    /// Construct queued-work claim data with the predecessor identity that an
+    /// abandoning store must restore. Store implementors pass `None` for fresh
+    /// work and the interrupted `claim_id` for a redrive.
+    pub fn queued_work_claim_data(
+        batches: Vec<crate::runtime::QueuedWorkBatch>,
+        abandon_restore_claim_id: Option<String>,
+    ) -> crate::runtime::QueuedWorkClaimData {
+        crate::runtime::QueuedWorkClaimData {
+            batches,
+            abandon_restore_claim_id,
+        }
+    }
+
+    /// Return the interrupted predecessor identity an abandoning queued-work
+    /// store must restore, or `None` when the claim originated as fresh work.
+    pub fn queued_work_abandon_restore_claim_id(
+        claim: &crate::runtime::QueuedWorkClaim,
+    ) -> Option<&str> {
+        claim.abandon_restore_claim_id.as_deref()
+    }
+
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
         SessionExecutionLeaseFenceFacts, SessionExecutionLeaseRefusalFacts,
@@ -57,6 +78,9 @@ pub mod store_backend_support {
 
 #[doc(hidden)]
 pub mod facade_support {
+    pub use crate::runtime::turn_loop::{
+        SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainRefusalCause,
+    };
     /// Build the core-level tool-registry projection through the same plugin
     /// composition path used for runtime sessions.
     pub fn build_core_tool_registry(
@@ -820,8 +844,7 @@ pub use runtime::{
     ProtocolTurnExtensionHandle, QueuedWorkAuthority, QueuedWorkBatchingConfig,
     QueuedWorkClaimPolicy, QueuedWorkKind, RecoveryDisposition, Resolution, ResolveOutcome,
     RuntimeError, RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController, SegmentHandover,
-    SegmentProgress, SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainRefusalCause,
-    SessionCursor, SessionCursorError, SessionId, SessionObservationEvent,
+    SegmentProgress, SessionCursor, SessionCursorError, SessionId, SessionObservationEvent,
     SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
     SessionRevision, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
     TokenLedgerEntry, ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelOriginHint,

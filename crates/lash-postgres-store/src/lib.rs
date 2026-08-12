@@ -832,6 +832,121 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping selected-drain plan proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect selected-drain plan storage");
+        sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+            .execute(storage.pool())
+            .await
+            .expect("enable pg_stat_statements for selected-drain plan proof");
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        let session_id = format!("selected-plan-session:{nonce}");
+        let batch_prefix = format!("selected-plan-batch:{nonce}:");
+        let source_prefix = format!("selected-plan-source:{nonce}:");
+        sqlx::query(
+            "INSERT INTO lash_queued_work_batches
+             (batch_id, session_id, source_key, delivery_policy, work_kind,
+              authority_json, merge_key, available_at_ms, enqueued_at_ms)
+             SELECT $1 || value::text, $2, $3 || value::text,
+                    'earliest_safe_boundary', 'turn', '{}', NULL, 0, 1
+             FROM generate_series(1, 10000) AS value",
+        )
+        .bind(&batch_prefix)
+        .bind(&session_id)
+        .bind(&source_prefix)
+        .execute(storage.pool())
+        .await
+        .expect("seed 10,000 ready selected-drain batches");
+        sqlx::query(
+            "INSERT INTO lash_queued_work_items (batch_id, item_index, item_id, payload_json)
+             SELECT $1 || value::text, 0, $1 || value::text || ':item:0',
+                    '{\"type\":\"agent_frame_task\",\"frame_id\":\"selected-plan\",\"task\":\"selected plan row\"}'
+             FROM generate_series(1, 10000) AS value",
+        )
+        .bind(&batch_prefix)
+        .execute(storage.pool())
+        .await
+        .expect("seed selected-drain batch payloads");
+        sqlx::query("ANALYZE lash_queued_work_batches")
+            .execute(storage.pool())
+            .await
+            .expect("analyze selected-drain plan fixture");
+
+        let store = storage.session_store(&session_id);
+        let owner = LeaseOwnerIdentity::opaque(
+            "selected-plan-owner",
+            format!("selected-plan-owner:{nonce}"),
+        );
+        let lease = store
+            .try_claim_session_execution_lease(&session_id, &owner, 60_000)
+            .await
+            .expect("claim selected-drain plan lease")
+            .acquired()
+            .expect("selected-drain plan lane is free");
+        sqlx::query("SELECT pg_stat_statements_reset()")
+            .execute(storage.pool())
+            .await
+            .expect("reset selected-drain statement statistics");
+        let selected_batch_id = format!("{batch_prefix}5000");
+        let claim = store
+            .claim_ready_queued_work_by_batch_ids(
+                &session_id,
+                &lease.fence(),
+                &owner,
+                QueuedWorkClaimBoundary::Idle,
+                std::slice::from_ref(&selected_batch_id),
+                lash_core::testing::queued_work_claim_policy(64),
+            )
+            .await
+            .expect("claim one selected row from 10,000")
+            .expect("selected row is claimable");
+        let selected_source_key = format!("{source_prefix}5000");
+        assert_eq!(
+            claim
+                .batches
+                .iter()
+                .map(|batch| batch.source_key.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some(selected_source_key.as_str())]
+        );
+        let measured_queue_rows: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(rows), 0)::bigint
+             FROM pg_stat_statements
+             WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+               AND query LIKE '%lash_queued_work_batches%'
+               AND query NOT LIKE '%pg_stat_statements%'",
+        )
+        .fetch_one(storage.pool())
+        .await
+        .expect("measure selected-drain queue rows");
+        assert!(
+            measured_queue_rows <= 4,
+            "one-ID selected drain may return or lock at most 4 queue rows, measured {measured_queue_rows}"
+        );
+
+        store
+            .abandon_queued_work_claim(&claim)
+            .await
+            .expect("abandon selected-drain plan claim");
+        store
+            .release_session_execution_lease(&lease.completion())
+            .await
+            .expect("release selected-drain plan lease");
+        sqlx::query("DELETE FROM lash_queued_work_batches WHERE session_id = $1")
+            .bind(&session_id)
+            .execute(storage.pool())
+            .await
+            .expect("remove selected-drain plan fixture");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
         let Some(database_url) = postgres_test_support::database_url() else {

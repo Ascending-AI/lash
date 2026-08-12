@@ -354,11 +354,14 @@ pub fn select_turn_work_claim_prefix(
 
 /// Resolve an exact-ID selection against interrupted predecessor identities.
 ///
-/// `candidate_batch_claims` must contain every ready, claimable row for the
-/// session in durable enqueue order. When a requested row belongs to an
-/// interrupted claim, this returns that claim's complete row indices only if
-/// the request includes the complete composition. A partial request returns
-/// the literal required composition without selecting any rows.
+/// `candidate_batch_claims` must contain every requested ready row plus every
+/// member of each interrupted claim touched by the request, in durable enqueue
+/// order. Every touched interrupted identity is validated before one is
+/// selected. If any identity is only partially covered, the physically earliest
+/// incomplete claim's literal composition is returned without selecting rows.
+/// When every touched identity is complete, one selected drain reclaims exactly
+/// the physically earliest interrupted composition; later complete identities
+/// remain queued for a later drain.
 #[doc(hidden)]
 pub fn select_interrupted_exact_claim_indices(
     candidate_batch_claims: &[(String, Option<String>)],
@@ -368,37 +371,42 @@ pub fn select_interrupted_exact_claim_indices(
         .iter()
         .map(String::as_str)
         .collect::<std::collections::BTreeSet<_>>();
-    let Some(prior_claim_id) =
-        candidate_batch_claims
-            .iter()
-            .find_map(|(batch_id, prior_claim_id)| {
-                requested
-                    .contains(batch_id.as_str())
-                    .then_some(prior_claim_id.as_deref())
-                    .flatten()
-            })
-    else {
+    let mut involved_claim_ids = Vec::new();
+    for (batch_id, prior_claim_id) in candidate_batch_claims {
+        let Some(prior_claim_id) = prior_claim_id.as_deref() else {
+            continue;
+        };
+        if requested.contains(batch_id.as_str()) && !involved_claim_ids.contains(&prior_claim_id) {
+            involved_claim_ids.push(prior_claim_id);
+        }
+    }
+    let Some(earliest_claim_id) = involved_claim_ids.first().copied() else {
         return Ok(None);
     };
-    let required_indices = candidate_batch_claims
-        .iter()
-        .enumerate()
-        .filter_map(|(index, (_, candidate_claim_id))| {
-            (candidate_claim_id.as_deref() == Some(prior_claim_id)).then_some(index)
-        })
-        .collect::<Vec<_>>();
-    let required_batch_ids = required_indices
-        .iter()
-        .map(|index| candidate_batch_claims[*index].0.clone())
-        .collect::<Vec<_>>();
-    if required_batch_ids
-        .iter()
-        .all(|batch_id| requested.contains(batch_id.as_str()))
-    {
-        Ok(Some(required_indices))
-    } else {
-        Err(required_batch_ids)
+
+    for prior_claim_id in involved_claim_ids {
+        let required_batch_ids = candidate_batch_claims
+            .iter()
+            .filter(|(_, candidate_claim_id)| candidate_claim_id.as_deref() == Some(prior_claim_id))
+            .map(|(batch_id, _)| batch_id.clone())
+            .collect::<Vec<_>>();
+        if !required_batch_ids
+            .iter()
+            .all(|batch_id| requested.contains(batch_id.as_str()))
+        {
+            return Err(required_batch_ids);
+        }
     }
+
+    Ok(Some(
+        candidate_batch_claims
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (_, candidate_claim_id))| {
+                (candidate_claim_id.as_deref() == Some(earliest_claim_id)).then_some(index)
+            })
+            .collect(),
+    ))
 }
 
 /// Conservative upper bound for the exact model-visible queued-work render.
@@ -602,6 +610,32 @@ mod tests {
                 &["w1".to_string(), "w2".to_string()],
             ),
             Ok(Some(vec![0, 2]))
+        );
+
+        let two_claims = vec![
+            ("a1".to_string(), Some("claim-a".to_string())),
+            ("a2".to_string(), Some("claim-a".to_string())),
+            ("b1".to_string(), Some("claim-b".to_string())),
+            ("b2".to_string(), Some("claim-b".to_string())),
+        ];
+        assert_eq!(
+            select_interrupted_exact_claim_indices(
+                &two_claims,
+                &["a1".to_string(), "a2".to_string(), "b1".to_string()],
+            ),
+            Err(vec!["b1".to_string(), "b2".to_string()])
+        );
+        assert_eq!(
+            select_interrupted_exact_claim_indices(
+                &two_claims,
+                &[
+                    "a1".to_string(),
+                    "a2".to_string(),
+                    "b1".to_string(),
+                    "b2".to_string(),
+                ],
+            ),
+            Ok(Some(vec![0, 1]))
         );
     }
 

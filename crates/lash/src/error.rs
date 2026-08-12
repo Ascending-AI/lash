@@ -9,7 +9,9 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
         unclaimed_batch_ids: Vec<String>,
     },
     /// A requested row belongs to an interrupted claim whose complete,
-    /// already-journaled composition must be redriven atomically.
+    /// already-journaled composition must be redriven atomically. If a request
+    /// partially covers more than one interrupted claim, this names the
+    /// physically earliest incomplete claim in durable enqueue order.
     InterruptedBatchRequiresFullComposition {
         /// Complete interrupted composition, in durable enqueue order.
         required_batch_ids: Vec<String>,
