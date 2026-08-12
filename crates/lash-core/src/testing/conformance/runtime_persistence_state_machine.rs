@@ -1888,12 +1888,7 @@ async fn law_claimed_work_settles_exactly_once(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(
-            SESSION_ID,
-            &owner,
-            "law-claimed-work-settles-exactly-once-executor",
-            60_000,
-        )
+        .try_claim_session_execution_lease(SESSION_ID, &owner, "claimed-work-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -1981,7 +1976,7 @@ async fn law_reclaim_mediates_supersession(
         .try_claim_session_execution_lease(
             SESSION_ID,
             &stale_owner,
-            "law-reclaim-mediates-supersession-stale-executor",
+            "reclaim-stale-executor",
             60_000,
         )
         .await
@@ -2010,7 +2005,7 @@ async fn law_reclaim_mediates_supersession(
         .try_claim_session_execution_lease(
             SESSION_ID,
             &successor_owner,
-            "law-reclaim-mediates-supersession-successor-executor",
+            "reclaim-successor-executor",
             60_000,
         )
         .await
@@ -2147,7 +2142,7 @@ async fn law_head_cas_serializes_competing_commits(
         .try_claim_session_execution_lease(
             SESSION_ID,
             &stale_owner,
-            "law-head-cas-stale-executor",
+            "head-cas-stale-executor",
             60_000,
         )
         .await
@@ -2180,7 +2175,7 @@ async fn law_head_cas_serializes_competing_commits(
         .try_claim_session_execution_lease(
             SESSION_ID,
             &successor_owner,
-            "law-head-cas-successor-executor",
+            "head-cas-successor-executor",
             60_000,
         )
         .await
@@ -2255,12 +2250,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(
-            SESSION_ID,
-            &owner,
-            "law-selected-batch-out-of-order-executor",
-            60_000,
-        )
+        .try_claim_session_execution_lease(SESSION_ID, &owner, "selected-batch-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -2341,12 +2331,7 @@ async fn law_turn_inputs_apply_once_in_order(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(
-            SESSION_ID,
-            &owner,
-            "law-turn-inputs-apply-once-executor",
-            60_000,
-        )
+        .try_claim_session_execution_lease(SESSION_ID, &owner, "turn-input-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()

@@ -27,16 +27,14 @@ use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
     ForkSessionRequest, HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity,
-    PendingTurnInputDraft,
-    PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
-    ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit, RuntimePersistence,
-    RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta,
-    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage,
-    ToolState,
+    PendingTurnInputDraft, PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry,
+    PluginSnapshotMeta, ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit,
+    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord,
+    SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
     TriggerOwnerScope, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress,
     TurnInputState, facade_support::InMemorySessionStore,
-    facade_support::InMemorySessionStoreFactory, facade_support::MergeKey,
+    facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;

@@ -938,7 +938,10 @@ finish "done through route"
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
             )))
-            .build()
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "agent-service-test",
+                "test",
+            ))
             .expect("core");
         let turn_work_driver = core.turn_work_driver();
         let db = Arc::new(Mutex::new(
@@ -948,7 +951,6 @@ finish "done through route"
             core,
             turn_work_driver,
             Arc::clone(&db),
-            lash::persistence::LeaseOwnerIdentity::opaque("agent-service-test", "test"),
             "mock-model".to_string(),
             None,
             AgentServiceDurability::Local,

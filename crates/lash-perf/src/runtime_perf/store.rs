@@ -113,6 +113,21 @@ struct RuntimePerfSessionExecutionLease {
     expires_at_epoch_ms: u64,
 }
 
+impl RuntimePerfSessionExecutionLease {
+    fn materialize(&self, session_id: &str) -> Option<SessionExecutionLease> {
+        Some(SessionExecutionLease {
+            session_id: session_id.to_string(),
+            owner: self.owner.clone()?,
+            executor_id: self.executor_id.clone()?,
+            lease_token: self.lease_token.clone()?,
+            fencing_token: self.fencing_token,
+            claimed_at_epoch_ms: self.claimed_at_epoch_ms,
+            lease_term_ms: self.lease_term_ms,
+            expires_at_epoch_ms: self.expires_at_epoch_ms,
+        })
+    }
+}
+
 #[derive(Clone, Copy)]
 enum RuntimePerfQueuedWorkClaimKind {
     LeadingSessionCommand,
@@ -852,32 +867,13 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 current.lease_term_ms = lease_ttl_ms;
                 current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-                    SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
-                        session_id: session_id.to_string(),
-                        owner: owner.clone(),
-                        executor_id: executor_id.to_string(),
-                        lease_token: current.lease_token.clone().expect("live lease token set"),
-                        fencing_token: current.fencing_token,
-                        claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-                        lease_term_ms: current.lease_term_ms,
-                        expires_at_epoch_ms: current.expires_at_epoch_ms,
-                    }),
+                    SessionExecutionLeaseAcquisition::fresh(
+                        current.materialize(session_id).expect("live lease set"),
+                    ),
                 ));
             }
             return Ok(SessionExecutionLeaseClaimOutcome::Busy {
-                holder: SessionExecutionLease {
-                    session_id: session_id.to_string(),
-                    owner: current.owner.clone().expect("live lease owner set"),
-                    executor_id: current
-                        .executor_id
-                        .clone()
-                        .expect("live lease executor id set"),
-                    lease_token: current.lease_token.clone().expect("live lease token set"),
-                    fencing_token: current.fencing_token,
-                    claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-                    lease_term_ms: current.lease_term_ms,
-                    expires_at_epoch_ms: current.expires_at_epoch_ms,
-                },
+                holder: current.materialize(session_id).expect("live lease set"),
             });
         }
         // Read the lapsed holder before overwriting it. The claim is the only
@@ -907,16 +903,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         current.claimed_at_epoch_ms = now;
         current.lease_term_ms = lease_ttl_ms;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
-        let lease = SessionExecutionLease {
-            session_id: session_id.to_string(),
-            owner: owner.clone(),
-            executor_id: executor_id.to_string(),
-            lease_token: current.lease_token.clone().expect("lease token set"),
-            fencing_token: current.fencing_token,
-            claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-            lease_term_ms: current.lease_term_ms,
-            expires_at_epoch_ms: current.expires_at_epoch_ms,
-        };
+        let lease = current.materialize(session_id).expect("claimed lease set");
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
                 Some((previous, previous_executor_id, generation, expired_at_epoch_ms)) => {
@@ -971,16 +958,9 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         }
         current.lease_term_ms = lease_ttl_ms;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
-        Ok(SessionExecutionLease {
-            session_id: fence.session_id.clone(),
-            owner: fence.owner.clone(),
-            executor_id: fence.executor_id.clone(),
-            lease_token: fence.lease_token.clone(),
-            fencing_token: current.fencing_token,
-            claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-            lease_term_ms: current.lease_term_ms,
-            expires_at_epoch_ms: current.expires_at_epoch_ms,
-        })
+        Ok(current
+            .materialize(&fence.session_id)
+            .expect("renewed lease remains materialized"))
     }
 
     async fn release_session_execution_lease(
@@ -1001,21 +981,9 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         session_id: &str,
     ) -> Result<Option<SessionExecutionLease>, StoreError> {
         let leases = self.session_execution_leases.lock_recover();
-        Ok(leases.get(session_id).and_then(|current| {
-            let owner = current.owner.clone()?;
-            let executor_id = current.executor_id.clone()?;
-            let lease_token = current.lease_token.clone()?;
-            Some(SessionExecutionLease {
-                session_id: session_id.to_string(),
-                owner,
-                executor_id,
-                lease_token,
-                fencing_token: current.fencing_token,
-                claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-                lease_term_ms: current.lease_term_ms,
-                expires_at_epoch_ms: current.expires_at_epoch_ms,
-            })
-        }))
+        Ok(leases
+            .get(session_id)
+            .and_then(|current| current.materialize(session_id)))
     }
 }
 

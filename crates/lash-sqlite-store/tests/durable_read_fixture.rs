@@ -85,7 +85,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 35"),
+        message.contains("supports schema version 36"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -103,7 +103,7 @@ async fn sqlite_prior_component_encoding_fixture_is_refused_at_hydration() {
         &database,
     )
     .expect("copy committed SQLite component-version refusal fixture");
-    assert_eq!(user_version(&database), 35);
+    assert_eq!(user_version(&database), 36);
     let store = Store::open(&database)
         .await
         .expect("open SQLite component-version refusal fixture");

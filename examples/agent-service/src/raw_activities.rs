@@ -379,7 +379,6 @@ finish "done through raw activities"
             Arc::new(Mutex::new(
                 AppDb::open(&data_dir.join("app.db")).expect("app db"),
             )),
-            lash::persistence::LeaseOwnerIdentity::opaque("agent-service-test", "test"),
             "scripted-model".to_string(),
             None,
             durability,

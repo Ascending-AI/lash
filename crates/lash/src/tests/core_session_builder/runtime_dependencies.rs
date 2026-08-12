@@ -55,7 +55,7 @@ fn queued_work_action_reserve_is_required() {
                 lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
             ))
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .build(),
+            .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing queued-work action reserve",
     );
     assert!(matches!(error, EmbedError::MissingQueuedWorkBatching));

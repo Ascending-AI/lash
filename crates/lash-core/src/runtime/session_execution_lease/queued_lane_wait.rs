@@ -13,8 +13,10 @@
 //!   same has renewed, so it is alive and no amount of waiting will free the
 //!   lane inside this invocation. The drain gives up and reports a typed
 //!   retryable error, handing pacing to the engine's retry policy;
-//! - waiting is capped regardless, so an unexpected shape cannot become an
-//!   unbounded block in a shipped product path.
+//! - waiting is capped at 60s regardless of the persisted term, so an
+//!   unexpected shape cannot become an unbounded block in a shipped product
+//!   path. The typed retryable give-up then hands pacing to the engine, which
+//!   redelivers the durable invocation.
 //!
 //! Aliveness is necessarily detected about one renewal interval after waiting
 //! begins: the policy can only prove a holder is alive after the store publishes
@@ -40,6 +42,14 @@ use crate::store::SessionExecutionLease;
 /// crash-blocked, and pacing belongs to the engine's retry policy, not to a
 /// sleep inside one invocation.
 const TOTAL_WAIT_TTL_MULTIPLE: u64 = 2;
+
+/// Ceiling for total in-process waiting inside one durable invocation.
+///
+/// Beyond one minute, the typed retryable give-up hands pacing to the engine,
+/// which redelivers the invocation. A host with an unusually long lease term
+/// therefore gets bounded in-process waiting plus engine-paced retries instead
+/// of one invocation sitting for multiple lease terms.
+const MAX_WAIT_BUDGET_MS: u64 = 60_000;
 
 /// Claim attempts per persisted lease term while waiting out a crashed-looking holder.
 ///
@@ -121,7 +131,7 @@ impl QueuedLaneWait {
     }
 
     /// Total budget fixed from the first observed holder's persisted term.
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     pub(crate) fn budget_ms(&self) -> u64 {
         self.budget_ms
     }
@@ -133,7 +143,7 @@ impl QueuedLaneWait {
                 self.budget_ms = holder
                     .lease_term_ms
                     .saturating_mul(TOTAL_WAIT_TTL_MULTIPLE)
-                    .max(MIN_SLICE_MS);
+                    .clamp(MIN_SLICE_MS, MAX_WAIT_BUDGET_MS);
                 self.slice_ms =
                     (holder.lease_term_ms / PROBES_PER_TTL).clamp(MIN_SLICE_MS, MAX_SLICE_MS);
             }
@@ -324,6 +334,18 @@ mod tests {
         };
         assert_eq!(slice_ms, 468);
         assert!(slice_ms <= 500);
+        assert_eq!(wait.budget_ms(), 60_000);
+    }
+
+    #[test]
+    fn an_hour_term_uses_the_literal_wait_budget_and_slice_ceilings() {
+        let mut wait = QueuedLaneWait::default();
+        let hour_term = holder("executor-a", 1_000, 3_600_000, 3_601_000);
+
+        assert_eq!(
+            wait.observe(&hour_term),
+            QueuedLaneWaitStep::Wait { slice_ms: 500 }
+        );
         assert_eq!(wait.budget_ms(), 60_000);
     }
 

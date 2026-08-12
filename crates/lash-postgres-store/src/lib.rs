@@ -891,7 +891,12 @@ mod tests {
             format!("selected-plan-owner:{nonce}"),
         );
         let lease = store
-            .try_claim_session_execution_lease(&session_id, &owner, 60_000)
+            .try_claim_session_execution_lease(
+                &session_id,
+                &owner,
+                "schema-congruence-test-executor",
+                60_000,
+            )
             .await
             .expect("claim selected-drain plan lease")
             .acquired()

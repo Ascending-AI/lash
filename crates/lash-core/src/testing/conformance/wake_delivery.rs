@@ -239,7 +239,12 @@ pub async fn wake_delivery_crash_matrix(
         "wake-authority-owner:incarnation",
     );
     let authority_lease = authority_target
-        .try_claim_session_execution_lease(authority_target_session_id, &authority_owner, 60_000)
+        .try_claim_session_execution_lease(
+            authority_target_session_id,
+            &authority_owner,
+            "wake-authority-target-executor",
+            60_000,
+        )
         .await
         .expect("claim authority target execution lease")
         .acquired()

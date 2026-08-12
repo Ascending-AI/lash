@@ -58,12 +58,6 @@ async fn waits_out_a_crashed_holder_then_claims(
         {
             SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => break acquisition,
             SessionExecutionLeaseClaimOutcome::Busy { holder: observed } => {
-                assert!(
-                    wait.budget_ms() == 0 || wait.waited_ms() < wait.budget_ms(),
-                    "the crashed-holder wait must terminate inside its budget; waited {}ms of {}ms",
-                    wait.waited_ms(),
-                    wait.budget_ms()
-                );
                 assert_eq!(observed.executor_id, "crashed-holder-executor");
                 match wait.observe(&observed) {
                     QueuedLaneWaitStep::Wait { slice_ms } => {

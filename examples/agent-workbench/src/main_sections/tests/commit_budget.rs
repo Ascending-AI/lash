@@ -46,7 +46,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
         .commit_budget(bounded)
-        .build()
+        .build(crate::test_core_owner())
     {
         Ok(_) => panic!("builder must not invent a queued-work action reserve"),
         Err(error) => error,

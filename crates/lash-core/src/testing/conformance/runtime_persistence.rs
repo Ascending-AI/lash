@@ -544,7 +544,7 @@ where
     borrowed_session_execution_lease_commit_contract(make("borrowed-commit-fence")).await;
     same_incarnation_rotation_gates_claims_not_commits(make("root")).await;
     same_host_distinct_executors_are_lane_less_without_revoking_holder(make(
-        "same-host-executors",
+        "fig1133-same-host-session",
     ))
     .await;
     session_execution_lease_fence_authority(make("lease-fence-authority").as_ref()).await;
@@ -2221,7 +2221,12 @@ async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn Ru
         .await
         .expect("enqueue oversized checkpoint queued work");
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "checkpoint-budget-refusal-executor",
+            60_000,
+        )
         .await
         .expect("claim checkpoint atomicity session lease")
         .acquired()

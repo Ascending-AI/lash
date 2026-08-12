@@ -15,7 +15,6 @@ use crate::{
 };
 use generated_prefix::generated_prefix;
 use proptest::prelude::*;
-use proptest::strategy::ValueTree;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 use run_shape::{RunShape, RunShapeTotals};
 use std::collections::{BTreeMap, BTreeSet};

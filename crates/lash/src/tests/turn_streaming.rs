@@ -1005,7 +1005,7 @@ async fn selected_queued_turn_refuses_partial_key_break_without_settling_rows() 
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-queued-turn-key-break-refusal";
     let session = core.session(session_id).open().await?;
     let store = store_factory
@@ -1090,7 +1090,7 @@ async fn selected_queued_turn_redrives_an_interrupted_composition_exactly_or_not
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-interrupted-composition";
     let session = core.session(session_id).open().await?;
     let store = store_factory
@@ -1119,7 +1119,7 @@ async fn selected_queued_turn_redrives_an_interrupted_composition_exactly_or_not
         "selected-interrupted-owner-a:incarnation",
     );
     let lease_a = store
-        .try_claim_session_execution_lease(session_id, &owner_a, 60_000)
+        .try_claim_session_execution_lease(session_id, &owner_a, "owner-a-executor", 60_000)
         .await
         .expect("claim predecessor session execution lease")
         .acquired()
@@ -1223,7 +1223,7 @@ async fn selected_queued_turn_reports_claimed_now_and_already_satisfied_ids() ->
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-idempotent-outcome";
     let session = core.session(session_id).open().await?;
     let store = store_factory
@@ -1296,7 +1296,7 @@ async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_busy_lane() -
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-duplicate-absent";
     let session = core.session(session_id).open().await?;
     let store = store_factory
@@ -1321,7 +1321,7 @@ async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_busy_lane() -
         "selected-duplicate-absent-holder:incarnation",
     );
     let held_lease = store
-        .try_claim_session_execution_lease(session_id, &held_owner, 60_000)
+        .try_claim_session_execution_lease(session_id, &held_owner, "held-executor", 60_000)
         .await
         .expect("claim held session execution lease")
         .acquired()
@@ -1362,7 +1362,7 @@ async fn selected_queued_turn_deduplicates_present_claimable_id() -> Result<()> 
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-duplicate-present";
     let session = core.session(session_id).open().await?;
     let store = store_factory
@@ -1421,7 +1421,7 @@ async fn selected_queued_turn_empty_selection_is_satisfied_noop() -> Result<()> 
         .model(mock_model_spec())
         .store_factory(store_factory)
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("selected-empty-noop").open().await?;
     session
         .enqueue(TurnInput::text("must remain queued"))
@@ -1467,7 +1467,7 @@ async fn selected_queued_turn_validates_every_interrupted_composition_before_mut
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-two-interrupted-compositions";
     let session = core.session(session_id).open().await?;
     let store = store_factory
@@ -1496,7 +1496,12 @@ async fn selected_queued_turn_validates_every_interrupted_composition_before_mut
         "selected-two-claims-predecessor:incarnation",
     );
     let predecessor_lease = store
-        .try_claim_session_execution_lease(session_id, &predecessor_owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &predecessor_owner,
+            "predecessor-executor",
+            60_000,
+        )
         .await
         .expect("claim predecessor session execution lease")
         .acquired()
@@ -1665,7 +1670,7 @@ async fn selected_queued_turn_redrive_ignores_successor_max_rows() -> Result<()>
         .store_factory(store_factory.clone())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(2))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-redrive-over-row-limit";
     let session = core.session(session_id).open().await?;
     let store = store_factory
@@ -1698,7 +1703,12 @@ async fn selected_queued_turn_redrive_ignores_successor_max_rows() -> Result<()>
         "selected-limit-predecessor:incarnation",
     );
     let predecessor_lease = store
-        .try_claim_session_execution_lease(session_id, &predecessor_owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &predecessor_owner,
+            "predecessor-executor",
+            60_000,
+        )
         .await
         .expect("claim selected row-limit predecessor lease")
         .acquired()
@@ -1772,7 +1782,7 @@ async fn selected_queued_turn_reports_execution_lane_contention() -> Result<()> 
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-execution-lane-busy";
     let session = core.session(session_id).open().await?;
     let store = store_factory
@@ -1798,7 +1808,7 @@ async fn selected_queued_turn_reports_execution_lane_contention() -> Result<()> 
         "selected-busy-holder:incarnation",
     );
     let held_lease = store
-        .try_claim_session_execution_lease(session_id, &held_owner, 60_000)
+        .try_claim_session_execution_lease(session_id, &held_owner, "held-executor", 60_000)
         .await
         .expect("claim held session execution lease")
         .acquired()
@@ -6721,7 +6731,7 @@ async fn assert_binary_scratch_files_survive_cold_reopen(
     .model(mock_model_spec())
     .store_factory(store_factory.clone())
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(&session_id).open().await?;
     first_session
         .admin()
@@ -6743,7 +6753,7 @@ async fn assert_binary_scratch_files_survive_cold_reopen(
     .model(mock_model_spec())
     .store_factory(store_factory)
     .disable_queued_work_driver()
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let reopened = reopened_core.session(&session_id).open().await?;
     let cold = reopened
         .admin()
