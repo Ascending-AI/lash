@@ -37,10 +37,9 @@
 //! These are trace events, not durable session history: lease churn is per-attempt telemetry. A
 //! lost lease is not a turn failure: the turn may still commit, and the
 //! `commit_cas_rejected` event is what proves it did not.
-//! Same-incarnation overlap is benign by design: rotating the lock-lifecycle
-//! token refuses stale release and renewal, but either holder may still win the
-//! session-head generation CAS and commit. Forced displacement must advance the
-//! generation; it never overloads the lease-token nonce.
+//! Reentry requires the same host owner, boot incarnation, and runtime-minted
+//! executor id. A second runtime open under the same host identity is a distinct
+//! claimant and therefore observes `Busy` while the first executor is live.
 //!
 //! `acquired` and `taken_over` are INFO rather than DEBUG because reconstructing
 //! takeover order is an ordinary production question; requiring debug logging to
@@ -59,6 +58,9 @@ use crate::store::{
 };
 
 mod observability;
+
+pub(super) use observability::trace_commit_cas_rejected;
+use observability::{trace_busy, trace_taken_over};
 
 static NEXT_LEASE_GUARD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -114,6 +116,7 @@ pub(super) struct SessionExecutionLeaseContinuity {
 pub(super) struct SessionExecutionLeaseCommitEvidence {
     /// The lane holder's identity.
     owner: crate::LeaseOwnerIdentity,
+    executor_id: String,
     /// The generation this runner held.
     fencing_token: u64,
     /// Whether this runner had already observed its own lease loss before the
@@ -156,6 +159,7 @@ impl BorrowedLaneAuthority {
         let lease = self.lease.lock_recover();
         Box::new(SessionExecutionLeaseCommitEvidence {
             owner: lease.owner.clone(),
+            executor_id: lease.executor_id.clone(),
             fencing_token: lease.fencing_token,
             lease_lost: self.loss_cause.load(Ordering::Acquire) != loss_cause::NONE,
         })
@@ -163,6 +167,7 @@ impl BorrowedLaneAuthority {
 }
 
 impl SessionExecutionLeaseGuard {
+    #[cfg(test)]
     pub(super) async fn try_acquire(
         store: Arc<dyn RuntimePersistence>,
         session_id: &str,
@@ -170,7 +175,28 @@ impl SessionExecutionLeaseGuard {
         timings: LeaseTimings,
         clock: Arc<dyn Clock>,
     ) -> Result<Option<Self>, StoreError> {
-        match Self::try_acquire_with_busy_holder(store, session_id, owner, timings, clock).await? {
+        let executor_id = uuid::Uuid::new_v4().to_string();
+        Self::try_acquire_for_executor(store, session_id, owner, &executor_id, timings, clock).await
+    }
+
+    pub(super) async fn try_acquire_for_executor(
+        store: Arc<dyn RuntimePersistence>,
+        session_id: &str,
+        owner: &crate::LeaseOwnerIdentity,
+        executor_id: &str,
+        timings: LeaseTimings,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Option<Self>, StoreError> {
+        match Self::try_acquire_with_busy_holder(
+            store,
+            session_id,
+            owner,
+            executor_id,
+            timings,
+            clock,
+        )
+        .await?
+        {
             SessionExecutionLeaseGuardAcquisition::Acquired(guard) => Ok(Some(guard)),
             SessionExecutionLeaseGuardAcquisition::Busy(_) => Ok(None),
         }
@@ -180,6 +206,7 @@ impl SessionExecutionLeaseGuard {
         store: Arc<dyn RuntimePersistence>,
         session_id: &str,
         owner: &crate::LeaseOwnerIdentity,
+        executor_id: &str,
         timings: LeaseTimings,
         clock: Arc<dyn Clock>,
     ) -> Result<SessionExecutionLeaseGuardAcquisition, StoreError> {
@@ -188,6 +215,7 @@ impl SessionExecutionLeaseGuard {
             .try_claim_session_execution_lease_with_token(
                 session_id,
                 owner,
+                executor_id,
                 &claim_nonce,
                 timings.ttl_ms(),
             )
@@ -195,7 +223,7 @@ impl SessionExecutionLeaseGuard {
         {
             SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition,
             SessionExecutionLeaseClaimOutcome::Busy { holder } => {
-                trace_busy(session_id, owner, &holder);
+                trace_busy(session_id, owner, executor_id, &holder);
                 return Ok(SessionExecutionLeaseGuardAcquisition::Busy(holder));
             }
         };
@@ -220,6 +248,7 @@ impl SessionExecutionLeaseGuard {
             session_id = %lease.session_id,
             owner_id = %lease.owner.owner_id,
             incarnation_id = %lease.owner.incarnation_id,
+            executor_id = %lease.executor_id,
             fencing_token = lease.fencing_token,
             expires_at_epoch_ms = lease.expires_at_epoch_ms,
             event = "session_execution_lease.acquired",
@@ -278,6 +307,7 @@ impl SessionExecutionLeaseGuard {
         let lease = self.lease.lock_recover();
         Box::new(SessionExecutionLeaseCommitEvidence {
             owner: lease.owner.clone(),
+            executor_id: lease.executor_id.clone(),
             fencing_token: lease.fencing_token,
             lease_lost: self.loss_cause.load(Ordering::Acquire) != loss_cause::NONE,
         })
@@ -299,6 +329,7 @@ impl SessionExecutionLeaseGuard {
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
+            executor_id = %completion.executor_id,
             fencing_token = completion.fencing_token,
             event = "session_execution_lease.released",
             "released session execution lease"
@@ -351,6 +382,7 @@ impl SessionExecutionLeaseGuard {
                 session_id = %completion.session_id,
                 owner_id = %completion.owner.owner_id,
                 incarnation_id = %completion.owner.incarnation_id,
+                executor_id = %completion.executor_id,
                 fencing_token = completion.fencing_token,
                 consulted = "renewal_fence_lost",
                 outcome = "skipped",
@@ -378,6 +410,7 @@ impl SessionExecutionLeaseGuard {
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
+            executor_id = %completion.executor_id,
             fencing_token = completion.fencing_token,
             outcome,
             event = "session_execution_lease.release",
@@ -393,6 +426,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     store: Arc<dyn RuntimePersistence>,
     commit: RuntimeCommit,
     owner: &crate::LeaseOwnerIdentity,
+    executor_id: &str,
     timings: LeaseTimings,
     clock: Arc<dyn Clock>,
 ) -> Result<RuntimeCommitResult, StoreError> {
@@ -401,6 +435,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
         Arc::clone(&store),
         &session_id,
         owner,
+        executor_id,
         timings,
         clock,
     )
@@ -412,7 +447,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
             return match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
                 Ok(result) => Ok(result),
                 Err(error) => {
-                    trace_commit_cas_rejected(&session_id, None, owner, &error);
+                    trace_commit_cas_rejected(&session_id, None, owner, executor_id, &error);
                     Err(error)
                 }
             };
@@ -426,7 +461,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
             Ok(result)
         }
         Err(error) => {
-            trace_commit_cas_rejected(&session_id, Some(&evidence), owner, &error);
+            trace_commit_cas_rejected(&session_id, Some(&evidence), owner, executor_id, &error);
             match lease.release_if_live().await {
                 Ok(()) => {}
                 Err(release_error) => {
@@ -462,7 +497,13 @@ pub(super) async fn commit_runtime_state_with_borrowed_lease(
     match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
         Ok(result) => Ok(result),
         Err(error) => {
-            trace_commit_cas_rejected(&session_id, Some(&evidence), owner, &error);
+            trace_commit_cas_rejected(
+                &session_id,
+                Some(&evidence),
+                owner,
+                &evidence.executor_id,
+                &error,
+            );
             Err(error)
         }
     }
@@ -486,6 +527,7 @@ impl Drop for SessionExecutionLeaseGuard {
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
+            executor_id = %completion.executor_id,
             fencing_token = completion.fencing_token,
             lease_lost,
             expires_at_epoch_ms = lease.expires_at_epoch_ms,
@@ -506,6 +548,7 @@ impl Drop for SessionExecutionLeaseGuard {
                     session_id = %completion.session_id,
                     owner_id = %completion.owner.owner_id,
                     incarnation_id = %completion.owner.incarnation_id,
+                    executor_id = %completion.executor_id,
                     fencing_token = completion.fencing_token,
                     outcome = "released",
                     event = "session_execution_lease.release",
@@ -515,6 +558,7 @@ impl Drop for SessionExecutionLeaseGuard {
                     session_id = %completion.session_id,
                     owner_id = %completion.owner.owner_id,
                     incarnation_id = %completion.owner.incarnation_id,
+                    executor_id = %completion.executor_id,
                     fencing_token = completion.fencing_token,
                     outcome = "stale_refused",
                     event = "session_execution_lease.release",
@@ -525,6 +569,7 @@ impl Drop for SessionExecutionLeaseGuard {
                     session_id = %completion.session_id,
                     owner_id = %completion.owner.owner_id,
                     incarnation_id = %completion.owner.incarnation_id,
+                    executor_id = %completion.executor_id,
                     fencing_token = completion.fencing_token,
                     outcome = "failed_ttl_fallback",
                     event = "session_execution_lease.release",
@@ -563,6 +608,7 @@ fn spawn_renewal_task(
                                 session_id = %renewed.session_id,
                                 owner_id = %renewed.owner.owner_id,
                                 incarnation_id = %renewed.owner.incarnation_id,
+                                executor_id = %renewed.executor_id,
                                 fencing_token = renewed.fencing_token,
                                 event = "session_execution_lease.renewed",
                                 "renewed session execution lease"
@@ -608,6 +654,7 @@ fn spawn_renewal_task(
                         session_id = %fence.session_id,
                         owner_id = %fence.owner.owner_id,
                         incarnation_id = %fence.owner.incarnation_id,
+                        executor_id = %fence.executor_id,
                         fencing_token = fence.fencing_token,
                         consulted = if established_loss_cause == loss_cause::STORE_VERDICT {
                             "renewal_fence_rejected"
@@ -624,6 +671,7 @@ fn spawn_renewal_task(
                         session_id = %fence.session_id,
                         owner_id = %fence.owner.owner_id,
                         incarnation_id = %fence.owner.incarnation_id,
+                        executor_id = %fence.executor_id,
                         fencing_token = fence.fencing_token,
                         consulted = "renewal_error_transient",
                         outcome = "renewal_stopped_release_still_required",
@@ -654,6 +702,8 @@ fn validate_renewed_session_execution_lease(
         Err(Mismatch::Session)
     } else if !renewed.owner.same_incarnation(&presented.owner) {
         Err(Mismatch::OwnerIncarnation)
+    } else if renewed.executor_id != presented.executor_id {
+        Err(Mismatch::Executor)
     } else if renewed.lease_token != presented.lease_token {
         Err(Mismatch::LeaseToken)
     } else if renewed.fencing_token != presented.fencing_token {
@@ -678,6 +728,7 @@ fn trace_renewal_install_refused(
         &presented.fence(),
         crate::store_backend_support::SessionExecutionLeaseRefusalFacts {
             current_owner: Some(&renewed.owner),
+            current_executor_id: Some(&renewed.executor_id),
             current_token: Some(&renewed.lease_token),
             current_fencing_token: Some(renewed.fencing_token),
             current_expires_at_epoch_ms: Some(renewed.expires_at_epoch_ms),
@@ -691,86 +742,6 @@ fn trace_renewal_install_refused(
 
 #[cfg(test)]
 mod renewal_install_tests;
-
-/// Report a takeover from the winning claim, naming the holder it displaced.
-///
-/// The fields describe the emitter, as they do on every other lease event:
-/// `fencing_token`/`owner_id`/`incarnation_id` are the *new* holder, and the
-/// `displaced_*` fields are the lapsed holder this claim took the lane from. Both
-/// come from one atomic claim, so a log line here is true regardless of whether
-/// the displaced runner is still alive to notice.
-fn trace_taken_over(
-    lease: &SessionExecutionLease,
-    displaced: &crate::store::SessionExecutionLeaseDisplacement,
-) {
-    tracing::info!(
-        session_id = %lease.session_id,
-        owner_id = %lease.owner.owner_id,
-        incarnation_id = %lease.owner.incarnation_id,
-        fencing_token = lease.fencing_token,
-        displaced_owner_id = %displaced.owner.owner_id,
-        displaced_incarnation_id = %displaced.owner.incarnation_id,
-        displaced_fencing_token = displaced.fencing_token,
-        displaced_expired_at_epoch_ms = displaced.expired_at_epoch_ms,
-        consulted = "session_execution_lease_claim",
-        outcome = "taken_over",
-        event = "session_execution_lease.taken_over",
-        "took the session execution lane over from a lapsed holder"
-    );
-}
-
-/// Report a commit whose head compare-and-set lost to a concurrent writer.
-///
-/// This is the authority speaking, not the advisory lease: a repeated rejection
-/// while `lane_held` is true and `lease_lost` is false is livelock (two writers
-/// racing the same head), while a rejection after `lost` / `taken_over` is an
-/// ordinary handoff. Non-CAS store failures are left to their own error paths.
-pub(super) fn trace_commit_cas_rejected(
-    session_id: &str,
-    evidence: Option<&SessionExecutionLeaseCommitEvidence>,
-    claimant: &crate::LeaseOwnerIdentity,
-    err: &StoreError,
-) {
-    let StoreError::HeadRevisionConflict { expected, actual } = err else {
-        return;
-    };
-    // The writer is always nameable: it is the lane holder when one was held, and
-    // otherwise the runner that proceeded under the busy advisory. A rejection is
-    // never anonymous.
-    let owner = evidence.map_or(claimant, |evidence| &evidence.owner);
-    tracing::warn!(
-        session_id,
-        fencing_token = evidence.map(|evidence| evidence.fencing_token),
-        owner_id = %owner.owner_id,
-        incarnation_id = %owner.incarnation_id,
-        lane_held = evidence.is_some(),
-        lease_lost = evidence.is_some_and(|evidence| evidence.lease_lost),
-        expected_head_revision = expected,
-        actual_head_revision = actual,
-        consulted = "session_head_revision",
-        outcome = "commit_rejected",
-        event = "session_execution_lease.commit_cas_rejected",
-        "the commit's head compare-and-set was rejected; another writer published first"
-    );
-}
-
-fn trace_busy(
-    session_id: &str,
-    claimant: &crate::LeaseOwnerIdentity,
-    holder: &SessionExecutionLease,
-) {
-    tracing::debug!(
-        session_id,
-        claimant_owner_id = %claimant.owner_id,
-        claimant_incarnation_id = %claimant.incarnation_id,
-        holder_owner_id = %holder.owner.owner_id,
-        holder_incarnation_id = %holder.owner.incarnation_id,
-        holder_fencing_token = holder.fencing_token,
-        holder_expires_at_epoch_ms = holder.expires_at_epoch_ms,
-        event = "session_execution_lease.busy",
-        "session execution lease is busy"
-    );
-}
 
 #[cfg(test)]
 mod tests {
@@ -960,8 +931,15 @@ mod tests {
         drop(release);
 
         // The same runtime drives again and re-claims the still-live lease.
+        let successor_nonce = crate::LeaseClaimNonce::for_testing("drop-race-successor-token");
         let successor = store
-            .try_claim_session_execution_lease(SESSION_ID, &owner, LeaseTimings::default().ttl_ms())
+            .try_claim_session_execution_lease_with_token(
+                SESSION_ID,
+                &owner,
+                &guard.completion().executor_id,
+                &successor_nonce,
+                LeaseTimings::default().ttl_ms(),
+            )
             .await
             .expect("same-incarnation re-claim")
             .acquired()
@@ -1021,7 +999,13 @@ mod tests {
         .expect("claim predecessor guard")
         .expect("predecessor guard acquired");
         let successor = store
-            .try_claim_session_execution_lease(SESSION_ID, &owner, LeaseTimings::default().ttl_ms())
+            .try_claim_session_execution_lease_with_token(
+                SESSION_ID,
+                &owner,
+                &guard.completion().executor_id,
+                &crate::LeaseClaimNonce::for_testing("in-band-successor-token"),
+                LeaseTimings::default().ttl_ms(),
+            )
             .await
             .expect("rotate same-incarnation claim")
             .acquired()
@@ -1314,7 +1298,7 @@ mod tests {
         ) {
             assert_eq!(event.target, "lash_core::session_execution_lease");
             assert_eq!(event.level, "WARN");
-            assert_eq!(event.field_count(), 24);
+            assert_eq!(event.field_count(), 27);
             for field in [
                 "event",
                 "operation",
@@ -1322,8 +1306,10 @@ mod tests {
                 "session_id",
                 "presented_owner_id",
                 "presented_incarnation_id",
+                "presented_executor_id",
                 "current_owner_id",
                 "current_incarnation_id",
+                "current_executor_id",
                 "current_token_identity",
                 "presented_token_identity",
                 "consulted_state",
@@ -1333,7 +1319,7 @@ mod tests {
             ] {
                 assert_eq!(event.field_kind(field), CapturedFieldKind::Str, "{field}");
             }
-            for field in ["owner_matched", "token_matched"] {
+            for field in ["owner_matched", "executor_matched", "token_matched"] {
                 assert_eq!(event.field_kind(field), CapturedFieldKind::Bool, "{field}");
             }
             for field in [
@@ -1361,12 +1347,15 @@ mod tests {
                 event.field("presented_incarnation_id"),
                 presented.owner.incarnation_id
             );
+            assert_eq!(event.field("presented_executor_id"), presented.executor_id);
             assert_eq!(event.field("current_owner_id"), current.owner.owner_id);
             assert_eq!(
                 event.field("current_incarnation_id"),
                 current.owner.incarnation_id
             );
+            assert_eq!(event.field("current_executor_id"), current.executor_id);
             assert_eq!(event.field("owner_matched"), "false");
+            assert_eq!(event.field("executor_matched"), "false");
             assert_eq!(event.field("token_matched"), "false");
             assert_eq!(
                 event.field("consulted_state"),
@@ -1406,6 +1395,7 @@ mod tests {
         let presented = SessionExecutionLeaseAuthority {
             session_id: SESSION_ID.to_string(),
             owner: crate::LeaseOwnerIdentity::opaque("presented-owner", "presented-incarnation"),
+            executor_id: "presented-executor".to_string(),
             lease_token: "presented-stale-token".to_string(),
             fencing_token: current.fencing_token,
         };
@@ -1436,6 +1426,7 @@ mod tests {
                 Some(
                     crate::store_backend_support::SessionExecutionLeaseFenceFacts {
                         owner: Some(&current.owner),
+                        executor_id: Some(&current.executor_id),
                         lease_token: Some(current.lease_token.as_str()),
                         fencing_token: current.fencing_token,
                         expires_at_epoch_ms: current.expires_at_epoch_ms,
@@ -1449,7 +1440,7 @@ mod tests {
         .await;
         let execution_event =
             execution_capture.exactly_one("session_execution_lease.execution_fence_refused");
-        assert_eq!(execution_event.field_count(), 24);
+        assert_eq!(execution_event.field_count(), 27);
         assert_eq!(execution_event.field("operation"), "execution_fence");
         assert_eq!(
             execution_event.field("decision_basis"),
@@ -1458,6 +1449,7 @@ mod tests {
         assert_eq!(execution_event.field("refusal_cause"), "owner_mismatch");
         assert_eq!(execution_event.field("session_matched"), "Some(true)");
         assert_eq!(execution_event.field("owner_matched"), "false");
+        assert_eq!(execution_event.field("executor_matched"), "false");
         assert_eq!(execution_event.field("token_matched"), "false");
         assert_eq!(execution_event.field("generation_matched"), "Some(true)");
         assert_eq!(execution_event.field("expiry_matched"), "Some(true)");
@@ -1513,7 +1505,13 @@ mod tests {
         .expect("predecessor guard acquired");
         let predecessor_token = guard.completion().lease_token;
         let successor = store
-            .try_claim_session_execution_lease(SESSION_ID, &owner, 60_000)
+            .try_claim_session_execution_lease_with_token(
+                SESSION_ID,
+                &owner,
+                &guard.completion().executor_id,
+                &crate::LeaseClaimNonce::for_testing("renewal-successor-token"),
+                60_000,
+            )
             .await
             .expect("rotate durable lease token")
             .acquired()

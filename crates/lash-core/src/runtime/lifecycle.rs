@@ -107,6 +107,7 @@ pub(in crate::runtime) struct RuntimeSessionAssembly {
     state: RuntimeSessionState,
     relation: crate::SessionRelation,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
+    runtime_lease_executor_id: String,
 }
 
 impl RuntimeSessionAssembly {
@@ -119,6 +120,20 @@ impl RuntimeSessionAssembly {
             state,
             relation,
             runtime_lease_owner,
+            runtime_lease_executor_id: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+
+    fn resumed(
+        state: RuntimeSessionState,
+        runtime_lease_owner: crate::LeaseOwnerIdentity,
+        runtime_lease_executor_id: String,
+    ) -> Self {
+        Self {
+            state,
+            relation: crate::SessionRelation::Root,
+            runtime_lease_owner,
+            runtime_lease_executor_id,
         }
     }
 }
@@ -159,6 +174,7 @@ impl LashRuntime {
         services: RuntimeServices,
         mut state: RuntimeSessionState,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
+        runtime_lease_executor_id: String,
     ) -> Result<Self, SessionError> {
         // Defaulted state (e.g. `RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))` used
         // by fresh-session constructors) carries an empty policy.
@@ -263,6 +279,7 @@ impl LashRuntime {
             services,
             state,
             runtime_lease_owner,
+            runtime_lease_executor_id,
             managed_sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_turns: Arc::new(StdMutex::new(HashMap::new())),
             protocol_turn_options,
@@ -286,7 +303,15 @@ impl LashRuntime {
         state: RuntimeSessionState,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
-        Self::from_host_state(policy, host.into(), services, state, runtime_lease_owner).await
+        Self::from_host_state(
+            policy,
+            host.into(),
+            services,
+            state,
+            runtime_lease_owner,
+            uuid::Uuid::new_v4().to_string(),
+        )
+        .await
     }
 
     /// Build a runtime for a host that supports background plugin work.
@@ -297,7 +322,15 @@ impl LashRuntime {
         state: RuntimeSessionState,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
-        Self::from_host_state(policy, host.into(), services, state, runtime_lease_owner).await
+        Self::from_host_state(
+            policy,
+            host.into(),
+            services,
+            state,
+            runtime_lease_owner,
+            uuid::Uuid::new_v4().to_string(),
+        )
+        .await
     }
 
     /// Build a runtime for an embedded host with persistent store support.
@@ -321,6 +354,7 @@ impl LashRuntime {
             services.into_runtime_services(),
             state,
             runtime_lease_owner,
+            uuid::Uuid::new_v4().to_string(),
         )
         .await
     }
@@ -346,6 +380,7 @@ impl LashRuntime {
             services.into_runtime_services(),
             state,
             runtime_lease_owner,
+            uuid::Uuid::new_v4().to_string(),
         )
         .await
     }
@@ -370,6 +405,7 @@ impl LashRuntime {
             mut state,
             relation,
             runtime_lease_owner,
+            runtime_lease_executor_id,
         } = session;
         let RuntimePersistenceBindings {
             runtime_store: store,
@@ -395,6 +431,7 @@ impl LashRuntime {
                     services.into_runtime_services(),
                     state,
                     runtime_lease_owner.clone(),
+                    runtime_lease_executor_id.clone(),
                 )
                 .await?
             }
@@ -409,29 +446,32 @@ impl LashRuntime {
                     services.into_runtime_services(),
                     state,
                     runtime_lease_owner.clone(),
+                    runtime_lease_executor_id.clone(),
                 )
                 .await?
             }
             (None, Some(registry)) => {
                 let host = ProcessRuntimeHost::new(embedded_host, registry);
                 let services = RuntimeServices::new(plugin_session);
-                Self::from_background_state(
+                Self::from_host_state(
                     policy,
-                    host,
+                    host.into(),
                     services,
                     state,
                     runtime_lease_owner.clone(),
+                    runtime_lease_executor_id.clone(),
                 )
                 .await?
             }
             (None, None) => {
                 let services = RuntimeServices::new(plugin_session);
-                Self::from_embedded_state(
+                Self::from_host_state(
                     policy,
-                    embedded_host,
+                    embedded_host.into(),
                     services,
                     state,
                     runtime_lease_owner,
+                    runtime_lease_executor_id,
                 )
                 .await?
             }
@@ -461,6 +501,25 @@ impl LashRuntime {
         store: Option<Arc<dyn crate::store::RuntimePersistence>>,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
+        Self::from_environment_for_executor(
+            env,
+            policy,
+            state,
+            store,
+            runtime_lease_owner,
+            uuid::Uuid::new_v4().to_string(),
+        )
+        .await
+    }
+
+    async fn from_environment_for_executor(
+        env: &RuntimeEnvironment,
+        policy: SessionPolicy,
+        state: RuntimeSessionState,
+        store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+        runtime_lease_owner: crate::LeaseOwnerIdentity,
+        runtime_lease_executor_id: String,
+    ) -> Result<Self, SessionError> {
         let plugin_host = env.plugin_host.as_ref().ok_or_else(|| {
             SessionError::Protocol(
                 "RuntimeEnvironment.plugin_host is required for from_environment".to_string(),
@@ -482,7 +541,7 @@ impl LashRuntime {
             plugin_session,
             RuntimePersistenceBindings::new(store),
             env.process_registry.as_ref().cloned(),
-            RuntimeSessionAssembly::new(state, crate::SessionRelation::Root, runtime_lease_owner),
+            RuntimeSessionAssembly::resumed(state, runtime_lease_owner, runtime_lease_executor_id),
         )
         .await?;
         // Thread the host-owned work drivers onto this session's host so
@@ -534,6 +593,7 @@ impl LashRuntime {
                 Arc::clone(&store),
                 commit,
                 &self.runtime_lease_owner,
+                &self.runtime_lease_executor_id,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
             )
@@ -550,6 +610,8 @@ impl LashRuntime {
             session_id,
             store,
             policy,
+            runtime_lease_owner: self.runtime_lease_owner,
+            runtime_lease_executor_id: self.runtime_lease_executor_id,
         })
     }
 
@@ -559,6 +621,14 @@ impl LashRuntime {
         env: &RuntimeEnvironment,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
+        if !parked
+            .runtime_lease_owner
+            .same_incarnation(&runtime_lease_owner)
+        {
+            return Err(SessionError::Protocol(
+                "parked runtime owner does not match the resuming host owner".to_string(),
+            ));
+        }
         let loaded = crate::store::load_persisted_session_state(parked.store.as_ref())
             .await
             .map_err(|err| {
@@ -569,12 +639,13 @@ impl LashRuntime {
             policy: parked.policy.clone(),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         });
-        Self::from_environment(
+        Self::from_environment_for_executor(
             env,
             parked.policy,
             state,
             Some(parked.store),
             runtime_lease_owner,
+            parked.runtime_lease_executor_id,
         )
         .await
     }

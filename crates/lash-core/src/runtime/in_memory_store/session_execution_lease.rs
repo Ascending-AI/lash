@@ -12,6 +12,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         &self,
         session_id: &str,
         owner: &crate::LeaseOwnerIdentity,
+        executor_id: &str,
         claim_nonce: &crate::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<crate::SessionExecutionLeaseClaimOutcome, crate::store::StoreError> {
@@ -26,6 +27,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 .owner
                 .as_ref()
                 .is_some_and(|current_owner| current_owner.same_incarnation(owner))
+                && current.executor_id.as_deref() == Some(executor_id)
             {
                 if current.lease_token.as_deref() != Some(lease_token) {
                     current.lease_token = Some(lease_token.to_string());
@@ -48,11 +50,22 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         let displaced = current
             .owner
             .clone()
-            .filter(|previous| !previous.same_incarnation(owner))
-            .map(|previous| (previous, current.fencing_token, current.expires_at_epoch_ms));
+            .zip(current.executor_id.clone())
+            .filter(|(previous, previous_executor_id)| {
+                !previous.same_incarnation(owner) || previous_executor_id != executor_id
+            })
+            .map(|(previous, previous_executor_id)| {
+                (
+                    previous,
+                    previous_executor_id,
+                    current.fencing_token,
+                    current.expires_at_epoch_ms,
+                )
+            });
         let lease = Self::acquire_session_execution_lease_in_memory(
             session_id,
             owner,
+            executor_id,
             lease_token,
             current,
             now,
@@ -60,10 +73,11 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         )?;
         Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
-                Some((previous, generation, expired_at_epoch_ms)) => {
+                Some((previous, previous_executor_id, generation, expired_at_epoch_ms)) => {
                     crate::SessionExecutionLeaseAcquisition::displacing_observed(
                         lease,
                         previous,
+                        previous_executor_id,
                         generation,
                         expired_at_epoch_ms,
                     )
@@ -102,6 +116,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .owner
             .as_ref()
             .is_some_and(|owner| owner.same_incarnation(&fence.owner))
+            || current.executor_id.as_deref() != Some(fence.executor_id.as_str())
             || current.lease_token.as_deref() != Some(fence.lease_token.as_str())
         {
             crate::store_backend_support::trace_session_execution_lease_refusal(
@@ -111,6 +126,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 fence,
                 crate::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
                     current.owner.as_ref(),
+                    current.executor_id.as_deref(),
                     current.lease_token.as_deref(),
                 ),
             );
@@ -137,6 +153,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 fence,
                 crate::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
                     current.owner.as_ref(),
+                    current.executor_id.as_deref(),
                     current.lease_token.as_deref(),
                 ),
             );
@@ -150,6 +167,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         let renewed = crate::SessionExecutionLease {
             session_id: fence.session_id.clone(),
             owner: fence.owner.clone(),
+            executor_id: fence.executor_id.clone(),
             lease_token: fence.lease_token.clone(),
             fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,

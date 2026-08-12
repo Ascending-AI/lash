@@ -68,6 +68,7 @@ pub(in crate::runtime) struct CurrentSessionCapability {
     plugins: Arc<crate::PluginSession>,
     store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
+    runtime_lease_executor_id: String,
     /// Explicit lane context for services scoped to a running parent turn.
     /// `None` identifies a lane-less host/service call and selects the fresh
     /// acquisition path at the persistence call site.
@@ -207,6 +208,7 @@ impl CurrentSessionCapability {
             plugins,
             store: runtime.services.store.clone(),
             runtime_lease_owner: runtime.runtime_lease_owner.clone(),
+            runtime_lease_executor_id: runtime.runtime_lease_executor_id.clone(),
             held_session_execution_lease: held_session_execution_lease
                 .map(SessionExecutionLeaseGuard::borrowed_authority),
             resident_graph_head_stale: Arc::clone(&runtime.resident_graph_head_stale),

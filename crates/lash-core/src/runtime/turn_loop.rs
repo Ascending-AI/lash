@@ -785,10 +785,11 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
-        match SessionExecutionLeaseGuard::try_acquire(
+        match SessionExecutionLeaseGuard::try_acquire_for_executor(
             store,
             &self.state.session_id,
             &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
             self.host.core.control.lease_timings,
             Arc::clone(&self.host.core.clock),
         )
@@ -1153,6 +1154,7 @@ impl LashRuntime {
                         .map(SessionExecutionLeaseGuard::commit_evidence)
                         .as_deref(),
                     &self.runtime_lease_owner,
+                    &self.runtime_lease_executor_id,
                     &err,
                 );
                 self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);

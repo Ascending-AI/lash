@@ -105,6 +105,7 @@ fn find_pending_turn_input_index(
 #[derive(Clone, Default)]
 struct RuntimePerfSessionExecutionLease {
     owner: Option<LeaseOwnerIdentity>,
+    executor_id: Option<String>,
     lease_token: Option<String>,
     fencing_token: u64,
     claimed_at_epoch_ms: u64,
@@ -197,6 +198,7 @@ impl RuntimePerfStore {
             leases.get(session_id).map(|current| {
                 lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {
                     owner: current.owner.as_ref(),
+                    executor_id: current.executor_id.as_deref(),
                     lease_token: current.lease_token.as_deref(),
                     fencing_token: current.fencing_token,
                     expires_at_epoch_ms: current.expires_at_epoch_ms,
@@ -226,9 +228,11 @@ impl RuntimePerfStore {
         let mut leases = self.session_execution_leases.lock_recover();
         if let Some(current) = leases.get_mut(&completion.session_id)
             && current.owner.as_ref() == Some(&completion.owner)
+            && current.executor_id.as_deref() == Some(completion.executor_id.as_str())
             && current.lease_token.as_deref() == Some(completion.lease_token.as_str())
         {
             current.owner = None;
+            current.executor_id = None;
             current.lease_token = None;
             current.claimed_at_epoch_ms = 0;
             current.expires_at_epoch_ms = 0;
@@ -243,6 +247,7 @@ impl RuntimePerfStore {
                     completion,
                     lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
                         current.and_then(|lease| lease.owner.as_ref()),
+                        current.and_then(|lease| lease.executor_id.as_deref()),
                         current.and_then(|lease| lease.lease_token.as_deref()),
                     ),
                 );
@@ -824,6 +829,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
@@ -836,6 +842,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 .owner
                 .as_ref()
                 .is_some_and(|current_owner| current_owner.same_incarnation(owner))
+                && current.executor_id.as_deref() == Some(executor_id)
             {
                 if current.lease_token.as_deref() != Some(lease_token) {
                     current.lease_token = Some(lease_token.to_string());
@@ -845,6 +852,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                     SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                         session_id: session_id.to_string(),
                         owner: owner.clone(),
+                        executor_id: executor_id.to_string(),
                         lease_token: current.lease_token.clone().expect("live lease token set"),
                         fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_epoch_ms,
@@ -856,6 +864,10 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 holder: SessionExecutionLease {
                     session_id: session_id.to_string(),
                     owner: current.owner.clone().expect("live lease owner set"),
+                    executor_id: current
+                        .executor_id
+                        .clone()
+                        .expect("live lease executor id set"),
                     lease_token: current.lease_token.clone().expect("live lease token set"),
                     fencing_token: current.fencing_token,
                     claimed_at_epoch_ms: current.claimed_at_epoch_ms,
@@ -871,16 +883,28 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         let displaced = current
             .owner
             .clone()
-            .filter(|previous| !previous.same_incarnation(owner))
-            .map(|previous| (previous, current.fencing_token, current.expires_at_epoch_ms));
+            .zip(current.executor_id.clone())
+            .filter(|(previous, previous_executor_id)| {
+                !previous.same_incarnation(owner) || previous_executor_id != executor_id
+            })
+            .map(|(previous, previous_executor_id)| {
+                (
+                    previous,
+                    previous_executor_id,
+                    current.fencing_token,
+                    current.expires_at_epoch_ms,
+                )
+            });
         current.fencing_token = current.fencing_token.saturating_add(1);
         current.owner = Some(owner.clone());
+        current.executor_id = Some(executor_id.to_string());
         current.lease_token = Some(lease_token.to_string());
         current.claimed_at_epoch_ms = now;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         let lease = SessionExecutionLease {
             session_id: session_id.to_string(),
             owner: owner.clone(),
+            executor_id: executor_id.to_string(),
             lease_token: current.lease_token.clone().expect("lease token set"),
             fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
@@ -888,10 +912,11 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         };
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
-                Some((previous, generation, expired_at_epoch_ms)) => {
+                Some((previous, previous_executor_id, generation, expired_at_epoch_ms)) => {
                     SessionExecutionLeaseAcquisition::displacing_observed(
                         lease,
                         previous,
+                        previous_executor_id,
                         generation,
                         expired_at_epoch_ms,
                     )
@@ -914,6 +939,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
             });
         };
         if current.owner.as_ref() != Some(&fence.owner)
+            || current.executor_id.as_deref() != Some(fence.executor_id.as_str())
             || current.lease_token.as_deref() != Some(fence.lease_token.as_str())
         {
             lash_core::store_backend_support::trace_session_execution_lease_refusal(
@@ -923,6 +949,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 fence,
                 lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
                     current.owner.as_ref(),
+                    current.executor_id.as_deref(),
                     current.lease_token.as_deref(),
                 ),
             );
@@ -939,6 +966,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         Ok(SessionExecutionLease {
             session_id: fence.session_id.clone(),
             owner: fence.owner.clone(),
+            executor_id: fence.executor_id.clone(),
             lease_token: fence.lease_token.clone(),
             fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
@@ -966,10 +994,12 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         let leases = self.session_execution_leases.lock_recover();
         Ok(leases.get(session_id).and_then(|current| {
             let owner = current.owner.clone()?;
+            let executor_id = current.executor_id.clone()?;
             let lease_token = current.lease_token.clone()?;
             Some(SessionExecutionLease {
                 session_id: session_id.to_string(),
                 owner,
+                executor_id,
                 lease_token,
                 fencing_token: current.fencing_token,
                 claimed_at_epoch_ms: current.claimed_at_epoch_ms,

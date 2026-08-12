@@ -1488,6 +1488,7 @@ pub struct LashRuntime {
     pub(in crate::runtime) services: RuntimeServices,
     pub(in crate::runtime) state: RuntimeSessionState,
     pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
+    pub(in crate::runtime) runtime_lease_executor_id: String,
     /// Set for the current turn when the lane was busy and the turn proceeded
     /// under the commit CAS anyway, so a rejected commit still names the writer
     /// and the generation it knowingly raced.

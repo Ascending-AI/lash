@@ -9,7 +9,6 @@ pub enum RuntimeErrorCode {
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
-    SessionExecutionBusy,
     /// The managed-turn registry's admission cap is full. Retrying the
     /// same request after another managed turn finishes is safe.
     ManagedTurnConcurrencyLimitExceeded,
@@ -208,7 +207,6 @@ impl RuntimeErrorCode {
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
-            Self::SessionExecutionBusy => "session_execution_busy",
             Self::ManagedTurnConcurrencyLimitExceeded => "managed_turn_concurrency_limit_exceeded",
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::StoreCommitContended => "store_commit_contended",
@@ -390,8 +388,7 @@ impl RuntimeErrorCode {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::SessionExecutionBusy
-                | Self::ManagedTurnConcurrencyLimitExceeded
+            Self::ManagedTurnConcurrencyLimitExceeded
                 | Self::StoreCommitContended
                 | Self::PostgresAwaitEventStore
                 | Self::PostgresEffectJournalRetirement
@@ -538,7 +535,6 @@ impl RuntimeErrorCode {
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
-            "session_execution_busy" => Self::SessionExecutionBusy,
             "managed_turn_concurrency_limit_exceeded" => Self::ManagedTurnConcurrencyLimitExceeded,
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "store_commit_contended" => Self::StoreCommitContended,
@@ -884,8 +880,7 @@ mod tests {
 
     fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         match code {
-            RuntimeErrorCode::SessionExecutionBusy
-            | RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
+            RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
             | RuntimeErrorCode::StoreCommitContended
             | RuntimeErrorCode::CancelStartGateUnavailable
             | RuntimeErrorCode::PostgresAwaitEventStore
@@ -1042,7 +1037,6 @@ mod tests {
             RuntimeErrorCode::EffectPanicked,
             RuntimeErrorCode::MissingExecutionScopeId,
             RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
-            RuntimeErrorCode::SessionExecutionBusy,
             RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded,
             RuntimeErrorCode::SessionExecutionLeaseLost,
             RuntimeErrorCode::StoreCommitContended,

@@ -37,6 +37,7 @@ impl ManagedSessionCapability {
                 Arc::clone(store),
                 commit,
                 &materialized.runtime.runtime_lease_owner,
+                &materialized.runtime.runtime_lease_executor_id,
                 materialized.runtime.host.core.control.lease_timings,
                 Arc::clone(&materialized.runtime.host.core.clock),
             )

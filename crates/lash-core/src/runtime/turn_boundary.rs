@@ -1453,7 +1453,7 @@ mod tests {
             },
         };
         let store = RecordingStore::default();
-        let (mut queue_pipeline, _lease) =
+        let (mut queue_pipeline, queue_lease) =
             leased_boundary(&store, state_with_graph(graph.clone())).await;
         let queue_state = queue_pipeline.export_state_for_assembly();
         let queue_err = queue_pipeline
@@ -1484,6 +1484,10 @@ mod tests {
             StoreError::UnsettledQueuedWorkClaim { ref claim_id, .. }
                 if claim_id == "queue-claim"
         ));
+        store
+            .release_session_execution_lease(&queue_lease.completion())
+            .await
+            .expect("release queue-case execution lease");
 
         let (mut input_pipeline, _lease) = leased_boundary(&store, state_with_graph(graph)).await;
         let input_state = input_pipeline.export_state_for_assembly();

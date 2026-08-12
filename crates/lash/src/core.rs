@@ -862,6 +862,7 @@ impl LashCore {
             runtime_host,
             Arc::clone(store_factory),
             process_registry,
+            self.session_execution_owner.clone(),
         )
         .with_session_policy(self.policy.clone())
         .with_process_execution_concurrency(self.process_execution_concurrency)?;
@@ -1413,8 +1414,8 @@ impl LashCoreBuilder {
             runtime_host,
             Arc::clone(store_factory),
             process_registry,
+            session_execution_owner,
         )
-        .with_lease_owner(session_execution_owner)
         .with_session_policy(policy.clone())
         .with_trigger_store(trigger_store.cloned().unwrap_or_else(|| {
             Arc::new(facade_support::InMemoryTriggerStore::with_clock(

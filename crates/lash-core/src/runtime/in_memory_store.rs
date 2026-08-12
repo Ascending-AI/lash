@@ -46,6 +46,7 @@ struct InMemoryQueuedBatch {
 #[derive(Clone, Default)]
 struct InMemorySessionExecutionLease {
     owner: Option<crate::LeaseOwnerIdentity>,
+    executor_id: Option<String>,
     lease_token: Option<String>,
     fencing_token: u64,
     claimed_at_epoch_ms: u64,
@@ -311,6 +312,7 @@ impl InMemorySessionStore {
             leases.get(session_id).map(|current| {
                 crate::store::session_execution_lease::SessionExecutionLeaseFenceFacts {
                     owner: current.owner.as_ref(),
+                    executor_id: current.executor_id.as_deref(),
                     lease_token: current.lease_token.as_deref(),
                     fencing_token: current.fencing_token,
                     expires_at_epoch_ms: current.expires_at_epoch_ms,
@@ -344,9 +346,11 @@ impl InMemorySessionStore {
                 .owner
                 .as_ref()
                 .is_some_and(|owner| owner.same_incarnation(&completion.owner))
+            && current.executor_id.as_deref() == Some(completion.executor_id.as_str())
             && current.lease_token.as_deref() == Some(completion.lease_token.as_str())
         {
             current.owner = None;
+            current.executor_id = None;
             current.lease_token = None;
             current.claimed_at_epoch_ms = 0;
             current.expires_at_epoch_ms = 0;
@@ -361,6 +365,7 @@ impl InMemorySessionStore {
                     completion,
                     crate::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
                         current.and_then(|lease| lease.owner.as_ref()),
+                        current.and_then(|lease| lease.executor_id.as_deref()),
                         current.and_then(|lease| lease.lease_token.as_deref()),
                     ),
                 );
@@ -376,6 +381,10 @@ impl InMemorySessionStore {
         crate::SessionExecutionLease {
             session_id: session_id.to_string(),
             owner: current.owner.clone().expect("live lease owner set"),
+            executor_id: current
+                .executor_id
+                .clone()
+                .expect("live lease executor id set"),
             lease_token: current.lease_token.clone().expect("live lease token set"),
             fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
@@ -386,6 +395,7 @@ impl InMemorySessionStore {
     fn acquire_session_execution_lease_in_memory(
         session_id: &str,
         owner: &crate::LeaseOwnerIdentity,
+        executor_id: &str,
         lease_token: &str,
         current: &mut InMemorySessionExecutionLease,
         now: u64,
@@ -396,6 +406,7 @@ impl InMemorySessionStore {
             current.fencing_token,
         )?;
         current.owner = Some(owner.clone());
+        current.executor_id = Some(executor_id.to_string());
         current.lease_token = Some(lease_token.to_string());
         current.claimed_at_epoch_ms = now;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);

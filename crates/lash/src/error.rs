@@ -132,8 +132,9 @@ impl EmbedError {
     ///
     /// Runtime failures delegate to the closed
     /// [`RuntimeErrorCode`](lash_core::RuntimeErrorCode) taxonomy. Its
-    /// retryable set includes lease contention plus idempotent store, Restate
-    /// ingress, session-refresh, and bounded-wait operations. Foreign extension
+    /// retryable set includes idempotent store contention, Restate ingress,
+    /// session-refresh, and bounded-wait operations. Lease Busy is an internal
+    /// claim outcome, not a public runtime error. Foreign extension
     /// codes are conservatively not retryable.
     ///
     /// Notably
@@ -244,13 +245,6 @@ mod tests {
 
     fn runtime_error(code: RuntimeErrorCode) -> EmbedError {
         EmbedError::Runtime(RuntimeError::new(code, "test"))
-    }
-
-    #[test]
-    fn session_execution_busy_is_retryable_and_not_terminal() {
-        let err = runtime_error(RuntimeErrorCode::SessionExecutionBusy);
-        assert!(err.is_retryable(), "{err}");
-        assert!(!err.is_terminal(), "{err}");
     }
 
     #[test]

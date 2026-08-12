@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 14;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 15;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -431,6 +431,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .try_claim_session_execution_lease_with_token(
             SESSION_ID,
             &queue_owner,
+            "durable-read-queue-executor",
             &LeaseClaimNonce::for_testing("durable-read-queue-claim-nonce"),
             100,
         )
@@ -473,6 +474,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .try_claim_session_execution_lease_with_token(
             SESSION_ID,
             &queue_owner,
+            "durable-read-retained-executor",
             &LeaseClaimNonce::for_testing("durable-read-retained-session-lease"),
             100,
         )

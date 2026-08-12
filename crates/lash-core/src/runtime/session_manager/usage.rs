@@ -178,6 +178,7 @@ impl UsageCapability {
                 Arc::clone(store),
                 commit,
                 &current.runtime_lease_owner,
+                &current.runtime_lease_executor_id,
                 current.host.core.control.lease_timings,
                 Arc::clone(&current.host.core.clock),
             )
