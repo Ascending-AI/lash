@@ -315,14 +315,14 @@ fn snapshot_runtime_value(value: &FlowValue) -> Result<Vec<u8>, lashlang::Contin
 }
 
 fn restore_runtime_value(data: &[u8]) -> Result<FlowValue, RlmSnapshotError> {
-    let mut snapshot = lashlang::Snapshot::from_canonical_bytes(data)?;
-    if snapshot.globals.len() != 1 || snapshot.globals.get("value").is_none() {
+    let snapshot = lashlang::Snapshot::from_canonical_bytes(data)?;
+    if snapshot.globals().len() != 1 || snapshot.globals().get("value").is_none() {
         return Err(RlmSnapshotError::FormatMismatch {
             details: "value body must contain exactly the canonical `value` binding".to_string(),
         });
     }
     Ok(snapshot
-        .globals
+        .into_globals()
         .remove("value")
         .expect("the canonical value binding was checked"))
 }

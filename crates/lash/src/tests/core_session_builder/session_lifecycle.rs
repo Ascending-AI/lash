@@ -1057,7 +1057,9 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // them (here `compile-extra-tool` resolves to `lookup`).
     let artifact_store = Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new());
     let factory = Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::new(lash_protocol_rlm::ExecutionBound::instructions(1_000_000), lash_protocol_rlm::ExecutionBound::secs(30)),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(lash_protocol_rlm::ExecutionBound::instructions(1_000_000), lash_protocol_rlm::ExecutionBound::secs(30),
+    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
+),
         artifact_store.clone(),
     ));
     let plugin_host = lash_core::facade_support::PluginHost::new(vec![

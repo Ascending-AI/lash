@@ -309,6 +309,7 @@ mod tests {
         let session = test_session(RlmProtocolPluginConfig::new(
             lashlang::ExecutionBound::Unbounded,
             lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
         ));
         session
             .apply_session_extension(crate::rlm_session_projection_extension(
@@ -337,6 +338,7 @@ mod tests {
         let session = test_session(RlmProtocolPluginConfig::new(
             lashlang::ExecutionBound::Unbounded,
             lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
         ));
         session
             .apply_session_extension(crate::rlm_session_projection_extension(
@@ -364,6 +366,7 @@ mod tests {
             ..RlmProtocolPluginConfig::new(
                 lashlang::ExecutionBound::Unbounded,
                 lashlang::ExecutionBound::Unbounded,
+                lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
             )
         });
         let state = lash_core::SessionSnapshot {

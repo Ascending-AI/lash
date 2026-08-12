@@ -703,20 +703,15 @@ fn apply_global_defaults(
     if patch.set_default.is_empty() {
         return Ok(());
     }
-    let mut snapshot = rlm.snapshot();
     for (key, value) in &patch.set_default {
         if is_reserved_global_name(key) || protected_names.contains(key) {
             return Err(format!(
                 "`{key}` is a read-only projected host binding; choose a different Lashlang variable name for `set_default`"
             ));
         }
-        if snapshot.globals.get(key).is_none() {
-            snapshot
-                .globals
-                .insert(key.clone(), json_to_flow_value(value.clone()));
-        }
+        rlm.set_default(key.clone(), json_to_flow_value(value.clone()))
+            .map_err(|error| error.to_string())?;
     }
-    *rlm = FlowState::from_snapshot(snapshot);
     Ok(())
 }
 
@@ -2550,7 +2545,7 @@ mod tests {
             };
             assert_eq!(record["history_len"], FlowValue::Number(1.0));
             assert_eq!(record["diary_len"], FlowValue::Number(1.0));
-            assert!(state.rlm.snapshot().globals.get("history").is_none());
+            assert!(state.rlm.snapshot().globals().get("history").is_none());
         });
     }
 
@@ -2589,12 +2584,19 @@ mod tests {
             )
             .expect("apply defaults");
         assert_eq!(
-            state.rlm.snapshot().globals.get("diary"),
+            state.rlm.snapshot().globals().get("diary"),
             Some(&FlowValue::List(
                 vec![FlowValue::String("initial".into())].into()
             ))
         );
-        assert!(state.rlm.snapshot().globals.get("current_query").is_none());
+        assert!(
+            state
+                .rlm
+                .snapshot()
+                .globals()
+                .get("current_query")
+                .is_none()
+        );
 
         state
             .patch_globals(
@@ -2608,11 +2610,152 @@ mod tests {
             )
             .expect("reapply defaults");
         assert_eq!(
-            state.rlm.snapshot().globals.get("diary"),
+            state.rlm.snapshot().globals().get("diary"),
             Some(&FlowValue::List(
                 vec![FlowValue::String("initial".into())].into()
             ))
         );
+    }
+
+    #[test]
+    fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
+        block_on(async {
+            let projected = ProjectedBindings::new();
+            let mut state = RlmExecutionState::new().expect("state");
+            let setup = lashlang::compile("seed = [{ nested: [1] }]").expect("compile setup");
+            execute_with_projected(&setup, &mut state.rlm, &projected)
+                .await
+                .expect("execute setup");
+            state
+                .patch_globals(
+                    &lash_rlm_types::RlmGlobalsPatchPluginBody {
+                        set_default: serde_json::Map::from_iter([(
+                            "diary".to_string(),
+                            serde_json::json!(["kept"]),
+                        )]),
+                    },
+                    &BTreeSet::new(),
+                )
+                .expect("patch heap-backed state");
+
+            let finish = lashlang::compile("finish diary").expect("compile finish");
+            assert_eq!(
+                execute_with_projected(&finish, &mut state.rlm, &projected)
+                    .await
+                    .expect("next cell sees patch"),
+                ExecutionOutcome::Finished(FlowValue::List(
+                    vec![FlowValue::String("kept".into())].into()
+                ))
+            );
+
+            let bytes = state
+                .rlm
+                .snapshot()
+                .to_canonical_bytes()
+                .expect("encode patched state");
+            let snapshot =
+                lashlang::Snapshot::from_canonical_bytes(&bytes).expect("decode patched state");
+            let mut restored = lashlang::State::from_snapshot(snapshot);
+            assert_eq!(
+                execute_with_projected(&finish, &mut restored, &projected)
+                    .await
+                    .expect("cold-restored cell sees patch"),
+                ExecutionOutcome::Finished(FlowValue::List(
+                    vec![FlowValue::String("kept".into())].into()
+                ))
+            );
+        });
+    }
+
+    #[test]
+    fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_restore() {
+        block_on(async {
+            let projected = ProjectedBindings::new();
+            let setup =
+                lashlang::compile("history = [{ role: \"user\" }]\nkept = [{ nested: [2] }]")
+                    .expect("compile setup");
+            let mut state = lashlang::State::new();
+            execute_with_projected(&setup, &mut state, &projected)
+                .await
+                .expect("execute setup");
+
+            let registry = Arc::new(ProjectionRegistry::new());
+            let descriptor = Arc::new(SnapshotProjectedToolText::default());
+            let reference = registry.register_memory(descriptor.clone());
+            state
+                .insert_global(
+                    "doc",
+                    FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
+                        "doc",
+                        descriptor,
+                        serde_json::to_value(&reference).expect("projection ref"),
+                    )),
+                )
+                .expect("insert projected value");
+            let unavailable = state
+                .snapshot()
+                .to_canonical_bytes()
+                .expect("encode projected state");
+            state = lashlang::State::from_snapshot(
+                lashlang::Snapshot::from_canonical_bytes(&unavailable)
+                    .expect("restore projected state as unavailable"),
+            );
+            rehydrate_projected_globals(
+                &mut state,
+                Arc::clone(&registry) as Arc<dyn ProjectionResolver>,
+            )
+            .await
+            .expect("rehydrate heap-backed projected value");
+            crate::projection::prune_reserved_projected_bindings(&mut state);
+
+            let finish = lashlang::compile("finish { doc: doc, kept: kept }")
+                .expect("compile post-patch read");
+            let expected =
+                ExecutionOutcome::Finished(FlowValue::Record(Arc::new(FlowRecord::from_iter([
+                    (
+                        "doc".to_string(),
+                        FlowValue::String("materialized tool text".into()),
+                    ),
+                    (
+                        "kept".to_string(),
+                        FlowValue::List(
+                            vec![FlowValue::Record(Arc::new(FlowRecord::from_iter([(
+                                "nested".to_string(),
+                                FlowValue::List(vec![FlowValue::Number(2.0)].into()),
+                            )])))]
+                            .into(),
+                        ),
+                    ),
+                ]))));
+            assert_eq!(
+                execute_with_projected(&finish, &mut state, &projected)
+                    .await
+                    .expect("next cell sees rehydrate and prune"),
+                expected
+            );
+            assert!(state.globals().get("history").is_none());
+
+            let bytes = state
+                .snapshot()
+                .to_canonical_bytes()
+                .expect("encode rehydrated and pruned state");
+            let snapshot = lashlang::Snapshot::from_canonical_bytes(&bytes)
+                .expect("decode rehydrated and pruned state");
+            let mut restored = lashlang::State::from_snapshot(snapshot);
+            rehydrate_projected_globals(
+                &mut restored,
+                Arc::clone(&registry) as Arc<dyn ProjectionResolver>,
+            )
+            .await
+            .expect("rehydrate after cold restore");
+            assert_eq!(
+                execute_with_projected(&finish, &mut restored, &projected)
+                    .await
+                    .expect("cold-restored cell sees rehydrate and prune"),
+                expected
+            );
+            assert!(restored.globals().get("history").is_none());
+        });
     }
 
     #[test]
@@ -2668,7 +2811,14 @@ mod tests {
             };
             assert_eq!(record["chars"], FlowValue::Number(4.0));
             assert_eq!(record["value"], FlowValue::String("host".into()));
-            assert!(state.rlm.snapshot().globals.get("current_query").is_none());
+            assert!(
+                state
+                    .rlm
+                    .snapshot()
+                    .globals()
+                    .get("current_query")
+                    .is_none()
+            );
 
             let compiled = lashlang::compile("current_query = \"local\"").expect("compile write");
             let env = ExecutionEnvironment::new(&NoopHost)
@@ -2693,15 +2843,16 @@ mod tests {
     fn executor_snapshot_does_not_materialize_projected_tool_result_globals() {
         let projected = Arc::new(SnapshotProjectedToolText::default());
         let mut state = RlmExecutionState::new().expect("state");
-        let mut snapshot = state.rlm.snapshot();
-        snapshot.globals.insert(
-            "m".to_string(),
-            FlowValue::Projected(ProjectedValue::custom(
-                "search.matches[0].text",
-                projected.clone(),
-            )),
-        );
-        state.rlm = FlowState::from_snapshot(snapshot);
+        state
+            .rlm
+            .insert_global(
+                "m".to_string(),
+                FlowValue::Projected(ProjectedValue::custom(
+                    "search.matches[0].text",
+                    projected.clone(),
+                )),
+            )
+            .expect("insert projected global");
 
         let snapshot =
             hydrate_snapshot(state.snapshot_execution_state().expect("executor snapshot"));
@@ -2721,7 +2872,7 @@ mod tests {
             .expect("restore runtime");
         let restored = restored_execution.rlm;
         assert!(matches!(
-            restored.snapshot().globals.get("m"),
+            restored.snapshot().globals().get("m"),
             Some(FlowValue::Projected(_))
         ));
     }
@@ -2833,8 +2984,8 @@ mod tests {
                 .restore_execution_state(&hydrated)
                 .expect("cold reopen final capture");
             assert_eq!(
-                reopened.rlm.snapshot().globals.get("large"),
-                state.rlm.snapshot().globals.get("large"),
+                reopened.rlm.snapshot().globals().get("large"),
+                state.rlm.snapshot().globals().get("large"),
                 "cold reopen must include the assignment made after the progress capture"
             );
 
@@ -2848,8 +2999,8 @@ mod tests {
                 .restore_execution_state(&retry_hydrated)
                 .expect("cold reopen retry capture");
             assert_eq!(
-                retry_reopened.rlm.snapshot().globals.get("large"),
-                state.rlm.snapshot().globals.get("large"),
+                retry_reopened.rlm.snapshot().globals().get("large"),
+                state.rlm.snapshot().globals().get("large"),
                 "aborting a superseded capture must retain the post-progress assignment"
             );
         });
@@ -2923,8 +3074,8 @@ mod tests {
                 .restore_execution_state(&final_hydration)
                 .expect("cold reopen final A capture");
             assert_eq!(
-                reopened.rlm.snapshot().globals.get("large"),
-                state.rlm.snapshot().globals.get("large")
+                reopened.rlm.snapshot().globals().get("large"),
+                state.rlm.snapshot().globals().get("large")
             );
 
             state.abort_execution_state_capture();
@@ -2942,8 +3093,8 @@ mod tests {
                 .restore_execution_state(&retry_hydration)
                 .expect("cold reopen retry A capture");
             assert_eq!(
-                retry_reopened.rlm.snapshot().globals.get("large"),
-                state.rlm.snapshot().globals.get("large")
+                retry_reopened.rlm.snapshot().globals().get("large"),
+                state.rlm.snapshot().globals().get("large")
             );
         });
     }
@@ -3108,10 +3259,10 @@ mod tests {
             );
             assert_eq!(changed.components.len(), 0);
             // 200 leaves would charge ~200 root refs plus ~200 manifest rows on
-            // every commit. Inline values now include the fixed versioned heap
-            // envelope, but still avoid that recurring manifest-row cost.
+            // every commit. Plain values use the compact tree representation,
+            // so the pre-heap inline-root ceiling remains appropriate.
             assert!(
-                commit_bytes < 96 * 1024,
+                commit_bytes < 34 * 1024,
                 "many short bindings must keep the per-commit floor low: {commit_bytes}"
             );
         });
@@ -3368,16 +3519,17 @@ mod tests {
     fn executor_snapshot_round_trips_projection_ref_metadata() {
         let reference = ProjectionRef::new("memory", serde_json::json!("doc"));
         let mut state = RlmExecutionState::new().expect("state");
-        let mut snapshot = state.rlm.snapshot();
-        snapshot.globals.insert(
-            "doc".to_string(),
-            FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
-                "doc",
-                Arc::new(SnapshotProjectedToolText::default()),
-                serde_json::json!(reference),
-            )),
-        );
-        state.rlm = FlowState::from_snapshot(snapshot);
+        state
+            .rlm
+            .insert_global(
+                "doc".to_string(),
+                FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
+                    "doc",
+                    Arc::new(SnapshotProjectedToolText::default()),
+                    serde_json::json!(reference),
+                )),
+            )
+            .expect("insert projected global");
 
         let snapshot =
             hydrate_snapshot(state.snapshot_execution_state().expect("executor snapshot"));
@@ -3388,7 +3540,7 @@ mod tests {
             .expect("restore runtime");
         let restored = restored_execution.rlm;
         let restored_snapshot = restored.snapshot();
-        let Some(FlowValue::Projected(projected)) = restored_snapshot.globals.get("doc") else {
+        let Some(FlowValue::Projected(projected)) = restored_snapshot.globals().get("doc") else {
             panic!("expected restored projected value");
         };
         assert_eq!(

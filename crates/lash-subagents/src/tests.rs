@@ -832,6 +832,7 @@ async fn run_seed_probe_inner(
                 lash_protocol_rlm::RlmProtocolPluginConfig::new(
                     lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
                     lash_protocol_rlm::ExecutionBound::secs(30),
+                    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
                 )
                 .with_lashlang_language_features(language_features),
                 Arc::clone(&artifact_store),

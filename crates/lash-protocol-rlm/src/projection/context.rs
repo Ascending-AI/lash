@@ -310,11 +310,9 @@ pub(crate) fn prune_projected_binding_names<'a>(
     rlm: &mut FlowState,
     names: impl IntoIterator<Item = &'a str>,
 ) {
-    let mut snapshot = rlm.snapshot();
     for key in names {
-        snapshot.globals.remove(key);
+        rlm.remove_global(key);
     }
-    *rlm = FlowState::from_snapshot(snapshot);
 }
 
 fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {

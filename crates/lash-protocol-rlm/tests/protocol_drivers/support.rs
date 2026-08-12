@@ -950,6 +950,7 @@ pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
             RlmProtocolPluginConfig::new(
                 lashlang::ExecutionBound::Unbounded,
                 lashlang::ExecutionBound::Unbounded,
+                lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
             )
             .with_redaction_roots(Vec::new()),
             lashlang::global_in_memory_lashlang_artifact_store(),

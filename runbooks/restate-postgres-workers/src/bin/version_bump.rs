@@ -193,6 +193,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         lash_protocol_rlm::RlmProtocolPluginConfig::new(
             lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
             lash_protocol_rlm::ExecutionBound::secs(30),
+            lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         Arc::new(storage.lashlang_artifact_store()),
     );

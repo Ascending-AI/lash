@@ -25,6 +25,7 @@ async fn sqlite_core(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         artifact_store.clone(),
     );
@@ -89,6 +90,7 @@ async fn postgres_core(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         Arc::new(storage.lashlang_artifact_store()),
     );
@@ -260,6 +262,7 @@ async fn shared_factory(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         artifact_store.clone(),
     );
@@ -389,6 +392,7 @@ mod tests {
             lash::rlm::RlmProtocolPluginConfig::new(
                 lash::rlm::ExecutionBound::instructions(1_000_000),
                 lash::rlm::ExecutionBound::secs(30),
+                lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
             ),
             Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
         );

@@ -49,6 +49,7 @@ async fn lashlang_execution_jsonl(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
@@ -90,6 +91,7 @@ async fn lashlang_graph_store(provider: ProviderHandle, model: ModelSpec) -> any
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )

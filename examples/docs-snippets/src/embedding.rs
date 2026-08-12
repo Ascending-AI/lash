@@ -79,6 +79,7 @@ async fn full_core(provider: ProviderHandle, data_dir: std::path::PathBuf) -> an
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         artifact_store.clone(),
     );
@@ -141,6 +142,7 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
@@ -176,6 +178,7 @@ async fn custom_stack(root_spec: SessionSpec) -> anyhow::Result<()> {
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );

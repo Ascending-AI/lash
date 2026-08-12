@@ -327,12 +327,13 @@ fn cold_reopen_restores_binary_scratch_files_byte_exactly() {
 fn leaf_bearing_hydration_and_live_target()
 -> (lash_core::plugin::HydratedExecutionState, RlmExecutionState) {
     let mut source = RlmExecutionState::new().expect("source state");
-    let mut snapshot = source.rlm.snapshot();
-    snapshot.globals.insert(
-        "kept".to_string(),
-        FlowValue::List(vec![FlowValue::String("source".repeat(2048).into())].into()),
-    );
-    source.rlm = FlowState::from_snapshot(snapshot);
+    source
+        .rlm
+        .insert_global(
+            "kept".to_string(),
+            FlowValue::List(vec![FlowValue::String("source".repeat(2048).into())].into()),
+        )
+        .expect("insert source global");
     source.mark_execution_started();
     source
         .write_scratch_file("keep.txt", b"source-file")
@@ -344,11 +345,9 @@ fn leaf_bearing_hydration_and_live_target()
     );
 
     let mut live = RlmExecutionState::new().expect("live state");
-    let mut snapshot = live.rlm.snapshot();
-    snapshot
-        .globals
-        .insert("live".to_string(), FlowValue::String("untouched".into()));
-    live.rlm = FlowState::from_snapshot(snapshot);
+    live.rlm
+        .insert_global("live".to_string(), FlowValue::String("untouched".into()))
+        .expect("insert live global");
     live.mark_execution_started();
     live.write_scratch_file("live.txt", b"live-file")
         .expect("write live scratch file");
@@ -357,12 +356,12 @@ fn leaf_bearing_hydration_and_live_target()
 
 fn assert_live_state_untouched(live: &RlmExecutionState, live_dir: &std::path::Path) {
     assert_eq!(
-        live.rlm.snapshot().globals.get("live"),
+        live.rlm.snapshot().globals().get("live"),
         Some(&FlowValue::String("untouched".into())),
         "a rejected restore must not replace live globals"
     );
     assert!(
-        live.rlm.snapshot().globals.get("kept").is_none(),
+        live.rlm.snapshot().globals().get("kept").is_none(),
         "a rejected restore must not leak the source's globals"
     );
     assert_eq!(
@@ -503,12 +502,13 @@ fn failed_file_collection_keeps_dirty_globals_retryable() {
     use std::os::unix::ffi::OsStringExt as _;
 
     let mut state = RlmExecutionState::new().expect("state");
-    let mut snapshot = state.rlm.snapshot();
-    snapshot.globals.insert(
-        "large".to_string(),
-        FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
-    );
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global(
+            "large".to_string(),
+            FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
+        )
+        .expect("insert large global");
     state.mark_execution_started();
     let invalid_path = state
         .scratch_dir
@@ -578,12 +578,13 @@ fn same_size_scratch_file_rewrite_emits_a_changed_leaf() {
 #[test]
 fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
     let mut state = RlmExecutionState::new().expect("state");
-    let mut snapshot = state.rlm.snapshot();
-    snapshot.globals.insert(
-        "large".to_string(),
-        FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
-    );
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global(
+            "large".to_string(),
+            FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
+        )
+        .expect("insert large global");
     state.mark_execution_started();
     let first = state.snapshot_execution_state().expect("first capture");
     assert!(first.components.values().any(|component| matches!(
@@ -631,18 +632,20 @@ fn includes_globals_excludes_history_and_named() {
 #[test]
 fn excludes_direct_projected_globals() {
     let mut state = RlmExecutionState::new().unwrap();
-    let mut snapshot = state.rlm.snapshot();
-    snapshot.globals.insert(
-        "projected".to_string(),
-        FlowValue::Projected(ProjectedValue::scalar(
-            "projected",
-            FlowValue::String("host".into()),
-        )),
-    );
-    snapshot
-        .globals
-        .insert("plain".to_string(), FlowValue::String("local".into()));
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global(
+            "projected".to_string(),
+            FlowValue::Projected(ProjectedValue::scalar(
+                "projected",
+                FlowValue::String("host".into()),
+            )),
+        )
+        .expect("insert projected global");
+    state
+        .rlm
+        .insert_global("plain".to_string(), FlowValue::String("local".into()))
+        .expect("insert plain global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
 
@@ -668,15 +671,17 @@ fn excludes_top_level_globals_containing_nested_projected_values() {
         )),
     );
     record.insert("title".to_string(), FlowValue::String("local".into()));
-    let mut snapshot = state.rlm.snapshot();
-    snapshot
-        .globals
-        .insert("doc".to_string(), FlowValue::Record(Arc::new(record)));
-    snapshot.globals.insert(
-        "plain".to_string(),
-        FlowValue::List(vec![FlowValue::Number(1.0)].into()),
-    );
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global("doc".to_string(), FlowValue::Record(Arc::new(record)))
+        .expect("insert document global");
+    state
+        .rlm
+        .insert_global(
+            "plain".to_string(),
+            FlowValue::List(vec![FlowValue::Number(1.0)].into()),
+        )
+        .expect("insert plain global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
 
@@ -719,12 +724,13 @@ impl ProjectedHostDescriptor for CountingProjectedValue {
 fn excludes_custom_projected_globals_without_rendering_or_materializing() {
     let projected = Arc::new(CountingProjectedValue::default());
     let mut state = RlmExecutionState::new().unwrap();
-    let mut snapshot = state.rlm.snapshot();
-    snapshot.globals.insert(
-        "projected".to_string(),
-        FlowValue::Projected(ProjectedValue::custom("projected", projected.clone())),
-    );
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global(
+            "projected".to_string(),
+            FlowValue::Projected(ProjectedValue::custom("projected", projected.clone())),
+        )
+        .expect("insert projected global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
 

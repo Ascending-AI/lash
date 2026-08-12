@@ -122,11 +122,12 @@ impl ExecutionBounds {
     pub const fn new(
         instruction_budget: ExecutionBound<NonZeroU64>,
         deadline: ExecutionBound<Duration>,
+        memory_limit: ExecutionBound<NonZeroU64>,
     ) -> Self {
         Self {
             instruction_budget,
             deadline,
-            memory_limit: ExecutionBound::instructions(lashlang::DEFAULT_HEAP_LOGICAL_BYTE_LIMIT),
+            memory_limit,
         }
     }
 
@@ -136,8 +137,11 @@ impl ExecutionBounds {
     }
 
     pub const fn unbounded() -> Self {
-        Self::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded)
-            .with_memory_limit(ExecutionBound::Unbounded)
+        Self::new(
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+        )
     }
 
     pub(crate) fn into_engine(self) -> lashlang::ExecutionBounds {

@@ -7,7 +7,6 @@ use super::{ExecutionBound, ExecutionBounds, RlmAbilities, RlmLanguageFeatures};
 pub struct RlmProtocolPluginConfig {
     pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
     pub deadline: ExecutionBound<std::time::Duration>,
-    #[serde(default = "default_memory_limit")]
     pub memory_limit: ExecutionBound<std::num::NonZeroU64>,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
@@ -38,11 +37,12 @@ impl RlmProtocolPluginConfig {
     pub fn new(
         instruction_budget: impl Into<ExecutionBound<std::num::NonZeroU64>>,
         deadline: impl Into<ExecutionBound<std::time::Duration>>,
+        memory_limit: impl Into<ExecutionBound<std::num::NonZeroU64>>,
     ) -> Self {
         Self {
             instruction_budget: instruction_budget.into(),
             deadline: deadline.into(),
-            memory_limit: default_memory_limit(),
+            memory_limit: memory_limit.into(),
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_abilities: RlmAbilities::default(),
             lashlang_language_features: RlmLanguageFeatures::default(),
@@ -53,8 +53,7 @@ impl RlmProtocolPluginConfig {
     }
 
     pub(crate) fn execution_bounds(&self) -> ExecutionBounds {
-        ExecutionBounds::new(self.instruction_budget, self.deadline)
-            .with_memory_limit(self.memory_limit)
+        ExecutionBounds::new(self.instruction_budget, self.deadline, self.memory_limit)
     }
 
     pub fn with_lashlang_abilities(mut self, abilities: impl Into<RlmAbilities>) -> Self {
@@ -77,24 +76,23 @@ impl RlmProtocolPluginConfig {
     }
 }
 
-fn default_memory_limit() -> ExecutionBound<std::num::NonZeroU64> {
-    ExecutionBound::instructions(lashlang::DEFAULT_HEAP_LOGICAL_BYTE_LIMIT)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn rlm_config_defaults_soft_budget_threshold_after_explicit_bounds() {
-        let config =
-            RlmProtocolPluginConfig::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded);
+        let config = RlmProtocolPluginConfig::new(
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+        );
 
         assert_eq!(config.continue_as_soft_warn_tokens, Some(100_000));
     }
 
     #[test]
-    fn serialized_config_requires_both_execution_bounds() {
+    fn serialized_config_requires_all_execution_bounds() {
         let missing_instruction = serde_json::json!({
             "deadline": "unbounded"
         });
@@ -108,6 +106,14 @@ mod tests {
         let error = serde_json::from_value::<RlmProtocolPluginConfig>(missing)
             .expect_err("deadline must be explicit");
         assert!(error.to_string().contains("deadline"));
+
+        let missing = serde_json::json!({
+            "instruction_budget": "unbounded",
+            "deadline": "unbounded"
+        });
+        let error = serde_json::from_value::<RlmProtocolPluginConfig>(missing)
+            .expect_err("memory limit must be explicit");
+        assert!(error.to_string().contains("memory_limit"));
     }
 
     #[test]
@@ -115,6 +121,7 @@ mod tests {
         let config = RlmProtocolPluginConfig::new(
             ExecutionBound::instructions(1_000_000),
             ExecutionBound::millis(30_000),
+            ExecutionBound::instructions(64 * 1024 * 1024),
         );
         let encoded = serde_json::to_value(&config).expect("serialize config");
         assert_eq!(
@@ -124,6 +131,10 @@ mod tests {
         assert_eq!(
             encoded["deadline"],
             serde_json::json!({ "bounded": 30_000 })
+        );
+        assert_eq!(
+            encoded["memory_limit"],
+            serde_json::json!({ "bounded": 64 * 1024 * 1024 })
         );
 
         let decoded: RlmProtocolPluginConfig = serde_json::from_value(encoded).expect("decode");

@@ -227,20 +227,14 @@ pub(crate) async fn rehydrate_projected_globals(
     rlm: &mut FlowState,
     projection_resolver: Arc<dyn ProjectionResolver>,
 ) -> Result<(), String> {
-    let mut snapshot = rlm.snapshot();
-    let mut changed = false;
-    let keys = snapshot
-        .globals
-        .keys()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    let keys = rlm.globals().keys().map(str::to_string).collect::<Vec<_>>();
     for key in keys {
-        if let Some(value) = snapshot.globals.get_mut(&key) {
-            changed |= rehydrate_projected_value(value, Arc::clone(&projection_resolver)).await?;
+        if let Some(mut value) = rlm.globals().get(&key).cloned()
+            && rehydrate_projected_value(&mut value, Arc::clone(&projection_resolver)).await?
+        {
+            rlm.insert_global(key, value)
+                .map_err(|error| error.to_string())?;
         }
-    }
-    if changed {
-        *rlm = FlowState::from_snapshot(snapshot);
     }
     Ok(())
 }

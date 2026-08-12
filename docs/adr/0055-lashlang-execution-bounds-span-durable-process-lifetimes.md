@@ -24,13 +24,16 @@ because only committed continuation meters survive.
 Every RLM configuration must explicitly choose three independent bounds:
 
 - `instruction_budget: ExecutionBound<NonZeroU64>` limits VM instructions plus
-  collection work charged by builtins; and
-- `deadline: ExecutionBound<Duration>` limits active VM execution time.
+  collection work charged by builtins;
+- `deadline: ExecutionBound<Duration>` limits active VM execution time; and
 - `memory_limit: ExecutionBound<NonZeroU64>` limits live logical heap bytes.
 
 Hosts select a finite bound or `Unbounded` for each field. Rust callers should
 use `ExecutionBound::instructions(n)`, `ExecutionBound::millis(n)`, or
-`ExecutionBound::secs(n)`. Serialized configuration uses
+`ExecutionBound::secs(n)` as appropriate; the byte-valued memory limit uses the
+same nonzero integer bound representation as instructions. Serialized RLM
+configuration must contain all three fields and has no implicit memory limit.
+It uses
 `{"bounded": 1000000}` for instructions and milliseconds, or the string
 `"unbounded"`; duration serialization never exposes Rust's internal
 seconds/nanoseconds representation.
@@ -80,4 +83,5 @@ processes before the cutover; older continuations are not migrated or decoded.
 - Durable segment handovers cannot reset any meter.
 - Time-bound redrives are intentionally not bit-for-bit outcome deterministic;
   instruction-bound redrives remain deterministic.
-- A v1-to-v2 rollout is a clean cutover: drain or recreate parked processes.
+- Bytecode-format rollouts are clean cutovers: drain or recreate parked
+  processes rather than attempting to migrate older continuations.

@@ -622,6 +622,7 @@ pub(crate) fn build_embed_core(
                 lash_protocol_rlm::RlmProtocolPluginConfig::new(
                     lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
                     lash_protocol_rlm::ExecutionBound::secs(30),
+                    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
                 ),
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
@@ -768,6 +769,7 @@ pub(crate) async fn build_runtime_with_store(
                 lash_protocol_rlm::RlmProtocolPluginConfig::new(
                     lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
                     lash_protocol_rlm::ExecutionBound::secs(30),
+                    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
                 ),
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
@@ -1070,6 +1072,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 lash_protocol_rlm::RlmProtocolPluginConfig::new(
                     lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
                     lash_protocol_rlm::ExecutionBound::secs(30),
+                    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
                 ),
                 artifact_store,
             );
