@@ -1257,7 +1257,7 @@ fn retrying_visible_stream_provider() -> ProviderHandle {
 }
 
 #[cfg(feature = "rlm")]
-fn retrying_rlm_prose_provider(
+fn output_then_failing_rlm_prose_provider(
     transport_calls: Arc<AtomicUsize>,
     requests: Arc<StdMutex<Vec<lash_core::LlmRequest>>>,
 ) -> ProviderHandle {
@@ -1287,7 +1287,8 @@ fn retrying_rlm_prose_provider(
                     return Err(
                         LlmTransportError::new("deterministic rate limit")
                             .with_status(429)
-                            .retryable(true),
+                            .retryable(true)
+                            .with_output_started(true),
                     );
                 }
                 let text = match call {
@@ -1376,17 +1377,16 @@ fn provider_request_text(request: &lash_core::LlmRequest) -> String {
 
 #[cfg(feature = "rlm")]
 #[test]
-fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-provider-retry-prose-test", || async {
+fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-provider-output-failure-test", || async {
         const MARKER: &str = "retry observer single-copy marker";
-        const EXEC_ERROR: &str = "unknown name `retry_missing_name`\n--> line 1, column 1\nretry_missing_name\n^~~~~~~~~~~~~~~~~~";
         let transport_calls = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(StdMutex::new(Vec::new()));
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(
             crate::TurnBudget::Unbounded,
             rlm_factory(),
         ))
-        .provider(retrying_rlm_prose_provider(
+        .provider(output_then_failing_rlm_prose_provider(
             Arc::clone(&transport_calls),
             Arc::clone(&requests),
         ))
@@ -1405,12 +1405,24 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
 
         assert_eq!(
             transport_calls.load(Ordering::SeqCst),
-            3,
-            "one failed attempt, its retry, and one error continuation must finish the turn"
+            1,
+            "provider output must not be re-bought after the failed attempt"
         );
-        assert_eq!(
-            first.final_value(),
-            Some(&serde_json::json!("provider retry succeeded"))
+        assert!(matches!(
+            first.result.outcome,
+            TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError)
+        ));
+        assert!(first.result.assistant_output.safe_text.is_empty());
+        assert!(first.result.assistant_output.raw_text.is_empty());
+        assert!(first.activities.iter().any(|activity| matches!(
+            &activity.event,
+            TurnEvent::AssistantProseDelta { text } if text.contains(MARKER)
+        )));
+        assert!(
+            first
+                .activities
+                .iter()
+                .all(|activity| !matches!(activity.event, TurnEvent::ModelAttemptReset { .. }))
         );
         let rlm_marker_records = first
             .result
@@ -1439,64 +1451,41 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
             })
             .count();
         assert_eq!(
-            rlm_marker_records, 1,
-            "RLM semantic history retained aborted-attempt prose"
+            rlm_marker_records, 0,
+            "failed-attempt prose is preview output, not committed RLM history"
         );
         {
             let requests = requests.lock_recover();
-            assert_eq!(requests.len(), 3, "RLM scheduled a spurious iteration");
-            let continuation_request = requests.last().expect("post-error continuation request");
-            let continuation = provider_request_text(continuation_request);
-            assert_eq!(
-                continuation.matches(MARKER).count(),
-                1,
-                "provider continuation duplicated retry prose: {continuation}"
-            );
-            assert_eq!(
-                continuation.matches(EXEC_ERROR).count(),
-                1,
-                "provider continuation duplicated exec error: {continuation}"
-            );
-            assert_eq!(
-                continuation
-                    .matches(&format!("Error:\n{EXEC_ERROR}"))
-                    .count(),
-                1,
-                "provider continuation duplicated the rendered Error block: {continuation}"
-            );
+            assert_eq!(requests.len(), 1, "RLM scheduled a spurious iteration");
         }
-
-        session
-            .admin()
-            .state()
-            .append_messages(vec![
-                lash_core::PluginMessage::text(
-                    lash_core::MessageRole::Assistant,
-                    format!("{MARKER}\n\nprovider retry succeeded"),
-                )
-                .with_id("workbench-assistant:retry-turn"),
-            ])
-            .await?;
-
-        let marker_messages = || {
-            session
-                .read_view()
-                .messages()
-                .iter()
-                .filter(|message| {
-                    message.role == lash_core::MessageRole::Assistant
-                        && message
-                            .parts
-                            .iter()
-                            .any(|part| part.content.contains(MARKER))
-                })
-                .count()
-        };
+        assert_eq!(first.result.llm_calls.len(), 1);
+        assert_eq!(first.result.llm_calls[0].attempts.len(), 1);
+        let attempt = &first.result.llm_calls[0].attempts[0];
         assert_eq!(
-            marker_messages(),
-            2,
-            "conversation history should retain one RLM replay record and one host transcript"
+            attempt.protocol_position,
+            lash_core::ProtocolPosition::OutputStarted
         );
+        assert_eq!(
+            attempt
+                .retry_decision
+                .as_ref()
+                .map(|decision| decision.scheduled),
+            Some(false)
+        );
+        assert_eq!(
+            attempt
+                .retry_decision
+                .as_ref()
+                .and_then(|decision| decision.reason.as_deref()),
+            Some("output_started_without_retry_guarantee")
+        );
+        let issue = first.result.errors.first().expect("typed provider issue");
+        assert_eq!(
+            issue.code.as_deref(),
+            Some("unsafe_retry_after_output_started")
+        );
+        assert_eq!(issue.retryable, Some(false));
+
         let persisted = session.admin().state().persist_current().await?;
         session.close().await?;
 
@@ -1505,38 +1494,22 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
         assert_eq!(
             reopened
                 .read_view()
-                .messages()
+                .active_events()
                 .iter()
-                .filter(|message| {
-                    message.role == lash_core::MessageRole::Assistant
-                        && message
-                            .parts
-                            .iter()
-                            .any(|part| part.content.contains(MARKER))
+                .filter(|record| match record {
+                    lash_core::SessionHistoryRecord::Conversation(message) => message
+                        .parts
+                        .iter()
+                        .any(|part| part.content.contains(MARKER)),
+                    lash_core::SessionHistoryRecord::Protocol(event) => matches!(
+                        lash_protocol_rlm::decode_rlm_protocol_event(event),
+                        Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
+                            if content.prose.contains(MARKER)
+                    ),
                 })
                 .count(),
-            2,
-            "reloaded conversation history should retain the RLM replay record and transcript"
-        );
-
-        reopened
-            .turn(TurnInput::text("check retry history"))
-            .run()
-            .await?;
-        let requests = requests.lock_recover();
-        assert_eq!(requests.len(), 4);
-        let subsequent_history = requests.last().expect("subsequent request");
-        let subsequent_history_json = serde_json::to_string(subsequent_history)?;
-        let subsequent_history_text = provider_request_text(subsequent_history);
-        let marker_count = subsequent_history_text.matches(MARKER).count();
-        assert_eq!(
-            marker_count, 1,
-            "provider-visible history duplicated retry prose: {subsequent_history_text}"
-        );
-        assert_eq!(
-            subsequent_history_text.matches(EXEC_ERROR).count(),
-            1,
-            "provider-visible history duplicated exec error: {subsequent_history_json}"
+            0,
+            "reloaded history retained failed-attempt prose"
         );
         Ok(())
     })
