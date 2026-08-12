@@ -403,17 +403,14 @@ impl SessionCommitStore for Store {
                     planner.validate_session_binding(
                         existing.as_ref().map(|meta| meta.session_id.as_str()),
                     )?;
-                    tx.execute(
-                        "INSERT OR IGNORE INTO session_meta
-                         (session_id, relation_json)
-                         VALUES (?1, ?2)",
-                        params![
-                            commit.session_id,
-                            serde_json::to_string(&lash_core::SessionRelation::Root)
-                                .map_err(|error| StoreError::Backend(error.to_string()))?,
-                        ],
-                    )
-                    .map_err(sqlite_error)?;
+                    crate::session_meta::write_session_meta(
+                        tx,
+                        &SessionMeta {
+                            session_id: commit.session_id.clone(),
+                            relation: lash_core::SessionRelation::Root,
+                        },
+                        crate::session_meta::SessionMetaWrite::Insert,
+                    )?;
                     planner.validate_node_derivation()?;
                     {
                         let prior: Option<(
@@ -986,21 +983,20 @@ impl SessionCommitStore for Store {
         binding.validate()?;
         self.bind_session(&binding.session_id)?;
         let session_id = binding.session_id.clone();
-        let relation_json = serde_json::to_string(&binding.relation)
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let meta = SessionMeta {
+            session_id: session_id.clone(),
+            relation: binding.relation.clone(),
+        };
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<lash_core::SessionAdmission, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
-                    let inserted = tx
-                        .execute(
-                            "INSERT OR IGNORE INTO session_meta
-                     (session_id, relation_json)
-                     VALUES (?1, ?2)",
-                            params![session_id, relation_json],
-                        )
-                        .map_err(sqlite_error)?;
-                    Ok(if inserted == 1 {
+                    let inserted = crate::session_meta::write_session_meta(
+                        tx,
+                        &meta,
+                        crate::session_meta::SessionMetaWrite::Insert,
+                    )?;
+                    Ok(if inserted {
                         lash_core::SessionAdmission::Created
                     } else {
                         lash_core::SessionAdmission::Rebound

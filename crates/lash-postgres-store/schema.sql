@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 45.
+-- lash-postgres-store schema, component version 46.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -86,7 +86,49 @@ CREATE TABLE IF NOT EXISTS lash_usage_deltas (
 
 CREATE TABLE IF NOT EXISTS lash_session_meta (
     session_id TEXT PRIMARY KEY,
-    meta_json TEXT NOT NULL
+    relation_kind TEXT NOT NULL,
+    observer_intent_depth BIGINT NOT NULL,
+    parent_session_id TEXT,
+    caused_by_kind TEXT,
+    caused_by_session_id TEXT,
+    caused_by_turn_id TEXT,
+    caused_by_effect_id TEXT,
+    caused_by_call_id TEXT,
+    caused_by_process_id TEXT,
+    caused_by_process_event_sequence TEXT,
+    caused_by_occurrence_id TEXT,
+    caused_by_subscription_id TEXT,
+    caused_by_subscription_incarnation TEXT,
+    caused_by_subscription_revision TEXT,
+    caused_by_node_id TEXT,
+    source_session_id TEXT,
+    source_node_id TEXT,
+    observer_inheritance_kind TEXT
+);
+
+CREATE TABLE IF NOT EXISTS lash_session_meta_observer_intent_processes (
+    session_id TEXT NOT NULL,
+    layer_index BIGINT NOT NULL,
+    process_index BIGINT NOT NULL,
+    process_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, layer_index, process_index),
+    FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS lash_session_meta_fork_pending_observer_processes (
+    session_id TEXT NOT NULL,
+    process_index BIGINT NOT NULL,
+    process_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, process_index),
+    FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS lash_session_meta_fork_inheritance_processes (
+    session_id TEXT NOT NULL,
+    process_index BIGINT NOT NULL,
+    process_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, process_index),
+    FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
@@ -417,7 +459,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 45)
+VALUES ('lash-postgres-store', 46)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

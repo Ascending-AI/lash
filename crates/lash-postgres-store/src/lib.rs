@@ -165,9 +165,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // working-directory keys from the session metadata JSON payload. Older stores
 // are rejected and recreated; there is no compatibility read path.
 // Version 45 makes nested session metadata strict and includes enum/tag values
-// in its registered payload shape. Version 44 is already selected by an
-// unmerged sibling lane, so this lane advances past it.
-const SCHEMA_VERSION: i32 = 45;
+// in its registered payload shape.
+// Version 46 replaces that JSON carrier with structural columns and narrow
+// ordered child tables. Older databases are rejected and recreated; there is
+// no JSON or compatibility read path.
+const SCHEMA_VERSION: i32 = 46;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -731,15 +733,10 @@ impl PostgresSessionStore {
         if let Some(session_id) = &self.session_id {
             return Ok(Some(session_id.clone()));
         }
-        if let Some(session_id) = self.bound_session.get() {
-            return Ok(Some(session_id.clone()));
-        }
-        let session_ids =
-            sqlx::query_scalar(crate::support::BOUNDED_UNBOUND_SESSION_CANDIDATES_SQL)
-                .fetch_all(&self.pool)
-                .await
-                .map_err(store_sqlx_error)?;
-        crate::support::resolve_bounded_session_candidates(session_ids)
+        sqlx::query_scalar("SELECT session_id FROM lash_sessions ORDER BY session_id ASC LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(store_sqlx_error)
     }
 }
 
@@ -763,6 +760,8 @@ mod schema;
 mod schema_shape;
 #[path = "postgres/session_factory.rs"]
 mod session_factory;
+#[path = "postgres/session_meta.rs"]
+mod session_meta;
 #[path = "postgres/support.rs"]
 mod support;
 #[path = "postgres/trigger_store.rs"]
@@ -807,29 +806,6 @@ mod tests {
     use tracing_subscriber::layer::{Context, SubscriberExt};
     use tracing_subscriber::{Layer, Registry};
 
-    fn candidate_base_rows(plan: &serde_json::Value) -> u64 {
-        let own_rows = match plan.get("Relation Name").and_then(|value| value.as_str()) {
-            Some("lash_sessions" | "lash_session_meta") => {
-                plan.get("Actual Rows")
-                    .and_then(serde_json::Value::as_f64)
-                    .unwrap_or(0.0) as u64
-                    * plan
-                        .get("Actual Loops")
-                        .and_then(serde_json::Value::as_f64)
-                        .unwrap_or(1.0) as u64
-            }
-            _ => 0,
-        };
-        own_rows
-            + plan
-                .get("Plans")
-                .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-                .map(candidate_base_rows)
-                .sum::<u64>()
-    }
-
     struct WarningCounter(Arc<AtomicUsize>);
 
     impl<S> Layer<S> for WarningCounter
@@ -855,52 +831,6 @@ mod tests {
             1,
             "the legacy factory must warn that process-owner liveness is not wired"
         );
-    }
-
-    #[tokio::test]
-    async fn unbound_session_candidate_query_reads_at_most_four_base_rows() {
-        let Some(database_url) = postgres_test_support::database_url() else {
-            eprintln!("skipping bounded candidate-plan proof: database URL is not set");
-            return;
-        };
-        let _database_lock =
-            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-        let storage = PostgresStorage::connect(&database_url)
-            .await
-            .expect("connect bounded candidate-plan storage");
-        let prefix = format!("bounded-plan-{}-", uuid::Uuid::new_v4());
-        let mut tx = storage.pool().begin().await.expect("begin plan fixture");
-        sqlx::query(
-            "INSERT INTO lash_sessions (session_id, head_json)
-             SELECT $1 || ordinal::text, '{}' FROM generate_series(1, 10000) AS ordinal",
-        )
-        .bind(&prefix)
-        .execute(&mut *tx)
-        .await
-        .expect("seed 10,000 session heads");
-        sqlx::query(
-            "INSERT INTO lash_session_meta (session_id, meta_json)
-             SELECT $1 || ordinal::text, '{}' FROM generate_series(1, 10000) AS ordinal",
-        )
-        .bind(&prefix)
-        .execute(&mut *tx)
-        .await
-        .expect("seed 10,000 session admissions");
-        let explain = format!(
-            "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {}",
-            crate::support::BOUNDED_UNBOUND_SESSION_CANDIDATES_SQL
-        );
-        let plan: serde_json::Value = sqlx::query_scalar(&explain)
-            .fetch_one(&mut *tx)
-            .await
-            .expect("explain bounded candidate query");
-        let plan = &plan[0]["Plan"];
-        let base_rows = candidate_base_rows(plan);
-        assert!(
-            base_rows <= 4,
-            "unbound ambiguity detection may read at most two rows from each candidate table; read {base_rows} base rows:\n{plan:#}"
-        );
-        tx.rollback().await.expect("discard plan fixture");
     }
 
     #[tokio::test]

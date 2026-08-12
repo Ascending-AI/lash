@@ -18,6 +18,7 @@ where
     session_admission_contract(make(), make_unbound_store()).await;
     session_store_factory_open_missing_returns_none(make()).await;
     session_store_factory_create_seeds_and_reopens_meta(make()).await;
+    session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
@@ -1044,6 +1045,203 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
         .expect("load reopened session meta")
         .expect("reopened session meta");
     assert_meta_matches_request(&reopened_meta, &request);
+}
+
+async fn session_store_factory_round_trips_every_relation_shape(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let child = |caused_by| crate::SessionRelation::Child {
+        parent_session_id: "roundtrip-parent".to_string(),
+        caused_by,
+    };
+    let relations = vec![
+        ("root", crate::SessionRelation::Root),
+        ("child-none", child(None)),
+        (
+            "child-turn",
+            child(Some(crate::CausalRef::Turn {
+                session_id: "cause-session".to_string(),
+                turn_id: "cause-turn".to_string(),
+            })),
+        ),
+        (
+            "child-effect-no-turn",
+            child(Some(crate::CausalRef::Effect {
+                session_id: "cause-session".to_string(),
+                turn_id: None,
+                effect_id: "cause-effect".to_string(),
+            })),
+        ),
+        (
+            "child-effect-with-turn",
+            child(Some(crate::CausalRef::Effect {
+                session_id: "cause-session".to_string(),
+                turn_id: Some("cause-turn".to_string()),
+                effect_id: "cause-effect".to_string(),
+            })),
+        ),
+        (
+            "child-tool-call",
+            child(Some(crate::CausalRef::ToolCall {
+                session_id: "cause-session".to_string(),
+                call_id: "cause-call".to_string(),
+            })),
+        ),
+        (
+            "child-process",
+            child(Some(crate::CausalRef::Process {
+                process_id: "cause-process".to_string(),
+            })),
+        ),
+        (
+            "child-process-event",
+            child(Some(crate::CausalRef::ProcessEvent {
+                process_id: "cause-process".to_string(),
+                sequence: u64::MAX,
+            })),
+        ),
+        (
+            "child-trigger-minimal",
+            child(Some(crate::CausalRef::TriggerOccurrence {
+                occurrence_id: "cause-occurrence".to_string(),
+                subscription_id: None,
+                subscription_incarnation: None,
+                subscription_revision: None,
+            })),
+        ),
+        (
+            "child-trigger-complete",
+            child(Some(crate::CausalRef::TriggerOccurrence {
+                occurrence_id: "cause-occurrence".to_string(),
+                subscription_id: Some("cause-subscription".to_string()),
+                subscription_incarnation: Some("cause-incarnation".to_string()),
+                subscription_revision: Some(u64::MAX),
+            })),
+        ),
+        (
+            "child-session-node",
+            child(Some(crate::CausalRef::SessionNode {
+                session_id: "cause-session".to_string(),
+                node_id: "cause-node".to_string(),
+            })),
+        ),
+        (
+            "fork-empty",
+            crate::SessionRelation::Fork {
+                source_session_id: "declared-missing-session".to_string(),
+                source_node_id: "declared-missing-node".to_string(),
+                observer_inheritance: crate::ObserverInheritance::All,
+                pending_observer_process_ids: Vec::new(),
+            },
+        ),
+        (
+            "fork-pending",
+            crate::SessionRelation::Fork {
+                source_session_id: "declared-source".to_string(),
+                source_node_id: "declared-node".to_string(),
+                observer_inheritance: crate::ObserverInheritance::None,
+                pending_observer_process_ids: vec![
+                    "pending-a".to_string(),
+                    "pending-b".to_string(),
+                ],
+            },
+        ),
+        (
+            "fork-only-empty",
+            crate::SessionRelation::Fork {
+                source_session_id: "declared-source".to_string(),
+                source_node_id: "declared-node".to_string(),
+                observer_inheritance: crate::ObserverInheritance::Only(Vec::new()),
+                pending_observer_process_ids: Vec::new(),
+            },
+        ),
+        (
+            "fork-only-processes",
+            crate::SessionRelation::Fork {
+                source_session_id: "declared-source".to_string(),
+                source_node_id: "declared-node".to_string(),
+                observer_inheritance: crate::ObserverInheritance::Only(vec![
+                    "inherit-a".to_string(),
+                    "inherit-b".to_string(),
+                ]),
+                pending_observer_process_ids: vec!["pending".to_string()],
+            },
+        ),
+        (
+            "observer-intent-root",
+            crate::SessionRelation::ObserverIntent {
+                relation: Box::new(crate::SessionRelation::Root),
+                pending_observer_process_ids: vec!["observer-a".to_string()],
+            },
+        ),
+        (
+            "observer-intent-empty-child",
+            crate::SessionRelation::ObserverIntent {
+                relation: Box::new(child(Some(crate::CausalRef::Process {
+                    process_id: "observer-cause".to_string(),
+                }))),
+                pending_observer_process_ids: Vec::new(),
+            },
+        ),
+        (
+            "observer-intent-nested-fork",
+            crate::SessionRelation::ObserverIntent {
+                relation: Box::new(crate::SessionRelation::ObserverIntent {
+                    relation: Box::new(crate::SessionRelation::Fork {
+                        source_session_id: "nested-source".to_string(),
+                        source_node_id: "nested-node".to_string(),
+                        observer_inheritance: crate::ObserverInheritance::Only(vec![
+                            "nested-inherit".to_string(),
+                        ]),
+                        pending_observer_process_ids: vec!["nested-fork-pending".to_string()],
+                    }),
+                    pending_observer_process_ids: vec!["nested-inner".to_string()],
+                }),
+                pending_observer_process_ids: Vec::new(),
+            },
+        ),
+    ];
+
+    for (label, relation) in relations {
+        let session_id = format!("session-meta-roundtrip-{label}");
+        let request = session_store_request(
+            &session_id,
+            "session-meta-roundtrip-model",
+            crate::SessionRelation::Root,
+        );
+        let store = factory
+            .create_store(&request)
+            .await
+            .unwrap_or_else(|error| panic!("create {label} relation store: {error}"));
+        let expected = SessionMeta {
+            session_id: session_id.clone(),
+            relation,
+        };
+        store
+            .save_session_meta(expected.clone())
+            .await
+            .unwrap_or_else(|error| panic!("save {label} relation: {error}"));
+        let loaded = store
+            .load_session_meta()
+            .await
+            .unwrap_or_else(|error| panic!("load {label} relation: {error}"))
+            .unwrap_or_else(|| panic!("{label} relation metadata exists"));
+        assert_eq!(loaded, expected, "{label} relation must round-trip");
+
+        let reopened = factory
+            .open_existing_store(&request)
+            .await
+            .unwrap_or_else(|error| panic!("reopen {label} relation store: {error}"))
+            .unwrap_or_else(|| panic!("{label} relation store exists"));
+        assert_eq!(
+            reopened
+                .load_session_meta()
+                .await
+                .unwrap_or_else(|error| panic!("reload {label} relation: {error}")),
+            Some(expected),
+            "{label} relation must survive reopen"
+        );
+    }
 }
 
 async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::SessionStoreFactory>) {

@@ -320,7 +320,11 @@ impl RawDurableReader {
                         )
                     })
                     .collect();
-                let session_meta = read_postgres_session_meta_observation(pool, session_id).await;
+                let session_meta = store
+                    .load_session_meta()
+                    .await
+                    .expect("read PostgreSQL session metadata")
+                    .map(session_meta_observation);
                 let lease_rows: Vec<LeaseRow> = sqlx::query_as(
                     "SELECT lease_owner_id, lease_owner_incarnation_id,
                             lease_owner_liveness_json, lease_token,

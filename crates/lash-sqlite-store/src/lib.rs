@@ -104,6 +104,7 @@ mod process_registry_change;
 mod process_registry_completion;
 mod queued_work;
 mod schema;
+mod session_meta;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod triggers;
@@ -627,7 +628,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
         };
-        let relation_json = encode_json(&meta.relation)?;
         store
             .conn
             .write_flow(move |tx| {
@@ -646,12 +646,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                         },
                     )));
                 }
-                tx.execute(
-                    "INSERT OR IGNORE INTO session_meta
-                     (session_id, relation_json)
-                     VALUES (?1, ?2)",
-                    params![meta.session_id, relation_json],
-                )?;
+                session_meta::write_session_meta(tx, &meta, session_meta::SessionMetaWrite::Insert)
+                    .map_err(sqlite_conversion_error)?;
                 Ok(TxOutcome::Commit(Ok(())))
             })
             .await
@@ -1163,35 +1159,6 @@ fn try_load_session_head_meta_from_conn(
         checkpoint_ref.map(Into::into),
         leaf_node_id,
     )))
-}
-
-fn load_session_meta_from_conn(
-    conn: &Connection,
-    session_id: &str,
-) -> Result<Option<SessionMeta>, StoreError> {
-    let row = conn
-        .query_row(
-            "SELECT session_id, relation_json
-             FROM session_meta WHERE session_id = ?1",
-            params![session_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-        )
-        .optional()
-        .map_err(sqlite_error)?;
-    let Some((session_id, relation_json)) = row else {
-        return Ok(None);
-    };
-    let relation = relation_json
-        .map(|json| {
-            serde_json::from_str(&json)
-                .map_err(|error| stored_data_corrupt("SessionMeta relation", error))
-        })
-        .transpose()?
-        .unwrap_or_default();
-    Ok(Some(SessionMeta {
-        session_id,
-        relation,
-    }))
 }
 
 fn decode_checkpoint(bytes: &[u8]) -> Result<SessionCheckpoint, StoreError> {

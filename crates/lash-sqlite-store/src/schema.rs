@@ -95,8 +95,50 @@ CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
     ON usage_deltas(session_id, seq);
 
 CREATE TABLE IF NOT EXISTS session_meta (
-    session_id    TEXT PRIMARY KEY,
-    relation_json TEXT
+    session_id                       TEXT PRIMARY KEY,
+    relation_kind                    TEXT NOT NULL,
+    observer_intent_depth            INTEGER NOT NULL,
+    parent_session_id                TEXT,
+    caused_by_kind                   TEXT,
+    caused_by_session_id             TEXT,
+    caused_by_turn_id                TEXT,
+    caused_by_effect_id              TEXT,
+    caused_by_call_id                TEXT,
+    caused_by_process_id             TEXT,
+    caused_by_process_event_sequence TEXT,
+    caused_by_occurrence_id           TEXT,
+    caused_by_subscription_id         TEXT,
+    caused_by_subscription_incarnation TEXT,
+    caused_by_subscription_revision   TEXT,
+    caused_by_node_id                 TEXT,
+    source_session_id                 TEXT,
+    source_node_id                    TEXT,
+    observer_inheritance_kind         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS session_meta_observer_intent_processes (
+    session_id    TEXT NOT NULL,
+    layer_index   INTEGER NOT NULL,
+    process_index INTEGER NOT NULL,
+    process_id    TEXT NOT NULL,
+    PRIMARY KEY (session_id, layer_index, process_index),
+    FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS session_meta_fork_pending_observer_processes (
+    session_id    TEXT NOT NULL,
+    process_index INTEGER NOT NULL,
+    process_id    TEXT NOT NULL,
+    PRIMARY KEY (session_id, process_index),
+    FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS session_meta_fork_inheritance_processes (
+    session_id    TEXT NOT NULL,
+    process_index INTEGER NOT NULL,
+    process_id    TEXT NOT NULL,
+    PRIMARY KEY (session_id, process_index),
+    FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS runtime_turn_commits (
@@ -305,10 +347,11 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Version 30 removes the CLI-era session name, creation timestamp, model, and
 /// working-directory columns from session metadata. Older databases are
 /// rejected and recreated; there is no compatibility read path.
-/// Version 32 makes nested session metadata strict. Version 31 is already
-/// selected by an unmerged sibling lane, so this shared PostgreSQL/SQLite
-/// payload cutover advances past it.
-pub(crate) const SCHEMA_VERSION: i32 = 32;
+/// Version 32 makes nested session metadata strict.
+/// Version 33 replaces that JSON carrier with structural columns and narrow
+/// ordered child tables. Older databases are rejected and recreated; there is
+/// no JSON or compatibility read path.
+pub(crate) const SCHEMA_VERSION: i32 = 33;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

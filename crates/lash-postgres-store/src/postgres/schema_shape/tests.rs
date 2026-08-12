@@ -207,18 +207,17 @@ fn committed_payload_shapes_match_registered_rust_types() {
 }
 
 #[test]
-fn payload_shape_drift_names_the_blob_column_and_changed_field() {
+fn denormalized_session_relation_drift_names_the_changed_column() {
     let expected = SchemaShape::expected();
     let mut found = expected.clone();
     found
         .tables
         .get_mut("lash_session_meta")
         .expect("session metadata table is published")
-        .payload_shapes
-        .get_mut("meta_json")
-        .expect("session metadata payload is published")
-        .entries
-        .remove("/properties/session_id/type");
+        .columns
+        .get_mut("relation_kind")
+        .expect("the denormalized relation discriminator is published")
+        .sql_type = "integer".to_string();
 
     let findings = expected.diff(&found);
     let report = SchemaReport {
@@ -228,9 +227,9 @@ fn payload_shape_drift_names_the_blob_column_and_changed_field() {
         findings,
     };
     let rendered = report.to_string();
-    assert!(rendered.contains("PAYLOAD SHAPE DRIFT"));
-    assert!(rendered.contains("lash_session_meta.meta_json"));
-    assert!(rendered.contains("/properties/session_id/type"));
+    assert!(rendered.contains("COLUMN DRIFT"));
+    assert!(rendered.contains("lash_session_meta.relation_kind"));
+    assert!(rendered.contains("expected text not-null, found integer not-null"));
 }
 
 #[test]

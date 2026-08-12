@@ -251,6 +251,8 @@ fn pg_dump(database_url: &str) -> Vec<u8> {
             "--rm",
             "--network",
             "host",
+            "--env",
+            "PGCLIENTENCODING=UTF8",
             "postgres:16-alpine",
             "pg_dump",
             "--format=plain",

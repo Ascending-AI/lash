@@ -256,21 +256,15 @@ impl Store {
 
     pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session(&meta.session_id)?;
-        let relation_json = serde_json::to_string(&meta.relation)
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
-                    tx.execute(
-                        "INSERT INTO session_meta
-                     (session_id, relation_json)
-                     VALUES (?1, ?2)
-                     ON CONFLICT(session_id) DO UPDATE SET
-                         relation_json = excluded.relation_json",
-                        params![meta.session_id, relation_json],
-                    )
-                    .map_err(sqlite_error)?;
+                    crate::session_meta::write_session_meta(
+                        tx,
+                        &meta,
+                        crate::session_meta::SessionMetaWrite::Replace,
+                    )?;
                     Ok(())
                 })();
                 Ok(match outcome {
@@ -288,22 +282,8 @@ impl Store {
         let meta = self
             .conn
             .call(move |conn| {
-                if let Some(session_id) = selected {
-                    return load_session_meta_from_conn(conn, &session_id)
-                        .map_err(sqlite_conversion_error);
-                }
-                let mut stmt = conn.prepare(
-                    "SELECT session_id FROM session_meta ORDER BY session_id ASC LIMIT 2",
-                )?;
-                let session_ids = stmt
-                    .query_map([], |row| row.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                if session_ids.len() == 1 {
-                    load_session_meta_from_conn(conn, &session_ids[0])
-                        .map_err(sqlite_conversion_error)
-                } else {
-                    Ok(None)
-                }
+                crate::session_meta::load_session_meta(conn, selected.as_deref())
+                    .map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)?;
