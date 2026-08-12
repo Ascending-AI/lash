@@ -31,7 +31,12 @@ pub async fn session_execution_lease_zero_row_renewal_is_refused(
     let owner = crate::LeaseOwnerIdentity::opaque("zero-row-owner", "zero-row-incarnation");
     let held = handles
         .store
-        .try_claim_session_execution_lease(SESSION_ID, &owner, 120_000)
+        .try_claim_session_execution_lease(
+            SESSION_ID,
+            &owner,
+            "session-execution-lease-zero-row-renewal-is-refused-executor",
+            120_000,
+        )
         .await
         .expect("claim zero-row renewal lease")
         .acquired()

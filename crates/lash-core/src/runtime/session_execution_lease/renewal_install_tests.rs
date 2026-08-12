@@ -35,6 +35,7 @@ async fn assert_renewal_response_refused(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             TEST_SESSION_ID,
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            "assert-renewal-response-refused-executor",
             timings,
             Arc::new(crate::runtime::SystemClock),
         )
@@ -257,6 +258,7 @@ async fn renewal_with_advanced_expiry_installs() {
         Arc::clone(&store) as Arc<dyn RuntimePersistence>,
         TEST_SESSION_ID,
         &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+        "renewal-with-advanced-expiry-installs-executor",
         timings,
         Arc::new(crate::runtime::SystemClock),
     )

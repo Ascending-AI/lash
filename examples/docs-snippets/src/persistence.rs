@@ -204,6 +204,14 @@ async fn commit_conflict_retry(
             retry_or_report(err, session)?;
         }
         Err(lash::EmbedError::Runtime(err))
+            if err.code == RuntimeErrorCode::SessionExecutionLaneBusy =>
+        {
+            // A durable workflow controller's queued drain found the lane held by
+            // a live executor and stopped waiting: nothing was consumed, so let
+            // the engine's retry policy re-drive this invocation unchanged.
+            retry_later(err)?;
+        }
+        Err(lash::EmbedError::Runtime(err))
             if err.code == RuntimeErrorCode::StoreCommitContended =>
         {
             // The failed commit published nothing: retry the same operation unchanged.

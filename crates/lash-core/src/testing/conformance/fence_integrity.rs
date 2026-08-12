@@ -77,7 +77,12 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
     let lease_owner =
         crate::LeaseOwnerIdentity::opaque("signed-write-lease", "signed-write-lease:incarnation");
     let lease_error = store
-        .try_claim_session_execution_lease("signed-write-lease", &lease_owner, u64::MAX)
+        .try_claim_session_execution_lease(
+            "signed-write-lease",
+            &lease_owner,
+            "signed-counter-write-domain-conformance-executor",
+            u64::MAX,
+        )
         .await
         .expect_err("unrepresentable session lease expiry must refuse before insert");
     assert!(matches!(
@@ -146,7 +151,7 @@ async fn claim_lease(
 ) -> (crate::LeaseOwnerIdentity, crate::SessionExecutionLease) {
     let owner = crate::LeaseOwnerIdentity::opaque("fence-owner", "fence-owner:incarnation");
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(session_id, &owner, "claim-lease-executor", 60_000)
         .await
         .expect("claim fence-integrity session lease")
         .acquired()

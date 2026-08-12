@@ -1281,10 +1281,12 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         });
         let lease = acquire_session_execution_lease_tx(
             &mut tx,
-            session_id,
-            owner,
-            executor_id,
-            lease_token,
+            lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {
+                session_id,
+                owner,
+                executor_id,
+                lease_token,
+            },
             previous_fencing_token,
             now,
             lease_ttl_ms,
@@ -3301,14 +3303,17 @@ async fn lock_session_execution_lease_tx(
 
 async fn acquire_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
-    owner: &LeaseOwnerIdentity,
-    executor_id: &str,
-    lease_token: &str,
+    claim: lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity<'_>,
     previous_fencing_token: u64,
     now: u64,
     lease_ttl_ms: u64,
 ) -> Result<SessionExecutionLease, StoreError> {
+    let lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {
+        session_id,
+        owner,
+        executor_id,
+        lease_token,
+    } = claim;
     let fencing_token = StoreError::checked_monotonic_increment(
         "session_execution_lease_fencing_token",
         previous_fencing_token,

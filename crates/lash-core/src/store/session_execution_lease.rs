@@ -309,6 +309,21 @@ pub struct SessionExecutionLeaseAuthority {
     pub fencing_token: u64,
 }
 
+/// The caller-supplied identity one session-execution-lease claim installs.
+///
+/// Backends take these four values as one value because they *are* one fact -
+/// the row the claim writes. As loose parameters, the executor id and the lease
+/// token are two adjacent `&str`s that a backend could silently transpose,
+/// which would make one host's executor another's lease authority.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct SessionExecutionLeaseClaimIdentity<'a> {
+    pub session_id: &'a str,
+    pub owner: &'a LeaseOwnerIdentity,
+    pub executor_id: &'a str,
+    pub lease_token: &'a str,
+}
+
 /// The lease-row facts every backend loads before deciding whether a retained
 /// execution guard still has authority.
 ///

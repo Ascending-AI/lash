@@ -29,7 +29,7 @@ pub(crate) use process_worker::{
 mod queued_work_driver;
 pub mod scenario_contracts;
 mod session_api;
-mod session_execution_lease;
+pub(crate) mod session_execution_lease;
 mod session_manager;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use session_manager::append_receipt_mixed_usage_envelope_conformance;
@@ -129,12 +129,20 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
     }
 }
 
+/// Wrap a store commit failure for the session-facing API.
+///
+/// The typed arm is not a convenience list: every variant here is one a host is
+/// expected to *match on* rather than log. `HeadRevisionConflict` in particular
+/// is the concurrent-append outcome the host is told to refresh and retry from,
+/// so collapsing it into `Protocol(String)` would leave string matching as the
+/// only way to tell a lost head race from an unrelated store failure.
 pub(super) fn session_commit_error(
     context: &str,
     source: crate::store::StoreError,
 ) -> SessionError {
     match source {
         source @ (crate::store::StoreError::SessionDeleted { .. }
+        | crate::store::StoreError::HeadRevisionConflict { .. }
         | crate::store::StoreError::AppendOperationIdentityConflict { .. }
         | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }
         | crate::store::StoreError::CommitNodeBudgetExceeded { .. }
@@ -302,6 +310,8 @@ pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
 #[doc(hidden)]
 pub use event_pump::drive_with_event_pump;
 pub use host::{EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeHostConfig};
+#[cfg(any(test, feature = "testing"))]
+pub use in_memory_store::RawSessionExecutionLeaseRow;
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
 pub use observation::{

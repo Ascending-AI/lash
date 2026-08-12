@@ -176,12 +176,13 @@ pub(super) struct SessionMetaObservation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SessionExecutionLeaseObservation {
     pub(super) owner: Option<LeaseOwnerIdentity>,
-    // Executor IDs and lease tokens are backend-generated CAS capabilities.
-    // Their bytes are physical implementation details; presence is the logical
-    // row state and is compared explicitly alongside owner, generation, and
-    // times.
-    pub(super) executor_id_present: bool,
-    pub(super) lease_token_present: bool,
+    // The executor id and the lease token are both caller-supplied bytes: the
+    // executor is the claimant's runtime-open discriminator and the token is the
+    // caller's `LeaseClaimNonce`. A backend that fails to persist or return
+    // either verbatim has broken lease authority, so the harness claims with
+    // deterministic values and compares the bytes rather than mere presence.
+    pub(super) executor_id: Option<String>,
+    pub(super) lease_token: Option<String>,
     pub(super) fencing_token: u64,
     // PostgreSQL uses database-authoritative wall time while local stores use
     // the injected clock. Compare the durable temporal contract (claimed and

@@ -232,13 +232,23 @@ async fn competing_first_claim(
     let right_owner = owner_b.clone();
     let left = tokio::spawn(async move {
         left_barrier.wait().await;
-        open.try_claim_session_execution_lease(&left_session, &left_owner, LEASE_TTL_MS)
-            .await
+        open.try_claim_session_execution_lease(
+            &left_session,
+            &left_owner,
+            "competing-first-claim-executor",
+            LEASE_TTL_MS,
+        )
+        .await
     });
     let right = tokio::spawn(async move {
         right_barrier.wait().await;
         reopened
-            .try_claim_session_execution_lease(&right_session, &right_owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                &right_session,
+                &right_owner,
+                "competing-first-claim-executor-2",
+                LEASE_TTL_MS,
+            )
             .await
     });
     barrier.wait().await;
@@ -296,7 +306,12 @@ async fn stale_completion_is_fenced(
     let owner_b = LeaseOwnerIdentity::opaque("stale-release-owner-b", "stale-release-owner-b:001");
     let lease = acquired(
         store
-            .try_claim_session_execution_lease(session_id, &owner_a, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                session_id,
+                &owner_a,
+                "stale-completion-is-fenced-executor",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| format!("claim stale-release setup: {err}"))?,
     )?;
@@ -318,7 +333,12 @@ async fn stale_completion_is_fenced(
         ));
     }
     let after_stale_release = store
-        .try_claim_session_execution_lease(session_id, &owner_b, LEASE_TTL_MS)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner_b,
+            "stale-completion-is-fenced-executor-2",
+            LEASE_TTL_MS,
+        )
         .await
         .map_err(|err| format!("claim after stale release: {err}"))?;
     if !matches!(
@@ -357,12 +377,22 @@ async fn reopen_handle_preserves_live_lease(
     let owner_a = LeaseOwnerIdentity::opaque("reopen-owner-a", "reopen-owner-a:001");
     let owner_b = LeaseOwnerIdentity::opaque("reopen-owner-b", "reopen-owner-b:001");
     let lease = acquired(
-        open.try_claim_session_execution_lease(session_id, &owner_a, LEASE_TTL_MS)
-            .await
-            .map_err(|err| format!("claim reopen setup: {err}"))?,
+        open.try_claim_session_execution_lease(
+            session_id,
+            &owner_a,
+            "reopen-handle-preserves-live-lease-executor",
+            LEASE_TTL_MS,
+        )
+        .await
+        .map_err(|err| format!("claim reopen setup: {err}"))?,
     )?;
     let reopened_claim = reopened
-        .try_claim_session_execution_lease(session_id, &owner_b, LEASE_TTL_MS)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner_b,
+            "reopen-handle-preserves-live-lease-executor-2",
+            LEASE_TTL_MS,
+        )
         .await
         .map_err(|err| format!("claim from reopened handle: {err}"))?;
     if !matches!(
@@ -377,7 +407,12 @@ async fn reopen_handle_preserves_live_lease(
         .map_err(|err| format!("release lease from reopened handle: {err}"))?;
     let after_release = acquired(
         reopened
-            .try_claim_session_execution_lease(session_id, &owner_b, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                session_id,
+                &owner_b,
+                "reopen-handle-preserves-live-lease-executor-3",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| format!("claim after reopened release: {err}"))?,
     )?;
@@ -410,12 +445,22 @@ async fn stale_owner_ttl_preserves_live_successor(
         let observation_started = std::time::Instant::now();
         let stale_lease = acquired(
             store
-                .try_claim_session_execution_lease(session_id, &stale_owner, LEASE_SEMANTIC_TTL_MS)
+                .try_claim_session_execution_lease(
+                    session_id,
+                    &stale_owner,
+                    "stale-owner-ttl-preserves-live-successor-executor",
+                    LEASE_SEMANTIC_TTL_MS,
+                )
                 .await
                 .map_err(|err| format!("claim stale-owner setup: {err}"))?,
         )?;
         let outcome = store
-            .try_claim_session_execution_lease(session_id, &live_owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                session_id,
+                &live_owner,
+                "stale-owner-ttl-preserves-live-successor-executor-2",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| format!("observe stale owner before TTL: {err}"))?;
         let observed_elapsed_ms = observation_started
@@ -455,7 +500,12 @@ async fn stale_owner_ttl_preserves_live_successor(
     let expiry_deadline = std::time::Instant::now() + LEASE_OBSERVATION_STALL_ALLOWANCE;
     let live_lease = loop {
         match store
-            .try_claim_session_execution_lease(session_id, &live_owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                session_id,
+                &live_owner,
+                "stale-owner-ttl-preserves-live-successor-executor-3",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| format!("claim stale-owner lease after TTL: {err}"))?
         {
@@ -584,7 +634,12 @@ async fn final_commit_retry_and_conflict_are_fenced(
         LeaseOwnerIdentity::opaque("final-commit-owner", "final-commit-owner:incarnation-001");
     let lease = acquired(
         store
-            .try_claim_session_execution_lease(session_id, &owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                session_id,
+                &owner,
+                "final-commit-retry-and-conflict-are-fenced-executor",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| format!("claim final commit lease: {err}"))?,
     )?;

@@ -70,9 +70,9 @@ pub mod store_backend_support {
 
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
-        SessionExecutionLeaseFenceFacts, SessionExecutionLeaseRefusalFacts,
-        SessionExecutionLeaseRefusalOperation, require_current_session_execution_lease,
-        trace_session_execution_lease_refusal,
+        SessionExecutionLeaseClaimIdentity, SessionExecutionLeaseFenceFacts,
+        SessionExecutionLeaseRefusalFacts, SessionExecutionLeaseRefusalOperation,
+        require_current_session_execution_lease, trace_session_execution_lease_refusal,
     };
 }
 

@@ -792,7 +792,12 @@ mod tests {
         .expect("admit turn-boundary test session");
         let owner = lease_owner("turn-boundary-test");
         let lease = store
-            .try_claim_session_execution_lease(&state.session_id, &owner, 60_000)
+            .try_claim_session_execution_lease(
+                &state.session_id,
+                &owner,
+                "leased-boundary-executor",
+                60_000,
+            )
             .await
             .expect("claim test session execution lease")
             .acquired()
@@ -1361,7 +1366,12 @@ mod tests {
 
         let peer_owner = lease_owner("fig905-peer");
         let peer_lease = store
-            .try_claim_session_execution_lease("session-1", &peer_owner, 60_000)
+            .try_claim_session_execution_lease(
+                "session-1",
+                &peer_owner,
+                "recovered-final-commit-drops-only-the-peer-superseded-queue-row-executor",
+                60_000,
+            )
             .await
             .expect("claim peer lease")
             .acquired()
@@ -1384,7 +1394,12 @@ mod tests {
 
         let recovery_owner = lease_owner("fig905-recovery");
         let recovery_lease = store
-            .try_claim_session_execution_lease("session-1", &recovery_owner, 60_000)
+            .try_claim_session_execution_lease(
+                "session-1",
+                &recovery_owner,
+                "recovered-final-commit-drops-only-the-peer-superseded-queue-row-executor-2",
+                60_000,
+            )
             .await
             .expect("claim recovery lease")
             .acquired()

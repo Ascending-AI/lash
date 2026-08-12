@@ -13,6 +13,12 @@ pub enum RuntimeErrorCode {
     /// same request after another managed turn finishes is safe.
     ManagedTurnConcurrencyLimitExceeded,
     SessionExecutionLeaseLost,
+    /// A durable workflow controller's queued-work drain could not take the
+    /// session execution lane: a live foreign executor holds it. Retrying the
+    /// identical drain is explicitly safe, and pacing belongs to the engine's
+    /// retry policy - the runtime deliberately stops waiting instead of
+    /// blocking one invocation indefinitely.
+    SessionExecutionLaneBusy,
     /// The store aborted a commit before publication because transactional
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
@@ -209,6 +215,7 @@ impl RuntimeErrorCode {
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
             Self::ManagedTurnConcurrencyLimitExceeded => "managed_turn_concurrency_limit_exceeded",
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
+            Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::StoreCommitContended => "store_commit_contended",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
             Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
@@ -389,6 +396,7 @@ impl RuntimeErrorCode {
         matches!(
             self,
             Self::ManagedTurnConcurrencyLimitExceeded
+                | Self::SessionExecutionLaneBusy
                 | Self::StoreCommitContended
                 | Self::PostgresAwaitEventStore
                 | Self::PostgresEffectJournalRetirement
@@ -537,6 +545,7 @@ impl RuntimeErrorCode {
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
             "managed_turn_concurrency_limit_exceeded" => Self::ManagedTurnConcurrencyLimitExceeded,
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
+            "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "store_commit_contended" => Self::StoreCommitContended,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
             "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
@@ -881,6 +890,7 @@ mod tests {
     fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         match code {
             RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
+            | RuntimeErrorCode::SessionExecutionLaneBusy
             | RuntimeErrorCode::StoreCommitContended
             | RuntimeErrorCode::CancelStartGateUnavailable
             | RuntimeErrorCode::PostgresAwaitEventStore
@@ -1039,6 +1049,7 @@ mod tests {
             RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
             RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded,
             RuntimeErrorCode::SessionExecutionLeaseLost,
+            RuntimeErrorCode::SessionExecutionLaneBusy,
             RuntimeErrorCode::StoreCommitContended,
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
             RuntimeErrorCode::StoreCommitByteBudgetExceeded,

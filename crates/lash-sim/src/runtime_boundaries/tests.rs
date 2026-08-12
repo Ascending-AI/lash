@@ -24,7 +24,12 @@ async fn worker_failover_continuation_oracle_catches_a_store_that_fails_to_fence
     let store = harness.store_for_session(session).await.expect("store");
     let blocker = LeaseOwnerIdentity::opaque("blocker-owner", "blocker-owner:001");
     let blocking = match store
-        .try_claim_session_execution_lease(session, &blocker, LEASE_TTL_MS)
+        .try_claim_session_execution_lease(
+            session,
+            &blocker,
+            "worker-failover-continuation-oracle-catches-a-store-that-fails-to-fence-executor",
+            LEASE_TTL_MS,
+        )
         .await
         .expect("blocker claim")
     {

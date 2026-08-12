@@ -338,7 +338,12 @@ mod tests {
         // TTL 0: the lane is held by a named owner whose renewals have already
         // stopped. This is the ambiguous state the procedure must not force.
         let stalled = store
-            .try_claim_session_execution_lease(SESSION_ID, &owner("worker-a", "worker-a:boot-1"), 0)
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &owner("worker-a", "worker-a:boot-1"),
+                "a-lapsed-holder-reads-as-lease-loss-and-refuses-to-authorize-a-kill-executor",
+                0,
+            )
             .await
             .expect("claim an immediately lapsed lane")
             .acquired()
@@ -365,7 +370,12 @@ mod tests {
         let (core, factory) = durable_core(dir.path()).await;
         let store = materialized_store(&factory, SESSION_ID).await;
         let displaced = store
-            .try_claim_session_execution_lease(SESSION_ID, &owner("worker-a", "worker-a:boot-1"), 0)
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &owner("worker-a", "worker-a:boot-1"),
+                "a-takeover-advances-the-generation-the-operator-reads-executor",
+                0,
+            )
             .await
             .expect("claim an immediately lapsed lane")
             .acquired()
@@ -378,6 +388,7 @@ mod tests {
             .try_claim_session_execution_lease(
                 SESSION_ID,
                 &owner("worker-b", "worker-b:boot-1"),
+                "a-takeover-advances-the-generation-the-operator-reads-executor-2",
                 60_000,
             )
             .await
@@ -410,6 +421,7 @@ mod tests {
             .try_claim_session_execution_lease(
                 SESSION_ID,
                 &owner("worker-a", "worker-a:boot-1"),
+                "releasing-the-lane-reads-as-unheld-rather-than-absent-executor",
                 60_000,
             )
             .await
@@ -447,6 +459,7 @@ mod tests {
             .try_claim_session_execution_lease(
                 SESSION_ID,
                 &owner("worker-a", "worker-a:boot-1"),
+                "the-diagnostic-read-does-not-disturb-the-holder-it-reports-executor",
                 60_000,
             )
             .await

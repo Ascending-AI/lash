@@ -172,7 +172,12 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         .expect("bind session to store");
     let owner = lease_owner("gc-test");
     let session_lease = store
-        .try_claim_session_execution_lease("root", &owner, 60_000)
+        .try_claim_session_execution_lease(
+            "root",
+            &owner,
+            "gc-keeps-live-committed-checkpoint-blobs-executor",
+            60_000,
+        )
         .await
         .expect("claim session execution lease")
         .acquired()
@@ -275,7 +280,12 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
         .expect("enqueue turn input");
     let owner = lease_owner("sqlite-claim-id-owner");
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "sqlite-claims-pin-both-production-claim-id-spellings-executor",
+            60_000,
+        )
         .await
         .expect("claim session execution lease")
         .acquired()
@@ -320,7 +330,12 @@ async fn second_claim_on_held_batch_is_not_won() {
         .await
         .expect("enqueue");
     let session_lease = store
-        .try_claim_session_execution_lease("root", &lease_owner("session-owner"), 60_000)
+        .try_claim_session_execution_lease(
+            "root",
+            &lease_owner("session-owner"),
+            "second-claim-on-held-batch-is-not-won-executor",
+            60_000,
+        )
         .await
         .expect("claim session execution lease")
         .acquired()
@@ -385,11 +400,16 @@ fn concurrent_claims_never_double_own_a_batch() {
     let session_fence = {
         let store = block_on(Store::open(&path)).expect("lease store");
         let owner = lease_owner("session-owner");
-        block_on(store.try_claim_session_execution_lease("root", &owner, 60_000))
-            .expect("claim session execution lease")
-            .acquired()
-            .expect("session execution lease")
-            .fence()
+        block_on(store.try_claim_session_execution_lease(
+            "root",
+            &owner,
+            "concurrent-claims-never-double-own-a-batch-executor",
+            60_000,
+        ))
+        .expect("claim session execution lease")
+        .acquired()
+        .expect("session execution lease")
+        .fence()
     };
 
     let barrier = Arc::new(std::sync::Barrier::new(2));

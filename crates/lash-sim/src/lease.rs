@@ -27,7 +27,12 @@ mod tests {
         let owner = LeaseOwnerIdentity::opaque("sim-owner", "sim-owner:001");
         let runtime_timings = sim_runtime_lease_timings();
         let runtime_lease = match store
-            .try_claim_session_execution_lease("runtime-session", &owner, runtime_timings.ttl_ms())
+            .try_claim_session_execution_lease(
+                "runtime-session",
+                &owner,
+                "runtime-lease-survives-starvation-while-deliberate-lease-expires-executor",
+                runtime_timings.ttl_ms(),
+            )
             .await
             .expect("claim sim runtime lease")
         {
@@ -50,6 +55,7 @@ mod tests {
             .try_claim_session_execution_lease(
                 "deliberate-expiry-session",
                 &owner,
+                "runtime-lease-survives-starvation-while-deliberate-lease-expires-executor-2",
                 production_ttl_ms,
             )
             .await

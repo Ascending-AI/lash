@@ -5869,6 +5869,7 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         &*store,
         session_id,
         &blocking_owner,
+        "restate-handler-replay-retries-final-lash-commit-idempotently-executor",
         60_000,
     )
     .await

@@ -520,6 +520,7 @@ pub(super) struct RemoteLocalExecutionRequest {
 pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     replay_ownership: crate::EffectReplayOwnership,
+    durable_workflow_controller: bool,
     allows_process_lifetime_completion_keys: bool,
     supports_concurrent_effects: bool,
 }
@@ -539,6 +540,7 @@ impl EffectTaskController {
         let proxy = Self {
             requests,
             replay_ownership: controller.replay_ownership(),
+            durable_workflow_controller: controller.durable_workflow_controller(),
             allows_process_lifetime_completion_keys: controller
                 .allows_process_lifetime_completion_keys(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
@@ -554,6 +556,10 @@ impl EffectTaskController {
 impl AwaitEventResolver for EffectTaskController {
     fn replay_ownership(&self) -> crate::EffectReplayOwnership {
         self.replay_ownership
+    }
+
+    fn durable_workflow_controller(&self) -> bool {
+        self.durable_workflow_controller
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {
@@ -738,6 +744,27 @@ pub(crate) async fn drive_effect_controller_task(
 pub trait AwaitEventResolver: Send + Sync {
     fn replay_ownership(&self) -> crate::EffectReplayOwnership {
         crate::EffectReplayOwnership::Runtime
+    }
+
+    /// Whether this boundary is a durable workflow controller whose engine owns
+    /// retry pacing for the whole invocation.
+    ///
+    /// Opting in changes exactly one behaviour: a queued-work drain that finds
+    /// the session execution lane held no longer answers "nothing to drain"
+    /// (which an engine would read as a settled queue). It waits out a
+    /// crashed-looking holder and otherwise fails with the typed retryable
+    /// [`RuntimeErrorCode::SessionExecutionLaneBusy`](crate::RuntimeErrorCode::SessionExecutionLaneBusy),
+    /// which the controller surfaces to its engine so the engine's retry policy
+    /// paces the next attempt.
+    ///
+    /// This is deliberately a separate question from
+    /// [`replay_ownership`](Self::replay_ownership): a store-backed durable
+    /// effect host also owns effect replay, yet has no engine-side retry policy
+    /// to hand the outcome to, so it must keep the ordinary one-shot drain
+    /// contract. Implement this only for a boundary whose *invocation* is
+    /// re-driven by a durable engine.
+    fn durable_workflow_controller(&self) -> bool {
+        false
     }
 
     /// Whether [`ToolContext::completion_key`](crate::ToolContext::completion_key)

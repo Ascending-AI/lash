@@ -394,7 +394,7 @@ async fn measure_store_hardening_backend_turn(
     let mut phases = BTreeMap::new();
     let (lease, phase) = measure_runtime_perf_async_phase(names.claim_session_lease, async {
         store
-            .try_claim_session_execution_lease(session_id, owner, HARDENING_LEASE_TTL_MS)
+            .try_claim_session_execution_lease(session_id, owner, "measure-store-hardening-backend-turn-executor", HARDENING_LEASE_TTL_MS)
             .await?
             .acquired()
             .ok_or_else(|| anyhow::anyhow!("store-hardening session lease was busy"))

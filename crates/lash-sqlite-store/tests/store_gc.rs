@@ -193,7 +193,12 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
         .expect("bind session to store");
     let owner = lease_owner("auto-gc-test");
     let session_lease = store
-        .try_claim_session_execution_lease("auto-gc", &owner, 60_000)
+        .try_claim_session_execution_lease(
+            "auto-gc",
+            &owner,
+            "auto-gc-runs-after-commit-without-reentrant-locking-executor",
+            60_000,
+        )
         .await
         .expect("claim session execution lease")
         .acquired()

@@ -71,6 +71,18 @@ async fn perf_store_reports_the_holder_a_claim_displaces() {
     .await;
 }
 
+/// The perf harness's store is the fourth backend behind the executor
+/// discriminator, so it owes the same-host/distinct-executor geometry too.
+/// Running the shared law rather than a local copy is what stops the double from
+/// quietly granting one host's second open the lane the first one holds.
+#[tokio::test]
+async fn perf_store_keeps_same_host_distinct_executors_lane_less() {
+    lash_core::testing::conformance::same_host_distinct_executors_are_lane_less_without_revoking_holder(
+        Arc::new(RuntimePerfStore::default()),
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn perf_store_enforces_core_lease_fence_authority() {
     let store = RuntimePerfStore::default();
@@ -107,7 +119,12 @@ async fn perf_store_pins_durable_claim_id_dialects() {
         .await
         .expect("enqueue perf turn input");
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "perf-store-pins-durable-claim-id-dialects-executor",
+            60_000,
+        )
         .await
         .expect("claim perf session lease")
         .acquired()

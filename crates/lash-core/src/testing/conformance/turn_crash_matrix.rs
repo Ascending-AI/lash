@@ -1768,6 +1768,7 @@ pub async fn cold_process_real_turn_driver(
                     .try_claim_session_execution_lease(
                         &identity.session_id,
                         &owner,
+                        "cold-process-real-turn-driver-executor",
                         recovery_timings().ttl_ms(),
                     )
                     .await
@@ -1818,6 +1819,7 @@ pub async fn cold_process_real_turn_driver(
                     .try_claim_session_execution_lease(
                         &identity.session_id,
                         &owner,
+                        "cold-process-real-turn-driver-executor-2",
                         recovery_timings().ttl_ms(),
                     )
                     .await
@@ -2017,6 +2019,7 @@ async fn wait_for_recovery_lease<F>(
                 .try_claim_session_execution_lease(
                     &identity.session_id,
                     &owner,
+                    "wait-for-recovery-lease-executor",
                     recovery_timings().ttl_ms(),
                 )
                 .await

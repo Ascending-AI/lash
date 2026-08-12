@@ -86,6 +86,7 @@ async fn claiming_the_lane_traces_the_session_generation_and_holder() {
             Arc::clone(&store),
             "lease-observability",
             &claimant,
+            "claiming-the-lane-traces-the-session-generation-and-holder-executor",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -130,7 +131,12 @@ async fn a_dead_holder_is_still_reported_as_taken_over_by_the_winner() {
     // it through the store rather than a guard is the point, because a dead
     // holder has no guard and emits nothing at all.
     let dead_generation = store
-        .try_claim_session_execution_lease(session_id, &dead, 0)
+        .try_claim_session_execution_lease(
+            session_id,
+            &dead,
+            "a-dead-holder-is-still-reported-as-taken-over-by-the-winner-executor",
+            0,
+        )
         .await
         .expect("seed the abandoned row")
         .acquired()
@@ -142,6 +148,7 @@ async fn a_dead_holder_is_still_reported_as_taken_over_by_the_winner() {
             Arc::clone(&store),
             session_id,
             &sweeper,
+            "a-dead-holder-is-still-reported-as-taken-over-by-the-winner-executor",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -202,6 +209,7 @@ async fn claiming_a_released_lane_reports_no_takeover() {
             Arc::clone(&store),
             session_id,
             &owner("worker-a", "worker-a:boot-1"),
+            "claiming-a-released-lane-reports-no-takeover-executor",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -214,6 +222,7 @@ async fn claiming_a_released_lane_reports_no_takeover() {
             Arc::clone(&store),
             session_id,
             &owner("worker-b", "worker-b:boot-1"),
+            "claiming-a-released-lane-reports-no-takeover-executor-2",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -250,6 +259,7 @@ async fn a_live_holder_that_is_swept_reports_only_its_own_renewal_failure() {
             Arc::clone(&store),
             session_id,
             &holder,
+            "a-live-holder-that-is-swept-reports-only-its-own-renewal-failure-executor",
             short_timings(),
             Arc::new(SystemClock),
         )
@@ -273,6 +283,7 @@ async fn a_live_holder_that_is_swept_reports_only_its_own_renewal_failure() {
             Arc::clone(&store),
             session_id,
             &successor,
+            "a-live-holder-that-is-swept-reports-only-its-own-renewal-failure-executor-2",
             short_timings(),
             Arc::new(SystemClock),
         )
@@ -350,6 +361,7 @@ async fn a_transient_renewal_error_neither_loses_the_lane_nor_reports_a_takeover
             Arc::clone(&store) as Arc<dyn crate::store::RuntimePersistence>,
             session_id,
             &holder,
+            "a-transient-renewal-error-neither-loses-the-lane-nor-reports-a-takeover-executor",
             short_timings(),
             Arc::new(SystemClock),
         )
@@ -406,7 +418,12 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
 
     // A live foreign holder, so the claimant below has no lane of its own.
     let _held = store
-        .try_claim_session_execution_lease(session_id, &holder, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &holder,
+            "a-lane-less-writer-that-loses-the-cas-is-still-attributable-executor",
+            60_000,
+        )
         .await
         .expect("claim the lane")
         .acquired()
@@ -419,6 +436,7 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
                 Arc::clone(&store),
                 session_id,
                 &claimant,
+                "a-lane-less-writer-that-loses-the-cas-is-still-attributable-executor",
                 LeaseTimings::default(),
                 Arc::new(SystemClock),
             )
@@ -483,7 +501,12 @@ async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
     let loser = owner("workflow-owner", "workflow-owner:successor-loser");
     let foreign = owner("foreign-owner", "foreign-owner:incarnation");
     let predecessor_row = store
-        .try_claim_session_execution_lease(session_id, &predecessor, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &predecessor,
+            "busy-claimants-race-only-at-head-cas-without-touching-holder-lane-executor",
+            60_000,
+        )
         .await
         .expect("predecessor claims the lane")
         .acquired()
@@ -619,7 +642,12 @@ async fn publish_on_one_side_of_ttl(
     let predecessor = owner("ttl-owner", "ttl-owner:predecessor");
     let successor = owner("ttl-owner", "ttl-owner:successor");
     let predecessor_row = store
-        .try_claim_session_execution_lease(session_id, &predecessor, short_timings().ttl_ms())
+        .try_claim_session_execution_lease(
+            session_id,
+            &predecessor,
+            "publish-on-one-side-of-ttl-executor",
+            short_timings().ttl_ms(),
+        )
         .await
         .expect("predecessor claims boundary lane")
         .acquired()
@@ -709,6 +737,7 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
             Arc::clone(&store),
             session_id,
             &holder,
+            "a-rejected-commit-cas-traces-the-losing-generation-and-head-revisions-executor",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )

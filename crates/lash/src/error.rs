@@ -133,9 +133,12 @@ impl EmbedError {
     /// Runtime failures delegate to the closed
     /// [`RuntimeErrorCode`](lash_core::RuntimeErrorCode) taxonomy. Its
     /// retryable set includes idempotent store contention, Restate ingress,
-    /// session-refresh, and bounded-wait operations. Lease Busy is an internal
-    /// claim outcome, not a public runtime error. Foreign extension
-    /// codes are conservatively not retryable.
+    /// session-refresh, and bounded-wait operations, plus
+    /// [`SessionExecutionLaneBusy`](lash_core::RuntimeErrorCode::SessionExecutionLaneBusy),
+    /// the one Busy outcome that is a public runtime error: a durable workflow
+    /// controller's queued drain hands lane contention back to its engine
+    /// instead of blocking. Every other lease Busy stays an internal claim
+    /// outcome. Foreign extension codes are conservatively not retryable.
     ///
     /// Notably
     /// [`SessionExecutionLeaseLost`](lash_core::RuntimeErrorCode::SessionExecutionLeaseLost)

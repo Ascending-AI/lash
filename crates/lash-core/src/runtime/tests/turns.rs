@@ -5840,6 +5840,7 @@ async fn foreground_turn_proceeds_when_advisory_session_lane_is_held() {
         store.as_ref(),
         "root",
         &owner,
+        "foreground-turn-proceeds-when-advisory-session-lane-is-held-executor",
         60_000,
     )
     .await
@@ -5886,6 +5887,7 @@ async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
         store.as_ref(),
         "root",
         &owner,
+        "idle-queued-work-noops-without-claiming-when-session-lane-is-held-executor",
         60_000,
     )
     .await
@@ -5953,6 +5955,7 @@ async fn durable_controller_waits_for_busy_session_lane_before_draining_queued_i
         store.as_ref(),
         "root",
         &lease_owner("crashed-worker"),
+        "durable-controller-waits-for-busy-session-lane-before-draining-queued-input-executor",
         50,
     )
     .await
@@ -5962,7 +5965,9 @@ async fn durable_controller_waits_for_busy_session_lane_before_draining_queued_i
     assert_eq!(held_lease.expires_at_epoch_ms, 1_050);
 
     let controller = Arc::new(
-        super::effect::RecordingEffectController::default().with_controller_owned_replay(),
+        super::effect::RecordingEffectController::default()
+            .with_controller_owned_replay()
+            .with_durable_workflow_controller(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,
@@ -5997,6 +6002,229 @@ async fn durable_controller_waits_for_busy_session_lane_before_draining_queued_i
     );
 }
 
+/// The give-up half of the same policy: a holder that keeps renewing is alive,
+/// so no amount of in-process waiting can free the lane inside this invocation.
+/// The drain reports the typed retryable error naming the live holder, and
+/// leaves both the holder row and the queued row exactly as it found them.
+#[tokio::test]
+async fn durable_controller_reports_a_retryable_busy_lane_when_the_holder_is_alive() {
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        mock_provider(Vec::new()),
+        store_clock,
+    )
+    .await;
+    runtime.host.core.clock = clock.clone();
+    enqueue_idle_turn_input(store.as_ref(), "root", "queued behind a live holder").await;
+    let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        "root",
+        &lease_owner("live-worker"),
+        "live-holder-executor",
+        100,
+    )
+    .await
+    .expect("claim live worker session execution lease")
+    .acquired()
+    .expect("live worker holds session execution lease");
+    assert_eq!(held_lease.expires_at_epoch_ms, 1_100);
+
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default()
+            .with_controller_owned_replay()
+            .with_durable_workflow_controller(),
+    );
+    let scope = crate::ScopedEffectController::shared(
+        controller,
+        crate::ExecutionScope::turn("root", "queued-live-holder"),
+    )
+    .expect("durable queued-turn scope");
+    let mut drain = crate::task::spawn(async move {
+        runtime
+            .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
+            .await
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(5), &mut drain)
+            .await
+            .is_err(),
+        "the drain must still be waiting when the holder renews"
+    );
+
+    clock.advance_ms(10);
+    let renewed = crate::store::SessionExecutionLeaseStore::renew_session_execution_lease(
+        store.as_ref(),
+        &held_lease.fence(),
+        100,
+    )
+    .await
+    .expect("live worker renews its session execution lease");
+    assert_eq!(renewed.expires_at_epoch_ms, 1_110);
+
+    let error = drain
+        .await
+        .expect("join durable queued drain")
+        .expect_err("a live holder must end the wait with a typed error");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::SessionExecutionLaneBusy
+    );
+    assert!(error.is_retryable());
+    assert!(!error.is_terminal());
+    assert_eq!(
+        error.message,
+        "session execution lane for session `root` is held by owner `live-worker` \
+         incarnation `live-worker:incarnation` executor `live-holder-executor` \
+         (fencing generation 1, expires at 1110); stopped waiting after 25ms \
+         because the holder renewed its lease"
+    );
+
+    let holder_after = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
+        store.as_ref(),
+        "root",
+    )
+    .await
+    .expect("read the holder row after the drain gave up")
+    .expect("the live holder still holds the lane");
+    assert_eq!(holder_after, renewed);
+    assert_eq!(
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+            .await
+            .expect("list pending input after the drain gave up")
+            .len(),
+        1,
+        "a drain that gave up must leave the queued row pending"
+    );
+}
+
+/// The backstop: a holder whose expiry never moves and never lapses (a frozen
+/// clock) must not become an unbounded block. Waiting stops at twice the
+/// observed TTL with the same typed retryable error.
+#[tokio::test]
+async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait_budget() {
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        mock_provider(Vec::new()),
+        store_clock,
+    )
+    .await;
+    runtime.host.core.clock = clock.clone();
+    enqueue_idle_turn_input(store.as_ref(), "root", "queued behind a frozen holder").await;
+    let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        "root",
+        &lease_owner("frozen-worker"),
+        "frozen-holder-executor",
+        100,
+    )
+    .await
+    .expect("claim frozen worker session execution lease")
+    .acquired()
+    .expect("frozen worker holds session execution lease");
+
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default()
+            .with_controller_owned_replay()
+            .with_durable_workflow_controller(),
+    );
+    let scope = crate::ScopedEffectController::shared(
+        controller,
+        crate::ExecutionScope::turn("root", "queued-frozen-holder"),
+    )
+    .expect("durable queued-turn scope");
+    let error = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
+        .await
+        .expect_err("the wait budget must end the drain with a typed error");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::SessionExecutionLaneBusy
+    );
+    assert!(error.is_retryable());
+    assert_eq!(
+        error.message,
+        "session execution lane for session `root` is held by owner `frozen-worker` \
+         incarnation `frozen-worker:incarnation` executor `frozen-holder-executor` \
+         (fencing generation 1, expires at 1100); stopped waiting after 200ms \
+         because the in-process wait budget elapsed"
+    );
+
+    let holder_after = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
+        store.as_ref(),
+        "root",
+    )
+    .await
+    .expect("read the holder row after the wait budget elapsed")
+    .expect("the frozen holder still holds the lane");
+    assert_eq!(holder_after, held_lease);
+    assert_eq!(
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+            .await
+            .expect("list pending input after the wait budget elapsed")
+            .len(),
+        1,
+        "a drain that hit the wait budget must leave the queued row pending"
+    );
+}
+
+/// The capability gate, not effect-replay ownership, is what selects the busy
+/// wait. A controller that owns effect replay but is not a durable workflow
+/// controller - every store-backed durable effect host - keeps the ordinary
+/// one-shot `Busy -> None` drain contract.
+#[tokio::test]
+async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_contract() {
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
+    enqueue_idle_turn_input(store.as_ref(), "root", "queued behind a replay-owning host").await;
+    let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        "root",
+        &lease_owner("foreground-runtime"),
+        "controller-owned-replay-alone-executor",
+        60_000,
+    )
+    .await
+    .expect("claim session execution lease")
+    .acquired()
+    .expect("session execution lease");
+
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default().with_controller_owned_replay(),
+    );
+    let scope = crate::ScopedEffectController::shared(
+        controller,
+        crate::ExecutionScope::turn("root", "queued-replay-owner"),
+    )
+    .expect("controller-owned replay queued-turn scope");
+    let busy_result = runtime
+        .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
+        .await
+        .expect("a replay-owning non-workflow controller must not error on Busy");
+
+    assert!(
+        busy_result.is_none(),
+        "controller-owned effect replay alone must keep the one-shot Busy no-op"
+    );
+    assert_eq!(
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+            .await
+            .expect("queued turn input after the one-shot no-op")
+            .len(),
+        1
+    );
+    let holder_after = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
+        store.as_ref(),
+        "root",
+    )
+    .await
+    .expect("read the holder row after the one-shot no-op")
+    .expect("the holder still holds the lane");
+    assert_eq!(holder_after.lease_token, held_lease.lease_token);
+    assert_eq!(holder_after.fencing_token, held_lease.fencing_token);
+}
+
 #[tokio::test]
 async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires() {
     let clock = Arc::new(ManualClock::new(1_000));
@@ -6012,6 +6240,7 @@ async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires(
         store.as_ref(),
         "root",
         &owner,
+        "session-command-waits-in-durable-queue-until-session-lease-ttl-expires-executor",
         50,
     )
     .await
@@ -6077,6 +6306,7 @@ async fn session_command_claim_lease_expiry_surfaces_session_execution_lease_los
         store.as_ref(),
         "root",
         &owner,
+        "session-command-claim-lease-expiry-surfaces-session-execution-lease-lost-executor",
         crate::LeaseTimings::default().ttl_ms(),
     )
     .await
@@ -6231,6 +6461,7 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
         store.as_ref(),
         "root",
         &successor_owner,
+        "advisory-lease-loss-does-not-stop-foreground-turn-before-final-commit-executor",
         60_000,
     )
     .await
@@ -6430,6 +6661,7 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
             store.as_ref(),
             "root",
             &successor,
+            "renewal-failure-mid-turn-does-not-select-a-durable-branch-executor",
             60_000,
         )
         .await

@@ -178,10 +178,22 @@ worker's original lease could expire.
    PID, and gate a real `exec_code_started` record. Run `just agent-workbench-restart <port>`
    without changing the data directory or Restate. Require the PID and boot incarnation to
    change while the session and turn address remain exact.
+
+   Record the lease identity triple on both sides of the restart:
+   `owner_id`, `incarnation_id`, `executor_id`. All three must change across a real process
+   replacement — a new boot mints a new incarnation, and each runtime open inside it mints a
+   new executor id. This is what makes the replacement worker a *foreign* claimant to the
+   dead worker's still-live lease row, which is precisely the geometry both arms below
+   exercise. An unchanged incarnation means the restart did not happen; an unchanged
+   executor under a changed incarnation means the identity is being derived from something
+   process-stable, which is a **FAIL**.
 2. **Same-turn successor arm:** allow Restate to redrive that exact turn. Require its user and
    assistant nodes to commit exactly once, the UI/API/store projections to agree, and the
    trace to show the replacement worker observed the still-live holder before the original
-   TTL elapsed. Save `06a-same-turn-{state,store,trace}.json` and report this arm separately.
+   TTL elapsed. The `session_execution_lease.busy` evidence must name the *dead* worker's
+   executor as `holder_executor_id` and the replacement's as `claimant_executor_id`: a
+   redrive is not reentry, and identical triples there would mean the runtime handed a
+   rebuilt open its predecessor's identity. Save `06a-same-turn-{state,store,trace}.json` and report this arm separately.
 3. **New-turn-within-TTL arm:** immediately submit a fresh marker turn through the replacement
    worker, while the timestamp is still inside that same original TTL window. Require its
    distinct turn id and ordered user/assistant nodes to commit exactly once, with UI/API/store

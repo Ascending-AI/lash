@@ -490,7 +490,12 @@ async fn commit_with_lease(
 ) -> crate::store::RuntimeCommitResult {
     let owner = crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"));
     let lease = store
-        .try_claim_session_execution_lease(&commit.session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            &commit.session_id,
+            &owner,
+            "commit-with-lease-executor",
+            60_000,
+        )
         .await
         .expect("claim commit lease")
         .acquired()

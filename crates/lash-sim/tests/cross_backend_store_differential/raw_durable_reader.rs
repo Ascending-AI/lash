@@ -132,25 +132,15 @@ impl RawDurableReader {
                 let session_execution_leases = store
                     .raw_session_execution_leases_for_testing()
                     .into_iter()
-                    .map(
-                        |(
-                            _session_id,
-                            owner,
-                            executor_id,
-                            lease_token_present,
-                            fencing_token,
-                            claimed_at_epoch_ms,
-                            expires_at_epoch_ms,
-                        )| SessionExecutionLeaseObservation {
-                            owner,
-                            executor_id_present: executor_id.is_some(),
-                            lease_token_present,
-                            fencing_token,
-                            claimed: claimed_at_epoch_ms != 0,
-                            ttl_ms: (claimed_at_epoch_ms != 0)
-                                .then_some(expires_at_epoch_ms - claimed_at_epoch_ms),
-                        },
-                    )
+                    .map(|row| SessionExecutionLeaseObservation {
+                        owner: row.owner,
+                        executor_id: row.executor_id,
+                        lease_token: row.lease_token,
+                        fencing_token: row.fencing_token,
+                        claimed: row.claimed_at_epoch_ms != 0,
+                        ttl_ms: (row.claimed_at_epoch_ms != 0)
+                            .then_some(row.expires_at_epoch_ms - row.claimed_at_epoch_ms),
+                    })
                     .collect();
                 RawDurableState {
                     head_revision: store.raw_head_revision_for_testing(),
@@ -352,8 +342,8 @@ impl RawDurableReader {
                             expires_at_epoch_ms,
                         )| SessionExecutionLeaseObservation {
                             owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
-                            executor_id_present: executor_id.is_some(),
-                            lease_token_present: lease_token.is_some(),
+                            executor_id,
+                            lease_token,
                             fencing_token: fencing_token as u64,
                             claimed: claimed_at_epoch_ms != 0,
                             ttl_ms: (claimed_at_epoch_ms != 0)

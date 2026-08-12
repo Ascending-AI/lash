@@ -142,7 +142,12 @@ impl RuntimeBoundaryHarness {
             format!("{probe_scope}:probe-owner"),
         );
         let lease = match store
-            .try_claim_session_execution_lease(&probe_scope, &owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                &probe_scope,
+                &owner,
+                "lease-probe-fencing-token-executor",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("claim lease probe failed: {err}")))?
         {
@@ -527,7 +532,12 @@ impl RuntimeBoundaryHarness {
             format!("{}:process-wake-driver", session),
         );
         let lease = match store
-            .try_claim_session_execution_lease(&session, &owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                &session,
+                &owner,
+                "deliver-process-wake-executor",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!("claim session lease failed: {err}"))
@@ -668,7 +678,12 @@ impl RuntimeBoundaryHarness {
         // Worker one (the doomed incarnation) acquires the session execution lease
         // and starts a real unit of worker-owned queued work.
         let stale_lease = match store
-            .try_claim_session_execution_lease(&session, &stale_owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                &session,
+                &stale_owner,
+                "run-worker-stale-completion-executor",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("claim stale lease failed: {err}")))?
         {
@@ -704,7 +719,12 @@ impl RuntimeBoundaryHarness {
         // process-liveness shortcut establishes expiry.
         self.clock.advance_by(LEASE_TTL_MS + 1).await;
         let live_lease = match store
-            .try_claim_session_execution_lease(&session, &live_owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                &session,
+                &live_owner,
+                "run-worker-stale-completion-executor-2",
+                LEASE_TTL_MS,
+            )
             .await
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!("take over expired worker lease failed: {err}"))

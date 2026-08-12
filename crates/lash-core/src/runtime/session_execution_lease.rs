@@ -18,6 +18,8 @@
 //! | `session_execution_lease.renewal_failed` | WARN | the holder | renewal stopped on a transient error; the lease is still ours to release |
 //! | `session_execution_lease.busy` | DEBUG | the claimant | the claim observed a named live holder and did not acquire the lane |
 //! | `session_execution_lease.busy_advisory` | DEBUG | the turn claimant | a turn proceeds lane-lessly because the head CAS is the authority |
+//! | `session_execution_lease.busy_wait` | INFO | the durable queued drain | a durable-workflow-controller drain is waiting out a crashed-looking holder before re-claiming |
+//! | `session_execution_lease.busy_gave_up` | INFO | the durable queued drain | the drain stopped waiting (`give_up = "holder_is_alive"` or `"wait_budget_exhausted"`) and reported `session_execution_lane_busy` so the engine's retry policy paces the next attempt |
 //! | `session_execution_lease.commit_busy_advisory` | INFO | the persistence claimant | a lane-less commit proceeds despite a live holder because the head CAS is the authority |
 //! | `session_execution_lease.commit_cas_rejected` | WARN | the losing writer | the commit's head CAS lost to a concurrent writer |
 //!
@@ -58,6 +60,7 @@ use crate::store::{
 };
 
 mod observability;
+pub(crate) mod queued_lane_wait;
 
 pub(super) use observability::trace_commit_cas_rejected;
 use observability::{trace_busy, trace_taken_over};
@@ -167,16 +170,22 @@ impl BorrowedLaneAuthority {
 }
 
 impl SessionExecutionLeaseGuard {
+    /// Test-only shorthand for
+    /// [`try_acquire_for_executor`](Self::try_acquire_for_executor).
+    ///
+    /// The executor stays a required parameter here too: it is identity, and a
+    /// minted-per-call default would silently make every acquisition a distinct
+    /// claimant, which is precisely the distinction these tests exercise.
     #[cfg(test)]
     pub(super) async fn try_acquire(
         store: Arc<dyn RuntimePersistence>,
         session_id: &str,
         owner: &crate::LeaseOwnerIdentity,
+        executor_id: &str,
         timings: LeaseTimings,
         clock: Arc<dyn Clock>,
     ) -> Result<Option<Self>, StoreError> {
-        let executor_id = uuid::Uuid::new_v4().to_string();
-        Self::try_acquire_for_executor(store, session_id, owner, &executor_id, timings, clock).await
+        Self::try_acquire_for_executor(store, session_id, owner, executor_id, timings, clock).await
     }
 
     pub(super) async fn try_acquire_for_executor(
@@ -761,6 +770,7 @@ mod tests {
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             SESSION_ID,
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            "acquire-gated-guard-executor",
             LeaseTimings::default(),
             Arc::new(crate::runtime::SystemClock),
         )
@@ -776,6 +786,7 @@ mod tests {
             .try_claim_session_execution_lease(
                 SESSION_ID,
                 &crate::LeaseOwnerIdentity::opaque("peer", "peer-incarnation"),
+                "lease-is-held-executor",
                 LeaseTimings::default().ttl_ms(),
             )
             .await
@@ -808,6 +819,7 @@ mod tests {
             Arc::clone(&persistence),
             "borrow-valid",
             &owner,
+            "borrowed-commit-leaves-outer-guard-fence-valid-executor",
             LeaseTimings::default(),
             Arc::new(crate::runtime::SystemClock),
         )
@@ -847,6 +859,7 @@ mod tests {
             Arc::clone(&persistence),
             "borrow-lapsed",
             &owner,
+            "lapsed-guard-cannot-authorize-borrowed-commit-executor",
             timings,
             Arc::new(crate::runtime::SystemClock),
         )
@@ -992,6 +1005,7 @@ mod tests {
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             SESSION_ID,
             &owner,
+            "stale-in-band-release-refusal-is-terminal-and-benign-executor",
             LeaseTimings::default(),
             Arc::new(crate::runtime::SystemClock),
         )
@@ -1040,6 +1054,7 @@ mod tests {
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             SESSION_ID,
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            "clean-guard-drop-releases-before-ttl-for-immediate-peer-reclaim-executor",
             LeaseTimings::default(),
             Arc::new(crate::runtime::SystemClock),
         )
@@ -1060,6 +1075,7 @@ mod tests {
             .try_claim_session_execution_lease(
                 SESSION_ID,
                 &crate::LeaseOwnerIdentity::opaque("peer", "peer-incarnation"),
+                "clean-guard-drop-releases-before-ttl-for-immediate-peer-reclaim-executor",
                 LeaseTimings::default().ttl_ms(),
             )
             .await
@@ -1082,6 +1098,7 @@ mod tests {
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             SESSION_ID,
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            "stalled-drop-release-falls-back-to-ttl-without-freeing-the-reclaimer-executor",
             LeaseTimings::default(),
             guard_clock,
         )
@@ -1098,6 +1115,7 @@ mod tests {
                 .try_claim_session_execution_lease(
                     SESSION_ID,
                     &peer_owner,
+                    "stalled-drop-release-falls-back-to-ttl-without-freeing-the-reclaimer-executor",
                     LeaseTimings::default().ttl_ms(),
                 )
                 .await
@@ -1110,6 +1128,7 @@ mod tests {
             .try_claim_session_execution_lease(
                 SESSION_ID,
                 &peer_owner,
+                "stalled-drop-release-falls-back-to-ttl-without-freeing-the-reclaimer-executor-2",
                 LeaseTimings::default().ttl_ms(),
             )
             .await
@@ -1131,6 +1150,7 @@ mod tests {
                     .try_claim_session_execution_lease(
                         SESSION_ID,
                         &crate::LeaseOwnerIdentity::opaque("observer", "observer-incarnation"),
+                        "stalled-drop-release-falls-back-to-ttl-without-freeing-the-reclaimer-executor-3",
                         LeaseTimings::default().ttl_ms(),
                     )
                     .await
@@ -1163,6 +1183,7 @@ mod tests {
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             SESSION_ID,
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            "transient-renewal-failure-still-requires-a-backend-release-executor",
             timings,
             Arc::new(crate::runtime::SystemClock),
         )
@@ -1211,6 +1232,7 @@ mod tests {
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             SESSION_ID,
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            "renewal-install-refusal-still-requires-a-backend-release-executor",
             timings,
             Arc::new(crate::runtime::SystemClock),
         )
@@ -1261,6 +1283,7 @@ mod tests {
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             SESSION_ID,
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            "definitive-renewal-fence-rejection-skips-the-owner-side-release-executor",
             timings,
             Arc::new(crate::runtime::SystemClock),
         )
@@ -1387,7 +1410,12 @@ mod tests {
         let store = Arc::new(InMemorySessionStore::new());
         let owner = crate::LeaseOwnerIdentity::opaque("current-owner", "current-incarnation");
         let current = store
-            .try_claim_session_execution_lease(SESSION_ID, &owner, 60_000)
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &owner,
+                "assert-refusal-event-executor",
+                60_000,
+            )
             .await
             .expect("claim current lease")
             .acquired()
@@ -1497,6 +1525,7 @@ mod tests {
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
             SESSION_ID,
             &owner,
+            "rotated-token-refusal-marks-the-old-renewal-loop-lost-executor",
             timings,
             Arc::new(crate::runtime::SystemClock),
         )

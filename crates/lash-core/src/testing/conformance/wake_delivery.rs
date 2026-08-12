@@ -880,7 +880,12 @@ async fn settle_queued_batch(
         format!("{batch_id}:incarnation"),
     );
     let lease = target
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "settle-queued-batch-executor",
+            60_000,
+        )
         .await
         .expect("claim target session lease")
         .acquired()

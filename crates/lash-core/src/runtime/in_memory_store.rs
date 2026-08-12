@@ -29,6 +29,8 @@ mod session_execution_lease;
 pub(crate) mod test_support;
 #[cfg(any(test, feature = "testing"))]
 mod testing_access;
+#[cfg(any(test, feature = "testing"))]
+pub use testing_access::RawSessionExecutionLeaseRow;
 mod turn_input;
 
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};

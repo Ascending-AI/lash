@@ -3,6 +3,7 @@ use super::logical_turn::agent_frame_follow_turn_id;
 use super::logical_turn::{
     LogicalTurnClaims, LogicalTurnStart, PhysicalTurnExecution, PreparedLogicalTurn,
 };
+use super::session_execution_lease::queued_lane_wait;
 use super::turn_control::ActiveTurnControl;
 use super::*;
 use crate::facade_support::{
@@ -818,9 +819,20 @@ impl LashRuntime {
     ///
     /// Ordinary controllers retain the public one-shot drain contract: Busy is
     /// reported as `None` and the durable row stays pending. A durable workflow
-    /// controller instead waits through the observed holder's TTL and retries.
-    /// This keeps one workflow invocation alive across failover without letting
-    /// it bypass or forge the foreign executor's lease authority.
+    /// controller instead applies the aliveness-aware policy in
+    /// [`queued_lane_wait`](super::session_execution_lease::queued_lane_wait):
+    /// wait out a crashed-looking holder's TTL and retry, but report the typed
+    /// retryable [`RuntimeErrorCode::SessionExecutionLaneBusy`] the moment the
+    /// holder proves it is alive or the wait budget elapses, so the engine's
+    /// retry policy - not a sleep inside one invocation - paces the next
+    /// attempt. Either way the foreign executor's lease authority is never
+    /// bypassed or forged.
+    ///
+    /// The gate is the controller's own
+    /// [`durable_workflow_controller`](crate::AwaitEventResolver::durable_workflow_controller)
+    /// capability rather than [`crate::EffectReplayOwnership::Controller`]:
+    /// store-backed durable effect hosts also own effect replay while having no
+    /// engine-side retry policy, so they keep the ordinary one-shot contract.
     async fn claim_session_execution_lease_for_queued_work(
         &mut self,
         opts: &TurnOptions<'_>,
@@ -835,8 +847,8 @@ impl LashRuntime {
         let wait_for_lease = opts
             .scoped_effect_controller()
             .controller()
-            .replay_ownership()
-            == crate::EffectReplayOwnership::Controller;
+            .durable_workflow_controller();
+        let mut wait = queued_lane_wait::QueuedLaneWait::default();
         loop {
             let acquisition = SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
                 Arc::clone(&store),
@@ -858,27 +870,35 @@ impl LashRuntime {
                     return Ok(None);
                 }
                 SessionExecutionLeaseGuardAcquisition::Busy(holder) => {
-                    let now_epoch_ms = self.host.core.clock.timestamp_ms();
-                    let wait_ms = holder
-                        .expires_at_epoch_ms
-                        .saturating_sub(now_epoch_ms)
-                        .max(1);
-                    tracing::debug!(
-                        session_id = %self.state.session_id,
-                        holder_owner_id = %holder.owner.owner_id,
-                        holder_incarnation_id = %holder.owner.incarnation_id,
-                        holder_executor_id = %holder.executor_id,
-                        holder_fencing_token = holder.fencing_token,
-                        holder_expires_at_epoch_ms = holder.expires_at_epoch_ms,
-                        wait_ms,
-                        event = "session_execution_lease.busy_wait",
-                        "durable queued drain is waiting for the live session lane"
+                    let slice_ms = match wait.observe(&holder) {
+                        queued_lane_wait::QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
+                        queued_lane_wait::QueuedLaneWaitStep::GiveUp(give_up) => {
+                            let waited_ms = wait.waited_ms();
+                            queued_lane_wait::trace_busy_gave_up(
+                                &self.state.session_id,
+                                &holder,
+                                give_up,
+                                waited_ms,
+                            );
+                            return Err(queued_lane_wait::lane_busy_error(
+                                &self.state.session_id,
+                                &holder,
+                                give_up,
+                                waited_ms,
+                            ));
+                        }
+                    };
+                    queued_lane_wait::trace_busy_wait(
+                        &self.state.session_id,
+                        &holder,
+                        slice_ms,
+                        wait.waited_ms(),
                     );
                     let sleep = self
                         .host
                         .core
                         .clock
-                        .sleep(std::time::Duration::from_millis(wait_ms));
+                        .sleep(std::time::Duration::from_millis(slice_ms));
                     tokio::select! {
                         () = sleep => {}
                         () = opts.cancel.cancelled() => return Ok(None),

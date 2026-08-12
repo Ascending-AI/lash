@@ -206,6 +206,7 @@ async fn new_turn_within_dead_lease_ttl_commits_under_head_cas() {
         &store,
         &session_id,
         &dead_incarnation,
+        "new-turn-within-dead-lease-ttl-commits-under-head-cas-executor",
         60_000,
     )
     .await
@@ -346,6 +347,7 @@ async fn same_turn_successor_within_dead_lease_ttl_commits_under_head_cas() {
         &store,
         &session_id,
         &dead_boot,
+        "same-turn-successor-within-dead-lease-ttl-commits-under-head-cas-executor",
         60_000,
     )
     .await
@@ -378,15 +380,25 @@ async fn same_turn_successor_within_dead_lease_ttl_commits_under_head_cas() {
     assert_eq!(dead_lease.owner, dead_boot);
 }
 
+/// Holds the first two writers to reach `session_graph_append.pre_commit`
+/// until both have arrived, so their head CAS attempts genuinely overlap.
+///
+/// `begin_named` is a synchronous callback on a tokio worker, so the rendezvous
+/// is a bounded watchdog rather than a `std::sync::Barrier`: a barrier has no
+/// timeout, and if both spawned appends were ever served by one worker the test
+/// would hang CI forever instead of failing. Overshooting the deadline is a real
+/// defect in the gate (the overlap it exists to prove did not happen), so it
+/// panics and turns the test red.
 struct AppendPreCommitBarrier {
-    barrier: std::sync::Barrier,
     arrivals: std::sync::atomic::AtomicUsize,
 }
 
 impl AppendPreCommitBarrier {
+    const OVERLAP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+    const OVERLAP_POLL: std::time::Duration = std::time::Duration::from_millis(1);
+
     fn new() -> Self {
         Self {
-            barrier: std::sync::Barrier::new(2),
             arrivals: std::sync::atomic::AtomicUsize::new(0),
         }
     }
@@ -398,13 +410,23 @@ impl lash::runtime::RuntimeTurnPhaseProbe for AppendPreCommitBarrier {
     fn end(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
 
     fn begin_named(&self, phase: &str) {
-        if phase == "session_graph_append.pre_commit"
-            && self
+        if phase != "session_graph_append.pre_commit"
+            || self
                 .arrivals
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                < 2
+                >= 2
         {
-            self.barrier.wait();
+            return;
+        }
+        let deadline = std::time::Instant::now() + Self::OVERLAP_DEADLINE;
+        while self.arrivals.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "only one writer reached session_graph_append.pre_commit within {:?}; the append \
+                 race never overlapped",
+                Self::OVERLAP_DEADLINE
+            );
+            std::thread::sleep(Self::OVERLAP_POLL);
         }
     }
 }
@@ -478,9 +500,21 @@ async fn two_live_writers_rebase_appends_into_durable_graph_order() {
     } else {
         right_result.expect_err("right writer loses the first CAS")
     };
+    // The loser must retain the *typed* conflict, not a rendered string: a host
+    // is told to refresh and retry from this outcome, and string matching cannot
+    // distinguish it from any other commit failure.
+    let lash::EmbedError::Session(lash::SessionError::Store {
+        source: lash::persistence::StoreError::HeadRevisionConflict { expected, actual },
+        ..
+    }) = &conflict
+    else {
+        panic!("the CAS loser must surface a typed HeadRevisionConflict, got {conflict:?}");
+    };
+    assert_eq!(*expected, 0);
+    assert_eq!(*actual, 1);
     assert_eq!(
         conflict.to_string(),
-        "runtime session error: protocol error: failed to persist runtime state: store head revision conflict: expected 0, actual 1"
+        "runtime session error: failed to persist runtime state: store head revision conflict: expected 0, actual 1"
     );
     let (loser, missing_text) = if left_lost {
         (left, "fig1133-concurrent-left")

@@ -440,7 +440,18 @@ multiset must equal durable truth exactly, with no row the graph does not have.
 
 **The concurrent-append outcome is the hard replacement gate.** Against the same idle
 session head, submit two uniquely marked graph appends concurrently and retain the typed
-result of each operation. Exactly one of these outcomes is acceptable:
+result of each operation.
+
+Know what the two writers *are* before scoring the outcome: one workbench process, one
+host owner identity, one boot incarnation — and **two runtime opens, so two distinct
+executor ids**. The session execution lease reenters only on an exact
+owner + incarnation + **executor** match, so tab 2's open is a foreign claimant and
+observes `Busy`. That is designed: `Busy` costs it the advisory lane, not the right to
+publish, because the head CAS is the sole publication authority (ADR 0029). So the
+executor distinction is exactly what makes the acceptable outcomes below reachable —
+if instead one open had *reentered* the other's live lane (identical triples), that is a
+runtime/store contract violation, not a pass. Exactly one of these outcomes is
+acceptable:
 
 - both appends return `Appended`, and a fresh store-backed graph read contains both markers
   exactly once on one active path in the order reported by their durable node ordinals; or
@@ -449,10 +460,12 @@ result of each operation. Exactly one of these outcomes is acceptable:
   durable graph contains the winner exactly once and contains no node or projection fragment
   from the loser.
 
-`Ok` without both durable markers, an untyped string error, a busy-lease refusal, reversed
+`Ok` without both durable markers, an untyped string error, a busy-lease refusal (the
+second executor observing `Busy` must not turn into a refusal to append), reversed
 durable ordering, a lost winner, or any partial loser state is a **FAIL**. Save both typed
-results, the active-path node ids/ordinals, and marker counts in
-`06-concurrent-append.json`. This assertion is intentionally stronger than "no error
+results, the active-path node ids/ordinals, marker counts, and each writer's
+`owner_id`/`incarnation_id`/`executor_id` in `06-concurrent-append.json` — the two
+executor ids must differ and the two owner/incarnation pairs must match. This assertion is intentionally stronger than "no error
 occurred": removing either append from the probe must make the marker/count gate fail.
 
 If the head CAS rejects one turn in the API race, require that rejection to be *visible*:

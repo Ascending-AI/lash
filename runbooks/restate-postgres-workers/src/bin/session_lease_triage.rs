@@ -599,7 +599,7 @@ async fn lease_takeover(
     // through the store, so there is no guard and no renewal loop behind it.
     let store = backend.store(&session_id).await?;
     let abandoned = store
-        .try_claim_session_execution_lease(&session_id, &abandoned_by, 0)
+        .try_claim_session_execution_lease(&session_id, &abandoned_by, "lease-takeover-executor", 0)
         .await
         .map_err(anyhow::Error::msg)
         .context("seed the abandoned lane")?

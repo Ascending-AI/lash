@@ -13,7 +13,12 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let stale_owner = owner(0);
     let stale_lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &stale_owner, 60_000)
+        .try_claim_session_execution_lease(
+            SESSION_ID,
+            &stale_owner,
+            "law-stale-settlement-cannot-damage-successor-executor",
+            60_000,
+        )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -35,7 +40,12 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let successor_owner = owner(1);
     let successor_lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &successor_owner, 60_000)
+        .try_claim_session_execution_lease(
+            SESSION_ID,
+            &successor_owner,
+            "law-stale-settlement-cannot-damage-successor-executor-2",
+            60_000,
+        )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -130,7 +140,12 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
     prop_assert!(
         matches!(
             store
-                .try_claim_session_execution_lease(SESSION_ID, &third_owner, 60_000)
+                .try_claim_session_execution_lease(
+                    SESSION_ID,
+                    &third_owner,
+                    "law-stale-settlement-cannot-damage-successor-executor-3",
+                    60_000,
+                )
                 .await
                 .map_err(|error| TestCaseError::fail(error.to_string()))?,
             SessionExecutionLeaseClaimOutcome::Busy { .. }

@@ -50,7 +50,12 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
     let store = Arc::new(InMemorySessionStore::default());
     let owner = crate::LeaseOwnerIdentity::opaque("parent-owner", "parent-incarnation");
     let _lease = store
-        .try_claim_session_execution_lease(PARENT_SESSION_ID, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            PARENT_SESSION_ID,
+            &owner,
+            "parent-bound-session-store-executor",
+            60_000,
+        )
         .await
         .expect("claim parent session lease")
         .acquired()

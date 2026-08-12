@@ -26,15 +26,17 @@ use lash_core::runtime::{
 use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
-    ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity, PendingTurnInputDraft,
+    ForkSessionRequest, HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity,
+    PendingTurnInputDraft,
     PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
     ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit, RuntimePersistence,
     RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta,
     SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
+    SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage,
+    ToolState,
     TriggerOwnerScope, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress,
     TurnInputState, facade_support::InMemorySessionStore,
-    facade_support::InMemorySessionStoreFactory,
+    facade_support::InMemorySessionStoreFactory, facade_support::MergeKey,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -1143,8 +1145,8 @@ async fn read_sqlite_durable_state(
                 let liveness_json = row.get::<_, Option<String>>(2)?;
                 Ok(SessionExecutionLeaseObservation {
                     owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
-                    executor_id_present: row.get::<_, Option<String>>(3)?.is_some(),
-                    lease_token_present: row.get::<_, Option<String>>(4)?.is_some(),
+                    executor_id: row.get::<_, Option<String>>(3)?,
+                    lease_token: row.get::<_, Option<String>>(4)?,
                     fencing_token: row.get::<_, i64>(5)? as u64,
                     claimed: row.get::<_, i64>(6)? != 0,
                     ttl_ms: {
@@ -1581,11 +1583,21 @@ impl BackendRunner {
                 .map(|_| None),
             StoreOperation::AcquireSessionLease { slot, owner } => {
                 let owner = LeaseOwnerIdentity::opaque(*owner, format!("{owner}:incarnation"));
+                // The executor and the claim nonce are caller-supplied bytes, so
+                // every backend must persist and return exactly these. Deriving
+                // them from the generated operation keeps them identical across
+                // the compared backends while staying distinct per slot, so a
+                // live holder is still observed as Busy rather than reentered.
+                let executor_id = format!("{}:{slot:?}-executor", owner.owner_id);
+                let claim_nonce =
+                    LeaseClaimNonce::for_testing(format!("{}:{slot:?}-token", owner.owner_id));
                 let lease = self
                     .store()
-                    .try_claim_session_execution_lease(
+                    .try_claim_session_execution_lease_with_token(
                         &self.session_id,
                         &owner,
+                        &executor_id,
+                        &claim_nonce,
                         SESSION_LEASE_TTL_MS,
                     )
                     .await?

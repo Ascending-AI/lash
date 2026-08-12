@@ -606,7 +606,12 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
     let store = Arc::new(storage.session_store(session_id));
     let owner = lash_core::LeaseOwnerIdentity::opaque("renewal-owner", "renewal-incarnation");
     let predecessor = store
-        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "postgres-claim-and-renewal-share-session-advisory-lock-ordering-executor",
+            120_000,
+        )
         .await
         .expect("claim renewal predecessor")
         .acquired()
@@ -1083,7 +1088,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("enqueue original wake");
     let owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
     let lease = match store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "postgres-wake-enqueue-serializes-with-consumption-when-configured-executor",
+            60_000,
+        )
         .await
         .expect("claim target session")
     {
@@ -1276,7 +1286,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("enqueue second sequence after source lock release");
     let second_owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
     let second_lease = store
-        .try_claim_session_execution_lease(session_id, &second_owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &second_owner,
+            "postgres-wake-enqueue-serializes-with-consumption-when-configured-executor-2",
+            60_000,
+        )
         .await
         .expect("claim target for second sequence")
         .acquired()
@@ -1472,7 +1487,12 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("record turn-owned intent");
     let owner = lash_core::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
     let lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            SESSION_ID,
+            &owner,
+            "postgres-turn-commit-stamps-use-injected-store-clock-when-configured-executor",
+            60_000,
+        )
         .await
         .expect("claim clock test lease")
         .acquired()

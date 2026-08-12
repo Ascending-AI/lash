@@ -1266,18 +1266,26 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// logged is guaranteed to happen. A claim that displaced nobody, including
     /// exact owner/incarnation/executor reentry and a reclaim of a released row,
     /// reports `None`.
+    /// `executor_id` is the caller's own runtime-open discriminator and must be
+    /// supplied: it is identity, and a default that minted one per call would
+    /// make reentry unreachable through this method while silently changing the
+    /// claimant on every retry. Only the claim nonce - a per-attempt
+    /// capability, not identity - is minted here, so a caller that needs one
+    /// nonce across an ambiguous-outcome retry uses
+    /// [`try_claim_session_execution_lease_with_token`](Self::try_claim_session_execution_lease_with_token)
+    /// directly.
     async fn try_claim_session_execution_lease(
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        executor_id: &str,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let claim_nonce = LeaseClaimNonce::new();
-        let executor_id = uuid::Uuid::new_v4().to_string();
         self.try_claim_session_execution_lease_with_token(
             session_id,
             owner,
-            &executor_id,
+            executor_id,
             &claim_nonce,
             lease_ttl_ms,
         )

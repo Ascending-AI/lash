@@ -67,7 +67,12 @@ async fn seed_and_claim(
         .expect("seed store-recovery queued work");
     let lease_owner = owner(format!("{source}:owner-a"));
     let lease = store
-        .try_claim_session_execution_lease(session_id, &lease_owner, recovery_timings().ttl_ms())
+        .try_claim_session_execution_lease(
+            session_id,
+            &lease_owner,
+            "seed-and-claim-executor",
+            recovery_timings().ttl_ms(),
+        )
         .await
         .expect("claim store-recovery session lease")
         .acquired()
@@ -104,6 +109,7 @@ where
                 .try_claim_session_execution_lease(
                     session_id,
                     &successor,
+                    "acquire-successor-executor",
                     recovery_timings().ttl_ms(),
                 )
                 .await
