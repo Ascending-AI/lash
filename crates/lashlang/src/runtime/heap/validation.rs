@@ -91,6 +91,78 @@ impl Owner<'_> {
 }
 
 impl Heap {
+    /// The deepest value any root can materialize into.
+    ///
+    /// The MessagePack structure guard cannot see this for the heap form: an
+    /// object's members are scalars or references, so a chain of a thousand
+    /// objects is a flat wire that materializes into a thousand-deep tree. The
+    /// depth that matters is the chain of objects, and it is what decides
+    /// whether exporting the value can be done at all.
+    ///
+    /// Computed without recursion, so measuring a wire that is too deep cannot
+    /// itself overflow the stack.
+    pub(crate) fn max_value_depth(&self, roots: &PersistedRoots<'_>) -> usize {
+        let mut object_depth = BTreeMap::<HeapId, usize>::new();
+        for start in self.id_to_slot.keys().copied() {
+            if object_depth.contains_key(&start) {
+                continue;
+            }
+            let mut stack = vec![(start, false)];
+            while let Some((id, children_done)) = stack.pop() {
+                if object_depth.contains_key(&id) {
+                    continue;
+                }
+                let Ok(object) = self.get(id) else {
+                    continue;
+                };
+                let children = object.child_refs();
+                if children_done {
+                    let deepest = children
+                        .iter()
+                        .filter_map(|child| object_depth.get(child).copied())
+                        .max()
+                        .unwrap_or(0);
+                    object_depth.insert(id, deepest + 1);
+                    continue;
+                }
+                stack.push((id, true));
+                for child in children {
+                    if !object_depth.contains_key(&child) {
+                        stack.push((child, false));
+                    }
+                }
+            }
+        }
+
+        let mut deepest = 0;
+        for value in roots
+            .durable
+            .iter()
+            .map(|(_, value)| *value)
+            .chain(roots.transient.iter().copied())
+        {
+            let mut pending = vec![(value, 1_usize)];
+            while let Some((value, depth)) = pending.pop() {
+                match value {
+                    Value::Ref(id) => {
+                        let chain = object_depth.get(id).copied().unwrap_or(0);
+                        deepest = deepest.max(depth.saturating_add(chain).saturating_sub(1));
+                    }
+                    Value::Tuple(values) | Value::List(values) => {
+                        deepest = deepest.max(depth);
+                        pending.extend(values.iter().map(|value| (value, depth + 1)));
+                    }
+                    Value::Record(record) => {
+                        deepest = deepest.max(depth);
+                        pending.extend(record.values().map(|value| (value, depth + 1)));
+                    }
+                    _ => deepest = deepest.max(depth),
+                }
+            }
+        }
+        deepest
+    }
+
     /// Checks that the persisted heap is a forest of exclusively owned trees.
     ///
     /// This is the one validator for the round-3 invariant, and it runs in

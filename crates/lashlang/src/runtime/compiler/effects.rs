@@ -48,9 +48,7 @@ impl Compiler {
             Expr::SleepUntil(_) => self.lashlang_execution_site(expr, "sleep", "sleep until"),
             Expr::WaitSignal { .. } => self.lashlang_execution_site(expr, "wait", "wait_signal"),
             Expr::SignalRun { .. } => self.lashlang_execution_site(expr, "signal", "signal_run"),
-            Expr::Finish(_) => {
-                self.lashlang_execution_site(expr, "terminal", "result")
-            }
+            Expr::Finish(_) => self.lashlang_execution_site(expr, "terminal", "result"),
             Expr::Fail(_) => self.lashlang_execution_site(expr, "terminal", "failure"),
             Expr::Yield(_) => self.lashlang_execution_site(expr, "process_event", "yield"),
             Expr::Wake(_) => self.lashlang_execution_site(expr, "process_event", "wake"),
@@ -223,8 +221,7 @@ impl Compiler {
 
         let mut leaves = Vec::with_capacity(leaf_count);
         let mut stack_value_count = 0;
-        let shape =
-            self.compile_aggregate_await_shape(handle, &mut leaves, &mut stack_value_count);
+        let shape = self.compile_aggregate_await_shape(handle, &mut leaves, &mut stack_value_count);
         let batch = self.push_resource_operation_batch(CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
             shape,
@@ -280,9 +277,7 @@ impl Compiler {
             Expr::Tuple(items) => {
                 let values = items
                     .iter()
-                    .map(|item| {
-                        self.compile_aggregate_await_shape(item, leaves, stack_value_count)
-                    })
+                    .map(|item| self.compile_aggregate_await_shape(item, leaves, stack_value_count))
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 CompiledAggregateAwaitShape::Tuple(values)
@@ -290,9 +285,7 @@ impl Compiler {
             Expr::List(items) => {
                 let values = items
                     .iter()
-                    .map(|item| {
-                        self.compile_aggregate_await_shape(item, leaves, stack_value_count)
-                    })
+                    .map(|item| self.compile_aggregate_await_shape(item, leaves, stack_value_count))
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 CompiledAggregateAwaitShape::List(values)

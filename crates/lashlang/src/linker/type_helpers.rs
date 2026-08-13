@@ -47,10 +47,8 @@ impl Scope {
             .cloned()
             .collect::<BTreeSet<_>>();
         for name in names {
-            let binding = join_optional_bindings(
-                left.bindings.get(&name),
-                right.bindings.get(&name),
-            );
+            let binding =
+                join_optional_bindings(left.bindings.get(&name), right.bindings.get(&name));
             self.bindings.insert(name, binding);
         }
     }
@@ -78,7 +76,6 @@ impl Scope {
         self.bind(target.root.as_str(), updated);
         Ok(())
     }
-
 }
 
 struct Completion {
@@ -129,9 +126,7 @@ fn update_binding_path(
     let Binding::Value(ty) = binding else {
         return Ok(binding);
     };
-    Ok(Binding::Value(update_type_path(
-        ty, steps, value_ty, span,
-    )?))
+    Ok(Binding::Value(update_type_path(ty, steps, value_ty, span)?))
 }
 
 fn update_type_path(
@@ -183,10 +178,12 @@ fn update_type_path(
             if updated {
                 Ok(union_type(items))
             } else {
-                Err(missing_error.unwrap_or_else(|| LinkError::UnknownObjectField {
-                    field: field.to_string(),
-                    span,
-                }))
+                Err(
+                    missing_error.unwrap_or_else(|| LinkError::UnknownObjectField {
+                        field: field.to_string(),
+                        span,
+                    }),
+                )
             }
         }
         (TypeExpr::Union(items), _) => Ok(union_type(
@@ -386,10 +383,8 @@ fn builtin_return_type(name: &str) -> TypeExpr {
         "to_float" => TypeExpr::Float,
         "to_string" | "trim" | "join" | "replace" | "lower" | "upper" => TypeExpr::Str,
         "sum" => TypeExpr::Float,
-        "keys" | "values" | "split" | "grep_text" | "range" | "push" | "sort"
-        | "sort_by" | "unique" | "reverse" => {
-            TypeExpr::List(Box::new(TypeExpr::Any))
-        }
+        "keys" | "values" | "split" | "grep_text" | "range" | "push" | "sort" | "sort_by"
+        | "unique" | "reverse" => TypeExpr::List(Box::new(TypeExpr::Any)),
         "json_parse" | "validate" | "format" => TypeExpr::Any,
         _ => TypeExpr::Any,
     }
@@ -452,7 +447,10 @@ fn shaping_comparable_type(ty: &TypeExpr) -> bool {
         | TypeExpr::Null
         | TypeExpr::Enum(_) => true,
         TypeExpr::Union(items) => {
-            let categories = items.iter().map(shaping_comparable_category).collect::<Vec<_>>();
+            let categories = items
+                .iter()
+                .map(shaping_comparable_category)
+                .collect::<Vec<_>>();
             categories.iter().all(Option::is_some)
                 && categories.windows(2).all(|pair| pair[0] == pair[1])
         }
@@ -512,11 +510,7 @@ fn binary_op_source(op: crate::ast::BinaryOp) -> &'static str {
     }
 }
 
-fn binary_operands_compatible(
-    op: crate::ast::BinaryOp,
-    left: &TypeExpr,
-    right: &TypeExpr,
-) -> bool {
+fn binary_operands_compatible(op: crate::ast::BinaryOp, left: &TypeExpr, right: &TypeExpr) -> bool {
     if type_is_gradual(left) || type_is_gradual(right) {
         return true;
     }
@@ -527,9 +521,7 @@ fn binary_operands_compatible(
         crate::ast::BinaryOp::Subtract
         | crate::ast::BinaryOp::Multiply
         | crate::ast::BinaryOp::Divide
-        | crate::ast::BinaryOp::Modulo => {
-            type_is_scalar(left) && type_is_scalar(right)
-        }
+        | crate::ast::BinaryOp::Modulo => type_is_scalar(left) && type_is_scalar(right),
         crate::ast::BinaryOp::Add => {
             (type_is_scalar(left) && type_is_scalar(right))
                 || matches!((left, right), (TypeExpr::List(_), TypeExpr::List(_)))
@@ -540,9 +532,7 @@ fn binary_operands_compatible(
         crate::ast::BinaryOp::Less
         | crate::ast::BinaryOp::LessEqual
         | crate::ast::BinaryOp::Greater
-        | crate::ast::BinaryOp::GreaterEqual => {
-            type_is_scalar(left) && type_is_scalar(right)
-        }
+        | crate::ast::BinaryOp::GreaterEqual => type_is_scalar(left) && type_is_scalar(right),
         crate::ast::BinaryOp::In => false,
     }
 }
@@ -552,7 +542,11 @@ fn equality_operands_compatible(left: &TypeExpr, right: &TypeExpr) -> bool {
         (TypeExpr::Union(items), other) | (other, TypeExpr::Union(items)) => items
             .iter()
             .any(|item| equality_operands_compatible(item, other)),
-        _ => type_is_gradual(left) || type_is_gradual(right) || type_category(left) == type_category(right),
+        _ => {
+            type_is_gradual(left)
+                || type_is_gradual(right)
+                || type_category(left) == type_category(right)
+        }
     }
 }
 

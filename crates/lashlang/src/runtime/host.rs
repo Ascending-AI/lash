@@ -143,6 +143,22 @@ impl ExecutionBound<std::num::NonZeroU64> {
             None => panic!("instruction budget must be non-zero"),
         }
     }
+
+    /// Construct a finite logical-memory bound in bytes.
+    ///
+    /// The same nonzero representation carries instruction counts and byte
+    /// counts; naming both constructors keeps a byte limit from being spelled
+    /// as an instruction budget at the call site.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `bytes` is zero.
+    pub const fn logical_bytes(bytes: u64) -> Self {
+        match std::num::NonZeroU64::new(bytes) {
+            Some(bytes) => Self::Bounded(bytes),
+            None => panic!("logical memory limit must be non-zero"),
+        }
+    }
 }
 
 impl ExecutionBound<Duration> {

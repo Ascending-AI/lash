@@ -48,9 +48,12 @@ bytes plus its deterministic scalar payload; records additionally cost 8 bytes
 plus UTF-8 key bytes per field. References cost 8 payload bytes. Allocation
 charges the complete object and mark-sweep collection subtracts swept objects.
 The non-moving collector runs every 1,024 allocations, based only on the
-monotonic allocation counter, and additionally at a park boundary. Test hosts
-can collect after every allocation to prove that collection timing does not
-change a program's result.
+monotonic allocation counter, and additionally wherever a boundary needs the
+live set exactly: at a park, when a snapshot is captured, and when a batch of
+global patches commits. Test hosts can collect after every allocation to prove
+that collection timing does not change a program's result; every instruction
+runs inside an allocation scope so that stress mode never collects against an
+empty root set.
 
 The memory limit bounds live plus not-yet-collected bytes, so it is the one
 place where collection timing is observable: a run that parks collects earlier

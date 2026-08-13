@@ -243,10 +243,7 @@ impl LashlangHostEnvironment {
         }
     }
 
-    pub fn with_globals(
-        mut self,
-        globals: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
+    pub fn with_globals(mut self, globals: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.globals.extend(globals.into_iter().map(Into::into));
         self
     }

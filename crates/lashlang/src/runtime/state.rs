@@ -330,19 +330,6 @@ struct CanonicalHeap {
     objects: Vec<CanonicalHeapEntry>,
 }
 
-impl Default for CanonicalHeap {
-    fn default() -> Self {
-        Self {
-            next_id: 1,
-            allocation_counter: 0,
-            live_logical_bytes: 0,
-            size_schedule_version: HEAP_SIZE_SCHEDULE_VERSION,
-            roots: Vec::new(),
-            objects: Vec::new(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CanonicalHeapEntry {
     id: HeapId,
@@ -520,6 +507,16 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                 forest_roots.durable_all(runtime_globals.iter());
                 heap.validate_persisted_forest(&forest_roots)
                     .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                // The heap form's depth lives in its chain of objects, not in
+                // its MessagePack nesting, so the structural guard cannot see
+                // it. Checking here — before anything materializes a root —
+                // means an over-deep wire is refused rather than overflowing
+                // the stack of whatever tries to read it.
+                if heap.max_value_depth(&forest_roots) > MAX_SNAPSHOT_VALUE_DEPTH {
+                    return Err(SnapshotDecodeError::ValueDepthLimitExceeded {
+                        limit: MAX_SNAPSHOT_VALUE_DEPTH,
+                    });
+                }
                 drop(forest_roots);
                 let globals = runtime_globals
                     .iter()
@@ -699,6 +696,9 @@ fn validate_snapshot_globals(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
     skip_messagepack_value(bytes, &mut cursor)?;
     let representation = take_canonical_string(bytes, &mut cursor, "snapshot")?;
     if representation == "heap" {
+        // The heap form carries its values as a flat object table, so the
+        // value-depth bound is enforced against the object graph after decode
+        // rather than against the wire's nesting here.
         return Ok(());
     }
     if representation != "globals" {

@@ -51,7 +51,11 @@ async fn find_instruction_continuation(
     panic!("no instruction boundary matched the requested live state")
 }
 
-fn slot_number(program: &CompiledProgram, continuation: &VmContinuation, name: &str) -> Option<f64> {
+fn slot_number(
+    program: &CompiledProgram,
+    continuation: &VmContinuation,
+    name: &str,
+) -> Option<f64> {
     let index = program
         .chunk
         .slot_names
@@ -86,7 +90,10 @@ async fn continuation_resumes_jump_based_while_with_accumulator() {
     })
     .await;
 
-    assert_eq!(round_trip_and_resume(&program, continuation).await, expected);
+    assert_eq!(
+        round_trip_and_resume(&program, continuation).await,
+        expected
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -113,7 +120,10 @@ async fn continuation_resumes_for_iterator_at_saved_cursor() {
     })
     .await;
 
-    assert_eq!(round_trip_and_resume(&program, continuation).await, expected);
+    assert_eq!(
+        round_trip_and_resume(&program, continuation).await,
+        expected
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -140,7 +150,10 @@ async fn continuation_resumes_nested_inner_iterator() {
     })
     .await;
 
-    assert_eq!(round_trip_and_resume(&program, continuation).await, expected);
+    assert_eq!(
+        round_trip_and_resume(&program, continuation).await,
+        expected
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -162,7 +175,10 @@ async fn continuation_suspends_at_quiescent_post_effect_point() {
     );
     let continuation = vm.suspend().expect("post-effect state should capture");
 
-    assert_eq!(round_trip_and_resume(&program, continuation).await, expected);
+    assert_eq!(
+        round_trip_and_resume(&program, continuation).await,
+        expected
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -277,7 +293,10 @@ async fn continuation_preserves_record_insertion_order() {
     else {
         panic!("ordered slot must contain a record");
     };
-    assert_eq!(record.keys().collect::<Vec<_>>(), ["zebra", "alpha", "middle"]);
+    assert_eq!(
+        record.keys().collect::<Vec<_>>(),
+        ["zebra", "alpha", "middle"]
+    );
 }
 
 #[test]
@@ -368,12 +387,7 @@ fn continuation_declines_projected_host_state_with_typed_error() {
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
     let slots = SlotState::from_globals(Record::new(), &program.chunk.slot_names, &projected);
     let host = Host;
-    let mut vm = Vm::new_with_mode(
-        &program.chunk,
-        slots,
-        &host,
-        ExecutionMode::Foreground,
-    );
+    let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
 
     assert_eq!(
         vm.suspend(),
@@ -418,11 +432,7 @@ async fn run_with_segment_budget(
             .expect("segmented execution should succeed")
         {
             VmRunOutcome::Complete(output) => {
-                return (
-                    output,
-                    host.effects.lock_recover().clone(),
-                    boundaries,
-                );
+                return (output, host.effects.lock_recover().clone(), boundaries);
             }
             VmRunOutcome::EffectCompleted => {
                 effects_in_segment += 1;
@@ -458,7 +468,10 @@ async fn segmented_multi_effect_run_preserves_result_and_observable_effects() {
 
     assert_eq!(segmented.0, unsegmented.0);
     assert_eq!(segmented.1, unsegmented.1);
-    assert!(segmented.2 >= 1, "the run must cross a non-terminal boundary");
+    assert!(
+        segmented.2 >= 1,
+        "the run must cross a non-terminal boundary"
+    );
     assert_eq!(unsegmented.2, 0, "the default path must not segment");
 }
 
@@ -481,15 +494,22 @@ async fn requested_boundary_at_non_capturable_point_is_safely_skipped() {
     let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Process);
 
     assert_eq!(
-        vm.run_process_until_effect().await.expect("effect should succeed"),
+        vm.run_process_until_effect()
+            .await
+            .expect("effect should succeed"),
         VmRunOutcome::EffectCompleted
     );
     assert!(matches!(
         vm.suspend(),
-        Err(ContinuationError::UnserializableValue { variant: "Projected", .. })
+        Err(ContinuationError::UnserializableValue {
+            variant: "Projected",
+            ..
+        })
     ));
     assert_eq!(
-        vm.run_process_until_effect().await.expect("skip should continue"),
+        vm.run_process_until_effect()
+            .await
+            .expect("skip should continue"),
         VmRunOutcome::Complete(ExecutionOutcome::Finished(Value::Number(3.0)))
     );
 }
@@ -581,8 +601,7 @@ impl DynamicMemoryHost {
     }
 
     fn set_limit(&self, limit: u64) {
-        self.limit
-            .store(limit, std::sync::atomic::Ordering::SeqCst);
+        self.limit.store(limit, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -596,7 +615,7 @@ impl ExecutionHost for DynamicMemoryHost {
         ExecutionBounds::unbounded().with_memory_limit(if limit == u64::MAX {
             ExecutionBound::Unbounded
         } else {
-            ExecutionBound::instructions(limit)
+            ExecutionBound::logical_bytes(limit)
         })
     }
 }
@@ -641,12 +660,15 @@ async fn logical_memory_exhaustion_is_an_uncatchable_typed_terminal() {
         .expect("memory-bound program should compile");
     let host = HeapConformanceHost {
         stress_gc: false,
-        memory_limit: ExecutionBound::instructions(32),
+        memory_limit: ExecutionBound::logical_bytes(32),
     };
     let error = execute_compiled(&program, &mut State::new(), &host)
         .await
         .expect_err("logical heap limit should terminate execution");
-    assert!(matches!(error, RuntimeError::MemoryLimitExceeded { limit: 32, .. }));
+    assert!(matches!(
+        error,
+        RuntimeError::MemoryLimitExceeded { limit: 32, .. }
+    ));
     assert!(error.is_execution_bound_exhausted());
 }
 
@@ -670,7 +692,7 @@ async fn failed_heapification_preserves_compound_state_transactionally() {
         .expect("path update should compile");
     let host = HeapConformanceHost {
         stress_gc: false,
-        memory_limit: ExecutionBound::instructions(1),
+        memory_limit: ExecutionBound::logical_bytes(1),
     };
 
     assert!(matches!(
@@ -694,9 +716,8 @@ async fn failed_heapification_preserves_compound_state_transactionally() {
 #[tokio::test(flavor = "current_thread")]
 async fn indexed_add_exact_limit_succeeds_and_one_byte_over_preserves_state() {
     let setup = compile_source("counts = {}").expect("setup should compile");
-    let update =
-        compile_source("key = \"a-long-new-key\"\ncounts[key] = counts[key] + 1")
-            .expect("indexed add should compile");
+    let update = compile_source("key = \"a-long-new-key\"\ncounts[key] = counts[key] + 1")
+        .expect("indexed add should compile");
     let empty_record_bytes = HeapObject::Record(Box::default()).logical_bytes();
     let mut grown = Record::new();
     grown.insert("a-long-new-key".to_string(), Value::Number(1.0));
@@ -713,7 +734,7 @@ async fn indexed_add_exact_limit_succeeds_and_one_byte_over_preserves_state() {
         .expect("seed exact-limit state");
     let exact_host = HeapConformanceHost {
         stress_gc: false,
-        memory_limit: ExecutionBound::instructions(exact_limit),
+        memory_limit: ExecutionBound::logical_bytes(exact_limit),
     };
     let exact_result = execute_compiled(&update, &mut exact, &exact_host).await;
     assert!(exact_result.is_ok(), "exact limit result: {exact_result:?}");
@@ -724,7 +745,7 @@ async fn indexed_add_exact_limit_succeeds_and_one_byte_over_preserves_state() {
         .expect("seed one-byte-over state");
     let over_host = HeapConformanceHost {
         stress_gc: false,
-        memory_limit: ExecutionBound::instructions(exact_limit - 1),
+        memory_limit: ExecutionBound::logical_bytes(exact_limit - 1),
     };
     assert!(matches!(
         execute_compiled(&update, &mut over, &over_host).await,
@@ -812,7 +833,10 @@ async fn continuation_dump_round_trip_is_byte_identical_and_preserves_heap_meter
         restored.heap.allocation_counter(),
         before.heap.allocation_counter()
     );
-    assert_eq!(restored.heap.live_logical_bytes(), before.heap.live_logical_bytes());
+    assert_eq!(
+        restored.heap.live_logical_bytes(),
+        before.heap.live_logical_bytes()
+    );
     assert_eq!(
         restored.heap.size_schedule_version(),
         HEAP_SIZE_SCHEDULE_VERSION
@@ -820,13 +844,19 @@ async fn continuation_dump_round_trip_is_byte_identical_and_preserves_heap_meter
 
     let prior_allocations = restored.heap.allocation_counter();
     let prior_instructions = restored.instructions_executed;
-    let mut resumed = Vm::resume_from(restored, &program, &host).expect("continuation should resume");
+    let mut resumed =
+        Vm::resume_from(restored, &program, &host).expect("continuation should resume");
     resumed.suspend_after_instructions(prior_instructions as usize + 25);
     assert_eq!(
-        resumed.run_for_mode().await.expect("resumed run should suspend"),
+        resumed
+            .run_for_mode()
+            .await
+            .expect("resumed run should suspend"),
         ExecutionOutcome::Continued
     );
-    let after = resumed.suspend().expect("second continuation should capture");
+    let after = resumed
+        .suspend()
+        .expect("second continuation should capture");
     assert!(after.heap.allocation_counter() > prior_allocations);
 }
 
@@ -861,8 +891,8 @@ async fn determinism_process_probe() {
     assert!(continuation.heap.allocation_counter() > 1_024);
     assert!(continuation.heap.storage_slot_count() > 3);
     assert!(continuation.heap.vacant_slot_count() > 0);
-    let continuation = serde_json::to_vec(&continuation)
-        .expect("probe continuation should serialize");
+    let continuation =
+        serde_json::to_vec(&continuation).expect("probe continuation should serialize");
     let restored_continuation: VmContinuation =
         serde_json::from_slice(&continuation).expect("probe continuation should restore");
     assert_eq!(
@@ -892,7 +922,11 @@ async fn determinism_process_probe() {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>()
     };
-    println!("HEAP_DETERMINISM_DUMP={}|{}", hex(&snapshot), hex(&continuation));
+    println!(
+        "HEAP_DETERMINISM_DUMP={}|{}",
+        hex(&snapshot),
+        hex(&continuation)
+    );
 }
 
 #[test]
@@ -967,8 +1001,8 @@ async fn meter_persistence_process_probe() {
         );
         return;
     }
-    let encoded = std::env::var("LASHLANG_METER_CONTINUATION")
-        .expect("consumer continuation input");
+    let encoded =
+        std::env::var("LASHLANG_METER_CONTINUATION").expect("consumer continuation input");
     let continuation: VmContinuation = serde_json::from_slice(&decode_test_hex(&encoded))
         .expect("consumer should restore continuation");
     let old_allocations = continuation.heap.allocation_counter();

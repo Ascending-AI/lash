@@ -4,46 +4,43 @@
 
 impl<H: ExecutionHost> Vm<'_, H> {
     fn append_assign(&mut self, slot: usize) -> Result<(), RuntimeError> {
-
-            let item = self.pop_stack()?;
-            self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-            // `xs = xs + [item]` appends into the accumulator's own object.
-            // Every other holder of the old value already owns a separate
-            // copy, so the append is unobservable outside this binding.
-            let heap_target = match self.slots.get(slot) {
-                Some(Value::Ref(id))
-                    if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) =>
-                {
-                    Some(Value::Ref(*id))
-                }
-                _ => None,
-            };
-            if let Some(target) = heap_target {
-                let value = self.heap.push_list(&target, item)?;
-                self.record_assignment(slot);
-                self.last_value = Some(value);
-                return Ok(());
+        let item = self.pop_stack()?;
+        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+        // `xs = xs + [item]` appends into the accumulator's own object.
+        // Every other holder of the old value already owns a separate
+        // copy, so the append is unobservable outside this binding.
+        let heap_target = match self.slots.get(slot) {
+            Some(Value::Ref(id)) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
+                Some(Value::Ref(*id))
             }
-            self.materialize_mutable_slot(slot)?;
-            let slot_name = &self.chunk.slot_names[slot];
-            let current =
-                self.slots
-                    .get_mut(slot)
-                    .ok_or_else(|| RuntimeError::UndefinedVariable {
-                        name: slot_name.text.to_string(),
-                    })?;
-            let value = if let Value::List(items) = current {
-                let values = items.make_mut();
-                if values.len() == values.capacity() {
-                    values.reserve(1);
-                }
-                values.push(item);
-                Value::List(items.clone())
-            } else {
-                add_values(current.clone(), Value::List(vec![item].into()))?
-            };
+            _ => None,
+        };
+        if let Some(target) = heap_target {
+            let value = self.heap.push_list(&target, item)?;
             self.record_assignment(slot);
             self.last_value = Some(value);
+            return Ok(());
+        }
+        self.materialize_mutable_slot(slot)?;
+        let slot_name = &self.chunk.slot_names[slot];
+        let current = self
+            .slots
+            .get_mut(slot)
+            .ok_or_else(|| RuntimeError::UndefinedVariable {
+                name: slot_name.text.to_string(),
+            })?;
+        let value = if let Value::List(items) = current {
+            let values = items.make_mut();
+            if values.len() == values.capacity() {
+                values.reserve(1);
+            }
+            values.push(item);
+            Value::List(items.clone())
+        } else {
+            add_values(current.clone(), Value::List(vec![item].into()))?
+        };
+        self.record_assignment(slot);
+        self.last_value = Some(value);
         Ok(())
     }
 

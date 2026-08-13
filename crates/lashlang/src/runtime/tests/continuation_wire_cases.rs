@@ -40,10 +40,7 @@ fn authored_continuation_fixture_decodes_and_re_encodes_exactly() {
             .expect("the authored object should materialize"),
         Value::List(vec![Value::Number(1.0), Value::Bool(true)].into())
     );
-    assert_eq!(
-        continuation.globals.get("total"),
-        Some(&Value::Number(3.0))
-    );
+    assert_eq!(continuation.globals.get("total"), Some(&Value::Number(3.0)));
 
     let re_encoded =
         serde_json::to_string(&continuation).expect("decoded continuation should encode");
@@ -93,7 +90,10 @@ async fn accepted_continuation_wire_survives_resume_suspend_and_re_encode() {
     let mut resumed = Vm::resume_from(decoded, &program, &host).expect("park should resume");
     resumed.suspend_after_instructions(6);
     assert_eq!(
-        resumed.run_for_mode().await.expect("resume to a second park"),
+        resumed
+            .run_for_mode()
+            .await
+            .expect("resume to a second park"),
         ExecutionOutcome::Continued
     );
     let re_parked = resumed.suspend().expect("second park should capture");
@@ -137,7 +137,10 @@ async fn park_and_resume_is_invisible_to_a_straight_through_run() {
     let mut parked_vm = continuation_test_vm(&program, &host);
     parked_vm.suspend_after_instructions(120);
     assert_eq!(
-        parked_vm.run_for_mode().await.expect("run to the park point"),
+        parked_vm
+            .run_for_mode()
+            .await
+            .expect("run to the park point"),
         ExecutionOutcome::Continued
     );
     let continuation = parked_vm.suspend().expect("park should capture");
@@ -207,7 +210,10 @@ async fn park_and_resume_never_exhausts_memory_earlier_than_a_straight_through_r
     let mut parked_vm = continuation_test_vm_with_host(&program, &host);
     parked_vm.suspend_after_instructions(60);
     assert_eq!(
-        parked_vm.run_for_mode().await.expect("run to the park point"),
+        parked_vm
+            .run_for_mode()
+            .await
+            .expect("run to the park point"),
         ExecutionOutcome::Continued
     );
     let continuation = parked_vm.suspend().expect("park should capture");
@@ -315,7 +321,8 @@ async fn stress_collection_survives_a_slot_concat_and_a_loop_concat() {
         unstressed_result(slot_form).await.expect("baseline")
     );
 
-    let loop_form = "kept = [[7]]\nacc = []\nfor n in range(0, 6) { acc = acc + [[n]] }\nfinish [kept, acc]";
+    let loop_form =
+        "kept = [[7]]\nacc = []\nfor n in range(0, 6) { acc = acc + [[n]] }\nfinish [kept, acc]";
     assert_eq!(
         stress_collected_result(loop_form)
             .await
@@ -338,8 +345,8 @@ fn slots_wire(slots: &str, objects: &str, next_id: u64, counter: u64, bytes: u64
 }
 
 fn reject_continuation(wire: &str, expected: &str) {
-    let error = serde_json::from_str::<VmContinuation>(wire)
-        .expect_err("the wire must be rejected");
+    let error =
+        serde_json::from_str::<VmContinuation>(wire).expect_err("the wire must be rejected");
     assert!(
         error.to_string().contains(expected),
         "unexpected rejection: {error}"

@@ -304,7 +304,11 @@ jobs:
       - name: Check formatting
         run: |
           cargo fmt --all --check
-          # include!d files escape cargo fmt's module walk; list each one here.
+          # include!d files escape cargo fmt's module walk. The scoped scan
+          # finds every one under the scopes it covers, so a new include! is
+          # checked the moment it exists rather than when someone remembers to
+          # add it here.
+          python3 scripts/check_included_file_formatting.py
           rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs
 
       - name: Clippy (workspace, all targets)

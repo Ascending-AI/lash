@@ -694,6 +694,21 @@ impl Heap {
         }
     }
 
+    /// The live byte meter must equal the sum of what each object was charged.
+    ///
+    /// The meter is maintained incrementally — allocation adds, sweep
+    /// subtracts, an in-place mutation adjusts by a member delta — so it is one
+    /// arithmetic slip away from disagreeing with the objects it claims to
+    /// count, and that meter is what the memory bound enforces.
+    fn debug_assert_byte_accounting(&self) {
+        debug_assert_eq!(
+            self.live_logical_bytes,
+            self.slots.iter().flatten().fold(0_u64, |total, entry| total
+                .saturating_add(entry.logical_bytes)),
+            "live logical bytes must equal the sum of the charged object sizes"
+        );
+    }
+
     fn debug_assert_boundary_cache_invariant(&self) {
         debug_assert!(self.boundary_refs.iter().all(|(identity, id)| {
             self.materialized.contains_key(id)
@@ -931,6 +946,7 @@ impl Heap {
         entry.logical_bytes = entry.logical_bytes.saturating_add(added_bytes);
         self.live_logical_bytes = next_live;
         self.invalidate_materialized_reaching(*id);
+        self.debug_assert_byte_accounting();
         Ok(Value::Ref(*id))
     }
 
@@ -1096,6 +1112,7 @@ impl Heap {
         entry.logical_bytes = entry_bytes;
         self.live_logical_bytes = next_live;
         self.invalidate_materialized_reaching(*id);
+        self.debug_assert_byte_accounting();
         Ok(value)
     }
 
@@ -1216,6 +1233,7 @@ impl Heap {
             self.live_logical_bytes = self.live_logical_bytes.saturating_sub(entry.logical_bytes);
             self.free_slots.push(slot);
         }
+        self.debug_assert_byte_accounting();
         if self.allocations >= self.next_collection_at {
             self.next_collection_at = self
                 .allocations

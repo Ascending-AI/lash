@@ -553,10 +553,13 @@ fn canonical_snapshot_encodes_projected_values_without_materializing() {
 #[tokio::test(flavor = "current_thread")]
 async fn canonical_snapshot_restore_makes_projected_value_unavailable() {
     let snapshot = Snapshot::new(
-        [("match_text".to_string(), Value::Projected(ProjectedValue::custom(
-            "matches[0].text",
-            Arc::new(SnapshotGuardProjectedValue::default()),
-        )))]
+        [(
+            "match_text".to_string(),
+            Value::Projected(ProjectedValue::custom(
+                "matches[0].text",
+                Arc::new(SnapshotGuardProjectedValue::default()),
+            )),
+        )]
         .into_iter()
         .collect(),
     );
@@ -1124,18 +1127,12 @@ async fn image_values_are_immutable_and_len_is_unsupported() {
     let err = exec_with_global("img", test_image(), "img.label = \"other\"\nfinish img")
         .await
         .expect_err("image field assignment should fail");
-    assert_eq!(
-        err,
-        RuntimeError::ImmutableImageFields
-    );
+    assert_eq!(err, RuntimeError::ImmutableImageFields);
 
     let err = exec_with_global("img", test_image(), "finish len(img)")
         .await
         .expect_err("len image should fail");
-    assert_eq!(
-        err,
-        RuntimeError::LenUnsupported
-    );
+    assert_eq!(err, RuntimeError::LenUnsupported);
 }
 
 #[tokio::test(flavor = "current_thread")]

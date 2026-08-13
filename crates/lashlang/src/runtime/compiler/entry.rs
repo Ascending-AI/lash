@@ -196,10 +196,7 @@ impl Compiler {
         index
     }
 
-    fn push_resource_operation_batch(
-        &mut self,
-        batch: CompiledResourceOperationBatch,
-    ) -> usize {
+    fn push_resource_operation_batch(&mut self, batch: CompiledResourceOperationBatch) -> usize {
         let index = self.resource_operation_batches.len();
         self.resource_operation_batches.push(batch);
         index
@@ -866,5 +863,4 @@ impl Compiler {
             | Expr::Fail(_) => None,
         }
     }
-
 }

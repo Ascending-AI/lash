@@ -9,9 +9,7 @@ fn label_on_await_assignment_attaches_to_await_instruction() {
     )
     .expect("program should parse");
     let surface = runtime_test_environment()
-        .with_language_features(
-            crate::LashlangLanguageFeatures::default().with_label_annotations(),
-        )
+        .with_language_features(crate::LashlangLanguageFeatures::default().with_label_annotations())
         .with_globals(["handle"]);
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
     let compiled = crate::compile_linked(&linked);
@@ -267,9 +265,7 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
             match op {
                 AbilityOp::ResourceOperation(operation) => {
                     let value = Self::echo_value(&operation);
-                    self.events
-                        .lock_recover()
-                        .push(format!("single:{value}"));
+                    self.events.lock_recover().push(format!("single:{value}"));
                     Ok(AbilityResult::Value(value))
                 }
                 AbilityOp::ResourceOperationBatch(batch) => {
@@ -454,9 +450,7 @@ async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path(
         }
 
         fn observe_lashlang_execution(&self, observation: crate::LashlangExecutionObservation) {
-            self.observations
-                .lock_recover()
-                .push(observation);
+            self.observations.lock_recover().push(observation);
         }
     }
 
@@ -667,7 +661,10 @@ fn every_container_insertion_lowering_emits_value_isolation() {
     let isolated_paths = code
         .windows(2)
         .filter(|pair| {
-            matches!(pair, [Instruction::DeepCopy, Instruction::PathAssign { .. }])
+            matches!(
+                pair,
+                [Instruction::DeepCopy, Instruction::PathAssign { .. }]
+            )
         })
         .count();
     assert_eq!(
@@ -675,10 +672,8 @@ fn every_container_insertion_lowering_emits_value_isolation() {
         "plain and forced-effect paths must both copy:\n{listing}"
     );
     assert!(
-        code.windows(2).any(|pair| matches!(
-            pair,
-            [Instruction::DeepCopy, Instruction::ListAppend]
-        )),
+        code.windows(2)
+            .any(|pair| matches!(pair, [Instruction::DeepCopy, Instruction::ListAppend])),
         "comprehension accumulation must copy:\n{listing}"
     );
     assert!(
@@ -1001,10 +996,7 @@ async fn result_unwrap_reports_failed_and_malformed_wrappers() {
     let err = exec("finish { ok: true }?")
         .await
         .expect_err("missing value should fail");
-    assert_eq!(
-        err,
-        RuntimeError::ToolResultMissingValue
-    );
+    assert_eq!(err, RuntimeError::ToolResultMissingValue);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1536,10 +1528,7 @@ async fn validate_reports_precise_shape_errors() {
     let err = exec("finish validate({ name: \"pkg\" }, { type: \"object\" })")
         .await
         .expect_err("raw schema records should be rejected");
-    assert_eq!(
-        err,
-        RuntimeError::ValidateTypeLiteralRequired
-    );
+    assert_eq!(err, RuntimeError::ValidateTypeLiteralRequired);
 }
 
 #[tokio::test(flavor = "current_thread")]
