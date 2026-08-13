@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::HandlerScopeExtent;
 
 fn function_code_range(
     chunk: &Chunk,
@@ -63,6 +64,11 @@ pub(super) fn validate_program_continuation(
         }
     }
 
+    // The handler stack is a nesting structure, not a bag of records. Each
+    // entry has to name a scope the compiler actually emitted, and consecutive
+    // entries in one frame have to be a strictly nested chain of those scopes —
+    // the same treatment `InvalidReturnSite` gives frames.
+    let mut enclosing: Option<(usize, &HandlerScopeExtent)> = None;
     for (handler_index, handler) in continuation.handler_stack.iter().enumerate() {
         let (range, owner) = function_code_range(chunk, handler.frame_function)?;
         validate_exception_target(
@@ -79,6 +85,46 @@ pub(super) fn validate_program_continuation(
                 &owner,
             )?;
         }
+        let scope = chunk
+            .handler_scope(
+                handler.handler_instruction_pointer,
+                handler.finally_instruction_pointer,
+                handler.catches,
+            )
+            .ok_or(ContinuationError::HandlerScopeUnknown {
+                handler: handler_index,
+                handler_instruction_pointer: handler.handler_instruction_pointer,
+                finally_instruction_pointer: handler.finally_instruction_pointer,
+                catches: handler.catches,
+            })?;
+        if !range.contains(&scope.push_ip) {
+            return Err(ContinuationError::HandlerScopeUnknown {
+                handler: handler_index,
+                handler_instruction_pointer: handler.handler_instruction_pointer,
+                finally_instruction_pointer: handler.finally_instruction_pointer,
+                catches: handler.catches,
+            });
+        }
+        if let Some((outer_index, outer)) = enclosing
+            && continuation.handler_stack[outer_index].frame_depth == handler.frame_depth
+            && continuation.handler_stack[outer_index].frame_function == handler.frame_function
+        {
+            let reason = if scope.push_ip <= outer.push_ip {
+                Some("its scope does not open inside the enclosing scope")
+            } else if scope.end_ip > outer.end_ip {
+                Some("its scope outlives the enclosing scope")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(ContinuationError::HandlerNestingNotMonotonic {
+                    handler: handler_index,
+                    outer: outer_index,
+                    reason,
+                });
+            }
+        }
+        enclosing = Some((handler_index, scope));
     }
 
     for (finally_index, finally) in continuation.finally_stack.iter().enumerate() {

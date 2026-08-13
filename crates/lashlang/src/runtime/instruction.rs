@@ -33,7 +33,48 @@ pub(crate) struct Chunk {
     pub(crate) assign_paths: Vec<CompiledAssignPath>,
     pub(crate) resource_operation_batches: Vec<CompiledResourceOperationBatch>,
     pub(crate) functions: Vec<CompiledFunction>,
+    /// Every structured-exception scope the compiler emitted a `PushHandler`
+    /// for, sorted by handler target. It is what makes an impossible durable
+    /// handler stack unrepresentable: a restored handler must name one of
+    /// these scopes, and consecutive handlers in one frame must be a strictly
+    /// nested chain of them.
+    pub(crate) handler_scopes: Vec<HandlerScopeExtent>,
     pub(crate) root_code_len: usize,
+}
+
+/// The bytecode extent of one `try` scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HandlerScopeExtent {
+    /// The `PushHandler` that installs the scope.
+    pub(crate) push_ip: usize,
+    /// Where a throw transfers to: the catch entry, or the finally entry for a
+    /// cleanup-only scope.
+    pub(crate) handler_ip: usize,
+    /// The scope's `finally` entry, when it has one.
+    pub(crate) finally_ip: Option<usize>,
+    /// Whether the scope catches, as opposed to only running cleanup.
+    pub(crate) catches: bool,
+    /// One past the last instruction the scope protects.
+    pub(crate) end_ip: usize,
+}
+
+impl Chunk {
+    /// Looks up the scope a durable handler record names. The handler target is
+    /// the scope's identity: no two scopes share one, so a record that does not
+    /// match exactly names no scope the compiler emitted.
+    pub(crate) fn handler_scope(
+        &self,
+        handler_ip: usize,
+        finally_ip: Option<usize>,
+        catches: bool,
+    ) -> Option<&HandlerScopeExtent> {
+        let index = self
+            .handler_scopes
+            .binary_search_by_key(&handler_ip, |scope| scope.handler_ip)
+            .ok()?;
+        let scope = &self.handler_scopes[index];
+        (scope.finally_ip == finally_ip && scope.catches == catches).then_some(scope)
+    }
 }
 
 #[derive(Clone)]

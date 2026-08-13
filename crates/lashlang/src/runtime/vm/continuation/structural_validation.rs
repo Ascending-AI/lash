@@ -211,6 +211,49 @@ pub(super) fn validate_continuation(
             });
         }
     }
+    // Ordering carries semantics the VM trusts absolutely, so the parts of it
+    // that need no compiled program are checked here: a handler stack unwinds
+    // outwards, never inwards.
+    for index in 1..continuation.handler_stack.len() {
+        let outer = &continuation.handler_stack[index - 1];
+        let inner = &continuation.handler_stack[index];
+        let reason = if inner.frame_depth < outer.frame_depth {
+            Some("its frame is shallower than the enclosing handler's")
+        } else if inner.frame_depth == outer.frame_depth
+            && inner.frame_function == outer.frame_function
+            && (inner.operand_stack_depth < outer.operand_stack_depth
+                || inner.iterator_stack_depth < outer.iterator_stack_depth)
+        {
+            Some("it restores to a shallower depth than the enclosing handler")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Err(ContinuationError::HandlerNestingNotMonotonic {
+                handler: index,
+                outer: index - 1,
+                reason,
+            });
+        }
+    }
+    for index in 1..continuation.finally_stack.len() {
+        let outer = &continuation.finally_stack[index - 1];
+        let inner = &continuation.finally_stack[index];
+        let reason = if inner.handler_stack_depth < outer.handler_stack_depth {
+            Some("it claims fewer handlers than the enclosing finally")
+        } else if inner.frame_depth < outer.frame_depth {
+            Some("its frame is shallower than the enclosing finally's")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Err(ContinuationError::FinallyNestingNotMonotonic {
+                finally: index,
+                outer: index - 1,
+                reason,
+            });
+        }
+    }
     for (index, finally) in continuation.finally_stack.iter().enumerate() {
         let Some((owner_function, _)) = continuation_frame_owner(continuation, finally.frame_depth)
         else {

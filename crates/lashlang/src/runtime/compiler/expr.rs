@@ -539,15 +539,23 @@ impl Compiler {
         }
         let end_ip = self.code.len();
 
+        let handler_ip = if scope.catch.is_some() {
+            catch_ip
+        } else {
+            finally_ip
+        };
         self.code[handler_push] = Instruction::PushHandler {
-            handler: if scope.catch.is_some() {
-                catch_ip
-            } else {
-                finally_ip
-            },
+            handler: handler_ip,
             finally: scope.finally.as_ref().map(|_| finally_ip),
             catches: scope.catch.is_some(),
         };
+        self.handler_scope_extents.push(HandlerScopeExtent {
+            push_ip: handler_push,
+            handler_ip,
+            finally_ip: scope.finally.as_ref().map(|_| finally_ip),
+            catches: scope.catch.is_some(),
+            end_ip,
+        });
         if scope.finally.is_some() {
             self.code[normal_exit] = Instruction::EnterFinally {
                 finally: finally_ip,
@@ -559,6 +567,16 @@ impl Compiler {
                     finally: Some(finally_ip),
                     catches: false,
                 };
+                // The catch body's cleanup scope protects the catch body only;
+                // the try scope's own handler is already gone by then, so the
+                // two never sit on the handler stack together.
+                self.handler_scope_extents.push(HandlerScopeExtent {
+                    push_ip: catch_cleanup,
+                    handler_ip: finally_ip,
+                    finally_ip: Some(finally_ip),
+                    catches: false,
+                    end_ip: finally_ip,
+                });
             }
             if let Some(catch_exit) = catch_exit {
                 self.code[catch_exit] = Instruction::EnterFinally {

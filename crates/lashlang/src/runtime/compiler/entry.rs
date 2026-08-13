@@ -83,6 +83,7 @@ impl Compiler {
             const_slots: Vec::new(),
             loop_contexts: Vec::new(),
             handler_scopes: Vec::new(),
+            handler_scope_extents: Vec::new(),
             pending_finally_sites: Vec::new(),
             functions: Vec::new(),
             pending_functions: Vec::new(),
@@ -114,6 +115,17 @@ impl Compiler {
             assign_paths: self.assign_paths,
             resource_operation_batches: self.resource_operation_batches,
             functions: self.functions,
+            handler_scopes: {
+                let mut scopes = self.handler_scope_extents;
+                scopes.sort_unstable_by_key(|scope| scope.handler_ip);
+                debug_assert!(
+                    scopes
+                        .windows(2)
+                        .all(|pair| pair[0].handler_ip != pair[1].handler_ip),
+                    "each exception scope owns a distinct handler target"
+                );
+                scopes
+            },
             root_code_len,
         }
     }
