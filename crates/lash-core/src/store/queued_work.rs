@@ -360,10 +360,9 @@ pub fn select_turn_work_claim_indices(
         return Ok((0..selected).collect());
     }
 
-    let mut selected = 1;
-    let mut rendered_tokens = first_tokens;
+    let mut compatible = 1;
     for candidate in &candidates[1..] {
-        if selected >= policy.max_rows
+        if compatible >= policy.max_rows
             || candidate.work_class != QueuedWorkClass::TurnWork
             || !candidate.kind.is_batchable()
             || candidate.delivery_policy != first.delivery_policy
@@ -372,12 +371,26 @@ pub fn select_turn_work_claim_indices(
         {
             break;
         }
-        let candidate_tokens = rendered_token_upper_bound(&candidates[..=selected]);
-        if candidate_tokens > available_tokens {
-            break;
+        compatible += 1;
+    }
+
+    let mut selected = 1;
+    let mut rendered_tokens = first_tokens;
+    if compatible > 1 {
+        let compatible_tokens = rendered_token_upper_bound(&candidates[..compatible]);
+        if compatible_tokens <= available_tokens {
+            selected = compatible;
+            rendered_tokens = compatible_tokens;
+        } else {
+            for prefix_len in 2..compatible {
+                let candidate_tokens = rendered_token_upper_bound(&candidates[..prefix_len]);
+                if candidate_tokens > available_tokens {
+                    break;
+                }
+                selected = prefix_len;
+                rendered_tokens = candidate_tokens;
+            }
         }
-        selected += 1;
-        rendered_tokens = candidate_tokens;
     }
     let selected = record_turn_claim_decision(
         candidates,
@@ -824,6 +837,41 @@ mod tests {
             )
             .unwrap(),
             1
+        );
+    }
+
+    #[test]
+    fn compatible_prefix_fallback_matches_incremental_selection() {
+        let candidates = vec![
+            candidate(1, Some("wake")),
+            candidate(2, Some("wake")),
+            candidate(3, Some("wake")),
+        ];
+        let two_tokens = rendered_token_upper_bound(&candidates[..2]);
+        let three_tokens = rendered_token_upper_bound(&candidates);
+        assert!(two_tokens < three_tokens);
+
+        let claim_policy = policy(three_tokens, three_tokens - two_tokens);
+        let available_tokens = claim_policy.max_context_tokens - claim_policy.action_token_reserve;
+        let mut incremental_selected = 1;
+        for _candidate in &candidates[1..] {
+            let candidate_tokens = rendered_token_upper_bound(&candidates[..=incremental_selected]);
+            if candidate_tokens > available_tokens {
+                break;
+            }
+            incremental_selected += 1;
+        }
+
+        assert_eq!(incremental_selected, 2);
+        assert_eq!(
+            select_turn_work_claim_indices(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                claim_policy,
+                1_000,
+            )
+            .unwrap(),
+            (0..incremental_selected).collect::<Vec<_>>()
         );
     }
 
