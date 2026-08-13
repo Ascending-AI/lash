@@ -433,7 +433,10 @@ impl Adapter {
             .params
             .iter()
             .map(|param| binding_name(&param.pat, param.span))
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|param| param != "this")
+            .collect();
         let body = function.body.as_ref().ok_or_else(|| {
             reject(
                 DiagnosticCode::UnsupportedStatement,
@@ -456,7 +459,19 @@ impl Adapter {
                 swc::Lit::Null(_) => Expr::Null,
                 swc::Lit::Bool(value) => Expr::Bool(value.value),
                 swc::Lit::Num(value) => Expr::Number(value.value),
-                swc::Lit::Str(value) => Expr::String(value.value.to_string_lossy().into_owned()),
+                swc::Lit::Str(value) => Expr::String(
+                    value
+                        .value
+                        .as_str()
+                        .ok_or_else(|| {
+                            reject(
+                                DiagnosticCode::LoneSurrogateLiteralUnsupported,
+                                "string literals containing lone UTF-16 surrogates",
+                                span,
+                            )
+                        })?
+                        .to_string(),
+                ),
                 swc::Lit::Regex(_) => {
                     return Err(reject(
                         DiagnosticCode::RegExpUnsupported,
@@ -524,7 +539,10 @@ impl Adapter {
                     .params
                     .iter()
                     .map(|param| binding_name(param, param.span()))
-                    .collect::<Result<_, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .filter(|param| param != "this")
+                    .collect();
                 let body = match function.body.as_ref() {
                     swc::BlockStmtOrExpr::BlockStmt(block) => {
                         FunctionBody::Block(self.convert_statements(&block.stmts)?)

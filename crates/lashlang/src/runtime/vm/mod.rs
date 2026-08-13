@@ -16,6 +16,7 @@ mod control;
 mod effects;
 mod exceptions;
 mod heap_plan;
+mod javascript;
 mod reference_assignment;
 
 #[cfg(test)]
@@ -48,8 +49,9 @@ use super::{
     eval_number_compare_values, eval_number_numeric_binary_value, execute_compiled_format,
     execute_compiled_format_direct, execute_compiled_format_one_number_compact_direct,
     execute_intrinsic, execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values,
-    materialize_projected_async, materialize_value, range_bounds, range_bounds_async,
-    read_field_direct, read_field_ref_direct, read_index_direct, unwrap_tool_result,
+    javascript_join, javascript_split, materialize_projected_async, materialize_value,
+    range_bounds, range_bounds_async, read_field_direct, read_field_ref_direct, read_index_direct,
+    read_javascript_field_direct, read_javascript_index_direct, unwrap_tool_result,
     unwrap_type_value,
 };
 
@@ -409,7 +411,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let target = self.pop_stack()?;
-                let value = read_field_direct(target, &self.chunk.names[field])?;
+                let value = if self.reference_semantics {
+                    read_javascript_field_direct(target, &self.chunk.names[field])?
+                } else {
+                    read_field_direct(target, &self.chunk.names[field])?
+                };
                 self.stack.push(value);
             }
             Instruction::Index => {
@@ -422,7 +428,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 }
                 let index = self.pop_stack()?;
                 let target = self.pop_stack()?;
-                self.stack.push(read_index_direct(target, index)?);
+                self.stack.push(if self.reference_semantics {
+                    read_javascript_index_direct(target, index)?
+                } else {
+                    read_index_direct(target, index)?
+                });
             }
             Instruction::ResultUnwrap => {
                 let value = self.pop_stack()?;
@@ -551,29 +561,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 };
                 self.stack.push(value);
             }
-            Instruction::JavaScriptUnary(op) => {
-                let mut value = self.pop_stack()?;
-                if op != JavaScriptUnaryOp::TypeOf && matches!(value, Value::Ref(_)) {
-                    value = self.heap.export_for_instruction(&value)?;
-                }
-                self.stack.push(eval_javascript_unary(value, op));
-            }
-            Instruction::JavaScriptBinary(op) => {
-                let mut right = self.pop_stack()?;
-                let mut left = self.pop_stack()?;
-                if !matches!(
-                    op,
-                    JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual
-                ) {
-                    if matches!(left, Value::Ref(_)) {
-                        left = self.heap.export_for_instruction(&left)?;
-                    }
-                    if matches!(right, Value::Ref(_)) {
-                        right = self.heap.export_for_instruction(&right)?;
-                    }
-                }
-                self.stack.push(eval_javascript_binary(left, op, right));
-            }
+            Instruction::JavaScriptUnary(op) => self.execute_javascript_unary(op)?,
+            Instruction::JavaScriptBinary(op) => self.execute_javascript_binary(op)?,
             Instruction::IsNullish => {
                 let value = self.pop_stack()?;
                 self.stack
@@ -1016,6 +1005,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         let inner = projected.get_field(field).await?;
                         ProjectedValue::propagate_field(&parent_name, &field.text, inner)
                     }
+                    target if self.reference_semantics => {
+                        read_javascript_field_direct(target, field)?
+                    }
                     target => read_field_direct(target, field)?,
                 };
                 self.stack.push(value);
@@ -1028,6 +1020,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         let parent_name = projected.name().to_string();
                         let inner = projected.get_index(&index).await?;
                         ProjectedValue::propagate_index(&parent_name, &index, inner)
+                    }
+                    target if self.reference_semantics => {
+                        read_javascript_index_direct(target, index)?
                     }
                     target => read_index_direct(target, index)?,
                 };
@@ -1314,6 +1309,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     async fn execute_intrinsic_instruction(&mut self, op: IntrinsicOp) -> Result<(), RuntimeError> {
         let start = self.profile.as_ref().map(|_| Instant::now());
         match op {
+            IntrinsicOp::JavaScriptSplit => self.execute_javascript_split()?,
+            IntrinsicOp::JavaScriptJoin => self.execute_javascript_join()?,
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;

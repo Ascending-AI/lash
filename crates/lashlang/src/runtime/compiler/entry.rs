@@ -911,12 +911,20 @@ impl Compiler {
             }
             Expr::Field { target, field } => {
                 let target = self.fold_compile_time_expr(target)?;
-                read_field_direct(target, &transient_name(field)).ok()
+                if self.dialect == CompilationDialect::Typescript {
+                    read_javascript_field_direct(target, &transient_name(field)).ok()
+                } else {
+                    read_field_direct(target, &transient_name(field)).ok()
+                }
             }
             Expr::Index { target, index } => {
                 let target = self.fold_compile_time_expr(target)?;
                 let index = self.fold_compile_time_expr(index)?;
-                read_index_direct(target, index).ok()
+                if self.dialect == CompilationDialect::Typescript {
+                    read_javascript_index_direct(target, index).ok()
+                } else {
+                    read_index_direct(target, index).ok()
+                }
             }
             Expr::Unary { op, expr } => {
                 let value = self.fold_compile_time_expr(expr)?;

@@ -377,6 +377,8 @@ pub(crate) enum IntrinsicOp {
     EndsWith,
     Split,
     Join,
+    JavaScriptSplit,
+    JavaScriptJoin,
     Trim,
     Slice,
     ToString,
@@ -545,6 +547,8 @@ impl IntrinsicOp {
             | IntrinsicOp::EndsWith
             | IntrinsicOp::Split
             | IntrinsicOp::Join
+            | IntrinsicOp::JavaScriptSplit
+            | IntrinsicOp::JavaScriptJoin
             | IntrinsicOp::Validate
             | IntrinsicOp::CeilDiv
             | IntrinsicOp::FloorDiv
@@ -575,6 +579,8 @@ impl IntrinsicOp {
             IntrinsicOp::EndsWith => BuiltinProfileTag::EndsWith,
             IntrinsicOp::Split => BuiltinProfileTag::Split,
             IntrinsicOp::Join => BuiltinProfileTag::Join,
+            IntrinsicOp::JavaScriptSplit => BuiltinProfileTag::Split,
+            IntrinsicOp::JavaScriptJoin => BuiltinProfileTag::Join,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,

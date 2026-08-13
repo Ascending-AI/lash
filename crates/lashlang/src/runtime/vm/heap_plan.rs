@@ -108,6 +108,7 @@ pub(super) fn instruction_heap_plan(
         | I::Duplicate
         | I::JavaScriptUnary(_)
         | I::JavaScriptBinary(_)
+        | I::Intrinsic(IntrinsicOp::JavaScriptSplit | IntrinsicOp::JavaScriptJoin)
         | I::IsNullish => InstructionHeapPlan::heap_native(),
         I::StoreName(_) => InstructionHeapPlan::heap_native(),
         I::HeapPathAssign { .. } => InstructionHeapPlan::heap_native(),

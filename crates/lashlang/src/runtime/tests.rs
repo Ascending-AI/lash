@@ -1047,6 +1047,8 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::EndsWith => format!("intrinsic ends_with argc={argc}"),
         IntrinsicOp::Split => format!("intrinsic split argc={argc}"),
         IntrinsicOp::Join => format!("intrinsic join argc={argc}"),
+        IntrinsicOp::JavaScriptSplit => format!("intrinsic typescript_split argc={argc}"),
+        IntrinsicOp::JavaScriptJoin => format!("intrinsic typescript_join argc={argc}"),
         IntrinsicOp::Trim => format!("intrinsic trim argc={argc}"),
         IntrinsicOp::Slice => format!("intrinsic slice argc={argc}"),
         IntrinsicOp::ToString => format!("intrinsic to_string argc={argc}"),

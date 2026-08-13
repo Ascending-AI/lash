@@ -66,6 +66,13 @@ impl Lowerer {
         self.functions.last().map_or(0, |function| function.id)
     }
 
+    fn has_binding(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.bindings.contains_key(name))
+    }
+
     fn lower_statements(
         &mut self,
         statements: &[Stmt],
@@ -420,15 +427,14 @@ impl Lowerer {
             Expr::Bool(value) => LashExpr::Bool(*value),
             Expr::Number(value) => LashExpr::Number(*value),
             Expr::String(value) => LashExpr::String(value.as_str().into()),
-            Expr::Ident(name)
-                if name == "undefined"
-                    && self
-                        .scopes
-                        .iter()
-                        .rev()
-                        .all(|scope| !scope.bindings.contains_key(name)) =>
-            {
+            Expr::Ident(name) if name == "undefined" && !self.has_binding(name) => {
                 LashExpr::Undefined
+            }
+            Expr::Ident(name) if name == "NaN" && !self.has_binding(name) => {
+                LashExpr::Number(f64::NAN)
+            }
+            Expr::Ident(name) if name == "Infinity" && !self.has_binding(name) => {
+                LashExpr::Number(f64::INFINITY)
             }
             Expr::Ident(name) => LashExpr::Variable(self.resolve(name)?.into()),
             Expr::Array(items) => LashExpr::List(
@@ -459,6 +465,9 @@ impl Lowerer {
                 UnaryOp::Plus => js_unary(JavaScriptUnaryOp::Plus, self.lower_expr(value)?),
                 UnaryOp::Minus => js_unary(JavaScriptUnaryOp::Negate, self.lower_expr(value)?),
                 UnaryOp::Not => js_unary(JavaScriptUnaryOp::Not, self.lower_expr(value)?),
+                UnaryOp::TypeOf if matches!(value.as_ref(), Expr::Ident(name) if !self.has_binding(name)) => {
+                    LashExpr::String("undefined".into())
+                }
                 UnaryOp::TypeOf => js_unary(JavaScriptUnaryOp::TypeOf, self.lower_expr(value)?),
             },
             Expr::Binary { left, op, right } => LashExpr::JavaScriptBinary {
@@ -625,8 +634,13 @@ impl Lowerer {
                 ("startsWith", [arg]) => ("starts_with", vec![target, arg.clone()]),
                 ("endsWith", [arg]) => ("ends_with", vec![target, arg.clone()]),
                 ("includes", [arg]) => ("contains", vec![target, arg.clone()]),
-                ("split", [arg]) => ("split", vec![target, arg.clone()]),
-                ("join", [arg]) => ("join", vec![target, arg.clone()]),
+                ("split", []) => ("__typescript_split", vec![target, LashExpr::Undefined]),
+                ("split", [arg]) => ("__typescript_split", vec![target, arg.clone()]),
+                ("join", []) => (
+                    "__typescript_join",
+                    vec![target, LashExpr::String(",".into())],
+                ),
+                ("join", [arg]) => ("__typescript_join", vec![target, arg.clone()]),
                 _ => {
                     return Err(Diagnostic::new(
                         DiagnosticCode::UnsupportedExpression,

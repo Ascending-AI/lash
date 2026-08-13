@@ -25,6 +25,8 @@ fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
         "ends_with" => IntrinsicOp::EndsWith,
         "split" => IntrinsicOp::Split,
         "join" => IntrinsicOp::Join,
+        "__typescript_split" => IntrinsicOp::JavaScriptSplit,
+        "__typescript_join" => IntrinsicOp::JavaScriptJoin,
         "trim" => IntrinsicOp::Trim,
         "slice" => IntrinsicOp::Slice,
         "to_string" => IntrinsicOp::ToString,

@@ -126,6 +126,61 @@ pub(crate) fn read_index_ref_direct(target: &Value, index: &Value) -> Result<Val
     }
 }
 
+pub(crate) fn read_javascript_field_direct(
+    value: Value,
+    field: &Name,
+) -> Result<Value, RuntimeError> {
+    match value {
+        Value::Record(record) => Ok(record
+            .get_symbol(field.symbol)
+            .cloned()
+            .unwrap_or(Value::Undefined)),
+        Value::List(values) | Value::Tuple(values) if field.text.as_ref() == "length" => {
+            Ok(Value::Number(values.len() as f64))
+        }
+        Value::String(value) if field.text.as_ref() == "length" => {
+            Ok(Value::Number(value.encode_utf16().count() as f64))
+        }
+        Value::Null | Value::Undefined => Err(RuntimeError::CannotReadField {
+            field: field.text.to_string(),
+            actual: value_type_name(&value).to_string(),
+        }),
+        _ => Ok(Value::Undefined),
+    }
+}
+
+pub(crate) fn read_javascript_index_direct(
+    target: Value,
+    index: Value,
+) -> Result<Value, RuntimeError> {
+    match target {
+        Value::List(values) | Value::Tuple(values) => Ok(javascript_array_index(&index)
+            .and_then(|index| values.get(index).cloned())
+            .unwrap_or(Value::Undefined)),
+        Value::String(value) => {
+            let Some(index) = javascript_array_index(&index) else {
+                return Ok(Value::Undefined);
+            };
+            let Some(unit) = value.encode_utf16().nth(index) else {
+                return Ok(Value::Undefined);
+            };
+            char::from_u32(unit.into())
+                .map(|ch| Value::String(ch.to_compact_string()))
+                .ok_or_else(|| RuntimeError::ValidationFailed {
+                    reason: "TS_LONE_SURROGATE_UNSUPPORTED: string indexing produced an unrepresentable lone surrogate".to_string(),
+                })
+        }
+        Value::Record(record) => Ok(record
+            .get(&javascript_to_string(&index))
+            .cloned()
+            .unwrap_or(Value::Undefined)),
+        Value::Null | Value::Undefined => Err(RuntimeError::CannotIndex {
+            actual: value_type_name(&target).to_string(),
+        }),
+        _ => Ok(Value::Undefined),
+    }
+}
+
 pub(crate) fn assign_path(
     root: &mut Value,
     path: &CompiledAssignPath,

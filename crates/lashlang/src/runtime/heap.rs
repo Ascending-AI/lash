@@ -44,7 +44,7 @@ pub(crate) enum HeapObject {
 }
 
 impl HeapObject {
-    fn kind_name(&self) -> &'static str {
+    pub(crate) fn kind_name(&self) -> &'static str {
         match self {
             Self::Tuple(_) => "tuple",
             Self::List(_) => "list",

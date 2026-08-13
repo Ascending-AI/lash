@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::{javascript_array_index, javascript_to_string};
 
 impl Heap {
     pub(crate) fn assign_path_reference(
@@ -34,8 +35,15 @@ impl Heap {
                         .get(index_cursor)
                         .ok_or(RuntimeError::MissingAssignmentIndex)?;
                     index_cursor += 1;
-                    let index = resolve_existing_list_assignment_index(index, values.len())?;
-                    values[index].clone()
+                    let index = javascript_array_index(index).ok_or_else(|| {
+                        RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
+                            key: javascript_to_string(index),
+                        }
+                    })?;
+                    values
+                        .get(index)
+                        .cloned()
+                        .ok_or(RuntimeError::ListAssignmentIndexOutOfBounds)?
                 }
                 (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
                     let index = indexes
@@ -92,7 +100,24 @@ impl Heap {
                 let index = indexes
                     .get(index_cursor)
                     .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                let index = resolve_existing_list_assignment_index(index, values.len())?;
+                let index = javascript_array_index(index).ok_or_else(|| {
+                    RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
+                        key: javascript_to_string(index),
+                    }
+                })?;
+                if index >= values.len() {
+                    let added = index + 1 - values.len();
+                    let attempted = old_object
+                        .logical_bytes()
+                        .saturating_add((added as u64).saturating_mul(VALUE_SLOT_BYTES + 1));
+                    if attempted > self.logical_byte_limit {
+                        return Err(RuntimeError::MemoryLimitExceeded {
+                            limit: self.logical_byte_limit,
+                            attempted,
+                        });
+                    }
+                    values.resize(index + 1, Value::Undefined);
+                }
                 values[index] = imported;
             }
             (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
