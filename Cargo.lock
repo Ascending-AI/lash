@@ -2391,6 +2391,7 @@ dependencies = [
  "lash-core",
  "lash-lashlang-runtime",
  "lash-llm-tools",
+ "lash-plugin-process-controls",
  "lash-plugin-tool-output-budget",
  "lash-postgres-store",
  "lash-protocol-rlm",

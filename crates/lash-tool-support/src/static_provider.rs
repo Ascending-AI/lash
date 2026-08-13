@@ -14,9 +14,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_core::{
-    AttemptToolCall, OrchestratingToolCall, ToolCall, ToolContract, ToolDefinition, ToolId,
-    ToolManifest, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolResult,
-    sansio::PendingToolCall,
+    AttemptToolCall, ToolCall, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider, ToolResult, sansio::PendingToolCall,
 };
 
 /// Per-call execution behavior for a [`StaticToolProvider`].
@@ -51,12 +50,17 @@ pub trait StaticToolExecute: Send + Sync + 'static {
     }
 
     /// Opt one fixed tool id into deterministic process-replay orchestration.
+    #[doc(hidden)]
     fn supports_orchestration_context(&self, _tool_id: &ToolId) -> bool {
         false
     }
 
     /// Execute an opted-in fixed tool with the orchestration-only context.
-    async fn execute_orchestration(&self, call: OrchestratingToolCall<'_>) -> ToolResult {
+    #[doc(hidden)]
+    async fn execute_orchestration(
+        &self,
+        call: lash_core::facade_support::OrchestratingToolCall<'_>,
+    ) -> ToolResult {
         ToolResult::err_fmt(format!(
             "orchestration execution is unavailable for tool `{}`",
             call.name
@@ -171,7 +175,10 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
         self.executor.supports_orchestration_context(tool_id)
     }
 
-    async fn execute_orchestration(&self, call: OrchestratingToolCall<'_>) -> ToolResult {
+    async fn execute_orchestration(
+        &self,
+        call: lash_core::facade_support::OrchestratingToolCall<'_>,
+    ) -> ToolResult {
         self.executor.execute_orchestration(call).await
     }
 }

@@ -230,12 +230,10 @@ pub(crate) fn resolve_callable_manifest(
     tool_name: &str,
 ) -> Option<ToolManifest> {
     // Tool Catalog membership is callability: a catalog member is callable.
-    if let Some(entry) = context
-        .tool_catalog
-        .tools
-        .iter()
-        .find(|tool| tool.manifest.name == tool_name)
-    {
+    if let Some(entry) = context.tool_catalog.tools.iter().find(|tool| {
+        tool.manifest.name == tool_name
+            && tool.manifest.activation != crate::ToolActivation::Internal
+    }) {
         return Some(entry.manifest.clone());
     }
     None
@@ -245,15 +243,27 @@ pub(crate) fn resolve_callable_manifest_by_id(
     context: &ToolDispatchContext<'_>,
     tool_id: &crate::ToolId,
 ) -> Option<ToolManifest> {
-    if let Some(entry) = context
-        .tool_catalog
-        .tools
-        .iter()
-        .find(|tool| tool.manifest.id == *tool_id)
-    {
+    if let Some(entry) = context.tool_catalog.tools.iter().find(|tool| {
+        tool.manifest.id == *tool_id && tool.manifest.activation != crate::ToolActivation::Internal
+    }) {
         return Some(entry.manifest.clone());
     }
     None
+}
+
+pub(crate) fn resolve_internal_manifest_by_id(
+    context: &ToolDispatchContext<'_>,
+    tool_id: &crate::ToolId,
+) -> Option<ToolManifest> {
+    context
+        .tool_catalog
+        .tools
+        .iter()
+        .find(|tool| {
+            tool.manifest.id == *tool_id
+                && tool.manifest.activation == crate::ToolActivation::Internal
+        })
+        .map(|entry| entry.manifest.clone())
 }
 
 #[cfg(test)]

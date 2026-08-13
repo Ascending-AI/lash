@@ -22,7 +22,7 @@ use lash_core::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimeScope,
 };
-use lash_postgres_store::{PostgresEffectHost, PostgresStorage};
+use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
 mod support;
 
@@ -36,6 +36,207 @@ const NESTED_KEY: &str = "pg-attempt-atomicity:attempt:nested";
 struct CrossingController {
     inner: Arc<dyn lash_core::RuntimeEffectController>,
     signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
+    crash_after: Option<CrashAfter>,
+    cancel_after_batch_failure: Option<tokio_util::sync::CancellationToken>,
+    force_serial: bool,
+    fired: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Clone, Copy)]
+enum CrashAfter {
+    SpawnAgentStart,
+    FirstProtocolBatchChild,
+}
+
+struct CrashingEffectHost {
+    inner: Arc<dyn EffectHost>,
+    crash_after: CrashAfter,
+    force_serial: bool,
+    fired: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for CrashingEffectHost {
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        self.inner.replay_ownership()
+    }
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        self.inner.journal_addressing()
+    }
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.inner.allows_process_lifetime_completion_keys()
+    }
+    async fn await_event_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
+    }
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
+    }
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.inner.peek_await_event(key).await
+    }
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.inner.await_await_event(key, cancel, deadline).await
+    }
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.revoke_await_events_for_session(session_id).await
+    }
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.cancel_await_events_for_session(session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl EffectHost for CrashingEffectHost {
+    fn scoped<'run>(
+        &'run self,
+        scope: ExecutionScope,
+    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        let inner = self
+            .inner
+            .scoped_static(scope.clone())?
+            .expect("PostgreSQL exposes static scopes");
+        lash_core::ScopedEffectController::shared(
+            Arc::new(CrossingController {
+                inner: Arc::new(ScopedControllerAdapter(inner)),
+                signal_frames: Arc::new(Mutex::new(Vec::new())),
+                crash_after: Some(self.crash_after),
+                cancel_after_batch_failure: None,
+                force_serial: self.force_serial,
+                fired: Arc::clone(&self.fired),
+            }),
+            scope,
+        )
+    }
+    fn scoped_static(
+        &self,
+        scope: ExecutionScope,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        let inner = self
+            .inner
+            .scoped_static(scope.clone())?
+            .expect("PostgreSQL exposes static scopes");
+        lash_core::ScopedEffectController::shared(
+            Arc::new(CrossingController {
+                inner: Arc::new(ScopedControllerAdapter(inner)),
+                signal_frames: Arc::new(Mutex::new(Vec::new())),
+                crash_after: Some(self.crash_after),
+                cancel_after_batch_failure: None,
+                force_serial: self.force_serial,
+                fired: Arc::clone(&self.fired),
+            }),
+            scope,
+        )
+        .map(Some)
+    }
+}
+
+struct ScopedControllerAdapter(lash_core::ScopedEffectController<'static>);
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        self.0.controller().replay_ownership()
+    }
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        self.0.controller().journal_addressing()
+    }
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.0
+            .controller()
+            .allows_process_lifetime_completion_keys()
+    }
+    async fn await_event_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.0.controller().await_event_key(scope, wait).await
+    }
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.0
+            .controller()
+            .resolve_await_event(key, resolution)
+            .await
+    }
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.0.controller().peek_await_event(key).await
+    }
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.0
+            .controller()
+            .await_await_event(key, cancel, deadline)
+            .await
+    }
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.0
+            .controller()
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.0
+            .controller()
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
+    fn supports_concurrent_effects(&self) -> bool {
+        self.0.controller().supports_concurrent_effects()
+    }
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        self.0
+            .controller()
+            .execute_effect(envelope, local_executor)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -102,7 +303,7 @@ impl lash_core::AwaitEventResolver for CrossingController {
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for CrossingController {
     fn supports_concurrent_effects(&self) -> bool {
-        self.inner.supports_concurrent_effects()
+        !self.force_serial && self.inner.supports_concurrent_effects()
     }
 
     async fn execute_effect(
@@ -110,6 +311,31 @@ impl lash_core::RuntimeEffectController for CrossingController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        let crash_here = match self.crash_after {
+            Some(CrashAfter::SpawnAgentStart) => matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(
+                        command.as_ref(),
+                        lash_core::ProcessCommand::Start { registration, .. }
+                            if registration.id == "process:subagent:fig1293-spawn-agent"
+                    )
+            ),
+            Some(CrashAfter::FirstProtocolBatchChild) => matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolAttempt { call, .. }
+                    if call.tool_name == "fig1293_echo"
+                        && call.args.get("value") == Some(&serde_json::json!("alpha"))
+            ),
+            None => false,
+        };
+        let cancel_here = self.cancel_after_batch_failure.is_some()
+            && matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolAttempt { call, .. }
+                    if call.tool_name == "fig1293_echo"
+                        && call.args.get("value") == Some(&serde_json::json!("fail"))
+            );
         if matches!(
             &envelope.command,
             RuntimeEffectCommand::Process { command }
@@ -120,7 +346,18 @@ impl lash_core::RuntimeEffectController for CrossingController {
                 .expect("signal crossing frame lock")
                 .push(serde_json::to_vec(&envelope).expect("serialize signal crossing frame"));
         }
-        self.inner.execute_effect(envelope, local_executor).await
+        let outcome = self.inner.execute_effect(envelope, local_executor).await;
+        if cancel_here && outcome.is_ok() {
+            self.cancel_after_batch_failure
+                .as_ref()
+                .expect("checked cancellation token")
+                .cancel();
+        }
+        if crash_here && outcome.is_ok() && !self.fired.swap(true, Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+            unreachable!("the host task is aborted after the selected child commit")
+        }
+        outcome
     }
 }
 
@@ -243,6 +480,10 @@ fn postgres_public_turn_scope(
         Arc::new(CrossingController {
             inner,
             signal_frames,
+            crash_after: None,
+            cancel_after_batch_failure: None,
+            force_serial: false,
+            fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }),
         scope,
     )
@@ -331,6 +572,7 @@ async fn public_signal_runtime(
 }
 
 struct Fig1293EchoTools;
+static FIG1293_BLOCKING_CHILD_RUNS: AtomicUsize = AtomicUsize::new(0);
 
 fn fig1293_echo_tool() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
@@ -363,6 +605,15 @@ impl lash_core::ToolProvider for Fig1293EchoTools {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        if call.args.get("value") == Some(&serde_json::json!("fail")) {
+            return lash_core::ToolResult::err_fmt("fig1293 injected batch failure");
+        }
+        if call.args.get("value") == Some(&serde_json::json!("block")) {
+            if FIG1293_BLOCKING_CHILD_RUNS.fetch_add(1, Ordering::SeqCst) == 0 {
+                std::future::pending::<()>().await;
+                unreachable!("FIG-1293 blocking child is dropped by cancellation")
+            }
+        }
         lash_core::ToolResult::ok(serde_json::json!({
             "echo": call.args.get("value").cloned().unwrap_or_default(),
         }))
@@ -512,6 +763,47 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
     (provider, model_calls)
 }
 
+fn fig1293_fault_batch_model() -> lash_core::facade_support::ProviderHandle {
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    lash_core::testing::TestProvider::builder()
+        .kind("stub")
+        .complete(move |_| {
+            let model_calls = Arc::clone(&model_calls);
+            async move {
+                Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => lash_core::LlmResponse {
+                        parts: vec![lash_core::LlmOutputPart::ToolCall {
+                            call_id: "fig1293-fault-batch".to_string(),
+                            tool_name: "batch".to_string(),
+                            input_json: serde_json::json!({
+                                "tool_calls": [
+                                    {"tool": "fig1293_echo", "parameters": {"value": "alpha"}},
+                                    {"tool": "fig1293_echo", "parameters": {"value": "fail"}},
+                                    {"tool": "fig1293_echo", "parameters": {"value": "block"}},
+                                ]
+                            })
+                            .to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..lash_core::LlmResponse::default()
+                    },
+                    _ => lash_core::LlmResponse {
+                        full_text: "fault batch complete".to_string(),
+                        parts: vec![lash_core::LlmOutputPart::Text {
+                            text: "fault batch complete".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..lash_core::LlmResponse::default()
+                    },
+                })
+            }
+        })
+        .build()
+        .into_handle()
+}
+
 async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegistry>) {
     registry
         .register_process_with_observers(
@@ -592,6 +884,13 @@ async fn run_fig1293_turn(
             "fig1293-restate-migrated-turn",
         ))
         .expect("scope FIG-1293 tier controller");
+    run_fig1293_turn_with_controller(runtime, controller).await
+}
+
+async fn run_fig1293_turn_with_controller(
+    runtime: &mut lash_core::facade_support::LashRuntime,
+    controller: lash_core::ScopedEffectController<'_>,
+) -> lash_core::facade_support::AssembledTurn {
     runtime
         .stream_turn(
             fig1293_input(),
@@ -604,6 +903,32 @@ async fn run_fig1293_turn(
         .expect("run FIG-1293 tier turn")
 }
 
+fn fig1293_cancelling_scope(
+    effect_host: &dyn EffectHost,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> lash_core::ScopedEffectController<'static> {
+    let scope = ExecutionScope::turn(
+        "fig1293-restate-migrated-tools",
+        "fig1293-restate-migrated-turn",
+    );
+    let inner = effect_host
+        .scoped_static(scope.clone())
+        .expect("scope cancelling host")
+        .expect("cancelling host exposes static scopes");
+    lash_core::ScopedEffectController::shared(
+        Arc::new(CrossingController {
+            inner: Arc::new(ScopedControllerAdapter(inner)),
+            signal_frames: Arc::new(Mutex::new(Vec::new())),
+            crash_after: None,
+            cancel_after_batch_failure: Some(cancellation),
+            force_serial: false,
+            fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }),
+        scope,
+    )
+    .expect("scope FIG-1293 cancelling PostgreSQL controller")
+}
+
 fn fig1293_literal_outputs(
     turn: &lash_core::facade_support::AssembledTurn,
 ) -> Vec<(String, serde_json::Value)> {
@@ -614,8 +939,14 @@ fn fig1293_literal_outputs(
 }
 
 fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::AssembledTurn) {
+    let mut outputs = fig1293_literal_outputs(turn);
+    let sequence = outputs[2].1["sequence"]
+        .as_u64()
+        .expect("shell.write projects its recorded event sequence");
+    assert!(sequence > 0);
+    outputs[2].1["sequence"] = serde_json::json!("<recorded-sequence>");
     assert_eq!(
-        fig1293_literal_outputs(turn),
+        outputs,
         vec![
             (
                 "start_command".to_string(),
@@ -633,8 +964,8 @@ fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::AssembledTur
                 serde_json::json!({
                     "__handle__": "process",
                     "done": true,
-                    "id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac",
-                    "process_id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac",
+                    "id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
+                    "process_id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
                     "running": false,
                     "status": "detached",
                 }),
@@ -643,6 +974,7 @@ fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::AssembledTur
                 "write_stdin".to_string(),
                 serde_json::json!({
                     "process_id": "fig1293-control-target",
+                    "sequence": "<recorded-sequence>",
                     "status": "signalled",
                 }),
             ),
@@ -772,6 +1104,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
         .await
         .expect("connect FIG-1293 PostgreSQL host");
     for statement in [
+        "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
         "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
         "DELETE FROM lash_processes WHERE record_json LIKE '%fig1293%'",
     ] {
@@ -849,10 +1182,14 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     .expect("PostgreSQL FIG-1293 redrive timed out");
     assert_fig1293_literal_outputs(&postgres_turn);
     assert_eq!(postgres_model_calls.load(Ordering::SeqCst), 3);
+    let normalize_sequence = |turn: &lash_core::facade_support::AssembledTurn| {
+        let mut outputs = fig1293_literal_outputs(turn);
+        outputs[2].1["sequence"] = serde_json::json!("<recorded-sequence>");
+        outputs
+    };
     assert_eq!(
-        fig1293_literal_outputs(&postgres_turn),
-        fig1293_literal_outputs(&inline_turn),
-        "the inline and PostgreSQL public callers have byte-for-byte tier-equivalent projections",
+        normalize_sequence(&postgres_turn),
+        normalize_sequence(&inline_turn)
     );
 
     let envelope_json: Vec<String> = sqlx::query_scalar(
@@ -993,6 +1330,318 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
         ],
         "batch, spawn_agent, and the internal shell process body have no PostgreSQL ToolAttempt frame",
     );
+}
+
+async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_serial: bool) {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping FIG-1293 PostgreSQL crash law: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect FIG-1293 PostgreSQL crash host");
+    for statement in [
+        "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
+        "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
+        "DELETE FROM lash_processes WHERE record_json LIKE '%fig1293%'",
+    ] {
+        sqlx::query(statement)
+            .execute(storage.pool())
+            .await
+            .expect("reset FIG-1293 PostgreSQL crash rows");
+    }
+
+    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    fig1293_seed_control_target(&registry).await;
+    let (model, model_calls) = fig1293_model();
+    let base_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::with_options(
+        &storage,
+        PostgresEffectReplayOptions {
+            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(
+                std::time::Duration::from_millis(300),
+            )
+            .expect("valid short FIG-1293 crash lease"),
+        },
+    ));
+    let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let effect_host: Arc<dyn EffectHost> = Arc::new(CrashingEffectHost {
+        inner: base_effect_host,
+        crash_after,
+        force_serial,
+        fired: Arc::clone(&fired),
+    });
+    let policy = fig1293_policy();
+    let state = fig1293_state(&policy);
+    let store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    let mut first = fig1293_runtime(
+        Arc::clone(&effect_host),
+        Arc::clone(&registry),
+        model.clone(),
+        Arc::clone(&store),
+        policy.clone(),
+        state.clone(),
+    )
+    .await;
+    let first_run =
+        tokio::spawn(async move { run_fig1293_turn(&mut first, effect_host.as_ref()).await });
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while !fired.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the selected child boundary must commit before host interruption");
+    first_run.abort();
+    let interrupted = first_run.await.expect_err("aborted host task");
+    assert!(interrupted.is_cancelled());
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    let replay_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::with_options(
+        &storage,
+        PostgresEffectReplayOptions {
+            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(
+                std::time::Duration::from_millis(300),
+            )
+            .expect("valid short FIG-1293 replay lease"),
+        },
+    ));
+    let mut replay = fig1293_runtime(
+        Arc::clone(&replay_effect_host),
+        registry,
+        model,
+        store,
+        policy,
+        state,
+    )
+    .await;
+    let redriven = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_fig1293_turn(&mut replay, replay_effect_host.as_ref()),
+    )
+    .await
+    .expect("FIG-1293 child-boundary redrive timed out");
+    assert_fig1293_literal_outputs(&redriven);
+    assert_eq!(
+        model_calls.load(Ordering::SeqCst),
+        3,
+        "redrive must replay the recorded provider calls"
+    );
+
+    let child_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lash_runtime_effect_replay
+         WHERE session_id = $1
+           AND (envelope_json LIKE '%process:subagent:fig1293-spawn-agent%'
+                OR envelope_json LIKE '%fig1293_echo%')",
+    )
+    .bind("fig1293-restate-migrated-tools")
+    .fetch_one(storage.pool())
+    .await
+    .expect("count FIG-1293 durable child rows");
+    assert!(
+        child_rows >= 4,
+        "the interrupted spawn boundary and nested batch children retain stable durable identities"
+    );
+}
+
+/// PostgreSQL redrive law for the exact process-replay boundary between a
+/// durable `spawn_agent` child start and its following await.
+#[tokio::test(flavor = "multi_thread")]
+async fn fig1293_spawn_agent_redrives_after_child_start_before_await_on_postgres() {
+    assert_fig1293_postgres_crash_boundary(CrashAfter::SpawnAgentStart, false).await;
+}
+
+/// PostgreSQL redrive law for a protocol batch after its first child commits
+/// but before the next serial child begins. Serial scheduling is the binding
+/// substrate geometry used by ordinal journals and remains valid on the
+/// key-addressed PostgreSQL controller.
+#[tokio::test(flavor = "multi_thread")]
+async fn fig1293_protocol_batch_redrives_between_children_on_postgres() {
+    assert_fig1293_postgres_crash_boundary(CrashAfter::FirstProtocolBatchChild, true).await;
+}
+
+/// PostgreSQL redrive law for a concurrent protocol batch with one committed
+/// success, one committed failure, and a third child cancelled while blocked.
+/// The recorded nested ToolBatch is the literal oracle; replay must return the
+/// identical three terminal classes without re-entering the blocked child.
+#[tokio::test(flavor = "multi_thread")]
+async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_postgres() {
+    let Some(database_url) = database_url() else {
+        eprintln!(
+            "skipping FIG-1293 PostgreSQL batch-cancel law: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect FIG-1293 PostgreSQL batch-cancel host");
+    for statement in [
+        "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
+        "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
+        "DELETE FROM lash_processes WHERE record_json LIKE '%fig1293%'",
+    ] {
+        sqlx::query(statement)
+            .execute(storage.pool())
+            .await
+            .expect("reset FIG-1293 PostgreSQL batch-cancel rows");
+    }
+
+    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    FIG1293_BLOCKING_CHILD_RUNS.store(0, Ordering::SeqCst);
+    let model = fig1293_fault_batch_model();
+    let effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
+    let policy = fig1293_policy();
+    let state = fig1293_state(&policy);
+    let store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    let mut first = fig1293_runtime(
+        Arc::clone(&effect_host),
+        Arc::clone(&registry),
+        model.clone(),
+        Arc::clone(&store),
+        policy.clone(),
+        state.clone(),
+    )
+    .await;
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    let controller = fig1293_cancelling_scope(effect_host.as_ref(), cancellation.clone());
+    let first_run = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        first.stream_turn(
+            fig1293_input(),
+            lash_core::facade_support::TurnOptions::new(cancellation, controller),
+        ),
+    )
+    .await
+    .expect("FIG-1293 cancelling batch run timed out");
+    assert!(
+        first_run.is_ok(),
+        "mid-batch cancellation must be projected as child data: {first_run:?}"
+    );
+
+    let recorded_rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT replay_key, envelope_json, outcome_json
+         FROM lash_runtime_effect_replay WHERE session_id = $1",
+    )
+    .bind("fig1293-restate-migrated-tools")
+    .fetch_all(storage.pool())
+    .await
+    .expect("read FIG-1293 batch-cancel rows");
+    let (batch_replay_key, batch_outcome, batch_envelope) = recorded_rows
+        .iter()
+        .find_map(|(replay_key, envelope_json, outcome_json)| {
+            let canonical: serde_json::Value = serde_json::from_str(envelope_json).ok()?;
+            let envelope =
+                serde_json::from_str::<RuntimeEffectEnvelope>(canonical.get("json")?.as_str()?)
+                    .ok()?;
+            let is_fault_batch = matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolBatch { batch }
+                    if batch.calls.iter().any(|child| {
+                        child.call.call_id == "fig1293-fault-batch"
+                    })
+            );
+            is_fault_batch.then_some((replay_key.clone(), outcome_json.clone(), envelope))
+        })
+        .expect("recorded FIG-1293 fault ToolBatch");
+    let first_outcome_json = batch_outcome.expect("cancelled enclosing batch is terminal");
+    assert_eq!(
+        batch_envelope.invocation.replay_key(),
+        Some(batch_replay_key.as_str())
+    );
+    let stored_hash: String = sqlx::query_scalar(
+        "SELECT envelope_hash FROM lash_runtime_effect_replay WHERE session_id = $1 AND replay_key = $2",
+    )
+    .bind("fig1293-restate-migrated-tools")
+    .bind(&batch_replay_key)
+    .fetch_one(storage.pool())
+    .await
+    .expect("read cancelled batch frame hash");
+    assert_eq!(
+        batch_envelope
+            .stable_hash()
+            .expect("cancelled batch stable hash"),
+        stored_hash
+    );
+    let first_outcome: RuntimeEffectOutcome =
+        serde_json::from_str(&first_outcome_json).expect("decode cancelled fault batch");
+    assert!(matches!(
+        first_outcome,
+        RuntimeEffectOutcome::ToolBatch { ref launches, .. }
+            if matches!(
+                launches.as_slice(),
+                [lash_core::runtime::ToolCallLaunch::Done { result }]
+                    if matches!(result.output.outcome, lash_core::ToolCallOutcome::Cancelled(_))
+            )
+    ));
+    let committed_children = recorded_rows
+        .iter()
+        .filter(|(_, envelope_json, outcome)| {
+            let Ok(canonical) = serde_json::from_str::<serde_json::Value>(envelope_json) else {
+                return false;
+            };
+            let Some(json) = canonical.get("json").and_then(serde_json::Value::as_str) else {
+                return false;
+            };
+            let Ok(envelope) = serde_json::from_str::<RuntimeEffectEnvelope>(json) else {
+                return false;
+            };
+            outcome.is_some()
+                && matches!(
+                    envelope.command,
+                    RuntimeEffectCommand::ToolAttempt { call, .. }
+                        if call.tool_name == "fig1293_echo"
+                            && matches!(call.args.get("value").and_then(serde_json::Value::as_str), Some("alpha" | "fail"))
+                )
+        })
+        .count();
+    assert_eq!(
+        committed_children, 2,
+        "success and failure commit before cancellation"
+    );
+
+    let replay_storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect redriving cancelled-batch host");
+    let replay_host = replay_storage.effect_host();
+    replay_host.start_replay();
+    let replay_controller = replay_host
+        .scoped(ExecutionScope::turn(
+            "fig1293-restate-migrated-tools",
+            "fig1293-restate-migrated-turn",
+        ))
+        .expect("scope cancelled batch replay");
+    let replayed = replay_controller
+        .controller()
+        .execute_effect(
+            batch_envelope,
+            RuntimeEffectLocalExecutor::testing({
+                let first_outcome = first_outcome.clone();
+                move |_| {
+                    let first_outcome = first_outcome.clone();
+                    async move { Ok(first_outcome) }
+                }
+            }),
+        )
+        .await
+        .expect("replay recorded cancelled FIG-1293 ToolBatch");
+    assert_eq!(
+        serde_json::to_string(&replayed).expect("encode replayed cancelled batch"),
+        first_outcome_json,
+    );
+    let redriven_outcome_json: String = sqlx::query_scalar(
+        "SELECT outcome_json FROM lash_runtime_effect_replay
+         WHERE session_id = $1 AND replay_key = $2",
+    )
+    .bind("fig1293-restate-migrated-tools")
+    .bind(batch_replay_key)
+    .fetch_one(replay_storage.pool())
+    .await
+    .expect("read redriven FIG-1293 fault ToolBatch outcome");
+    assert_eq!(redriven_outcome_json, first_outcome_json);
+    assert_eq!(FIG1293_BLOCKING_CHILD_RUNS.load(Ordering::SeqCst), 1);
 }
 
 /// Runs the hazard shape on one host: a recorded attempt whose body emits a

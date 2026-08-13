@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lash_core::{
-    OrchestratingToolCall, PreparedToolCall, SessionToolAccess, SubagentSessionContext,
-    ToolArgumentProjectionPolicy, ToolCall, ToolDefinition, ToolPrepareContext, ToolResult,
-    facade_support::SessionSpec, sansio::PendingToolCall,
+    PreparedToolCall, SessionToolAccess, SubagentSessionContext, ToolArgumentProjectionPolicy,
+    ToolCall, ToolDefinition, ToolPrepareContext, ToolResult, facade_support::SessionSpec,
+    sansio::PendingToolCall,
 };
 use lash_lashlang_runtime::ToolDefinitionLashlangExt;
 use lash_tool_support::{StaticToolExecute, StaticToolProvider};
@@ -44,7 +44,7 @@ impl RlmSubagentToolsProvider {
     async fn spawn_agent(
         &self,
         _args: &Value,
-        context: &lash_core::OrchestrationContext<'_>,
+        context: &lash_core::facade_support::OrchestrationContext<'_>,
     ) -> Result<Value, String> {
         let prepared: PreparedSpawnAgent = context
             .decode_prepared_payload()
@@ -218,7 +218,10 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
         tool_id.as_str() == "tool:spawn_agent"
     }
 
-    async fn execute_orchestration(&self, call: OrchestratingToolCall<'_>) -> ToolResult {
+    async fn execute_orchestration(
+        &self,
+        call: lash_core::facade_support::OrchestratingToolCall<'_>,
+    ) -> ToolResult {
         let result = match call.name {
             "spawn_agent" => self.spawn_agent(call.args, call.context).await,
             other => Err(format!("Unknown orchestrating tool: {other}")),

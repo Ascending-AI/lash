@@ -234,6 +234,7 @@ impl<'run> AttemptContext<'run> {
     }
     /// Return the recorded process execution environment for a leaf intent
     /// that starts a tool- or engine-backed process.
+    #[doc(hidden)]
     pub fn process_execution_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
         self.execution_env_spec.clone()
     }
@@ -1342,10 +1343,12 @@ pub trait ToolProvider: Send + Sync + 'static {
     }
     /// Whether this tool id uses authored process-replay execution instead of
     /// the recorded attempt coordinator.
+    #[doc(hidden)]
     fn supports_orchestration_context(&self, _tool_id: &ToolId) -> bool {
         false
     }
     /// Execute an opted-in tool body as deterministic process-replay code.
+    #[doc(hidden)]
     async fn execute_orchestration(&self, call: OrchestratingToolCall<'_>) -> ToolResult {
         ToolResult::failure(crate::ToolFailure {
             class: crate::ToolFailureClass::Unavailable,
@@ -1360,6 +1363,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         })
     }
     /// Resolve an opted-in orchestrating tool by stable catalog identity.
+    #[doc(hidden)]
     async fn execute_orchestration_by_id(
         &self,
         tool_id: &ToolId,

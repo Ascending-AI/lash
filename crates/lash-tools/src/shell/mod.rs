@@ -146,6 +146,10 @@ impl StandardShell {
     ) -> Result<StartCommandParams, ToolResult> {
         let common = self.parse_common_command_params(args)?;
         let detach = parse_optional_bool(args, "detach", false)?;
+        let detached_process_id = args
+            .get("detached_process_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
 
         Ok(StartCommandParams {
             cmd: common.cmd,
@@ -154,6 +158,7 @@ impl StandardShell {
             login: common.login,
             max_output_tokens: common.max_output_tokens,
             detach,
+            detached_process_id,
         })
     }
 
@@ -241,8 +246,21 @@ impl StandardShell {
         params: &StartCommandParams,
         context: &lash_core::ToolContext<'_>,
     ) -> ToolResult {
-        // Launch first: never register an audit row for a process that failed to
-        // start.
+        let Some(_launcher_process_id) = context.async_process_id() else {
+            return execution_failure(
+                "detached_process_runner_missing_process",
+                "the internal detached process runner requires a durable process id",
+            );
+        };
+        let Some(detached_process_id) = params.detached_process_id.as_deref() else {
+            return execution_failure(
+                "detached_process_runner_missing_audit_id",
+                "the recorded detached process body requires a stable audit process id",
+            );
+        };
+
+        // Validate the complete durable launch context before starting host
+        // work. The audit row is registered only after a successful exec.
         let launch = match self.runtime.spawn_detached(
             &params.cmd,
             &params.workdir,
@@ -256,22 +274,42 @@ impl StandardShell {
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis() as u64)
             .unwrap_or(0);
-        let Some(process_id) = context.async_process_id().map(str::to_string) else {
-            return execution_failure(
-                "detached_process_runner_missing_process",
-                "the internal detached process runner requires a durable process id",
-            );
-        };
         let launch_value = json!({
             "pid": launch.pid,
             "pgid": launch.pgid,
             "command": params.cmd.clone(),
             "started_at": started_at,
         });
+        let request = ProcessStartRequest::external(
+            detached_process_id,
+            lash_core::ProcessOriginator::host_scoped("shell-detached"),
+            launch_value.clone(),
+        )
+        .with_identity(
+            lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
+        );
+        if let Err(error) = context.processes().start(request).await {
+            self.runtime.stop_detached(launch);
+            return execution_failure("detached_process_registration_failed", error.to_string());
+        }
+        if let Err(error) = context
+            .processes()
+            .complete_external(
+                detached_process_id,
+                lash_core::ProcessAwaitOutput::Success {
+                    value: launch_value.clone(),
+                    control: None,
+                },
+            )
+            .await
+        {
+            self.runtime.stop_detached(launch);
+            return execution_failure("detached_process_completion_failed", error.to_string());
+        }
         let mut record = launch_value.as_object().cloned().unwrap_or_default();
         record.insert("__handle__".to_string(), json!("process"));
-        record.insert("id".to_string(), json!(process_id));
-        record.insert("process_id".to_string(), json!(process_id));
+        record.insert("id".to_string(), json!(detached_process_id));
+        record.insert("process_id".to_string(), json!(detached_process_id));
         record.insert("status".to_string(), json!("detached"));
         record.insert("done".to_string(), json!(true));
         record.insert("running".to_string(), json!(false));
@@ -296,7 +334,8 @@ impl StandardShell {
             }
         };
         let process_id = identity.replay_key;
-        let args = start_command_process_args(params);
+        let detached_process_id = params.detach.then(|| format!("{process_id}:detached"));
+        let args = start_command_process_args(params, detached_process_id.as_deref());
         let call = PreparedToolCall::from_parts(
             process_id.clone(),
             RUN_START_COMMAND_TOOL_ID,
@@ -310,26 +349,34 @@ impl StandardShell {
         } else {
             lash_core::SessionScope::for_agent_frame(context.session_id(), context.agent_frame_id())
         };
-        let request = ProcessStartRequest::new(
+        let mut request = ProcessStartRequest::new(
             process_id.clone(),
             ProcessInput::ToolCall { call },
             // Shell process groups are owner-bound external side effects. The
             // durable intent is idempotent; recovery must not launch a second OS
             // process after the owner has bound.
             lash_core::RecoveryDisposition::OwnerBound,
-            lash_core::ProcessOriginator::session(session_scope),
+            if params.detach {
+                lash_core::ProcessOriginator::host_scoped("shell-detached-launcher")
+            } else {
+                lash_core::ProcessOriginator::session(session_scope)
+            },
         )
         .with_env_spec(context.process_execution_env_spec())
-        .with_wake_session_id(Some(context.session_id().to_string()))
-        .with_observers([context.session_id().to_string()])
         .with_identity(
             lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
         )
         .with_extra_event_types([shell_signal_event_type()]);
+        if !params.detach {
+            request = request
+                .with_wake_session_id(Some(context.session_id().to_string()))
+                .with_observers([context.session_id().to_string()]);
+        }
+        let public_process_id = detached_process_id.as_deref().unwrap_or(&process_id);
         let result = lash_core::ToolResultDone::ok(json!({
             "__handle__": "process",
-            "id": process_id,
-            "process_id": process_id,
+            "id": public_process_id,
+            "process_id": public_process_id,
             "status": if params.detach { "detached" } else { "running" },
             "done": params.detach,
             "running": !params.detach,
@@ -481,7 +528,10 @@ fn tool_result_without_intents(result: ToolResult) -> lash_core::ToolAttemptResu
     }
 }
 
-fn start_command_process_args(params: &StartCommandParams) -> serde_json::Value {
+fn start_command_process_args(
+    params: &StartCommandParams,
+    detached_process_id: Option<&str>,
+) -> serde_json::Value {
     let mut args = serde_json::Map::new();
     args.insert("cmd".to_string(), json!(params.cmd.clone()));
     args.insert(
@@ -490,6 +540,13 @@ fn start_command_process_args(params: &StartCommandParams) -> serde_json::Value 
     );
     args.insert("shell".to_string(), json!(params.shell_path.clone()));
     args.insert("login".to_string(), json!(params.login));
+    args.insert("detach".to_string(), json!(params.detach));
+    if let Some(detached_process_id) = detached_process_id {
+        args.insert(
+            "detached_process_id".to_string(),
+            json!(detached_process_id),
+        );
+    }
     if let Some(max_output_tokens) = params.max_output_tokens {
         args.insert("max_output_tokens".to_string(), json!(max_output_tokens));
     }
@@ -665,7 +722,12 @@ finish probe.exit_code == 0"#.into(),
                 RUN_START_COMMAND_TOOL_ID,
                 "run_start_command",
                 "Internal owner-bound process body for shell.start.",
-                object_schema(command_common("Shell command to start."), &["cmd"]),
+                {
+                    let mut properties = command_common("Shell command to start.");
+                    properties["detach"] = json!({ "type": "boolean", "default": false });
+                    properties["detached_process_id"] = json!({ "type": "string" });
+                    object_schema(properties, &["cmd"])
+                },
                 shell_start_output_schema(),
             )
             .with_activation(lash_core::ToolActivation::Internal),
@@ -758,7 +820,7 @@ fn shell_write_output_schema() -> serde_json::Value {
             "status": { "type": "string", "enum": ["signalled"] },
             "sequence": { "type": "integer", "minimum": 0 }
         },
-        "required": ["process_id", "status"],
+        "required": ["process_id", "status", "sequence"],
         "additionalProperties": false
     })
 }

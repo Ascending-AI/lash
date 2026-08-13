@@ -9,8 +9,8 @@ use crate::plugin::PluginError;
 /// operations issued through [`OrchestrationContext`] are therefore ordinary,
 /// ordinal-safe children of that process replay.
 ///
-/// This is public for **tool-provider integrators** implementing a model-facing
-/// operation whose result depends on durable child work.
+/// This is a doc-hidden first-party facade-support seam, not host API.
+#[doc(hidden)]
 pub struct OrchestratingToolCall<'a> {
     pub name: &'a str,
     pub args: &'a serde_json::Value,
@@ -24,9 +24,11 @@ pub struct OrchestratingToolCall<'a> {
 /// randomness, drive commands from unordered iteration, perform unjournaled
 /// I/O, or leave a journaled action un-awaited.
 ///
-/// This is public for **tool-provider integrators**; runtime hosts construct it
-/// and provider bodies receive it through [`OrchestratingToolCall`].
+/// This is a doc-hidden first-party facade-support seam; runtime internals
+/// construct it and first-party provider bodies receive it through
+/// [`OrchestratingToolCall`].
 #[derive(Clone)]
+#[doc(hidden)]
 pub struct OrchestrationContext<'run> {
     context: ToolContext<'run>,
 }

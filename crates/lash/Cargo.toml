@@ -62,6 +62,7 @@ otel-trace = ["lash-core/otel-trace"]
 insta = "1"
 lash-core = { workspace = true, features = ["testing"] }
 lash-llm-tools = { workspace = true }
+lash-plugin-process-controls = { workspace = true }
 lash-subagents = { workspace = true }
 lash-tools = { workspace = true }
 lash-sqlite-store = { workspace = true }

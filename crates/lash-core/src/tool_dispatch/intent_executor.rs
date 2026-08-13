@@ -402,6 +402,11 @@ async fn execute_one(
 fn error_code(error: &crate::PluginError) -> String {
     match error {
         crate::PluginError::RuntimeEffectController(error) => error.code.as_str().to_string(),
+        crate::PluginError::ProcessNotVisible { .. } => "process_not_visible".to_string(),
+        crate::PluginError::ProcessAlreadyTerminal { .. } => "process_already_terminal".to_string(),
+        crate::PluginError::ProcessNoLongerRetained { .. } => {
+            "process_no_longer_retained".to_string()
+        }
         _ => "plugin".to_string(),
     }
 }

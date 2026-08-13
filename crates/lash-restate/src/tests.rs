@@ -5201,6 +5201,7 @@ struct ReplayableRecordingContext {
     process_worker: Mutex<Option<DurableProcessWorker>>,
     defer_process_workflows: AtomicBool,
     replay_process_workflow_starts_from_journal: AtomicBool,
+    live_process_workflow_starts: AtomicUsize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -5857,6 +5858,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             if context.defer_process_workflows.load(Ordering::SeqCst) {
                 return Ok(format!("invocation-{}", registration.id));
             }
+            context
+                .live_process_workflow_starts
+                .fetch_add(1, Ordering::SeqCst);
             let Some(worker) = worker else {
                 return Err(TerminalError::new("process workflow start is unsupported"));
             };
@@ -7408,6 +7412,13 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
         "the recorded protocol batch must be a direct child; Restate process service-call frames are asserted by the PostgreSQL envelope law and the endpoint E2E",
     );
 
+    assert!(
+        context.live_process_workflow_starts.load(Ordering::SeqCst) > 0,
+        "the first invocation must cross the production process-workflow start path"
+    );
+    // Fixture-only replay substitution: captured Restate service-call results
+    // stand in for the substrate journal on the second invocation. The live
+    // assertion above prevents this flag from masking production-path coverage.
     context.replay_process_workflow_starts_from_journal();
     context.start_replay_allowing_journal_extension();
     let mut replay = replay_test_runtime_with_plugins_and_registry(
@@ -7451,8 +7462,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                 serde_json::json!({
                     "__handle__": "process",
                     "done": true,
-                    "id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac",
-                    "process_id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac",
+                    "id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
+                    "process_id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
                     "running": false,
                     "status": "detached",
                 }),
@@ -7461,6 +7472,7 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                 "write_stdin".to_string(),
                 serde_json::json!({
                     "process_id": "fig1293-control-target",
+                    "sequence": 2,
                     "status": "signalled",
                 }),
             ),

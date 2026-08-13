@@ -28,6 +28,7 @@ pub(super) struct AgentScenario {
     pub(super) expected_final_value: Option<serde_json::Value>,
     pub(super) tool_provider: Option<Arc<dyn ToolProvider>>,
     pub(super) install_subagents: bool,
+    pub(super) install_shell_processes: bool,
     pub(super) max_turns: Option<usize>,
     pub(super) expected_contracts: AgentScenarioExpectations,
 }
@@ -43,6 +44,7 @@ impl AgentScenario {
             expected_final_value: None,
             tool_provider: None,
             install_subagents: false,
+            install_shell_processes: false,
             max_turns: None,
             expected_contracts: AgentScenarioExpectations::default(),
         }
@@ -79,6 +81,11 @@ impl AgentScenario {
 
     pub(super) fn install_subagents(mut self) -> Self {
         self.install_subagents = true;
+        self
+    }
+
+    pub(super) fn install_shell_processes(mut self) -> Self {
+        self.install_shell_processes = true;
         self
     }
 
@@ -157,6 +164,7 @@ struct AgentScenarioSetup {
     scripted_provider_usage: LlmUsage,
     tool_provider: Option<Arc<dyn ToolProvider>>,
     install_subagents: bool,
+    install_shell_processes: bool,
     install_llm_tools: bool,
     max_turns: Option<usize>,
 }
@@ -168,6 +176,7 @@ impl AgentScenarioSetup {
             scripted_provider_usage: LlmUsage::default(),
             tool_provider: None,
             install_subagents: false,
+            install_shell_processes: false,
             install_llm_tools: false,
             max_turns: None,
         }
@@ -190,6 +199,11 @@ impl AgentScenarioSetup {
 
     fn install_subagents(mut self, install_subagents: bool) -> Self {
         self.install_subagents = install_subagents;
+        self
+    }
+
+    fn install_shell_processes(mut self, install_shell_processes: bool) -> Self {
+        self.install_shell_processes = install_shell_processes;
         self
     }
 
@@ -233,6 +247,20 @@ impl AgentScenarioSetup {
         }
         if self.install_subagents {
             builder = builder.plugin(subagents_plugin());
+        }
+        if self.install_shell_processes {
+            builder = builder
+                .plugin(Arc::new(
+                    lash_tools::shell::StandardShellPluginFactory::new(),
+                ))
+                .plugin(Arc::new(
+                    lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+                ))
+                .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                    "agent-scenario-standard-batch",
+                    lash_core::facade_support::PluginSpec::new()
+                        .with_tool_provider(lash_protocol_standard::standard_batch_tool_provider()),
+                )));
         }
         if self.install_llm_tools {
             builder = builder.plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()));
@@ -285,6 +313,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .response_usage(case.scripted_provider_usage.clone())
         .maybe_tool_provider(case.tool_provider.clone())
         .install_subagents(case.install_subagents)
+        .install_shell_processes(case.install_shell_processes)
         .max_turns(case.max_turns)
         .build()?;
     let session = runtime.core.session(&case.session_id).open().await?;

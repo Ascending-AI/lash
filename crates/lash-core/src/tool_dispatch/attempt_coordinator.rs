@@ -358,6 +358,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         child_trace_hook.as_ref(),
                     )
                     .await;
+                    project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
                     context.recorded_intent_outcomes.record(&intent_outcomes);
                     if let Some(slot) = &intent_drain_slot {
                         slot.complete_final_drain().await;
@@ -392,6 +393,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         child_trace_hook.as_ref(),
                     )
                     .await;
+                    project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
                     context.recorded_intent_outcomes.record(&intent_outcomes);
                     if let Some(slot) = &intent_drain_slot {
                         slot.complete_final_drain().await;
@@ -449,6 +451,49 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
         ))),
         triggers,
     }
+}
+
+fn project_recorded_intent_outcomes(
+    output: &mut crate::ToolCallOutput,
+    outcomes: &[crate::ToolIntentExecutionOutcome],
+) {
+    if let Some(crate::ToolIntentExecutionOutcome::Refused { refusal, .. }) = outcomes
+        .iter()
+        .find(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Refused { .. }))
+    {
+        let (code, message) = match refusal {
+            crate::ToolIntentRefusalReason::CommandFailed { code, message } => {
+                (code.clone(), message.clone())
+            }
+            refusal => (refusal.code().to_string(), format!("{refusal:?}")),
+        };
+        *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Unavailable,
+            code,
+            message,
+        ));
+        return;
+    }
+
+    let Some(sequence) = outcomes.iter().find_map(|outcome| match outcome {
+        crate::ToolIntentExecutionOutcome::Executed {
+            kind: crate::ToolIntentKind::SignalProcess,
+            result,
+            ..
+        } => result.get("sequence").and_then(serde_json::Value::as_u64),
+        _ => None,
+    }) else {
+        return;
+    };
+    let crate::ToolCallOutcome::Success(value) = &mut output.outcome else {
+        return;
+    };
+    let mut projected = value.to_json_value();
+    let Some(object) = projected.as_object_mut() else {
+        return;
+    };
+    object.insert("sequence".to_string(), serde_json::json!(sequence));
+    *value = crate::ToolValue::from(projected);
 }
 
 fn runtime_failure_outcome(

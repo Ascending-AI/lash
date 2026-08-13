@@ -14,6 +14,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+mod internal_activation;
+
 type AttemptObservation = (u32, u32, Option<String>);
 type SharedAttemptObservations = Arc<std::sync::Mutex<Vec<AttemptObservation>>>;
 
@@ -160,6 +162,34 @@ async fn scheduler_runs_every_item_concurrently_and_preserves_order() {
 }
 
 struct MockTools;
+
+struct InternalProbeTools {
+    executed: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for InternalProbeTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![
+            test_tool("internal_probe").with_activation(crate::ToolActivation::Internal),
+        ])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "internal_probe").then(|| {
+            Arc::new(
+                test_tool("internal_probe")
+                    .with_activation(crate::ToolActivation::Internal)
+                    .contract(),
+            )
+        })
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        self.executed.fetch_add(1, Ordering::SeqCst);
+        ToolResult::ok(json!("internal body ran"))
+    }
+}
 
 #[derive(Clone)]
 struct AttemptIntentTools {

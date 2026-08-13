@@ -83,6 +83,7 @@ pub mod facade_support {
         SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainError,
         SelectedQueuedWorkDrainOutcome, SelectedQueuedWorkDrainRefusalCause,
     };
+    pub use crate::tool_provider::{OrchestratingToolCall, OrchestrationContext};
     /// Build the core-level tool-registry projection through the same plugin
     /// composition path used for runtime sessions.
     pub fn build_core_tool_registry(
@@ -942,11 +943,11 @@ pub use tool_intent::{
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptResult, ToolIntent, ToolIntents,
     ToolResultDone, derive_tool_intent_identity,
 };
+pub(crate) use tool_provider::OrchestrationContext;
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall,
-    OrchestratingToolCall, OrchestrationContext, PreparedToolBatch, PreparedToolBatchCall,
-    PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant, ToolPrepareCall,
-    ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall, PreparedToolBatch,
+    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,
+    ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 
 #[cfg(test)]

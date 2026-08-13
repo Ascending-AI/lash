@@ -158,6 +158,9 @@ impl ProcessLocalExecution {
                         "local process signal execution requires its effect controller",
                     )
                 })?;
+                if registry.get_process(&process_id).await?.is_none() {
+                    return Err(crate::PluginError::ProcessNotVisible { process_id }.into());
+                }
                 let result = registry.append_event(&process_id, request).await?;
                 let waiting_ordinal =
                     registry
