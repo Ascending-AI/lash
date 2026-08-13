@@ -1833,7 +1833,7 @@ impl LashRuntime {
             // A host-selected drain is closed over the rendered batch set. Without this guard,
             // an EarliestSafeBoundary checkpoint in the selected turn could pull unrelated
             // pending batches into the same run after the exact initial claim.
-            work.input.turn_context.suppress_checkpoint_queued_work();
+            work.input.turn_context.mark_selected_queued_work_drain();
         }
         if let Some(hint) = opts.local_cancel_origin_hint() {
             work.input.turn_context.set_local_cancel_origin_hint(hint);

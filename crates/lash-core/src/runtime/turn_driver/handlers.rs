@@ -5,7 +5,9 @@ impl RuntimeTurnDriver<'_> {
         &self,
         request: &LlmRequest,
     ) -> Result<(), RuntimeError> {
-        if self.pending_queue_claims.is_empty() {
+        if self.pending_queue_claims.is_empty()
+            || !self.turn_context.enforces_selected_queued_work_reserve()
+        {
             return Ok(());
         }
         let request = crate::attachments::resolve_llm_request_attachments(
@@ -36,9 +38,12 @@ impl RuntimeTurnDriver<'_> {
             ));
         }
 
-        // The claim-time store can only see queued rows. This is the first seam
+        // A selected drain is admitted as one exact host-requested composition.
+        // The claim-time store can only see queued rows; this is the first seam
         // where retained history, system prompt, tools, attachments, generation
         // controls, and the request envelope have all been projected together.
+        // Automatic background drains retain their established unrestricted
+        // execution contract and do not enter this selected-drain check.
         // One serialized UTF-8 byte is charged as one token, matching the
         // conservative tokenizer-independent upper bound used by queue claims.
         let serialized_bytes = serde_json::to_vec(&request).map_err(|err| {

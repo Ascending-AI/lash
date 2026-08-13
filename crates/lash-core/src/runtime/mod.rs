@@ -648,6 +648,7 @@ pub struct TurnContext {
     prompt: crate::PromptLayer,
     local_cancel_origin: TurnCancelOriginHint,
     claim_checkpoint_queued_work: bool,
+    enforce_selected_queued_work_reserve: bool,
 }
 
 impl Default for TurnContext {
@@ -658,6 +659,7 @@ impl Default for TurnContext {
             prompt: crate::PromptLayer::default(),
             local_cancel_origin: TurnCancelOriginHint::default(),
             claim_checkpoint_queued_work: true,
+            enforce_selected_queued_work_reserve: false,
         }
     }
 }
@@ -699,8 +701,13 @@ impl TurnContext {
         self.local_cancel_origin.clone()
     }
 
-    pub(crate) fn suppress_checkpoint_queued_work(&mut self) {
+    pub(crate) fn mark_selected_queued_work_drain(&mut self) {
         self.claim_checkpoint_queued_work = false;
+        self.enforce_selected_queued_work_reserve = true;
+    }
+
+    pub(crate) fn enforces_selected_queued_work_reserve(&self) -> bool {
+        self.enforce_selected_queued_work_reserve
     }
 
     pub(crate) fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {

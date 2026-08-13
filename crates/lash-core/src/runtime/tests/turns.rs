@@ -6823,7 +6823,8 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
 }
 
 #[tokio::test]
-async fn queued_wake_reserve_refuses_the_complete_projected_request_with_retained_history() {
+async fn selected_queued_wake_reserve_refuses_the_complete_projected_request_with_retained_history()
+{
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let captured_provider_calls = Arc::clone(&provider_calls);
     let transport = TestProvider::builder()
@@ -6905,13 +6906,27 @@ async fn queued_wake_reserve_refuses_the_complete_projected_request_with_retaine
     )
     .await;
 
+    let batch_id = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list wake for selected drain")
+        .into_iter()
+        .next()
+        .expect("queued wake")
+        .batch_id;
+
     let err = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            named_turn_scope("root", "full-projection-reserve"),
-        ))
+        .stream_selected_queued_work(
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "full-projection-reserve"),
+            ),
+            &[batch_id],
+        )
         .await
         .expect_err("retained history plus wake and reserve must be refused");
+    let super::super::turn_loop::SelectedQueuedWorkDrainError::Runtime(err) = err else {
+        panic!("projected-request refusal must remain a runtime error");
+    };
     assert_eq!(err.code, crate::RuntimeErrorCode::QueuedWork);
     assert!(err.message.contains("complete projected request"));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
