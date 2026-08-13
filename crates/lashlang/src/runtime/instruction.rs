@@ -261,6 +261,10 @@ pub(crate) enum Instruction {
         resume: usize,
     },
     EndFinally,
+    /// Discards the pending completion of the `finally` body being left by an
+    /// abrupt completion (`break` / `continue`), per ECMA-262 completion
+    /// replacement.
+    AbandonFinally,
     Throw,
     AddAssign(usize),
     // Retained after measurement: indexed_assignment/large_data regress when
@@ -422,6 +426,7 @@ impl Instruction {
             | Instruction::PopHandler
             | Instruction::EnterFinally { .. }
             | Instruction::EndFinally
+            | Instruction::AbandonFinally
             | Instruction::Throw => InstructionProfileTag::Exception,
             Instruction::AddAssign(_)
             | Instruction::AddAssignNumber { .. }

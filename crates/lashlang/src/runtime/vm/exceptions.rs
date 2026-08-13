@@ -74,6 +74,26 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.ip = finally_ip;
     }
 
+    /// Leaves a running `finally` body by an abrupt completion. The pending
+    /// completion the body would otherwise have resumed or rethrown is
+    /// replaced by the jump that is leaving, so it is dropped here.
+    pub(super) fn abandon_finally(&mut self) -> Result<(), RuntimeError> {
+        let Some(finally) = self.finally_stack.pop() else {
+            return Err(RuntimeError::InvalidExceptionState {
+                reason: "finally stack underflow",
+            });
+        };
+        if finally.frame_depth != self.frames.len()
+            || finally.frame_function != self.active_function
+        {
+            return Err(RuntimeError::InvalidExceptionState {
+                reason: "finally was abandoned in a different frame",
+            });
+        }
+        self.stack.truncate(finally.stack_depth);
+        Ok(())
+    }
+
     pub(super) fn finish_finally(&mut self) -> Result<Option<Value>, RuntimeError> {
         let Some(finally) = self.finally_stack.pop() else {
             return Err(RuntimeError::InvalidExceptionState {

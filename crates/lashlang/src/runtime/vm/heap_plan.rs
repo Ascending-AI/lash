@@ -125,7 +125,8 @@ pub(super) fn instruction_heap_plan(
         | I::PushHandler { .. }
         | I::PopHandler
         | I::EnterFinally { .. }
-        | I::EndFinally => InstructionHeapPlan::stack(Top(0)),
+        | I::EndFinally
+        | I::AbandonFinally => InstructionHeapPlan::stack(Top(0)),
 
         // Single-operand opcodes.
         I::Field(_)

@@ -55,6 +55,8 @@ pub(crate) struct Compiler {
     compile_stats: Rc<RefCell<CompileStats>>,
     const_slots: Vec<Option<Value>>,
     loop_contexts: Vec<LoopContext>,
+    handler_scopes: Vec<HandlerScope>,
+    pending_finally_sites: Vec<Vec<usize>>,
     functions: Vec<CompiledFunction>,
     pending_functions: Vec<Option<FunctionExpr>>,
 }
@@ -68,6 +70,29 @@ struct LashlangExecutionCompileContext {
 struct LoopContext {
     continue_target: usize,
     break_jumps: SmallVec<[usize; 4]>,
+    /// Depth of [`Compiler::handler_scopes`] when the loop was entered. A
+    /// `break` or `continue` targeting this loop must unwind every scope above
+    /// this depth before it jumps.
+    handler_scope_depth: usize,
+}
+
+/// One live structured-exception scope on the compile-time scope stack. It
+/// mirrors what the VM's handler and finally stacks hold while the enclosed
+/// bytecode runs, which is what lets a jump edge emit exactly the instructions
+/// a fall-through edge would have executed.
+#[derive(Clone, Copy)]
+enum HandlerScope {
+    /// A `PushHandler` is live: leaving the region pops it and, when the scope
+    /// owns a `finally`, runs that block before the jump continues.
+    Protected {
+        /// Index into [`Compiler::pending_finally_sites`] collecting the
+        /// `EnterFinally` sites this scope still has to patch, or `None` when
+        /// the scope has no `finally` block.
+        finally_sites: Option<usize>,
+    },
+    /// A `finally` body is executing: leaving it by a jump replaces the pending
+    /// completion, discarding whatever the body was going to resume or rethrow.
+    FinallyBody,
 }
 
 #[derive(Default)]

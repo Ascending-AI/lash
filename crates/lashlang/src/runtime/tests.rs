@@ -947,6 +947,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::PopHandler => "pop_handler".to_string(),
         Instruction::EnterFinally { .. } => "enter_finally".to_string(),
         Instruction::EndFinally => "end_finally".to_string(),
+        Instruction::AbandonFinally => "abandon_finally".to_string(),
         Instruction::Throw => "throw".to_string(),
     }
 }

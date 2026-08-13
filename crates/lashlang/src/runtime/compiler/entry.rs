@@ -82,6 +82,8 @@ impl Compiler {
             compile_stats,
             const_slots: Vec::new(),
             loop_contexts: Vec::new(),
+            handler_scopes: Vec::new(),
+            pending_finally_sites: Vec::new(),
             functions: Vec::new(),
             pending_functions: Vec::new(),
         }
@@ -128,6 +130,7 @@ impl Compiler {
                 std::mem::replace(&mut self.slots, Rc::new(RefCell::new(SlotTable::default())));
             let root_const_slots = std::mem::take(&mut self.const_slots);
             let root_loops = std::mem::take(&mut self.loop_contexts);
+            let root_handler_scopes = std::mem::take(&mut self.handler_scopes);
 
             let self_slot = definition.name.as_deref().map(|name| self.push_slot(name));
             let parameter_slots = definition
@@ -159,6 +162,7 @@ impl Compiler {
             self.slots = root_slots;
             self.const_slots = root_const_slots;
             self.loop_contexts = root_loops;
+            self.handler_scopes = root_handler_scopes;
             next += 1;
         }
     }
@@ -665,6 +669,7 @@ impl Compiler {
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
             break_jumps: SmallVec::new(),
+            handler_scope_depth: self.handler_scopes.len(),
         });
         self.compile_block_discarding_values(body);
         let loop_context = self
@@ -775,6 +780,7 @@ impl Compiler {
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
             break_jumps: SmallVec::new(),
+            handler_scope_depth: self.handler_scopes.len(),
         });
         self.compile_block_discarding_values(body);
         let loop_context = self

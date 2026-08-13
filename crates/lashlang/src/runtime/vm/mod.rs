@@ -481,6 +481,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::EnterFinally { finally, resume } => {
                 self.enter_finally(finally, resume);
             }
+            Instruction::AbandonFinally => self.abandon_finally()?,
             Instruction::EndFinally => {
                 if let Some(value) = self.finish_finally()? {
                     return Err(RuntimeError::UncaughtException {
@@ -1230,6 +1231,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::PopHandler
             | Instruction::EnterFinally { .. }
             | Instruction::EndFinally
+            | Instruction::AbandonFinally
             | Instruction::Throw => {
                 unreachable!("opcode is always completed by step_instruction_fast")
             }
