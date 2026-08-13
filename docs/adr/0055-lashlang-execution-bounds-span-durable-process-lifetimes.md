@@ -28,6 +28,10 @@ Every RLM configuration must explicitly choose three independent bounds:
 - `deadline: ExecutionBound<Duration>` limits active VM execution time; and
 - `memory_limit: ExecutionBound<NonZeroU64>` limits live logical heap bytes.
 
+The engine's own `ExecutionBounds::new` takes all three as well: a host that has
+not decided how much logical memory an execution may hold has not finished
+configuring it, and a silent default would be a bound nobody chose.
+
 Hosts select a finite bound or `Unbounded` for each field. Rust callers should
 use `ExecutionBound::instructions(n)`, `ExecutionBound::millis(n)`, or
 `ExecutionBound::secs(n)` as appropriate; the byte-valued memory limit uses the
@@ -44,8 +48,16 @@ bytes plus its deterministic scalar payload; records additionally cost 8 bytes
 plus UTF-8 key bytes per field. References cost 8 payload bytes. Allocation
 charges the complete object and mark-sweep collection subtracts swept objects.
 The non-moving collector runs every 1,024 allocations, based only on the
-monotonic allocation counter. Test hosts can collect after every allocation to
-prove that collection timing is otherwise unobservable.
+monotonic allocation counter, and additionally at a park boundary. Test hosts
+can collect after every allocation to prove that collection timing does not
+change a program's result.
+
+The memory limit bounds live plus not-yet-collected bytes, so it is the one
+place where collection timing is observable: a run that parks collects earlier
+than a run that does not, and can therefore survive a point at which the
+straight-through run would have exhausted the bound. The relation is one-way —
+parking never brings exhaustion forward — and results, instruction meters and
+reachable heap accounting are unaffected.
 
 Foreground meters apply per executed Lashlang block. Durable-process meters are
 cumulative over the entire logical process lifetime and persist across every
