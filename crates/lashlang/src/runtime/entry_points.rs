@@ -255,9 +255,8 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
     projected: &ProjectedBindings,
     scratch: Option<&mut ExecutionScratch>,
 ) -> Result<ExecutionOutcome, RuntimeError> {
-    if program.dialect == super::CompilationDialect::Typescript {
-        state.reference_semantics = true;
-    }
+    let reference_semantics = program.dialect == super::CompilationDialect::Typescript;
+    state.reference_semantics = reference_semantics;
     if let Some(scratch) = scratch {
         let (globals, heap) = state.take_runtime();
         let slots = SlotState::from_globals_with_scratch(
@@ -273,9 +272,7 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
             scratch,
             host.execution_mode(),
         );
-        if state.reference_semantics {
-            vm.reference_semantics = true;
-        }
+        vm.reference_semantics = reference_semantics;
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.recycle_into_state_parts(scratch)?;
@@ -285,9 +282,7 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         let (globals, heap) = state.take_runtime();
         let slots = SlotState::from_globals(globals, &program.chunk.slot_names, projected);
         let mut vm = Vm::new_with_mode(&program.chunk, slots, host, host.execution_mode());
-        if state.reference_semantics {
-            vm.reference_semantics = true;
-        }
+        vm.reference_semantics = reference_semantics;
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.into_state_parts()?;

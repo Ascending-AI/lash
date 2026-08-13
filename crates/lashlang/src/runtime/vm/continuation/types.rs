@@ -157,6 +157,8 @@ pub struct VmProfileContinuation {
 pub enum ContinuationError {
     #[error("continuation format version {found} is incompatible with version {expected}")]
     FormatVersionMismatch { expected: u32, found: u32 },
+    #[error("TypeScript reference semantics are not valid for a Lashlang continuation")]
+    ReferenceSemanticsDialectMismatch,
     #[error("continuation function index exceeds the durable u32 index space")]
     FunctionIndexOverflow,
     #[error("continuation closure function index {index} is not present in the compiled program")]

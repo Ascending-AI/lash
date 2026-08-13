@@ -942,6 +942,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 found: continuation.format_version,
             });
         }
+        let reference_semantics = program.dialect == CompilationDialect::Typescript;
+        if continuation.reference_semantics && !reference_semantics {
+            return Err(ContinuationError::ReferenceSemanticsDialectMismatch);
+        }
         validate_continuation(&continuation)?;
         validate_program_continuation(&continuation, &program.chunk)?;
         let active_function = continuation.active_function.map(|index| index as usize);
@@ -1129,7 +1133,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             },
             heap_initialized: true,
             extras_heapified: false,
-            reference_semantics: continuation.reference_semantics,
+            reference_semantics,
             // A resumed VM records assignments from here on. Continuations are
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are
