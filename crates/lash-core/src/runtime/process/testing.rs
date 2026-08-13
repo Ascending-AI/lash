@@ -1289,6 +1289,14 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         ))
     }
 
+    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
+        let managed = self.managed.lock().await;
+        Ok(managed
+            .values()
+            .filter(|record| !record.record.is_terminal())
+            .count())
+    }
+
     async fn claim_process_lease(
         &self,
         process_id: &str,

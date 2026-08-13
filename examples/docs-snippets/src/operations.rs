@@ -9,7 +9,7 @@ use lash::persistence::{
     SessionStoreFactory,
 };
 use lash::provider::ProviderHandle;
-use lash::{LashCore, LashSession, TurnInput, TurnOutput};
+use lash::{DeploymentDrainStatus, LashCore, LashSession, TurnInput, TurnOutput};
 
 fn configure_lease_timings(
     factory: lash::rlm::RlmProtocolPluginFactory,
@@ -111,21 +111,39 @@ async fn graceful_drain(
     //    invalidates the old completion. Resolve outstanding durable waits as
     //    `Cancelled` with `session.revoke_durable_waits()`.
 
-    // 5. Release provider transports. The default `close()` is a no-op; the
+    // 5. Read the deployment's authoritative process status before retiring
+    //    an immutable deployment. This is a read, not a drain orchestrator:
+    //    keep the old deployment registered while `drained` is false.
+    let drain_status = core.drain_status(false).await?;
+    if drain_status.drained {
+        // The host may now retire this deployment.
+    } else {
+        // Keep it available for the remaining pinned invocations.
+        let _ = drain_status.remaining_invocations;
+    }
+
+    // 6. Release provider transports. The default `close()` is a no-op; the
     //    Codex provider sends WebSocket Close frames on its cached sessions.
     let _ = provider.close().await;
 
-    // 6. Release resources owned by plugin factories. This is not a drain
+    // 7. Release resources owned by plugin factories. This is not a drain
     //    orchestrator: intake, ordering, and deadlines remain host policy.
     core.shutdown().await?;
 
-    // 7. Flush the trace sink (fsync for JSONL). OTel span-export durability is
+    // 8. Flush the trace sink (fsync for JSONL). OTel span-export durability is
     //    the host's duty: `force_flush()`/`shutdown()` your own TracerProvider.
     core.flush_trace_sink()?;
 
-    // 8. Exit. Any lease this process still holds now expires on its TTL.
+    // 9. Exit. Any lease this process still holds now expires on its TTL.
     Ok(())
     // docs:end:graceful-drain
+}
+
+async fn read_deployment_drain_status(
+    core: &LashCore,
+    accepting_new_work: bool,
+) -> lash::Result<DeploymentDrainStatus> {
+    core.drain_status(accepting_new_work).await
 }
 
 async fn run_turn_with_retry(session: &LashSession, text: &str) -> lash::Result<TurnOutput> {
@@ -234,5 +252,70 @@ mod tests {
             crate::example_process_owner(),
         )
         .expect("lease-timing snippet must build");
+    }
+
+    #[tokio::test]
+    async fn deployment_drain_status_counts_work_and_reaches_drained() -> anyhow::Result<()> {
+        use lash::process::{
+            ProcessAwaitOutput, ProcessCompletionAuthority, ProcessInput, ProcessProvenance,
+            ProcessRegistration, ProcessRegistry, RecoveryDisposition,
+        };
+
+        let registry = Arc::new(
+            lash_sqlite_store::SqliteProcessRegistry::memory()
+                .await
+                .expect("open in-memory process registry"),
+        );
+        let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+            .model(crate::test_support::model())
+            .store_factory(Arc::new(
+                lash::persistence::InMemorySessionStoreFactory::new(),
+            ))
+            .process_registry(registry.clone())
+            .effect_host(Arc::new(InlineEffectHost::default()))
+            .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+            .process_env_store(Arc::new(
+                lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+            ))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .build(crate::example_process_owner())?;
+        registry
+            .register_process(ProcessRegistration::new(
+                "deployment-drain-status-example",
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryDisposition::ExternallyOwned,
+                ProcessProvenance::host(),
+            ))
+            .await?;
+
+        let accepting = read_deployment_drain_status(&core, true).await?;
+        assert!(accepting.accepting_new_work);
+        assert_eq!(accepting.remaining_invocations, 1);
+        assert!(!accepting.drained);
+
+        let closed = read_deployment_drain_status(&core, false).await?;
+        assert!(!closed.accepting_new_work);
+        assert_eq!(closed.remaining_invocations, 1);
+        assert!(!closed.drained);
+        assert!(accepting.checked_at <= closed.checked_at);
+
+        registry
+            .complete_process(
+                "deployment-drain-status-example",
+                ProcessAwaitOutput::Success {
+                    value: serde_json::Value::Null,
+                    control: None,
+                },
+                ProcessCompletionAuthority::external_owner(),
+            )
+            .await?;
+        let drained = read_deployment_drain_status(&core, false).await?;
+        assert!(!drained.accepting_new_work);
+        assert_eq!(drained.remaining_invocations, 0);
+        assert!(drained.drained);
+        Ok(())
     }
 }

@@ -1004,6 +1004,10 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
     let process_id = "waiting-recovery-worklist";
     let definition = serde_json::json!({"suite": "waiting-recovery-worklist"});
     let env_ref = ProcessExecutionEnvRef::new("process-env:waiting-recovery-worklist");
+    let count_before = registry
+        .count_non_terminal_processes()
+        .await
+        .expect("count existing non-terminal processes");
     let record = registry
         .register_process(
             ProcessRegistration::new(
@@ -1050,6 +1054,14 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
     assert!(
         non_terminal.iter().any(|record| record.id == process_id),
         "a waiting process must remain claimable by crash recovery"
+    );
+    assert_eq!(
+        registry
+            .count_non_terminal_processes()
+            .await
+            .expect("count waiting non-terminal process"),
+        count_before + 1,
+        "a waiting process must pin the deployment as non-drained"
     );
     let references = registry
         .live_reference_summary()

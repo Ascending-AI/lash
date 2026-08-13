@@ -37,7 +37,7 @@ pub use crate::admin::{
     AdvancedToolAdmin, Completions, CoreTriggerAdmin, PluginOperations, SessionCommandAdmin,
     SessionTriggerAdmin, ToolAdmin,
 };
-pub use crate::core::{LashCore, LashCoreBuilder, SessionDeleteReport};
+pub use crate::core::{DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteReport};
 pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause};
 pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
@@ -80,9 +80,9 @@ pub use tokio_util::sync::CancellationToken;
 /// from the crate root.
 pub mod prelude {
     pub use crate::{
-        AdvancedToolAdmin, CoreTriggerAdmin, EmbedError, EnqueueTurnBuilder, ExecutionSummary,
-        InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits, ModelLimitsError,
-        ModelSpec, ModelSpecBuilder, ObservableSession, ParkedSession,
+        AdvancedToolAdmin, CoreTriggerAdmin, DeploymentDrainStatus, EmbedError, EnqueueTurnBuilder,
+        ExecutionSummary, InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits,
+        ModelLimitsError, ModelSpec, ModelSpecBuilder, ObservableSession, ParkedSession,
         PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
         PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder, SessionCommand,
         SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest,

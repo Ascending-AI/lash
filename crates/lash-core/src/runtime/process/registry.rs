@@ -871,6 +871,14 @@ pub trait ProcessRegistry: Send + Sync {
     async fn live_reference_summary(&self)
     -> Result<Vec<ProcessLiveReferenceSummary>, PluginError>;
 
+    /// Count every retained process row that is still non-terminal.
+    ///
+    /// This is the low-level implementation seam for the facade's deployment
+    /// drain read. Durable backends should override it with an indexed count
+    /// over their authoritative status rows rather than hydrating records.
+    #[doc(hidden)]
+    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError>;
+
     /// Claim the durable single-owner lease over a non-terminal process.
     ///
     /// An unexpired lease held by a *different* owner returns

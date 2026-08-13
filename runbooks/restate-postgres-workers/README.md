@@ -64,6 +64,25 @@ so an in-place rebuild can RT0016 immediately. Publish the rebuilt worker at a
 new deployment URI, register that URI as a new deployment, keep the old worker
 available until all of its invocations drain, and only then retire it.
 
+The old deployment is not retired on an empty host-side queue guess. After
+admission is closed and its in-flight work has settled, read the Lash-owned
+authoritative status while the old deployment is still registered:
+
+```rust
+let status = old_core.drain_status(false).await?;
+assert!(!status.accepting_new_work);
+if status.drained {
+    retire_old_deployment();
+} else {
+    // Keep the old deployment available for status.remaining_invocations.
+}
+```
+
+`remaining_invocations` counts every retained non-terminal process row,
+including suspended/waiting work and retrying work whose status remains
+`running`. The read does not route, deadline, or retire the deployment; those
+decisions remain with the host.
+
 ## Local Postgres Conformance
 
 The Postgres store conformance tests require `LASH_POSTGRES_DATABASE_URL`.

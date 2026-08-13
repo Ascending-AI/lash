@@ -463,6 +463,56 @@ disposition = "unused-add"
 reason = "Add lash::CoreTriggerAdmin::subscriptions to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::DeploymentDrainStatus"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash::prelude::DeploymentDrainStatus"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/operations.rs:145#lash::Result<DeploymentDrainStatus>"
+assertion = "examples/docs-snippets/src/operations.rs:318#assert!(drained.drained);"
+
+[[api]]
+symbol = "lash::DeploymentDrainStatus::accepting_new_work"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::DeploymentDrainStatus::accepting_new_work"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/operations.rs:295#assert!(accepting.accepting_new_work);"
+assertion = "examples/docs-snippets/src/operations.rs:295#assert!(accepting.accepting_new_work);"
+
+[[api]]
+symbol = "lash::DeploymentDrainStatus::checked_at"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::DeploymentDrainStatus::checked_at"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/operations.rs:303#assert!(accepting.checked_at <= closed.checked_at);"
+assertion = "examples/docs-snippets/src/operations.rs:303#assert!(accepting.checked_at <= closed.checked_at);"
+
+[[api]]
+symbol = "lash::DeploymentDrainStatus::drained"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::DeploymentDrainStatus::drained"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/operations.rs:318#assert!(drained.drained);"
+assertion = "examples/docs-snippets/src/operations.rs:318#assert!(drained.drained);"
+
+[[api]]
+symbol = "lash::DeploymentDrainStatus::remaining_invocations"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::DeploymentDrainStatus::remaining_invocations"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/operations.rs:296#assert_eq!(accepting.remaining_invocations, 1);"
+assertion = "examples/docs-snippets/src/operations.rs:296#assert_eq!(accepting.remaining_invocations, 1);"
+
+[[api]]
 symbol = "lash::EffectReplayOwnership"
 kind = "enum"
 availability = "default+all-features"
@@ -1305,6 +1355,16 @@ disposition = "unused-add"
 reason = "The current example use of lash::LashCore::delete_session is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::LashCore::drain_status"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCore::drain_status"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/operations.rs:146#core.drain_status(accepting_new_work).await"
+assertion = "examples/docs-snippets/src/operations.rs:318#assert!(drained.drained);"
+
+[[api]]
 symbol = "lash::LashCore::durable_process_worker_config"
 kind = "function"
 availability = "default+all-features"
@@ -1349,7 +1409,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::flush_trace_sink"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:124#core.flush_trace_sink()?;"
+usage = "examples/docs-snippets/src/operations.rs:135#core.flush_trace_sink()?;"
 
 [[api]]
 symbol = "lash::LashCore::fork_at"
@@ -6324,7 +6384,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnResult::duration", "lash::turn::TurnResult::duration"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:205#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
+usage = "examples/docs-snippets/src/operations.rs:223#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
 
 [[api]]
 symbol = "lash::TurnResult::errors"
@@ -6387,7 +6447,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnResult::started_at", "lash::turn::TurnResult::started_at"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:204#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:222#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::TurnResult::state"
@@ -29815,7 +29875,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderHandle::close"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:116#let _ = provider.close().await;"
+usage = "examples/docs-snippets/src/operations.rs:127#let _ = provider.close().await;"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::complete"

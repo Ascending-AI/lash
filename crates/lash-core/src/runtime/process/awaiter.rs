@@ -744,6 +744,10 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.live_reference_summary().await
     }
 
+    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
+        self.inner.count_non_terminal_processes().await
+    }
+
     async fn claim_process_lease(
         &self,
         process_id: &str,
@@ -1556,8 +1560,7 @@ mod tests {
                 .await
                 .expect("append");
         }
-        // Terminal events ride the same best-effort sink and remain durable for
-        // reconciliation if that push is dropped.
+        // Terminal events remain durable for reconciliation if that push is dropped.
         registry
             .complete_process(
                 "proc",
@@ -1576,7 +1579,6 @@ mod tests {
             (sink.seen.lock_recover().len() as u64) < EVENTS,
             "the sink observed fewer events than were appended"
         );
-        // ...but the durable log is the complete, ordered truth.
         let reconciled = registry
             .events_after("proc", 0)
             .await
