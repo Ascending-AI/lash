@@ -543,7 +543,7 @@ impl RuntimeError {
             Self::MissingLoopState => ErrorTaxonomy::Catchable,
             Self::ContextDependentIntrinsicMisdispatch { .. } => ErrorTaxonomy::Catchable,
             Self::UncaughtException { .. } => ErrorTaxonomy::Catchable,
-            Self::InvalidExceptionState { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidExceptionState { .. } => ErrorTaxonomy::UncatchableTerminal,
         }
     }
 
@@ -682,8 +682,12 @@ impl RuntimeError {
 /// How the VM and its host must treat a [`RuntimeError`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorTaxonomy {
-    /// A host or execution-bound terminal: it ends execution and bypasses every
-    /// guest handler.
+    /// A host, execution-bound or internal-invariant terminal: it ends
+    /// execution and bypasses every guest handler. `InvalidExceptionState`
+    /// belongs here because it is raised *by* the exception machinery, and
+    /// routing it back through a handler stack that has already been shown
+    /// inconsistent is the one place a catchable classification cannot be
+    /// defended.
     UncatchableTerminal,
     /// A failure raised by a host effect. Catchable, and reported to the guest
     /// as an `EffectError`.

@@ -50,6 +50,83 @@ pub struct NestingTooDeep {
     pub limit: usize,
 }
 
+/// An AST that cannot be compiled as written.
+///
+/// AST-only nodes have no parser to reject them out of place, so the checks a
+/// parsed program gets for free are applied at the AST-construction entry
+/// points instead.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidAst {
+    /// The tree nests deeper than [`MAX_AST_NESTING_DEPTH`].
+    #[error(transparent)]
+    NestingTooDeep {
+        #[from]
+        source: NestingTooDeep,
+    },
+    /// A `break` or `continue` appears with no enclosing loop in the same
+    /// function body. The parser rejects this in source; a host-built tree has
+    /// to be told.
+    #[error("`{keyword}` is used outside a loop")]
+    LoopControlOutsideLoop { keyword: &'static str },
+}
+
+/// Rejects an AST the compiler cannot lower as written.
+///
+/// This is the AST-construction counterpart of the parser's own validation: it
+/// runs before any recursive walk, so an over-deep or ill-formed tree becomes a
+/// typed error rather than a stack overflow or a panic deeper in the compiler.
+pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
+    check_ast_nesting_depth(program)?;
+    check_loop_control(&program.main)?;
+    for declaration in &program.declarations {
+        if let Declaration::Process(process) = declaration {
+            check_loop_control(&process.body)?;
+        }
+    }
+    Ok(())
+}
+
+/// Walks one function body, tracking whether a loop encloses each node.
+///
+/// Loop bodies are the only place `break` and `continue` are legal, and a
+/// nested `Expr::Function` starts a fresh body: the compiler saves and restores
+/// its loop contexts across one, so an enclosing loop outside the function does
+/// not reach in.
+fn check_loop_control(root: &Expr) -> Result<(), InvalidAst> {
+    let mut pending: Vec<(&Expr, bool)> = vec![(root, false)];
+    while let Some((expr, in_loop)) = pending.pop() {
+        match expr {
+            Expr::Break if !in_loop => {
+                return Err(InvalidAst::LoopControlOutsideLoop { keyword: "break" });
+            }
+            Expr::Continue if !in_loop => {
+                return Err(InvalidAst::LoopControlOutsideLoop {
+                    keyword: "continue",
+                });
+            }
+            Expr::For { iterable, body, .. } => {
+                pending.push((iterable, in_loop));
+                pending.push((body, true));
+                continue;
+            }
+            Expr::While { condition, body } => {
+                pending.push((condition, in_loop));
+                pending.push((body, true));
+                continue;
+            }
+            Expr::Function(function) => {
+                pending.push((&function.body, false));
+                continue;
+            }
+            _ => {}
+        }
+        for child in expr.children() {
+            pending.push((child, in_loop));
+        }
+    }
+    Ok(())
+}
+
 /// Rejects an AST whose expression nesting exceeds [`MAX_AST_NESTING_DEPTH`].
 ///
 /// The walk is iterative on purpose: a recursive measurement would overflow on

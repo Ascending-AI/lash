@@ -38,8 +38,8 @@ pub fn compile(source: &str) -> Result<CompiledProgram, crate::parser::ParseErro
 /// have no source syntax — and therefore no parser to bound how deeply a caller
 /// nests them. The depth cap is applied here instead, so an over-deep tree is a
 /// typed error rather than a stack overflow in a later AST walk.
-pub fn compile_ast(program: &Program) -> Result<CompiledProgram, crate::ast::NestingTooDeep> {
-    crate::ast::check_ast_nesting_depth(program)?;
+pub fn compile_ast(program: &Program) -> Result<CompiledProgram, crate::ast::InvalidAst> {
+    crate::ast::validate_ast(program)?;
     Ok(compile_program_internal(program))
 }
 

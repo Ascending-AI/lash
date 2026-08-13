@@ -28,10 +28,10 @@ pub use artifact::{
 };
 pub use ast::{
     AssignPathStep, AssignTarget, BinaryOp, CatchClause, Declaration, Expr, ExprFolder,
-    ExprVisitor, FunctionExpr, LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH,
-    NestingTooDeep, ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessStartExpr, Program,
-    ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp, check_ast_nesting_depth,
-    fold_expr_children, format_type_expr, walk_expr,
+    ExprVisitor, FunctionExpr, InvalidAst, LabelMetadata, ListComprehensionClause,
+    MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl, ProcessParam, ProcessSignalDecl,
+    ProcessStartExpr, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
+    check_ast_nesting_depth, fold_expr_children, format_type_expr, validate_ast, walk_expr,
 };
 
 /// Names of every builtin accepted by the linker and runtime, in registry order.

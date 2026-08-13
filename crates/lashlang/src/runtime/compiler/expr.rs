@@ -120,13 +120,13 @@ impl Compiler {
                 let scope_depth = self
                     .loop_contexts
                     .last()
-                    .expect("parser rejects `break` outside loops")
+                    .expect("validate_ast rejects `break` outside loops")
                     .handler_scope_depth;
                 self.emit_exception_scope_exit(scope_depth);
                 let jump = self.emit_jump();
                 self.loop_contexts
                     .last_mut()
-                    .expect("parser rejects `break` outside loops")
+                    .expect("validate_ast rejects `break` outside loops")
                     .break_jumps
                     .push(jump);
                 self.clear_const_slots();
@@ -136,7 +136,7 @@ impl Compiler {
                     let context = self
                         .loop_contexts
                         .last()
-                        .expect("parser rejects `continue` outside loops");
+                        .expect("validate_ast rejects `continue` outside loops");
                     (context.continue_target, context.handler_scope_depth)
                 };
                 self.emit_exception_scope_exit(scope_depth);
