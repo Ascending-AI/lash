@@ -108,11 +108,11 @@ fn trace_fields_from_outcome(
         }
         TurnOutcome::Finished(TurnFinish::FinalValue { .. }) => ("completed", "final_value", None),
         TurnOutcome::Finished(TurnFinish::ToolValue { .. }) => ("completed", "tool_value", None),
-        TurnOutcome::AgentFrameSwitch { frame_id, .. } => (
+        TurnOutcome::AgentFrameSwitch { frame_key, .. } => (
             "completed",
             "agent_frame_switch",
             Some(lash_trace::TraceAgentFrameSwitch {
-                frame_id: frame_id.clone(),
+                frame_key: frame_key.as_str().to_string(),
             }),
         ),
         TurnOutcome::Stopped(stop) => ("failed", trace_stop_reason(stop), None),

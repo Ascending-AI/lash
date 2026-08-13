@@ -186,11 +186,11 @@ fn outcome_entry(actor: Actor, outcome: &TurnOutcome) -> Entry {
                 .attr(Attr::json("value", value))
         }
         TurnOutcome::AgentFrameSwitch {
-            frame_id,
+            frame_key,
             initial_nodes,
             ..
         } => Entry::new(Kind::Outcome, actor, "turn.frame_switch")
-            .attr(Attr::id("frame", IdKind::Node, frame_id))
+            .attr(Attr::id("frame_key", IdKind::Node, frame_key.as_str()))
             .attr(Attr::int("nodes", initial_nodes.len() as u64)),
         TurnOutcome::Stopped(stop) => {
             let mut entry = Entry::new(Kind::Outcome, actor, "turn.stopped")

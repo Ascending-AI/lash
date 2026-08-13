@@ -646,12 +646,12 @@ pub(super) fn turn_outcome_contract_json(
             "finish": format!("{other:?}"),
         }),
         lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
-            frame_id,
+            frame_key,
             initial_nodes,
             task,
         } => json!({
             "kind": "agent_frame_switch",
-            "frame_id": frame_id,
+            "frame_key": frame_key,
             "initial_nodes": initial_nodes,
             "task": task,
         }),

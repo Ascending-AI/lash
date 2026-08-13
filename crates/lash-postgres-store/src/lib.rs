@@ -172,7 +172,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // no JSON or compatibility read path.
 // Version 47 cuts queued-work storage over from slot_policy/merge_key_json to
 // work_kind/authority_json/nullable merge_key.
-const SCHEMA_VERSION: i32 = 47;
+// Version 49 rejects completed tool-attempt outcomes whose frame-switch control
+// still carries the pre-cutover `frame_id` field. Version 48 remains reserved
+// by FIG-1133.
+const SCHEMA_VERSION: i32 = 49;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

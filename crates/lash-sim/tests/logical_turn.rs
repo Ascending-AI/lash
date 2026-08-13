@@ -110,7 +110,8 @@ impl ToolProvider for SeedSwitchTool {
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         assert_eq!(call.name, "switch_frame");
         ToolResult::ok(json!({"switched": true})).with_control(ToolControl::SwitchAgentFrame {
-            frame_id: "sim-seeded-follow-frame".to_string(),
+            frame_key: lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
+                .expect("non-empty caller material"),
             initial_nodes: self.initial_nodes.clone(),
             task: Some("run seeded follow-on".to_string()),
         })
@@ -349,12 +350,18 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     let second_still_pending = pending_at_commit
         .iter()
         .any(|input| input.input_id == second.input_id);
+    let expected_frame_id = lash_core::facade_support::frame_node_id(
+        "logical-turn-sim",
+        lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
+            .expect("non-empty caller material")
+            .as_str(),
+    );
     let follow_on_enqueued = queued_at_commit.iter().any(|batch| {
         batch.items.iter().any(|item| {
             matches!(
                 &item.payload,
                 lash_core::runtime::QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-                    if frame_id == "sim-seeded-follow-frame" && task == "run seeded follow-on"
+                    if frame_id == &expected_frame_id && task == "run seeded follow-on"
             )
         })
     });
@@ -476,7 +483,8 @@ impl ToolProvider for BoundedSwitchTools {
             .and_then(|value| value.parse::<usize>().ok())
             .expect("bounded switch tool name");
         ToolResult::ok(json!({"switch": index})).with_control(ToolControl::SwitchAgentFrame {
-            frame_id: format!("bounded-frame-{index}"),
+            frame_key: lash_core::FrameKey::from_caller_material(&format!("bounded-frame-{index}"))
+                .expect("non-empty caller material"),
             initial_nodes: vec![SessionAppendNode::plugin(
                 "sim.bounded.seed",
                 json!({"index": index}),

@@ -103,9 +103,14 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
             lash_core::facade_support::TurnOutcome::Finished(finish) => Self::Finished {
                 finish: finish.into(),
             },
-            lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_id, task, .. } => {
+            lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
+                frame_key, task, ..
+            } => {
                 // Frame seeds are deliberately omitted from this lean result projection.
-                Self::AgentFrameSwitch { frame_id, task }
+                Self::AgentFrameSwitch {
+                    frame_key: frame_key.as_str().to_string(),
+                    task,
+                }
             }
             lash_core::facade_support::TurnOutcome::Stopped(stop) => Self::Stopped { stop: stop.into() },
         }

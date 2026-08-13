@@ -121,7 +121,7 @@ pub enum RemoteTurnStatus {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTurnOutcome {
     Finished { finish: RemoteTurnFinish },
-    AgentFrameSwitch { frame_id: String, task: String },
+    AgentFrameSwitch { frame_key: String, task: String },
     Stopped { stop: RemoteTurnStop },
 }
 

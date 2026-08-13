@@ -820,8 +820,8 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             attrs.push(KeyValue::new("lash.turn.done_reason", done_reason.clone()));
             if let Some(agent_frame_switch) = agent_frame_switch {
                 attrs.push(KeyValue::new(
-                    "lash.turn.agent_frame_switch.frame_id",
-                    agent_frame_switch.frame_id.clone(),
+                    "lash.turn.agent_frame_switch.frame_key",
+                    agent_frame_switch.frame_key.clone(),
                 ));
             }
         }

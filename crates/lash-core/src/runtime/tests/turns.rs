@@ -291,13 +291,13 @@ struct RestoreExecutorFromRuntimeState {
 
 struct SwitchBeforeLlmProtocol {
     executor: Option<Arc<FailingCaptureExecutor>>,
-    frame_id: String,
+    frame_key_material: String,
     switch_next: AtomicBool,
 }
 
 struct ResetExecutorOnSwitchProtocol {
     executor: Arc<FailingCaptureExecutor>,
-    frame_id: String,
+    frame_key_material: String,
     switch_next: AtomicBool,
 }
 
@@ -335,7 +335,8 @@ impl crate::plugin::ProtocolSessionPlugin for ResetExecutorOnSwitchProtocol {
             return Ok(None);
         }
         Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame {
-            frame_id: self.frame_id.clone(),
+            frame_key: crate::FrameKey::from_caller_material(&self.frame_key_material)
+                .expect("non-empty caller material"),
             task: "reset the resident executor".to_string(),
         }))
     }
@@ -376,7 +377,8 @@ impl crate::plugin::ProtocolSessionPlugin for SwitchBeforeLlmProtocol {
             return Ok(None);
         }
         Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame {
-            frame_id: self.frame_id.clone(),
+            frame_key: crate::FrameKey::from_caller_material(&self.frame_key_material)
+                .expect("non-empty caller material"),
             task: "protocol-directed switch".to_string(),
         }))
     }
@@ -712,7 +714,8 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         vec![protocol_factory],
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "restore-failure-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("restore-failure-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("continue after restore".to_string()),
             }],
@@ -960,7 +963,7 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
 }
 
 #[tokio::test]
-async fn already_current_protocol_frame_switch_preserves_dirty_execution_state_on_cold_reopen() {
+async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_state() {
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(true),
         fail_capture: AtomicBool::new(false),
@@ -970,7 +973,7 @@ async fn already_current_protocol_frame_switch_preserves_dirty_execution_state_o
     let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
         Arc::new(SwitchBeforeLlmProtocol {
             executor: Some(Arc::clone(&executor)),
-            frame_id: "initial-frame".to_string(),
+            frame_key_material: "caller-named-existing-frame".to_string(),
             switch_next: AtomicBool::new(true),
         });
     let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
@@ -1003,6 +1006,16 @@ async fn already_current_protocol_frame_switch_preserves_dirty_execution_state_o
         Arc::clone(&runtime_store),
     )
     .await;
+    let colliding_frame_key = crate::FrameKey::from_caller_material("caller-named-existing-frame")
+        .expect("non-empty caller material");
+    let opened = runtime
+        .open_agent_frame(crate::OpenAgentFrameRequest::new(
+            colliding_frame_key.as_str(),
+            crate::AgentFrameReason::initial(),
+        ))
+        .await
+        .expect("pre-open caller-named frame");
+    assert!(opened.opened, "caller-named collision target must exist");
     runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterFirstCommittedTurn {
         executor: Arc::clone(&executor),
         committed_turns: AtomicUsize::new(0),
@@ -1049,7 +1062,7 @@ async fn already_current_protocol_frame_switch_preserves_dirty_execution_state_o
     let reopen_protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
         Arc::new(SwitchBeforeLlmProtocol {
             executor: Some(Arc::clone(&reopened_executor)),
-            frame_id: "initial-frame".to_string(),
+            frame_key_material: "caller-named-existing-frame".to_string(),
             switch_next: AtomicBool::new(true),
         });
     let reopen_code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> =
@@ -1090,7 +1103,7 @@ async fn materialized_frame_switch_clears_checkpoint_and_resets_resident_executo
     let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
         Arc::new(ResetExecutorOnSwitchProtocol {
             executor: Arc::clone(&executor),
-            frame_id: "materialized-next-frame".to_string(),
+            frame_key_material: "materialized-next-frame".to_string(),
             switch_next: AtomicBool::new(true),
         });
     let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
@@ -1144,50 +1157,6 @@ async fn materialized_frame_switch_clears_checkpoint_and_resets_resident_executo
                 == Some(b"fresh-frame-execution-state".as_slice()),
         "one committed switch must durably clear the checkpoint and reset the resident executor"
     );
-}
-
-#[tokio::test]
-async fn empty_protocol_frame_switch_id_fails_with_typed_action_error() {
-    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
-        Arc::new(SwitchBeforeLlmProtocol {
-            executor: None,
-            frame_id: " \t".to_string(),
-            switch_next: AtomicBool::new(true),
-        });
-    let protocol_factory =
-        crate::testing::test_standard_protocol_factory_with_runtime_state(protocol, None);
-    let store = Arc::new(RecordingStore::default());
-    let transport = TestProvider::builder()
-        .kind("mock")
-        .requires_streaming(true)
-        .complete(|_| async move {
-            panic!("an invalid agent-frame action must fail before invoking the provider")
-        })
-        .build();
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        vec![protocol_factory],
-        Arc::new(EmptyTools),
-        transport,
-        test_host_config(),
-        store.clone() as Arc<dyn crate::RuntimePersistence>,
-    )
-    .await;
-
-    let error = runtime
-        .run_turn_assembled(
-            TurnInput::text("reject an empty frame identity"),
-            CancellationToken::new(),
-            named_turn_scope("root", "invalid-frame-switch"),
-        )
-        .await
-        .expect_err("an empty SwitchAgentFrame frame_id must fail the turn");
-    assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::InvalidAgentFrameSwitchFrameId
-    );
-    assert!(error.message.contains("SwitchAgentFrame"));
-    assert!(error.message.contains("frame_id"));
-    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 }
 
 #[tokio::test]
@@ -1337,7 +1306,8 @@ async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_re
         vec![protocol_factory],
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "capture-failure-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("capture-failure-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("recover committed handoff".to_string()),
             }],
@@ -1508,7 +1478,8 @@ impl crate::ToolProvider for FrameRotatingDynamicTool {
                 self.rotated.store(true, Ordering::SeqCst);
                 crate::ToolResult::ok(json!({ "rotated": true })).with_control(
                     crate::ToolControl::SwitchAgentFrame {
-                        frame_id: "live-surface-frame".to_string(),
+                        frame_key: crate::FrameKey::from_caller_material("live-surface-frame")
+                            .expect("non-empty caller material"),
                         initial_nodes: Vec::new(),
                         task: Some("call the newly available tool".to_string()),
                     },
@@ -3653,7 +3624,8 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
         Vec::new(),
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "queued-follow-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("queued-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("run follow-on task".to_string()),
             }],
@@ -3761,7 +3733,8 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
         Vec::new(),
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "recovery-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("recovery-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("recover this handoff".to_string()),
             }],
@@ -3804,10 +3777,16 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
         .await
         .expect("list committed handoff");
     assert_eq!(queued.len(), 1);
+    let expected_frame_id = crate::session_graph::frame_node_id(
+        "root",
+        crate::FrameKey::from_caller_material("recovery-frame")
+            .expect("non-empty caller material")
+            .as_str(),
+    );
     assert!(matches!(
         &queued[0].items[0].payload,
         crate::QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-            if frame_id == "recovery-frame" && task == "recover this handoff"
+            if frame_id == &expected_frame_id && task == "recover this handoff"
     ));
 
     let recovered = runtime
@@ -3859,7 +3838,8 @@ async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_hando
         Vec::new(),
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "cancelled-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("cancelled-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("cancel before running".to_string()),
             }],
@@ -4118,7 +4098,8 @@ async fn stream_prepared_turn_follows_agent_frame_switch() {
         Vec::new(),
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "prepared-follow-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("prepared-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("finish prepared follow-on".to_string()),
             }],
@@ -4216,7 +4197,8 @@ async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
         vec![turn_finalized_borrowed_append_plugin()],
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "finalized-lapsed-follow-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("finalized-lapsed-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("exercise the retained finalize observer".to_string()),
             }],
@@ -4288,7 +4270,8 @@ async fn retained_turn_graph_service_does_not_extend_the_execution_lane() {
         ))],
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "retained-service-follow-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("retained-service-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("leave this follow-on queued".to_string()),
             }],
@@ -4414,7 +4397,8 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
         )],
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "queued-lapsed-follow-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("queued-lapsed-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("must retain the loud lease failure".to_string()),
             }],
@@ -4556,7 +4540,8 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
         )],
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "inprocess-lapsed-follow-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("inprocess-lapsed-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("must retain the loud lease failure".to_string()),
             }],
@@ -4681,7 +4666,8 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
         Vec::new(),
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "resident-follow-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("resident-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("continue on retained lease".to_string()),
             }],
@@ -4802,7 +4788,8 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
         Vec::new(),
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
-                frame_id: "lost-lease-follow-frame".to_string(),
+                frame_key: crate::FrameKey::from_caller_material("lost-lease-follow-frame")
+                    .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("continue after retained commit".to_string()),
             }],
@@ -4901,7 +4888,8 @@ async fn frame_switch_limit_commits_terminal_error_and_settles_claim() {
         .build();
     let controls = (0..switch_count)
         .map(|index| crate::ToolControl::SwitchAgentFrame {
-            frame_id: format!("bounded-frame-{index}"),
+            frame_key: crate::FrameKey::from_caller_material(&format!("bounded-frame-{index}"))
+                .expect("non-empty caller material"),
             initial_nodes: Vec::new(),
             task: Some(format!("continue bounded chain {index}")),
         })
@@ -4996,7 +4984,10 @@ async fn frame_switch_limit_capture_abort_abandons_prompt_claim_before_returning
         .build();
     let controls = (0..switch_count)
         .map(|index| crate::ToolControl::SwitchAgentFrame {
-            frame_id: format!("capture-abort-frame-{index}"),
+            frame_key: crate::FrameKey::from_caller_material(&format!(
+                "capture-abort-frame-{index}"
+            ))
+            .expect("non-empty caller material"),
             initial_nodes: Vec::new(),
             task: Some(format!("continue capture-abort chain {index}")),
         })

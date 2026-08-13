@@ -252,7 +252,12 @@ fn continue_as_record(args: &Record) -> Value {
 
     let mut record = Record::default();
     record.insert("ok".to_string(), Value::Bool(true));
-    record.insert("frame_id".to_string(), Value::String("frame:bench".into()));
+    record.insert(
+        "frame_key".to_string(),
+        Value::String(
+            "frame-key/v1/7516a6c3aefb1a9e2a39e3c9178e8a241ffa1da902f032f93c1ae9149e4dae33".into(),
+        ),
+    );
     record.insert(
         "task".to_string(),
         args.get("task")

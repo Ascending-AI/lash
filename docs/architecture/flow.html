@@ -86,7 +86,7 @@ sequenceDiagram
         <div class="section">
           <div class="section-header">
             <h2>AgentFrameSwitch Continuations</h2>
-            <p>RLM's <code>continue_as</code> tool ends the current trajectory and creates a fresh AgentFrame in the same session with the packed <code>task</code> + <code>seed</code>. The low-level runtime exposes this as <code>TurnOutcome::AgentFrameSwitch { frame_id, task }</code>. App hosts call <code>TurnBuilder::stream_to</code>, <code>run</code>, or pull-style <code>stream</code>; the <code>lash</code> facade drives AgentFrame chains and returns the final turn result. The underlying runtime primitive is <code>stream_turn_with_agent_frames</code>.</p>
+            <p>RLM's <code>continue_as</code> tool ends the current trajectory and creates a fresh AgentFrame in the same session with the packed <code>task</code> + <code>seed</code>. The low-level runtime exposes this as <code>TurnOutcome::AgentFrameSwitch { frame_key, task }</code>. App hosts call <code>TurnBuilder::stream_to</code>, <code>run</code>, or pull-style <code>stream</code>; the <code>lash</code> facade drives AgentFrame chains and returns the final turn result. The underlying runtime primitive is <code>stream_turn_with_agent_frames</code>.</p>
           </div>
           <div class="diagram">
             <div class="diagram-title">AgentFrameSwitch drive loop (runtime internal)</div>
@@ -96,7 +96,7 @@ flowchart LR
   Follow --> Turn["stream_turn"]
   Turn --> Outcome["TurnOutcome"]
   Outcome -- "Finished / Stopped" --> Done["final turn result"]
-  Outcome -- "AgentFrameSwitch(frame_id)" --> Frame["current AgentFrame<br/>task + seed"]
+  Outcome -- "AgentFrameSwitch(frame_key)" --> Frame["current AgentFrame<br/>task + seed"]
   Frame --> Turn
             </div>
           </div>

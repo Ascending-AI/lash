@@ -545,7 +545,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 32, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 33, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -945,6 +945,17 @@ fn wrong_protocol_versions_are_rejected() {
     assert!(matches!(
         report.validate(),
         Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
+    ));
+}
+
+#[test]
+fn pre_frame_key_remote_protocol_is_rejected_with_literal_versions() {
+    assert!(matches!(
+        ensure_protocol_version(31),
+        Err(RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 31,
+            expected: 33,
+        })
     ));
 }
 

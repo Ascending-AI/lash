@@ -10331,7 +10331,7 @@
             ],
             "turn_outcomes": [
               {
-                "frame_id": "next-frame",
+                "frame_key": "frame-key/v1/d46d6c8dac00b465d48def0db9bd4018a9748789fddccb08417f9f8df626f6eb",
                 "initial_nodes": [
                   {
                     "kind": "message",
@@ -10423,7 +10423,7 @@
             ],
             "turn_outcomes": [
               {
-                "frame_id": "next-frame",
+                "frame_key": "frame-key/v1/d46d6c8dac00b465d48def0db9bd4018a9748789fddccb08417f9f8df626f6eb",
                 "initial_nodes": [
                   {
                     "kind": "message",

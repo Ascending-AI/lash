@@ -516,6 +516,17 @@ pub fn code_execution_context_with_invocation(
     code_execution_context().with_parent_invocation(invocation)
 }
 
+/// Build a code-execution context with a concrete tool surface and the stable
+/// parent invocation production installs around an `ExecCode` effect.
+pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    code_execution_context_with_tool_provider_and_catalog(provider, tool_catalog)
+        .with_parent_invocation(invocation)
+}
+
 /// Build the stable invocation installed around an `ExecCode` effect.
 pub fn exec_code_invocation(
     session_id: impl Into<String>,
@@ -1454,16 +1465,14 @@ mod test_protocol_fakes {
                 if terminal_outcome.is_none() && outcome.output.is_success() {
                     terminal_outcome = match outcome.output.control.as_ref() {
                         Some(crate::ToolControl::SwitchAgentFrame {
-                            frame_id,
+                            frame_key,
                             initial_nodes,
                             task: Some(task),
-                        }) if !frame_id.trim().is_empty() && !task.trim().is_empty() => {
-                            Some(TurnOutcome::AgentFrameSwitch {
-                                frame_id: frame_id.clone(),
-                                task: task.clone(),
-                                initial_nodes: initial_nodes.clone(),
-                            })
-                        }
+                        }) if !task.trim().is_empty() => Some(TurnOutcome::AgentFrameSwitch {
+                            frame_key: frame_key.clone(),
+                            task: task.clone(),
+                            initial_nodes: initial_nodes.clone(),
+                        }),
                         Some(crate::ToolControl::Finish { value }) => {
                             Some(TurnOutcome::Finished(TurnFinish::ToolValue {
                                 tool_name: outcome.tool_name.clone(),

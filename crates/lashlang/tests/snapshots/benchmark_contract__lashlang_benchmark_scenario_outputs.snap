@@ -8,7 +8,7 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
   "baseline": "user=sam;attempt=3;active=alpha:1,gamma:3;total=6;count=3;seen=3;indexes=4",
   "cache_pressure": "alpha:3|beta:3|gamma:7|delta:6|epsilon:7|zeta:7",
   "continue_as_seed_host_environment": {
-    "frame_id": "frame:bench",
+    "frame_key": "frame-key/v1/7516a6c3aefb1a9e2a39e3c9178e8a241ffa1da902f032f93c1ae9149e4dae33",
     "global_count": 4,
     "projected_count": 1,
     "seed_keys": [

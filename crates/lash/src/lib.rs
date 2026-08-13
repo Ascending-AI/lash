@@ -53,7 +53,7 @@ pub use crate::turn::{
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, EffectReplayOwnership,
-    InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder,
+    FrameKey, InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder,
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatchingConfig,
     Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionStartPoint,

@@ -695,6 +695,106 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct NoopTraceSink;
+
+    impl lash_core::facade_support::TraceSink for NoopTraceSink {
+        fn append(
+            &self,
+            _record: &lash_core::facade_support::TraceRecord,
+        ) -> Result<(), lash_core::facade_support::TraceSinkError> {
+            Ok(())
+        }
+    }
+
+    async fn execute_continue_as_with_trace_sink(
+        trace_sink: Option<Arc<dyn lash_core::facade_support::TraceSink>>,
+    ) -> lash_core::ToolCallRecord {
+        let definition = crate::continue_as_tool_definition();
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![definition]);
+        let invocation = lash_core::testing::exec_code_invocation(
+            "test-session",
+            "turn-7",
+            7,
+            2,
+            "exec-code-3",
+            "exec-code:3",
+        );
+        let context =
+            lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+                Arc::new(crate::control_tools::RlmControlToolsProvider),
+                catalog,
+                invocation,
+            );
+        let (_, response) = execute_code_unbounded_for_tests(
+            RlmExecutionState::new().expect("state"),
+            context,
+            ExecRequest {
+                language: "lashlang".to_string(),
+                code: r#"await control.continue_as({ task: "continue deterministically" })?"#
+                    .to_string(),
+                accept_finish: true,
+            },
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig {
+                sink: trace_sink,
+                trace_context: TraceContext::default(),
+            },
+        )
+        .await
+        .expect("execute continue_as");
+        assert_eq!(response.error, None);
+        assert_eq!(response.tool_calls.len(), 1);
+        response
+            .tool_calls
+            .into_iter()
+            .next()
+            .expect("one continue_as call")
+    }
+
+    #[test]
+    fn resource_call_identity_is_trace_sink_independent() {
+        block_on(async {
+            let without_trace = execute_continue_as_with_trace_sink(None).await;
+            let with_trace =
+                execute_continue_as_with_trace_sink(Some(Arc::new(NoopTraceSink))).await;
+
+            assert_eq!(
+                without_trace.call_id.as_deref(),
+                Some(
+                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:82541028d85291e9d3275727:1"
+                )
+            );
+            assert_eq!(
+                with_trace.call_id.as_deref(),
+                Some(
+                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:82541028d85291e9d3275727:1"
+                )
+            );
+
+            let without_trace_key = match without_trace.output.control {
+                Some(lash_core::ToolControl::SwitchAgentFrame { frame_key, .. }) => frame_key,
+                other => panic!("expected frame switch, got {other:?}"),
+            };
+            let with_trace_key = match with_trace.output.control {
+                Some(lash_core::ToolControl::SwitchAgentFrame { frame_key, .. }) => frame_key,
+                other => panic!("expected frame switch, got {other:?}"),
+            };
+            assert_eq!(
+                without_trace_key.as_str(),
+                "frame-key/v1/dcbfa2438c3591445220f0d38a3dd6394513c8b91caedbd391db04d98b3a3b63"
+            );
+            assert_eq!(
+                with_trace_key.as_str(),
+                "frame-key/v1/dcbfa2438c3591445220f0d38a3dd6394513c8b91caedbd391db04d98b3a3b63"
+            );
+        });
+    }
+
     async fn execute_test_code(state: RlmExecutionState, code: String) -> RlmExecutionState {
         let (state, response) = execute_code_unbounded_for_tests(
             state,

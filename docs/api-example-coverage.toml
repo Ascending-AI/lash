@@ -1106,6 +1106,58 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::ExternalCompletionError::raw` directly; the gate reaches the same item a second time through `lash_core::Resolution::Err`. Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/effect/executor.rs:1251, crates/lash-core/src/runtime/mod.rs:853, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
+symbol = "lash::FrameKey"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::FrameKey"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party protocol and tool implementors construct deterministic agent-frame switches from stable call-site or caller-owned naming material."
+
+[[api]]
+symbol = "lash::FrameKey::as_str"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::FrameKey::as_str"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party protocol and tool implementors inspect the derived key when correlating an agent-frame switch with their own records."
+
+[[api]]
+symbol = "lash::FrameKey::from_call_site"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::FrameKey::from_call_site"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party protocol and tool implementors derive replay-stable frame keys from the session, frame lineage, and tool-call identity."
+
+[[api]]
+symbol = "lash::FrameKey::from_caller_material"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::FrameKey::from_caller_material"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party protocol and tool implementors preserve caller-owned frame naming while Lash derives the key representation."
+
+[[api]]
+symbol = "lash_core::FrameKeyError"
+kind = "enum"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party protocol and tool implementors match the typed rejection returned when caller-owned frame naming material is invalid."
+
+[[api]]
+symbol = "lash_core::FrameKeyError::EmptyCallerMaterial"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party protocol and tool implementors distinguish blank or whitespace-only caller-owned frame names without parsing an error string."
+
+[[api]]
 symbol = "lash::GenerationOverlay"
 kind = "enum"
 availability = "default+all-features"
@@ -6103,13 +6155,13 @@ disposition = "unused-add"
 reason = "The current example use of lash::TurnOutcome::AgentFrameSwitch is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::TurnOutcome::AgentFrameSwitch::frame_id"
+symbol = "lash::TurnOutcome::AgentFrameSwitch::frame_key"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::TurnOutcome::AgentFrameSwitch::frame_id"]
+aliases = ["lash::prelude::TurnOutcome::AgentFrameSwitch::frame_key"]
 area = "sessions-turns"
 disposition = "unused-add"
-reason = "The current example use of lash::TurnOutcome::AgentFrameSwitch::frame_id is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+reason = "The current example use of lash::TurnOutcome::AgentFrameSwitch::frame_key is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
 symbol = "lash::TurnOutcome::AgentFrameSwitch::initial_nodes"
@@ -40146,12 +40198,12 @@ disposition = "unused-add"
 reason = "Add lash::remote::turn_result::RemoteTurnOutcome::AgentFrameSwitch to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::remote::turn_result::RemoteTurnOutcome::AgentFrameSwitch::frame_id"
+symbol = "lash::remote::turn_result::RemoteTurnOutcome::AgentFrameSwitch::frame_key"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
-reason = "Add lash::remote::turn_result::RemoteTurnOutcome::AgentFrameSwitch::frame_id to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+reason = "Add lash::remote::turn_result::RemoteTurnOutcome::AgentFrameSwitch::frame_key to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::turn_result::RemoteTurnOutcome::AgentFrameSwitch::task"
@@ -47008,15 +47060,6 @@ aliases = ["lash_core::RuntimeErrorCode::ForeignCode::0"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugins and effect hosts use namespaced codes at the deliberately open extension boundary."
-
-[[api]]
-symbol = "lash::runtime::RuntimeErrorCode::InvalidAgentFrameSwitchFrameId"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::RuntimeErrorCode::InvalidAgentFrameSwitchFrameId"]
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers match this typed caller-bug diagnostic to reject an invalid SwitchAgentFrame action without retrying it."
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::InvalidAwaitEventSessionId"
@@ -54219,10 +54262,10 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash::tools::ToolControl::SwitchAgentFrame::frame_id"
+symbol = "lash::tools::ToolControl::SwitchAgentFrame::frame_key"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::ToolControl::SwitchAgentFrame::frame_id"]
+aliases = ["lash_core::ToolControl::SwitchAgentFrame::frame_key"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
@@ -65587,7 +65630,7 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash_core::ProtocolLlmCallAction::SwitchAgentFrame::frame_id"
+symbol = "lash_core::ProtocolLlmCallAction::SwitchAgentFrame::frame_key"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"

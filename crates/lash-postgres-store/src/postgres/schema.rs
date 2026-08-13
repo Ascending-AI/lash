@@ -280,8 +280,11 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     };
     StoreError::Backend(format!(
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
-         The component schema is a reject-and-recreate boundary with no migration chain: \
-         provision a fresh database from this build's schema.sql artifact. This gate is \
-         unconditional; SchemaCheck::WarnOnly does not relax it."
+         The component schema is a reject-and-recreate boundary with no migration chain. Drain \
+         affected sessions and recreate the whole Lash trust domain with this version: provision \
+         the database from this build's schema.sql artifact, and reset the tombstones, await-event \
+         revocation ledger, effect journal, and Restate state together; see \
+         docs/persistence.html#delete-sessions. This gate is unconditional; \
+         SchemaCheck::WarnOnly does not relax it."
     ))
 }

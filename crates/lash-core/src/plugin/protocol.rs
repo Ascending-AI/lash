@@ -208,7 +208,10 @@ pub struct HydratedExecutionState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProtocolLlmCallAction {
-    SwitchAgentFrame { frame_id: String, task: String },
+    SwitchAgentFrame {
+        frame_key: crate::FrameKey,
+        task: String,
+    },
 }
 
 /// Narrow wrapper around `LashRuntime` that protocol plugins use when

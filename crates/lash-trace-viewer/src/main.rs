@@ -6,8 +6,9 @@
 //! [`lash_trace::TraceEvent`], producing a [`RenderModel`] of plain serde
 //! structs. That model is embedded as JSON and the browser script is a dumb
 //! renderer over it — it carries zero event-kind strings and no schema
-//! knowledge. Records that fail the typed parse still get a raw-JSON render
-//! path so future/unknown events are never dropped.
+//! knowledge. Records refused by the typed schema-version fence, or otherwise
+//! failing the typed parse, still get a raw-JSON render path so old, future, or
+//! unknown events are never dropped.
 
 use std::fs;
 use std::io::{self, Write};
@@ -1326,7 +1327,7 @@ mod tests {
                 status: "completed".to_string(),
                 done_reason: "modelstop".to_string(),
                 agent_frame_switch: Some(TraceAgentFrameSwitch {
-                    frame_id: "f1".to_string(),
+                    frame_key: "frame-key/v1/example".to_string(),
                 }),
             },
             TraceEvent::Custom {
@@ -1540,20 +1541,23 @@ mod tests {
     }
 
     #[test]
-    fn load_trace_keeps_unknown_valid_json_records() {
-        let path = temp_trace_path("unknown");
+    fn load_trace_keeps_old_and_unknown_valid_json_records_raw() {
+        let path = temp_trace_path("raw-fallback");
         std::fs::write(
             &path,
-            r#"{"schema_version":999,"type":"future_event","payload":{"text":"kept raw"}}"#,
+            concat!(
+                r#"{"schema_version":999,"type":"future_event","payload":{"text":"kept raw"}}"#,
+                "\n",
+                r#"{"schema_version":3,"id":"legacy-record","timestamp":"2026-05-11T11:42:01.234+00:00","context":{"session_id":"legacy-session"},"type":"session_started"}"#,
+            ),
         )
         .expect("write trace");
 
         let trace = load_trace(&path).expect("load trace");
         std::fs::remove_file(&path).ok();
 
-        assert_eq!(trace.records.len(), 1);
-        assert!(trace.records[0].typed.is_none());
-        assert_eq!(trace.records[0].raw["type"], "future_event");
+        assert_eq!(trace.records.len(), 2);
+        assert!(trace.records.iter().all(|record| record.typed.is_none()));
 
         // The unknown record still renders through the raw-JSON fallback path.
         let rendered = render_event(1, &trace.records[0]);
@@ -1564,6 +1568,12 @@ mod tests {
         let html = render_html("title", &path, &trace).expect("render");
         assert!(html.contains("future_event"));
         assert!(html.contains("kept raw"));
+
+        let rendered = render_event(2, &trace.records[1]);
+        assert_eq!(rendered.kind, "session_started");
+        assert_eq!(rendered.title, "session started");
+        assert_eq!(rendered.id, "legacy-record");
+        assert_eq!(rendered.pills, vec!["session legacy-session", "schema 3"]);
     }
 
     #[test]

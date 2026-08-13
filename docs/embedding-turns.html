@@ -34,7 +34,7 @@
             <div class="diagram-title">TurnOutcome shape</div>
             <pre data-lang="rust"><code>pub enum TurnOutcome {
     Finished(TurnFinish),
-    AgentFrameSwitch { frame_id: String, task: String },
+    AgentFrameSwitch { frame_key: FrameKey, task: String },
     Stopped(TurnStop),
 }
 
@@ -68,7 +68,7 @@ pub enum TurnFinish {
           <p>Session-lane conflicts and CAS backstop conflicts are <em>not</em> <code>Stopped</code> variants; they surface as <code>Err</code> from <code>run()</code>/<code>stream()</code>, no partial commit. See <a href="./persistence.html#cas-conflicts">Persistence → Session Lane And CAS</a>.</p>
           <pre data-lang="rust" data-snippet="embedding_turns#outcome-match"><code>match result.outcome {
     TurnOutcome::Finished(finish) =&gt; persist_terminal(finish)?,
-    TurnOutcome::AgentFrameSwitch { frame_id, .. } =&gt; record_frame_boundary(frame_id)?,
+    TurnOutcome::AgentFrameSwitch { frame_key, .. } =&gt; record_frame_boundary(frame_key)?,
     TurnOutcome::Stopped(stop) =&gt; match stop {
         TurnStop::Cancelled | TurnStop::InvalidInput =&gt; report_user_visible(stop),
         TurnStop::ProviderError | TurnStop::Incomplete =&gt; offer_retry(stop),

@@ -398,6 +398,17 @@ impl<'run> ToolContext<'run> {
         &self.agent_frame_id
     }
 
+    /// Overrides the current frame lineage in an isolated tool-provider test.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn with_agent_frame_id_for_testing(
+        mut self,
+        agent_frame_id: impl Into<crate::AgentFrameId>,
+    ) -> Self {
+        self.agent_frame_id = agent_frame_id.into();
+        self
+    }
+
     /// Exposes sessions to protocol and process-engine implementors while preparing or executing an
     /// authorized tool call.
     pub fn sessions(&self) -> ToolSessionAdmin<'run> {

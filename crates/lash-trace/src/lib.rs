@@ -57,7 +57,40 @@ pub use lashlang_graph::{
 ///   payloads are opaque `serde_json::Value`; adding to or reshaping the data
 ///   inside them never forces a bump. (This is why the `exec_code_completed`
 ///   diagnostic's `tool_calls` payload was purely additive.)
-pub const TRACE_SCHEMA_VERSION: u32 = 3;
+///
+/// Version 4 renames `TraceAgentFrameSwitch.frame_id` to `frame_key`.
+pub const TRACE_SCHEMA_VERSION: u32 = 4;
+
+/// A durable trace record was written under a schema this reader does not support.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TraceSchemaVersionError {
+    pub actual: u32,
+    pub expected: u32,
+}
+
+impl std::fmt::Display for TraceSchemaVersionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "unsupported trace schema version {}; expected {}",
+            self.actual, self.expected
+        )
+    }
+}
+
+impl std::error::Error for TraceSchemaVersionError {}
+
+/// Refuses a durable trace record whose exact schema version is unsupported.
+pub fn ensure_trace_schema_version(actual: u32) -> Result<(), TraceSchemaVersionError> {
+    if actual == TRACE_SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(TraceSchemaVersionError {
+            actual,
+            expected: TRACE_SCHEMA_VERSION,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -142,7 +175,7 @@ impl TraceContext {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TraceRecord {
     pub schema_version: u32,
     pub id: String,
@@ -150,6 +183,45 @@ pub struct TraceRecord {
     pub context: TraceContext,
     #[serde(flatten)]
     pub event: TraceEvent,
+}
+
+#[derive(Deserialize)]
+struct TraceRecordWire {
+    schema_version: u32,
+    id: String,
+    timestamp: String,
+    context: TraceContext,
+    #[serde(flatten)]
+    event: TraceEvent,
+}
+
+impl<'de> Deserialize<'de> for TraceRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Read the self-describing JSON value first so the schema fence runs
+        // before the current event shape is interpreted. A pre-cutover record
+        // must report its version mismatch even when its payload is no longer
+        // structurally valid for this build.
+        let value = Value::deserialize(deserializer)?;
+        let schema_version = value
+            .get("schema_version")
+            .cloned()
+            .ok_or_else(|| serde::de::Error::missing_field("schema_version"))
+            .and_then(|value| serde_json::from_value(value).map_err(serde::de::Error::custom))?;
+        ensure_trace_schema_version(schema_version).map_err(serde::de::Error::custom)?;
+
+        let wire: TraceRecordWire =
+            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            schema_version: wire.schema_version,
+            id: wire.id,
+            timestamp: wire.timestamp,
+            context: wire.context,
+            event: wire.event,
+        })
+    }
 }
 
 impl TraceRecord {
@@ -631,7 +703,7 @@ pub struct TraceTokenUsage {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceAgentFrameSwitch {
-    pub frame_id: String,
+    pub frame_key: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1026,7 +1098,7 @@ mod tests {
                 status: "completed".to_string(),
                 done_reason: "modelstop".to_string(),
                 agent_frame_switch: Some(TraceAgentFrameSwitch {
-                    frame_id: "frame-1".to_string(),
+                    frame_key: "frame-key/v1/example".to_string(),
                 }),
             },
         );
@@ -1037,7 +1109,10 @@ mod tests {
 
         let completed_json = serde_json::to_value(completed).unwrap();
         assert_eq!(completed_json["type"], "turn_completed");
-        assert_eq!(completed_json["agent_frame_switch"]["frame_id"], "frame-1");
+        assert_eq!(
+            completed_json["agent_frame_switch"]["frame_key"],
+            "frame-key/v1/example"
+        );
     }
 
     #[test]

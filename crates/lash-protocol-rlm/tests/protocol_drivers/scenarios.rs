@@ -651,7 +651,8 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
                 args: serde_json::json!({}),
                 output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true}))
                     .with_control(lash_core::ToolControl::SwitchAgentFrame {
-                        frame_id: "next-frame".to_string(),
+                        frame_key: lash_core::FrameKey::from_caller_material("next-frame")
+                            .expect("non-empty caller material"),
                         initial_nodes: initial_nodes.clone(),
                         task: Some("continue".to_string()),
                     }),
@@ -675,7 +676,8 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
             tool_call_events: true,
             agent_frame_switch: Some(("next-frame", "continue")),
             turn_outcome: Some(lash_sansio::TurnOutcome::AgentFrameSwitch {
-                frame_id: "next-frame".to_string(),
+                frame_key: lash_core::FrameKey::from_caller_material("next-frame")
+                    .expect("non-empty caller material"),
                 task: "continue".to_string(),
                 initial_nodes,
             }),

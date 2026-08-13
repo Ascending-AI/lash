@@ -2,6 +2,7 @@ pub mod attachment;
 pub mod causal;
 #[doc(hidden)]
 pub mod core_support;
+mod frame_key;
 pub mod llm;
 pub mod plugin;
 pub mod prompt;
@@ -23,6 +24,7 @@ pub use attachment::{
     InvalidMediaType, MediaType,
 };
 pub use causal::CausalRef;
+pub use frame_key::{FrameKey, FrameKeyError};
 pub use llm::capability::{
     ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
     ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,

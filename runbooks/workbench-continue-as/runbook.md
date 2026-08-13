@@ -44,7 +44,7 @@ Therefore the expected post-switch shape is:
   resolving that old frame still yields the pre-switch rows.
 - **Trace:** the switch physical turn is `turn_completed` with
   `done_reason == "agent_frame_switch"` and
-  `agent_frame_switch.frame_id == <new frame key>`; a distinct follow-frame physical turn
+  `agent_frame_switch.frame_key == <new frame key>`; a distinct follow-frame physical turn
   completes the one composer send. Do not equate physical `turn_completed` count with
   rendered assistant-row count across a frame switch.
 
@@ -55,7 +55,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 
 1. **The switch is proven structurally.** Require a new `frame_open` graph node whose
    `reason` is exactly `continue_as`; its `frame_key` must equal the trace's
-   `agent_frame_switch.frame_id`. Prose claiming a fresh start proves nothing.
+   `agent_frame_switch.frame_key`. Prose claiming a fresh start proves nothing.
 2. **The seed is explicit and inspectable.** Use two distinctive seed values: a baton marker
    needed by the seeded competence probe and a compact supporting fact. Require one RLM seed
    protocol event on the new frame path with exactly those keys and values. The deliberately
@@ -193,7 +193,7 @@ the pre-switch transcript as `02-boundary-expected.json` and
 `02-before-switch-{dom,state,store,trace}.json`. Gate, in this order:
 
 1. a `turn_completed` with `done_reason == "agent_frame_switch"` and a non-empty
-   `agent_frame_switch.frame_id`;
+   `agent_frame_switch.frame_key`;
 2. one new raw `frame_open` node with `reason == "continue_as"` and matching `frame_key`;
 3. a new-frame RLM seed event containing `seed_baton` and the supporting fact, but not
    `unseeded_secret` or its marker;

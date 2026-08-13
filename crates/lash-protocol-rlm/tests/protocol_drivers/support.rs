@@ -814,17 +814,19 @@ impl RlmProtocolExpectations {
                 run.turn_outcomes
             );
         }
-        if let Some((frame_id, task)) = self.agent_frame_switch {
+        if let Some((frame_key_material, task)) = self.agent_frame_switch {
+            let expected_frame_key = lash_core::FrameKey::from_caller_material(frame_key_material)
+                .expect("non-empty frame key material");
             assert!(
                 run.turn_outcomes.iter().any(|outcome| matches!(
                     outcome,
                     lash_sansio::TurnOutcome::AgentFrameSwitch {
-                        frame_id: actual_frame_id,
+                        frame_key: actual_frame_key,
                         task: actual_task,
                         ..
-                    } if actual_frame_id == frame_id && actual_task == task
+                    } if actual_frame_key == &expected_frame_key && actual_task == task
                 )),
-                "{scenario_name} missing agent-frame switch outcome for {frame_id}: {:?}",
+                "{scenario_name} missing agent-frame switch outcome for {frame_key_material}: {:?}",
                 run.turn_outcomes
             );
         }

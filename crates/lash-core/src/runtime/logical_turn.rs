@@ -58,13 +58,15 @@ impl LogicalTurnClaims {
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
         let enqueued_queue_batches = match outcome {
-            TurnOutcome::AgentFrameSwitch { frame_id, task, .. } if claimed => {
+            TurnOutcome::AgentFrameSwitch {
+                frame_key, task, ..
+            } if claimed => {
                 vec![
                     crate::QueuedWorkBatchDraft::new(
                         session_id,
                         crate::DeliveryPolicy::AfterCurrentTurnCommit,
                         vec![crate::QueuedWorkPayload::agent_frame_task(
-                            frame_id.clone(),
+                            crate::session_graph::frame_node_id(session_id, frame_key.as_str()),
                             task.clone(),
                             protocol_turn_options,
                         )],
@@ -263,16 +265,16 @@ impl LashRuntime {
             } = execution;
             frame_stopwatch.stamp(&mut turn, self.host.core.clock.as_ref());
             let switched_frame = match &turn.outcome {
-                TurnOutcome::AgentFrameSwitch { frame_id, task, .. } => {
-                    Some((frame_id.clone(), task.clone()))
-                }
+                TurnOutcome::AgentFrameSwitch {
+                    frame_key, task, ..
+                } => Some((frame_key.clone(), task.clone())),
                 _ => None,
             };
             turns.push(turn);
             if post_commit_delivery_failed {
                 return Ok(AgentFrameRun { turns });
             }
-            let Some((frame_id, task)) = switched_frame else {
+            let Some((frame_key, task)) = switched_frame else {
                 return Ok(AgentFrameRun { turns });
             };
 
@@ -336,14 +338,21 @@ impl LashRuntime {
                             crate::QueuedWorkPayload::AgentFrameTask {
                                 frame_id: target,
                                 ..
-                            } if target == &frame_id
+                            } if target
+                                == &crate::session_graph::frame_node_id(
+                                    &self.state.session_id,
+                                    frame_key.as_str(),
+                                )
                         )
                     })
                 });
                 if !target_matches {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::StoreCommitFailed,
-                        format!("agent-frame handoff did not target frame `{frame_id}`"),
+                        format!(
+                            "agent-frame handoff did not target frame key `{}`",
+                            frame_key.as_str()
+                        ),
                     ));
                 }
                 let materialized = claim.materialize_queued_turn_work();
