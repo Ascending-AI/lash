@@ -12,7 +12,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginSessionContext, PluginSpec, SessionPlugin,
     StaticPluginFactory,
 };
-use lash_core::{ToolCall, ToolDefinition, ToolProvider, ToolResult};
+use lash_core::{AttemptToolCall, ToolCall, ToolDefinition, ToolProvider, ToolResult};
 use lash_tool_support::{
     LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt,
 };
@@ -81,6 +81,53 @@ impl StaticToolExecute for SessionProcessAdminTools {
             _ => ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
         }
     }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id.as_str() == "tool:cancel_process"
+    }
+
+    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
+        if call.name != "cancel_process" || !self.include_cancel_process {
+            return done_without_intents(ToolResult::err_fmt(format_args!(
+                "Unknown leaf process tool: {}",
+                call.name
+            )));
+        }
+        let Some(process_id) = call
+            .args
+            .get("process_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+        else {
+            return done_without_intents(ToolResult::err_fmt(
+                "cancel_process requires `process_id`",
+            ));
+        };
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({
+                "process_id": process_id,
+                "status": "cancelled",
+            })),
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::CancelProcess(
+                lash_core::CancelProcessIntent {
+                    session_id: call.context.session_id().to_string(),
+                    process_id,
+                    reason: Some("cancelled by processes.cancel".to_string()),
+                },
+            )]),
+        )
+    }
+}
+
+fn done_without_intents(result: ToolResult) -> lash_core::ToolAttemptResult {
+    match result {
+        ToolResult::Done(output) => lash_core::ToolAttemptResult::done_without_intents(
+            lash_core::ToolResultDone::from_output(*output),
+        ),
+        ToolResult::Pending(pending) => lash_core::ToolAttemptResult::pending(pending),
+    }
 }
 
 pub fn process_list_tool_definition() -> ToolDefinition {
@@ -125,7 +172,7 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:cancel_process",
         "cancel_process",
-        "Request cancellation for a durable process, including a running `shell.start` process, by `process_id`. On ordinal-addressed Restate tiers this returns a typed refusal inside an atomic tool attempt; cancel from an explicit process step. Runtime-owned and key-addressed tiers are unaffected.",
+        "Request cancellation for a durable process, including a running `shell.start` process, by `process_id`.",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -271,6 +318,46 @@ mod tests {
         let rendered = definition.compact_contract().render_signature();
         assert!(rendered.contains("status: enum["), "{rendered}");
         assert!(!rendered.contains("terminal:"), "{rendered}");
+    }
+
+    #[tokio::test]
+    async fn cancel_process_declares_literal_v1_cancel_intent() {
+        let tools = SessionProcessAdminTools {
+            include_cancel_process: true,
+        };
+        let tool_context = lash_core::testing::mock_tool_context();
+        let context = lash_core::AttemptContext::__for_testing(
+            &tool_context,
+            "process-controls-intent-scope",
+        );
+        let result = tools
+            .execute_attempt(AttemptToolCall {
+                name: "cancel_process",
+                args: &serde_json::json!({"process_id": "literal-process"}),
+                context: &context,
+            })
+            .await;
+        let lash_core::ToolAttemptResult::Done { result, intents } = result else {
+            panic!("processes.cancel must complete with an intent")
+        };
+        assert_eq!(
+            result.into_output().value_for_projection(),
+            serde_json::json!({
+                "process_id": "literal-process",
+                "status": "cancelled",
+            })
+        );
+        assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);
+        assert_eq!(intents.intents.len(), 1);
+        let lash_core::ToolIntent::CancelProcess(intent) = &intents.intents[0] else {
+            panic!("processes.cancel must declare CancelProcess")
+        };
+        assert_eq!(intent.session_id, "test-session");
+        assert_eq!(intent.process_id, "literal-process");
+        assert_eq!(
+            intent.reason.as_deref(),
+            Some("cancelled by processes.cancel")
+        );
     }
 
     #[test]

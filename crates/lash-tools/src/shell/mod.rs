@@ -21,8 +21,8 @@ use lash_core::plugin::{
 };
 use lash_core::runtime::ProcessEventSemanticsSpec;
 use lash_core::{
-    PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest, PromptContribution,
-    SessionToolAccess, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    AttemptToolCall, PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest,
+    PromptContribution, SessionToolAccess, ToolCall, ToolDefinition, ToolProvider, ToolResult,
 };
 
 use lash_tool_support::{
@@ -40,6 +40,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const SHELL_STDIN_SIGNAL: &str = "stdin";
 const SHELL_STDIN_SIGNAL_EVENT: &str = "signal.stdin";
+const RUN_START_COMMAND_TOOL_ID: &str = "tool:run_start_command";
 
 pub fn shell_prompt_contributions() -> Vec<PromptContribution> {
     shell_prompt_contributions_for_access(&SessionToolAccess::default())
@@ -52,7 +53,7 @@ pub fn shell_prompt_contributions_for_access(
     access: &SessionToolAccess,
 ) -> Vec<PromptContribution> {
     let mut command_execution = String::from(
-        "Use `shell.exec` for one-shot commands; it returns only after the process exits and successful results include `status: \"completed\"`, `done: true`, and `exit_code`. Use `shell.start` only for interactive or intentionally long-lived processes; it returns a process handle that is visible to `processes.list` and cancellable with `processes.cancel`. On ordinal-addressed Restate tiers, `shell.start`, detached starts, `shell.write`, and `processes.cancel` return typed refusals inside atomic tool attempts; use an explicit process step.",
+        "Use `shell.exec` for one-shot commands; it returns only after the process exits and successful results include `status: \"completed\"`, `done: true`, and `exit_code`. Use `shell.start` only for interactive or intentionally long-lived processes; it returns a process handle that is visible to `processes.list` and cancellable with `processes.cancel`.",
     );
     if tool_callable_from_authority(access, "write_stdin") {
         command_execution.push_str(" Send stdin to running shell processes with `shell.write`.");
@@ -209,16 +210,13 @@ impl StandardShell {
         }
     }
 
-    async fn start_command(
+    async fn start_command_process(
         &self,
         params: &StartCommandParams,
         context: &lash_core::ToolContext<'_>,
         cancel: Option<CancellationToken>,
     ) -> ToolResult {
         if params.detach {
-            // A Detached Command is single-phase: it is launched and recorded as
-            // an immediately-terminal audit fact, so it never enters the worker
-            // run phase below.
             return self.detach_command_process(params, context).await;
         }
         if let Some(process_id) = context.async_process_id() {
@@ -226,7 +224,10 @@ impl StandardShell {
                 .run_start_command_process(process_id, params, context, cancel)
                 .await;
         }
-        self.register_start_command_process(params, context).await
+        execution_failure(
+            "shell_process_runner_missing_process",
+            "the internal shell process runner requires a durable process id",
+        )
     }
 
     /// Launch a Detached Command (ADR 0019): double-fork/setsid it out of the
@@ -255,46 +256,18 @@ impl StandardShell {
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis() as u64)
             .unwrap_or(0);
-        let process_id = context
-            .tool_call_id()
-            .filter(|id| !id.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("shell:{}", self.runtime.allocate_handle_id()));
+        let Some(process_id) = context.async_process_id().map(str::to_string) else {
+            return execution_failure(
+                "detached_process_runner_missing_process",
+                "the internal detached process runner requires a durable process id",
+            );
+        };
         let launch_value = json!({
             "pid": launch.pid,
             "pgid": launch.pgid,
             "command": params.cmd.clone(),
             "started_at": started_at,
         });
-        let request = ProcessStartRequest::new(
-            process_id.clone(),
-            ProcessInput::External {
-                metadata: launch_value.clone(),
-            },
-            // Detached commands are host/OS property from birth: lash never
-            // executes or recovers the row (ADR 0019).
-            lash_core::RecoveryDisposition::ExternallyOwned,
-            lash_core::ProcessOriginator::host(),
-        )
-        .with_identity(
-            lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
-        );
-        if let Err(err) = context.processes().start(request).await {
-            return execution_failure("detached_process_registration_failed", err.to_string());
-        }
-        if let Err(err) = context
-            .processes()
-            .complete_external(
-                &process_id,
-                lash_core::ProcessAwaitOutput::Success {
-                    value: launch_value.clone(),
-                    control: None,
-                },
-            )
-            .await
-        {
-            return execution_failure("detached_process_completion_failed", err.to_string());
-        }
         let mut record = launch_value.as_object().cloned().unwrap_or_default();
         record.insert("__handle__".to_string(), json!("process"));
         record.insert("id".to_string(), json!(process_id));
@@ -305,52 +278,72 @@ impl StandardShell {
         ToolResult::ok(serde_json::Value::Object(record))
     }
 
-    async fn register_start_command_process(
+    fn declare_start_command_process(
         &self,
         params: &StartCommandParams,
-        context: &lash_core::ToolContext<'_>,
-    ) -> ToolResult {
-        let process_id = context
-            .tool_call_id()
-            .filter(|id| !id.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("shell:{}", self.runtime.allocate_handle_id()));
+        context: &lash_core::AttemptContext<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        let identity = match context.intent_identity(0) {
+            Ok(identity) => identity,
+            Err(refusal) => {
+                return lash_core::ToolAttemptResult::done_without_intents(
+                    lash_core::ToolResultDone::failure(lash_core::ToolFailure::runtime(
+                        lash_core::ToolFailureClass::InvalidRequest,
+                        refusal.code(),
+                        "shell.start requires a stable tool call identity",
+                    )),
+                );
+            }
+        };
+        let process_id = identity.replay_key;
         let args = start_command_process_args(params);
         let call = PreparedToolCall::from_parts(
             process_id.clone(),
-            "tool:start_command",
-            "start_command",
+            RUN_START_COMMAND_TOOL_ID,
+            "run_start_command",
             args,
             None,
             serde_json::Value::Null,
         );
+        let session_scope = if context.agent_frame_id().is_empty() {
+            lash_core::SessionScope::new(context.session_id())
+        } else {
+            lash_core::SessionScope::for_agent_frame(context.session_id(), context.agent_frame_id())
+        };
         let request = ProcessStartRequest::new(
             process_id.clone(),
             ProcessInput::ToolCall { call },
-            // A shell.start row spawns an OS process group and its side effects are
-            // not idempotent: recovery must never re-execute a started command, so
-            // its contract binds at first start (ADR 0019).
+            // Shell process groups are owner-bound external side effects. The
+            // durable intent is idempotent; recovery must not launch a second OS
+            // process after the owner has bound.
             lash_core::RecoveryDisposition::OwnerBound,
-            lash_core::ProcessOriginator::host(),
+            lash_core::ProcessOriginator::session(session_scope),
         )
+        .with_env_spec(context.process_execution_env_spec())
+        .with_wake_session_id(Some(context.session_id().to_string()))
+        .with_observers([context.session_id().to_string()])
         .with_identity(
             lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
         )
         .with_extra_event_types([shell_signal_event_type()]);
-        match context.processes().start(request).await {
-            Ok(summary) => {
-                let mut handle = serde_json::to_value(summary).unwrap_or_else(|_| {
-                    lash_core::RuntimeExecutionContext::process_handle_json(&process_id)
-                });
-                if let Some(object) = handle.as_object_mut() {
-                    object.insert("status".to_string(), json!("running"));
-                    object.insert("done".to_string(), json!(false));
-                    object.insert("running".to_string(), json!(true));
-                }
-                ToolResult::ok(handle)
-            }
-            Err(err) => execution_failure("shell_process_registration_failed", err.to_string()),
-        }
+        let result = lash_core::ToolResultDone::ok(json!({
+            "__handle__": "process",
+            "id": process_id,
+            "process_id": process_id,
+            "status": if params.detach { "detached" } else { "running" },
+            "done": params.detach,
+            "running": !params.detach,
+        }));
+        lash_core::ToolAttemptResult::done(
+            result,
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+                lash_core::StartProcessIntent {
+                    session_id: context.session_id().to_string(),
+                    request,
+                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
+                },
+            ))]),
+        )
     }
 
     async fn run_start_command_process(
@@ -373,17 +366,42 @@ impl StandardShell {
             return ToolResult::failure(*err);
         }
 
-        let signal_done = CancellationToken::new();
-        let signal_forwarder =
-            self.spawn_stdin_signal_forwarder(handle_id.clone(), context, signal_done.clone());
-        match self
-            .runtime
-            .wait_until_exit_or_timeout(&handle_id, None, params.max_output_tokens, cancel)
-            .await
-        {
+        let process_outcome = self.runtime.wait_until_exit_or_timeout(
+            &handle_id,
+            None,
+            params.max_output_tokens,
+            cancel,
+        );
+        tokio::pin!(process_outcome);
+        let mut after_sequence = 0;
+        let mut signals_open = true;
+        let process_events = context.process_events();
+        let outcome = loop {
+            tokio::select! {
+                outcome = &mut process_outcome => break outcome,
+                event = process_events.wait_event_after(SHELL_STDIN_SIGNAL_EVENT, after_sequence), if signals_open => {
+                    match event {
+                        Ok(event) => {
+                            after_sequence = event.sequence;
+                            if let Some(chars) = event.payload.get("chars").and_then(|value| value.as_str()) {
+                                let _ = self.runtime.write_stdin(&handle_id, chars).await;
+                            }
+                            if event
+                                .payload
+                                .get("close_stdin")
+                                .and_then(|value| value.as_bool())
+                                .unwrap_or(false)
+                            {
+                                let _ = self.runtime.close_stdin(&handle_id).await;
+                            }
+                        }
+                        Err(_) => signals_open = false,
+                    }
+                }
+            }
+        };
+        match outcome {
             Ok(PollOutcome::Running { .. }) => {
-                signal_done.cancel();
-                let _ = signal_forwarder.await;
                 self.runtime.remove_process(&handle_id);
                 execution_failure(
                     "unexpected_running_shell_process",
@@ -396,8 +414,6 @@ impl StandardShell {
                 exit_code,
                 full_output_path,
             }) => {
-                signal_done.cancel();
-                let _ = signal_forwarder.await;
                 self.runtime.remove_process(&handle_id);
                 shell_io_result(
                     &handle_id,
@@ -409,62 +425,24 @@ impl StandardShell {
                 )
             }
             Ok(PollOutcome::Cancelled) => {
-                signal_done.cancel();
-                let _ = signal_forwarder.await;
                 self.runtime.remove_process(&handle_id);
                 ToolResult::cancelled("tool call cancelled")
             }
             Err(failure) => {
-                signal_done.cancel();
-                let _ = signal_forwarder.await;
                 self.runtime.remove_process(&handle_id);
                 ToolResult::failure(*failure)
             }
         }
     }
 
-    fn spawn_stdin_signal_forwarder(
-        &self,
-        process_id: String,
-        context: &lash_core::ToolContext<'_>,
-        done: CancellationToken,
-    ) -> tokio::task::JoinHandle<()> {
-        let runtime = self.runtime.clone();
-        let events = context.process_events();
-        tokio::spawn(async move {
-            let mut after_sequence = 0;
-            loop {
-                let event = tokio::select! {
-                    _ = done.cancelled() => break,
-                    event = events.wait_event_after(SHELL_STDIN_SIGNAL_EVENT, after_sequence) => event,
-                };
-                let Ok(event) = event else {
-                    break;
-                };
-                after_sequence = event.sequence;
-                if let Some(chars) = event.payload.get("chars").and_then(|value| value.as_str()) {
-                    let _ = runtime.write_stdin(&process_id, chars).await;
-                }
-                if event
-                    .payload
-                    .get("close_stdin")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false)
-                {
-                    let _ = runtime.close_stdin(&process_id).await;
-                }
-            }
-        })
-    }
-
-    async fn write_stdin_call(
+    fn declare_write_stdin(
         &self,
         args: &serde_json::Value,
-        context: &lash_core::ToolContext<'_>,
-    ) -> ToolResult {
+        context: &lash_core::AttemptContext<'_>,
+    ) -> lash_core::ToolAttemptResult {
         let process_id = match parse_process_id(args) {
             Ok(value) => value,
-            Err(err) => return err,
+            Err(err) => return tool_result_without_intents(err),
         };
         let chars = args
             .get("chars")
@@ -472,27 +450,34 @@ impl StandardShell {
             .unwrap_or("");
         let close_stdin = match parse_optional_bool(args, "close_stdin", false) {
             Ok(value) => value,
-            Err(err) => return err,
+            Err(err) => return tool_result_without_intents(err),
         };
-        match context
-            .processes()
-            .signal(
-                &process_id,
-                SHELL_STDIN_SIGNAL,
-                json!({
-                    "chars": chars,
-                    "close_stdin": close_stdin,
-                }),
-            )
-            .await
-        {
-            Ok(event) => ToolResult::ok(json!({
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(json!({
                 "process_id": process_id,
                 "status": "signalled",
-                "sequence": event.sequence,
             })),
-            Err(err) => execution_failure("shell_process_signal_failed", err.to_string()),
-        }
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::SignalProcess(
+                lash_core::SignalProcessIntent {
+                    session_id: context.session_id().to_string(),
+                    process_id,
+                    signal_name: SHELL_STDIN_SIGNAL.to_string(),
+                    payload: json!({
+                        "chars": chars,
+                        "close_stdin": close_stdin,
+                    }),
+                },
+            )]),
+        )
+    }
+}
+
+fn tool_result_without_intents(result: ToolResult) -> lash_core::ToolAttemptResult {
+    match result {
+        ToolResult::Done(output) => lash_core::ToolAttemptResult::done_without_intents(
+            lash_core::ToolResultDone::from_output(*output),
+        ),
+        ToolResult::Pending(pending) => lash_core::ToolAttemptResult::pending(pending),
     }
 }
 
@@ -538,12 +523,33 @@ impl StaticToolExecute for StandardShell {
         self.dispatch(call.name, call.args, call.context, cancellation_token)
             .await
     }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        matches!(tool_id.as_str(), "tool:start_command" | "tool:write_stdin")
+    }
+
+    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
+        match call.name {
+            "start_command" => {
+                let params = match self.parse_start_command_params(call.args) {
+                    Ok(params) => params,
+                    Err(err) => return tool_result_without_intents(err),
+                };
+                self.declare_start_command_process(&params, call.context)
+            }
+            "write_stdin" => self.declare_write_stdin(call.args, call.context),
+            other => tool_result_without_intents(invalid_request_failure(
+                "unknown_shell_leaf_tool",
+                format!("Unknown leaf shell tool: {other}"),
+            )),
+        }
+    }
 }
 
 impl StandardShell {
     fn tool_definitions(&self) -> Vec<ToolDefinition> {
         let exec_command_description = "Run a noninteractive one-shot command with stdin closed and stdout/stderr captured, then wait for it to finish. The command is executed exactly as written by the selected shell; the tool does not add strict-mode prefixes or rewrite pipelines. Completed commands always include `status: \"completed\"`, `done: true`, `running: false`, cleaned `output`, and `exit_code`. Nonzero exit codes are returned as ordinary result data; in Lashlang, `await shell.exec(...)?` does not abort just because the process exited nonzero. Inspect `exit_code` yourself when it matters. Commands time out after 600000 ms by default; set `timeout_ms` to override the hard timeout. Timed-out commands are killed and returned as a tool failure with `status: \"timed_out\"`, `timed_out: true`, and no `exit_code`. Use `shell.start` instead for interactive, TTY-dependent, or intentionally long-lived processes. ANSI/control noise is stripped from returned output. Large or truncated output may also include `full_output_path` pointing at the saved raw stream; prefer that over shell-level `head`/`tail` truncation when you need to inspect more.";
-        let start_command_description = "Start an interactive or intentionally long-lived command in a PTY as a durable background process. The command is executed exactly as written by the selected shell. The result is a process handle with `__handle__: \"process\"`, `id`, `process_id`, `status: \"running\"`, `done: false`, and `running: true`; use `processes.list` to see it and `processes.cancel` to stop it. When the process exits, nonzero exit codes are returned as ordinary result data with `exit_code`; in Lashlang, `?` does not abort just because the process exited nonzero. Inspect `exit_code` yourself. Use `shell.exec` for builds, installs, tests, service setup, verification, and other commands that must complete before the next step. Set `detach: true` to launch a fully detached process that the host/OS owns: it runs in its own session, outlives this session and host, and lash will NOT track, signal, or stop it. A detached launch returns immediately with `status: \"detached\"`, `done: true`, `running: false`, and the launch identity `pid`, `pgid`, `command`, and `started_at`; there is no exit code, output, or `processes.cancel` for it — supervision is entirely your/the host's responsibility. On ordinal-addressed Restate tiers, tracked and detached starts return a typed refusal inside an atomic tool attempt; place the start in an explicit process step. Runtime-owned and key-addressed tiers are unaffected.";
+        let start_command_description = "Start an interactive or intentionally long-lived command in a PTY as a durable background process. The command is executed exactly as written by the selected shell. The result contains the deterministic derived process id before the next model step; use `processes.list` to see it and `processes.cancel` to stop it. When the process exits, nonzero exit codes are returned as ordinary result data with `exit_code`; in Lashlang, `?` does not abort just because the process exited nonzero. Inspect `exit_code` yourself. Use `shell.exec` for builds, installs, tests, service setup, verification, and other commands that must complete before the next step. Set `detach: true` to launch a fully detached process that the host/OS owns and Lash abandons when the parent turn ends.";
         let command_common = |command_description: &str| {
             json!({
                 "cmd": {
@@ -624,7 +630,7 @@ finish probe.exit_code == 0"#.into(),
             ToolDefinition::raw(
                 "tool:write_stdin",
                 "write_stdin",
-                "Send bytes to stdin for a running shell process started by `shell.start`. Use `close_stdin: true` to send EOF. This only acknowledges delivery of the signal; use process lifecycle tools to inspect or cancel the background process. On ordinal-addressed Restate tiers this returns a typed refusal inside an atomic tool attempt; signal from an explicit process step. Runtime-owned and key-addressed tiers are unaffected.",
+                "Send bytes to stdin for a running shell process started by `shell.start`. Use `close_stdin: true` to send EOF. This acknowledges the recorded signal request; use process lifecycle tools to inspect or cancel the background process.",
                 object_schema(
                     json!({
                         "process_id": {
@@ -655,6 +661,14 @@ finish probe.exit_code == 0"#.into(),
                 "write",
                 &["send_stdin", "poll_command"],
             )),
+            ToolDefinition::raw(
+                RUN_START_COMMAND_TOOL_ID,
+                "run_start_command",
+                "Internal owner-bound process body for shell.start.",
+                object_schema(command_common("Shell command to start."), &["cmd"]),
+                shell_start_output_schema(),
+            )
+            .with_activation(lash_core::ToolActivation::Internal),
         ]
     }
 
@@ -674,13 +688,23 @@ finish probe.exit_code == 0"#.into(),
                 self.exec_command(&params, cancel).await
             }
             "start_command" => {
+                let _ = (context, cancel);
+                execution_failure(
+                    "shell_start_requires_leaf_attempt",
+                    "shell.start executes through the leaf intent protocol",
+                )
+            }
+            "write_stdin" => execution_failure(
+                "shell_write_requires_leaf_attempt",
+                "shell.write executes through the leaf intent protocol",
+            ),
+            "run_start_command" => {
                 let params = match self.parse_start_command_params(args) {
                     Ok(params) => params,
                     Err(err) => return err,
                 };
-                self.start_command(&params, context, cancel).await
+                self.start_command_process(&params, context, cancel).await
             }
-            "write_stdin" => self.write_stdin_call(args, context).await,
             _ => invalid_request_failure("unknown_shell_tool", format!("Unknown tool: {name}")),
         }
     }
@@ -734,7 +758,7 @@ fn shell_write_output_schema() -> serde_json::Value {
             "status": { "type": "string", "enum": ["signalled"] },
             "sequence": { "type": "integer", "minimum": 0 }
         },
-        "required": ["process_id", "status", "sequence"],
+        "required": ["process_id", "status"],
         "additionalProperties": false
     })
 }

@@ -26,6 +26,50 @@ mod tests {
         args: &serde_json::Value,
         context: &lash_core::ToolContext<'_>,
     ) -> ToolResult {
+        if name == "start_command" && context.async_process_id().is_some() {
+            return shell
+                .execute(ToolCall {
+                    name: "run_start_command",
+                    args,
+                    context,
+                })
+                .await;
+        }
+        if matches!(name, "start_command" | "write_stdin") {
+            let attempt = lash_core::AttemptContext::__for_testing(context, "shell-test-scope");
+            let outcome = shell
+                .execute_attempt(AttemptToolCall {
+                    name,
+                    args,
+                    context: &attempt,
+                })
+                .await;
+            let lash_core::ToolAttemptResult::Done { result, intents } = outcome else {
+                panic!("shell leaf test unexpectedly returned Pending");
+            };
+            for intent in intents.intents {
+                match intent {
+                    lash_core::ToolIntent::StartProcess(intent) => {
+                        context
+                            .processes()
+                            .start(intent.request)
+                            .await
+                            .expect("test drains StartProcess intent");
+                    }
+                    lash_core::ToolIntent::SignalProcess(intent) => {
+                        if let Err(error) = context
+                            .processes()
+                            .signal(&intent.process_id, &intent.signal_name, intent.payload)
+                            .await
+                        {
+                            return ToolResult::err_fmt(error);
+                        }
+                    }
+                    other => panic!("unexpected shell intent: {:?}", other.kind()),
+                }
+            }
+            return ToolResult::from_output(result.into_output());
+        }
         shell
             .execute(ToolCall {
                 name,
@@ -685,8 +729,12 @@ mod tests {
         assert_eq!(result.value_for_projection()["done"], false);
         assert_eq!(result.value_for_projection()["running"], true);
         assert_eq!(result.value_for_projection()["__handle__"], "process");
-        assert_eq!(result.value_for_projection()["id"], "shell-call-1");
-        assert_eq!(result.value_for_projection()["process_id"], "shell-call-1");
+        let derived_id = result.value_for_projection()["process_id"]
+            .as_str()
+            .expect("derived process id")
+            .to_string();
+        assert!(derived_id.starts_with("tool-intent:v1:sha256:"));
+        assert_eq!(result.value_for_projection()["id"], derived_id);
 
         let entries = service
             .registry()
@@ -694,11 +742,75 @@ mod tests {
             .await
             .expect("list live observed");
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].id, "shell-call-1");
+        assert_eq!(entries[0].id, derived_id);
         assert_eq!(entries[0].identity.kind, "shell");
         assert_eq!(
             entries[0].identity.label.as_deref(),
             Some("sleep 1; echo done")
+        );
+    }
+
+    #[tokio::test]
+    async fn shell_start_and_write_are_literal_leaf_intents() {
+        let shell = test_shell();
+        let context = context_with_processes(
+            Arc::new(TestProcessService::default()),
+            "shell-intent-call",
+        );
+        let attempt = lash_core::AttemptContext::__for_testing(&context, "shell-intent-scope");
+        let start = shell
+            .execute_attempt(AttemptToolCall {
+                name: "start_command",
+                args: &json!({"cmd": "sleep 30", "detach": true}),
+                context: &attempt,
+            })
+            .await;
+        let lash_core::ToolAttemptResult::Done { result, intents } = start else {
+            panic!("shell.start must complete with an intent")
+        };
+        let value = result.into_output().value_for_projection();
+        assert_eq!(
+            value["process_id"],
+            "tool-intent:v1:sha256:bdfc6fa58690fb98375000a2ddf1fd5d9141819d6d7221415d8b614efd071a75"
+        );
+        assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);
+        assert_eq!(intents.intents.len(), 1);
+        let lash_core::ToolIntent::StartProcess(intent) = &intents.intents[0] else {
+            panic!("shell.start must declare StartProcess")
+        };
+        assert_eq!(intent.session_id, "test-session");
+        assert_eq!(intent.on_parent_end, lash_core::ProcessParentEndPolicy::Abandon);
+        assert_eq!(intent.request.id, value["process_id"]);
+        assert!(intent.request.env_spec.is_some());
+        assert_eq!(intent.request.observers, ["test-session"]);
+        assert_eq!(
+            intent.request.wake_session_id.as_deref(),
+            Some("test-session")
+        );
+
+        let write = shell
+            .execute_attempt(AttemptToolCall {
+                name: "write_stdin",
+                args: &json!({
+                    "process_id": "literal-shell-process",
+                    "chars": "status\n",
+                    "close_stdin": true,
+                }),
+                context: &attempt,
+            })
+            .await;
+        let lash_core::ToolAttemptResult::Done { intents, .. } = write else {
+            panic!("shell.write must complete with an intent")
+        };
+        let lash_core::ToolIntent::SignalProcess(intent) = &intents.intents[0] else {
+            panic!("shell.write must declare SignalProcess")
+        };
+        assert_eq!(intent.session_id, "test-session");
+        assert_eq!(intent.process_id, "literal-shell-process");
+        assert_eq!(intent.signal_name, "stdin");
+        assert_eq!(
+            intent.payload,
+            json!({"chars": "status\n", "close_stdin": true})
         );
     }
 
@@ -813,10 +925,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_command_detach_records_terminal_audit_fact() {
+    async fn internal_detached_process_body_reports_launch_identity() {
         let shell = shell_provider(StandardShell::new().with_cwd("/"));
-        let service = Arc::new(TestProcessService::default());
-        let ctx = context_with_processes(Arc::clone(&service), "detach-call-1");
+        let ctx = async_process_context("detach-call-1", CancellationToken::new());
         let result = run_with_context(
             &shell,
             "start_command",
@@ -837,22 +948,6 @@ mod tests {
         assert!(
             value["started_at"].as_u64().is_some(),
             "detach reports started_at",
-        );
-
-        // The registry row is externally-owned and already terminal.
-        let record = service
-            .registry()
-            .get_process("detach-call-1")
-            .await
-            .expect("read process")
-            .expect("registry row");
-        assert!(
-            record.is_terminal(),
-            "detached row must be terminal from birth",
-        );
-        assert_eq!(
-            record.disposition,
-            lash_core::RecoveryDisposition::ExternallyOwned,
         );
 
         // Reap the process group we launched.
@@ -922,13 +1017,7 @@ mod tests {
             let ctx = Arc::clone(&ctx);
             let args = Arc::clone(&args);
             tokio::spawn(async move {
-                shell
-                    .execute(ToolCall {
-                        name: "start_command",
-                        args: &args,
-                        context: &ctx,
-                    })
-                    .await
+                run_with_context(&shell, "start_command", &args, &ctx).await
             })
         };
 
@@ -976,13 +1065,7 @@ mod tests {
             let ctx = Arc::clone(&ctx);
             let args = Arc::clone(&args);
             tokio::spawn(async move {
-                shell
-                    .execute(ToolCall {
-                        name: "start_command",
-                        args: &args,
-                        context: &ctx,
-                    })
-                    .await
+                run_with_context(&shell, "start_command", &args, &ctx).await
             })
         };
 
@@ -1070,13 +1153,7 @@ mod tests {
             let ctx = Arc::clone(&ctx);
             let args = Arc::clone(&args);
             tokio::spawn(async move {
-                shell
-                    .execute(ToolCall {
-                        name: "start_command",
-                        args: &args,
-                        context: &ctx,
-                    })
-                    .await
+                run_with_context(&shell, "start_command", &args, &ctx).await
             })
         };
 
@@ -1222,7 +1299,14 @@ mod tests {
     fn shell_definitions_are_compact_and_non_empty() {
         let shell = StandardShell::default();
         let defs = shell.tool_definitions();
-        assert_eq!(defs.len(), 3);
+        assert_eq!(defs.len(), 4);
+        assert_eq!(
+            defs.iter()
+                .filter(|definition| definition.manifest.activation == lash_core::ToolActivation::Internal)
+                .map(|definition| definition.name())
+                .collect::<Vec<_>>(),
+            vec!["run_start_command"]
+        );
         assert!(defs.iter().all(|def| !def.description().is_empty()));
     }
 

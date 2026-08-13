@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lash_core::{
-    PreparedToolCall, SessionToolAccess, SubagentSessionContext, ToolArgumentProjectionPolicy,
-    ToolCall, ToolContext, ToolDefinition, ToolPrepareContext, ToolResult,
+    OrchestratingToolCall, PreparedToolCall, SessionToolAccess, SubagentSessionContext,
+    ToolArgumentProjectionPolicy, ToolCall, ToolDefinition, ToolPrepareContext, ToolResult,
     facade_support::SessionSpec, sansio::PendingToolCall,
 };
 use lash_lashlang_runtime::ToolDefinitionLashlangExt;
@@ -41,24 +41,14 @@ impl RlmSubagentToolsProvider {
     /// crate) is what re-supplies the live parent provider, gives the child
     /// durability, and makes it recoverable — the same generic path every other
     /// background session turn takes.
-    async fn spawn_agent(&self, _args: &Value, context: &ToolContext<'_>) -> Result<Value, String> {
+    async fn spawn_agent(
+        &self,
+        _args: &Value,
+        context: &lash_core::OrchestrationContext<'_>,
+    ) -> Result<Value, String> {
         let prepared: PreparedSpawnAgent = context
             .decode_prepared_payload()
             .map_err(|err| format!("spawn_agent was not prepared correctly: {err}"))?;
-
-        if context
-            .sessions()
-            .tool_catalog()
-            .await
-            .ok()
-            .is_some_and(|catalog| {
-                catalog.iter().all(|tool| {
-                    tool.get("name").and_then(serde_json::Value::as_str) != Some("spawn_agent")
-                })
-            })
-        {
-            return Err("subagent spawning is unavailable in this session".to_string());
-        }
 
         let request = lash_core::ProcessStartRequest::new(
             prepared.process_id.clone(),
@@ -77,14 +67,12 @@ impl RlmSubagentToolsProvider {
             lash_core::ProcessIdentity::new("subagent").with_label(Some("spawn".to_string())),
         );
         context
-            .processes()
-            .start(request)
+            .start_process(request)
             .await
             .map_err(|err| format!("failed to start subagent process: {err}"))?;
         context
             .emit_child_process_started(prepared.process_id.clone(), Some("subagent".to_string()));
         let output = context
-            .processes()
             .await_process(&prepared.process_id)
             .await
             .map_err(|err| format!("subagent failed while executing its task: {err}"))?;
@@ -115,6 +103,7 @@ impl RlmSubagentToolsProvider {
             .session_snapshot()
             .await
             .map_err(|err| ToolResult::err(serde_json::json!(err.to_string())))?;
+        let child_session_id = format!("session:subagent:{}", call.call_id);
         let create_request = Box::new(
             build_spawn_create_request(SpawnCreateRequestInput {
                 registry: &self.registry,
@@ -134,7 +123,8 @@ impl RlmSubagentToolsProvider {
                         call_id: call_id.to_string(),
                     }),
             })
-            .map_err(|err| ToolResult::err(serde_json::json!(err)))?,
+            .map_err(|err| ToolResult::err(serde_json::json!(err)))?
+            .with_session_id(child_session_id),
         );
         let turn_input = turn_input_for_task(render_task_prompt(&task, output_schema.as_ref()));
         // Mint the child's process identity here, in the prepared (journaled)
@@ -214,9 +204,24 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         let result = match call.name {
-            "spawn_agent" => self.spawn_agent(call.args, call.context).await,
+            "spawn_agent" => Err(
+                "spawn_agent executes only through the process-replay orchestration shape"
+                    .to_string(),
+            ),
             "submit_error" => return rlm_support::submit_error_tool_result(call.args),
             other => Err(format!("Unknown tool: {other}")),
+        };
+        finalise_tool_result(result)
+    }
+
+    fn supports_orchestration_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id.as_str() == "tool:spawn_agent"
+    }
+
+    async fn execute_orchestration(&self, call: OrchestratingToolCall<'_>) -> ToolResult {
+        let result = match call.name {
+            "spawn_agent" => self.spawn_agent(call.args, call.context).await,
+            other => Err(format!("Unknown orchestrating tool: {other}")),
         };
         finalise_tool_result(result)
     }
@@ -294,7 +299,7 @@ fn spawn_agent_definition(capability_names: &[String], examples: Vec<String>) ->
     let cap_list = capability_list_for_description(capability_names);
     let capability_detail = capability_detail_for_tool_description(capability_names);
     let description = format!(
-        "Run one subagent and return its final result. Direct awaits are serial; for parallel fan-out, start every branch process before awaiting the handle collection. On ordinal-addressed Restate tiers this tool returns a typed refusal inside an atomic tool attempt; spawn from an explicit process step. Runtime-owned and key-addressed tiers are unaffected. {capability_detail} Available capabilities: {cap_list}. \
+        "Run one subagent and return its final result. Direct awaits are serial; for parallel fan-out, start every branch process before awaiting the handle collection. {capability_detail} Available capabilities: {cap_list}. \
         \n\nThe child inherits no state. Pass required context through `seed`; projected roots remain read-only projections, while computed values become writable globals. Projected seeds require an RLM child.\
         \n\nA child can fail terminally through `task.fail`; this operation returns that reason as an error."
     );

@@ -35,8 +35,8 @@ pub mod scenario_contracts;
 use batch::batch_tool_definition;
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, LlmOutputPart, LlmResponse,
-    ProtocolBuildInput, SessionError, ToolCall, ToolContract, ToolManifest, ToolProvider,
-    ToolResult, TurnDriverConfig, TurnDriverPreamble, facade_support::ToolInvocation,
+    OrchestratingToolCall, ProtocolBuildInput, SessionError, ToolCall, ToolContract, ToolManifest,
+    ToolProvider, ToolResult, TurnDriverConfig, TurnDriverPreamble, facade_support::ToolInvocation,
     facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
     facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
     facade_support::reasoning_part,
@@ -157,6 +157,17 @@ impl ToolProvider for StandardProtocolTools {
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+        ToolResult::err_fmt(format_args!(
+            "tool `{}` requires process-replay orchestration",
+            call.name
+        ))
+    }
+
+    fn supports_orchestration_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id.as_str() == "tool:batch"
+    }
+
+    async fn execute_orchestration(&self, call: OrchestratingToolCall<'_>) -> ToolResult {
         match call.name {
             "batch" => execute_batch_tool_call(call).await,
             _ => ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
@@ -171,7 +182,7 @@ struct BatchCallSpec {
     parameters: Value,
 }
 
-async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
+async fn execute_batch_tool_call(call: OrchestratingToolCall<'_>) -> ToolResult {
     let args = call.args;
     let specs = match parse_batch_specs(args) {
         Ok(specs) => specs,
@@ -180,7 +191,6 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
 
     let mut immediate_outcomes = Vec::new();
     let mut parallel_specs = Vec::new();
-    let dispatch = call.context.dispatch();
 
     for spec in specs.into_iter().take(BATCH_MAX_TOOL_CALLS) {
         if spec.tool == "batch" {
@@ -193,7 +203,7 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
             }));
             continue;
         }
-        let Some(manifest) = dispatch.callable_tool_manifest(&spec.tool) else {
+        let Some(manifest) = call.context.callable_tool_manifest(&spec.tool) else {
             let error = format!("Tool '{}' is unavailable in this session", spec.tool);
             immediate_outcomes.push(serde_json::json!({
                 "index": spec.index,
@@ -218,8 +228,9 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
         ));
     }
 
-    let mut parallel_outcomes = dispatch
-        .batch(
+    let mut parallel_outcomes = call
+        .context
+        .call_tool_batch(
             parallel_specs
                 .iter()
                 .map(|(_, invocation)| invocation.clone())
@@ -246,7 +257,10 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
         );
         result_record.insert(
             "duration_ms".to_string(),
-            serde_json::json!(tool_record.duration_ms),
+            // Batch results are replay data. Wall-clock child timing remains
+            // available on traces, but cannot participate in a cross-tier
+            // literal outcome.
+            serde_json::json!(0),
         );
         result_record.insert(
             if tool_record.output.is_success() {
@@ -838,18 +852,35 @@ mod tests {
         }
     }
 
+    type RecordedEffectFrame = (lash_core::RuntimeEffectKind, Option<String>);
+
     #[derive(Clone, Default)]
     struct CountingEffectController {
-        kinds: Arc<std::sync::Mutex<Vec<lash_core::RuntimeEffectKind>>>,
+        frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
     }
 
     impl CountingEffectController {
         fn count(&self, kind: lash_core::RuntimeEffectKind) -> usize {
-            self.kinds
+            self.frames
                 .lock_recover()
                 .iter()
-                .filter(|candidate| **candidate == kind)
+                .filter(|(candidate, _)| *candidate == kind)
                 .count()
+        }
+
+        fn tool_attempt_names(&self) -> Vec<String> {
+            let mut names = self
+                .frames
+                .lock_recover()
+                .iter()
+                .filter_map(|(kind, name)| {
+                    (*kind == lash_core::RuntimeEffectKind::ToolAttempt)
+                        .then(|| name.clone())
+                        .flatten()
+                })
+                .collect::<Vec<_>>();
+            names.sort();
+            names
         }
     }
 
@@ -930,7 +961,15 @@ mod tests {
             local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
         {
-            self.kinds.lock_recover().push(envelope.command.kind());
+            let name = match &envelope.command {
+                lash_core::RuntimeEffectCommand::ToolAttempt { call, .. } => {
+                    Some(call.tool_name.clone())
+                }
+                _ => None,
+            };
+            self.frames
+                .lock_recover()
+                .push((envelope.command.kind(), name));
             if matches!(
                 &envelope.command,
                 lash_core::RuntimeEffectCommand::PeekAwaitEvent { .. }
@@ -942,7 +981,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn standard_batch_tool_rejects_nested_batch_inside_durable_attempt() {
+    async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_attempt() {
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let saw_batch_result = Arc::new(AtomicBool::new(false));
         let provider = BatchRuntimeProvider {
@@ -1026,12 +1065,18 @@ mod tests {
             lash_core::facade_support::TurnOutcome::Finished(_)
         ));
         assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
-        assert_eq!(started.load(Ordering::SeqCst), 0);
-        assert!(!saw_batch_result.load(Ordering::SeqCst));
-        assert_eq!(controller.count(lash_core::RuntimeEffectKind::ToolBatch), 1);
+        assert_eq!(started.load(Ordering::SeqCst), 2);
+        assert!(saw_batch_result.load(Ordering::SeqCst));
+        assert_eq!(controller.count(lash_core::RuntimeEffectKind::ToolBatch), 2);
         assert_eq!(
             controller.count(lash_core::RuntimeEffectKind::ToolAttempt),
-            1
+            2,
+            "only alpha and beta are attempts; the batch body itself has no ToolAttempt frame"
+        );
+        assert_eq!(
+            controller.tool_attempt_names(),
+            vec!["alpha".to_string(), "beta".to_string()],
+            "the runtime-owned batch orchestration body is never enclosed by ToolAttempt"
         );
     }
 

@@ -156,6 +156,57 @@ struct MatrixRow {
     crossings: &'static [&'static str],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MigratedShape {
+    LeafIntent,
+    ProcessReplayOrchestration,
+    RuntimeOwnedOrchestration,
+}
+
+struct MigratedToolRoute {
+    tool: &'static str,
+    old_route: &'static str,
+    shape: MigratedShape,
+    replacement: &'static str,
+}
+
+/// Layer 2's exact reclassification of the five shipped callers. This is
+/// deliberately separate from [`ROUTE_MATRIX`]: the legacy `ToolContext`
+/// capabilities remain fenced until layer 3, while these public tools no
+/// longer call those capabilities from inside a recorded attempt.
+const MIGRATED_TOOL_ROUTES: &[MigratedToolRoute] = &[
+    MigratedToolRoute {
+        tool: "shell.start / shell.detach",
+        old_route: "ToolContext::processes().start()",
+        shape: MigratedShape::LeafIntent,
+        replacement: "StartProcess(on_parent_end=Abandon)",
+    },
+    MigratedToolRoute {
+        tool: "shell.write",
+        old_route: "ToolContext::processes().signal()",
+        shape: MigratedShape::LeafIntent,
+        replacement: "SignalProcess",
+    },
+    MigratedToolRoute {
+        tool: "processes.cancel",
+        old_route: "ToolContext::processes().cancel()",
+        shape: MigratedShape::LeafIntent,
+        replacement: "CancelProcess",
+    },
+    MigratedToolRoute {
+        tool: "spawn_agent",
+        old_route: "ToolContext::processes().start()+await_process()",
+        shape: MigratedShape::ProcessReplayOrchestration,
+        replacement: "OrchestrationContext::start_process()+await_process()",
+    },
+    MigratedToolRoute {
+        tool: "protocol-standard batch",
+        old_route: "ToolContext::dispatch().batch()",
+        shape: MigratedShape::RuntimeOwnedOrchestration,
+        replacement: "OrchestrationContext::call_tool_batch()",
+    },
+];
+
 /// The 19-row `ToolContext` inventory plus the internal `Transfer` command at
 /// the shared process-command choke point. Adding a capability without adding a row trips
 /// [`sentinel_allows_no_undeclared_crossing_from_inside_an_attempt`].
@@ -1036,6 +1087,50 @@ matrix_row_test!(attempt_atomicity_row_completion_key, 16);
 matrix_row_test!(attempt_atomicity_row_emit_child_process_started, 17);
 matrix_row_test!(attempt_atomicity_row_named_phase, 18);
 matrix_row_test!(attempt_atomicity_row_accessors, 19);
+
+#[test]
+fn migrated_shipped_routes_have_exact_layer_two_shapes() {
+    let actual = MIGRATED_TOOL_ROUTES
+        .iter()
+        .map(|row| (row.tool, row.old_route, row.shape, row.replacement))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        vec![
+            (
+                "shell.start / shell.detach",
+                "ToolContext::processes().start()",
+                MigratedShape::LeafIntent,
+                "StartProcess(on_parent_end=Abandon)",
+            ),
+            (
+                "shell.write",
+                "ToolContext::processes().signal()",
+                MigratedShape::LeafIntent,
+                "SignalProcess",
+            ),
+            (
+                "processes.cancel",
+                "ToolContext::processes().cancel()",
+                MigratedShape::LeafIntent,
+                "CancelProcess",
+            ),
+            (
+                "spawn_agent",
+                "ToolContext::processes().start()+await_process()",
+                MigratedShape::ProcessReplayOrchestration,
+                "OrchestrationContext::start_process()+await_process()",
+            ),
+            (
+                "protocol-standard batch",
+                "ToolContext::dispatch().batch()",
+                MigratedShape::RuntimeOwnedOrchestration,
+                "OrchestrationContext::call_tool_batch()",
+            ),
+        ],
+        "the five shipped routes must stay off their legacy attempt-capability paths"
+    );
+}
 
 /// The catch-all. Every crossing any capability makes from inside a recorded
 /// attempt must appear in a declared row's crossing list. A new `ToolContext`

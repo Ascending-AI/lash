@@ -42,6 +42,9 @@ uuid = { workspace = true, features = ["v4"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }
+lash-plugin-process-controls = { workspace = true }
+lash-subagents = { workspace = true }
+lash-tools = { workspace = true }
 lash-sqlite-store = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
