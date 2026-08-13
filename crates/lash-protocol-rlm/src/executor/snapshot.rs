@@ -1,11 +1,12 @@
 use thiserror::Error;
 
-// v9 is one shape carrying two changes that each claimed v8 independently:
+// v10 adds serializable lashlang call frames and closure heap objects. v9 was
+// one shape carrying two changes that each claimed v8 independently:
 // the inline-versus-leaf size line applies to globals and files alike, and a
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub(super) const RLM_SNAPSHOT_VERSION: u32 = 9;
+pub(super) const RLM_SNAPSHOT_VERSION: u32 = 10;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

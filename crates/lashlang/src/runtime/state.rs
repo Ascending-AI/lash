@@ -14,7 +14,7 @@ mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 2;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 3;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the
@@ -209,11 +209,16 @@ impl State {
     ) -> Result<(), RuntimeError> {
         let mut globals = record_with_capacity(runtime_globals.len());
         for entry in runtime_globals.entries.iter() {
-            globals.insert_symbolized(
-                entry.symbol,
-                entry.name.clone(),
-                heap.export_for_instruction(&entry.value)?,
-            );
+            match heap.export_for_instruction(&entry.value) {
+                Ok(value) => {
+                    globals.insert_symbolized(entry.symbol, entry.name.clone(), value);
+                }
+                // Function values remain VM-private heap objects. They persist
+                // in `runtime_globals` and snapshots, but are deliberately
+                // absent from the host-facing materialized globals view.
+                Err(RuntimeError::FunctionValueAtHostBoundary) => {}
+                Err(error) => return Err(error),
+            }
         }
         self.globals = globals;
         self.runtime_globals = runtime_globals;
@@ -338,9 +343,19 @@ struct CanonicalHeapEntry {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CanonicalHeapObject {
-    Tuple { items: Vec<CanonicalValue> },
-    List { items: Vec<CanonicalValue> },
-    Record { fields: Vec<CanonicalBinding> },
+    Tuple {
+        items: Vec<CanonicalValue>,
+    },
+    List {
+        items: Vec<CanonicalValue>,
+    },
+    Record {
+        fields: Vec<CanonicalBinding>,
+    },
+    Closure {
+        function: u32,
+        captures: Vec<CanonicalValue>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -517,16 +532,18 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     });
                 }
                 drop(forest_roots);
-                let globals = runtime_globals
-                    .iter()
-                    .map(|(name, value)| {
-                        heap.export(value)
-                            .map(|value| (name.to_string(), value))
-                            .map_err(|error| {
-                                SnapshotDecodeError::InvalidEncoding(error.to_string())
-                            })
-                    })
-                    .collect::<Result<_, _>>()?;
+                let mut globals = Record::new();
+                for (name, value) in runtime_globals.iter() {
+                    match heap.export(value) {
+                        Ok(value) => {
+                            globals.insert(name.to_string(), value);
+                        }
+                        Err(RuntimeError::FunctionValueAtHostBoundary) => {}
+                        Err(error) => {
+                            return Err(SnapshotDecodeError::InvalidEncoding(error.to_string()));
+                        }
+                    }
+                }
                 Ok(Self {
                     globals,
                     runtime_globals,
@@ -637,7 +654,7 @@ const HEAP_FIELDS: &[&str] = &[
 ];
 const BINDING_FIELDS: &[&str] = &["name", "value"];
 const HEAP_ENTRY_FIELDS: &[&str] = &["id", "object"];
-const TAGGED_VALUE_FIELDS: &[&str] = &["kind", "value", "items", "fields"];
+const TAGGED_VALUE_FIELDS: &[&str] = &["kind", "value", "items", "fields", "function", "captures"];
 
 fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
     let globals_result = validate_snapshot_globals(bytes);

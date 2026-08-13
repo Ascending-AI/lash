@@ -48,10 +48,10 @@ pub use heap::{
 };
 pub(crate) use heap::{Heap, HeapObject, HeapRestoreWire, PersistedRoots};
 pub use host::{
-    AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
-    ExecutionHostError, ExecutionMode, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart,
-    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
-    ResourceOperationResult, Sleep, SleepKind,
+    AbilityOp, AbilityResult, DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds,
+    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ProcessEvent,
+    ProcessEventKind, ProcessSignal, ProcessStart, ResourceOperation, ResourceOperationBatch,
+    ResourceOperationBatchResult, ResourceOperationResult, Sleep, SleepKind,
 };
 #[allow(unused_imports)]
 pub(crate) use instruction::*;
@@ -69,8 +69,9 @@ pub(crate) use schema::{
 pub(crate) use vm::SlotState;
 #[allow(unused_imports)]
 pub use vm::{
-    ContinuationError, Vm, VmContinuation, VmHeapContinuation, VmIteratorContinuation,
-    VmIteratorCursor, VmProfileContinuation, VmRunOutcome,
+    ContinuationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation, VmFrameContinuation,
+    VmFrameReturnContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
+    VmProfileContinuation, VmRunOutcome,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

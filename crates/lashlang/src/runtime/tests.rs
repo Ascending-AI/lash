@@ -936,6 +936,12 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::WrapHostDescriptor(type_name) => {
             format!("wrap_host_descriptor {}", name_text(chunk, type_name))
         }
+        Instruction::MakeClosure { function, captures } => {
+            format!("make_closure {function} captures={captures}")
+        }
+        Instruction::Call { argc } => format!("call argc={argc}"),
+        Instruction::Map => "map_callback".to_string(),
+        Instruction::Return => "return".to_string(),
     }
 }
 
@@ -1240,3 +1246,4 @@ include!("tests/projection_cases.rs");
 include!("tests/async_and_cache_cases.rs");
 include!("tests/continuation_cases.rs");
 include!("tests/continuation_wire_cases.rs");
+include!("tests/function_cases.rs");

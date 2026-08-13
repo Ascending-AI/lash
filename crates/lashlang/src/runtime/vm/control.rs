@@ -227,7 +227,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             self.heap_initialized = true;
         }
-        while let Some(instruction) = self.chunk.code.get(self.ip).copied() {
+        while self.active_function.is_some() || self.ip < self.chunk.root_code_len {
+            let Some(instruction) = self.chunk.code.get(self.ip).copied() else {
+                break;
+            };
             let instruction_ip = self.ip;
             if let Err(error) = self.materialize_instruction_operands(instruction) {
                 return Err(VmTrap {
@@ -261,6 +264,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let result = match step {
                 Ok(VmStep::Continue) => Ok(None),
                 Ok(VmStep::Effect(effect)) => {
+                    if self
+                        .frames
+                        .iter()
+                        .any(|frame| matches!(frame.return_target, super::ReturnTarget::Map(_)))
+                    {
+                        return Err(VmTrap {
+                            error: RuntimeError::EffectInBuiltinCallback,
+                            instruction_ip,
+                            span: None,
+                        });
+                    }
                     self.active_execution_elapsed += active_started.elapsed();
                     if let Err(error) = self.enforce_execution_bounds() {
                         return Err(VmTrap {
@@ -411,21 +425,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     self.stack[index] = exported;
                 }
             }
-            StackExport::All => {
-                for value in &mut self.stack {
-                    *value = self.heap.export_for_instruction(value)?;
-                }
-            }
         }
         match plan.slots {
             SlotExport::None => {}
             SlotExport::Read(slot) => self.materialize_slot(slot)?,
             SlotExport::Mutate(slot) => self.materialize_mutable_slot(slot)?,
-            SlotExport::All => {
-                for slot in 0..self.slots.values.len() {
-                    self.materialize_slot(slot)?;
-                }
-            }
         }
         Ok(())
     }
@@ -612,6 +616,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 roots.push(Value::List(values.clone()));
             }
             roots.extend(iterator.restore.previous.iter().cloned());
+        }
+        for frame in &self.frames {
+            roots.extend(frame.slots.values.iter().flatten().cloned());
+            roots.extend(frame.slots.extras.values().cloned());
+            for iterator in &frame.iter_stack {
+                if let super::IterCursor::List { values, .. } = &iterator.cursor {
+                    roots.push(Value::List(values.clone()));
+                }
+                roots.extend(iterator.restore.previous.iter().cloned());
+            }
+            if let super::ReturnTarget::Map(callback) = &frame.return_target {
+                roots.push(callback.function.clone());
+                roots.extend(callback.items.iter().cloned());
+                roots.extend(callback.results.iter().cloned());
+            }
         }
         roots
     }

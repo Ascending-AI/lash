@@ -28,8 +28,9 @@ mod heap_plan;
 #[cfg(test)]
 use continuation::TestSuspension;
 pub use continuation::{
-    ContinuationError, VmContinuation, VmHeapContinuation, VmIteratorContinuation,
-    VmIteratorCursor, VmProfileContinuation, VmRunOutcome,
+    ContinuationError, VM_CONTINUATION_FORMAT_VERSION, VmContinuation, VmFrameContinuation,
+    VmFrameReturnContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
+    VmProfileContinuation, VmRunOutcome,
 };
 use control::{VmMode, VmStep};
 use effects::VmEffect;
@@ -223,6 +224,8 @@ pub struct Vm<'a, H> {
     host: &'a H,
     mode: VmMode,
     iter_stack: Vec<IterState>,
+    active_function: Option<usize>,
+    frames: Vec<CallFrame>,
     lashlang_execution_occurrences: FxHashMap<String, u64>,
     profile: Option<ProfileAccumulator>,
     validation_plans: FxHashMap<usize, (Arc<Record>, ValidationPlan)>,
@@ -432,15 +435,21 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::StoreName(name) => {
                 let value = self.pop_stack()?;
-                self.slots
-                    .assign(name, value.clone(), &self.chunk.slot_names)?;
+                self.slots.assign(
+                    name,
+                    value.clone(),
+                    slot_names_for(self.chunk, self.active_function),
+                )?;
                 self.record_assignment(name);
                 self.last_value = Some(value);
             }
             Instruction::StoreConst { slot, constant } => {
                 let value = self.chunk.constants[constant].clone();
-                self.slots
-                    .assign(slot, value.clone(), &self.chunk.slot_names)?;
+                self.slots.assign(
+                    slot,
+                    value.clone(),
+                    slot_names_for(self.chunk, self.active_function),
+                )?;
                 self.record_assignment(slot);
                 self.last_value = Some(value);
             }
@@ -520,6 +529,60 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 self.stack.push(unwrap_tool_result(value)?);
             }
+            Instruction::MakeClosure { function, captures } => {
+                let captures = self.pop_n(captures)?;
+                let closure = self.heap.allocate_closure(function, captures)?;
+                self.stack.push(closure);
+            }
+            Instruction::Call { argc } => {
+                let start = self.stack_drain_start(argc + 1)?;
+                let mut values = self.stack.drain(start..).collect::<Vec<_>>();
+                let function = values.remove(0);
+                let active = self.begin_lashlang_execution(self.current_instruction_ip());
+                match self.begin_function_call(function, values, ReturnTarget::Direct) {
+                    Ok(()) => {
+                        if let Some(active) = &active {
+                            self.complete_lashlang_execution(active);
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(active) = &active {
+                            self.fail_lashlang_execution(active, error.to_string());
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            Instruction::Map => {
+                let function = self.pop_stack()?;
+                let items = self.pop_stack()?;
+                let items = self.heap.export_for_instruction(&items)?;
+                let items = match items {
+                    Value::List(values) | Value::Tuple(values) => values
+                        .iter()
+                        .map(|value| self.heap.isolate_value(value))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    value => {
+                        return Err(RuntimeError::ShapingListRequired {
+                            builtin: "map",
+                            actual: super::value_type_name(&value).to_string(),
+                        });
+                    }
+                };
+                if items.is_empty() {
+                    self.stack.push(Value::List(Vec::new().into()));
+                } else {
+                    let first = self.heap.isolate_value(&items[0])?;
+                    let callback = MapCallback {
+                        function: function.clone(),
+                        items,
+                        next_index: 1,
+                        results: Vec::new(),
+                    };
+                    self.begin_function_call(function, vec![first], ReturnTarget::Map(callback))?;
+                }
+            }
+            Instruction::Return => self.return_from_function()?,
             Instruction::Binary(op) => {
                 if self.stack.len() < 2
                     || self.stack[self.stack.len() - 2..]
@@ -833,8 +896,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let (start, end, step) = range_bounds(&self.stack[start_index..])?;
                 self.stack.truncate(start_index);
                 if range_has_next(start, end, step) {
-                    self.slots
-                        .ensure_assignable(binding, &self.chunk.slot_names)?;
+                    self.slots.ensure_assignable(
+                        binding,
+                        slot_names_for(self.chunk, self.active_function),
+                    )?;
                 }
                 self.iter_stack.push(IterState {
                     cursor: IterCursor::Range {
@@ -1001,8 +1066,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let path = &self.chunk.assign_paths[path];
                 let index_start = self.stack_drain_start(path.dynamic_index_count)?;
                 let indexes = &self.stack[index_start..];
-                let root_name = &self.chunk.slot_names[slot];
-                self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+                let root_name = &slot_names_for(self.chunk, self.active_function)[slot];
+                self.slots
+                    .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
                 let root =
                     self.slots
                         .get_mut(slot)
@@ -1145,8 +1211,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let iterable = self.pop_stack()?;
                 let values = iterable_values(iterable).await?;
                 if !values.is_empty() {
-                    self.slots
-                        .ensure_assignable(binding, &self.chunk.slot_names)?;
+                    self.slots.ensure_assignable(
+                        binding,
+                        slot_names_for(self.chunk, self.active_function),
+                    )?;
                 }
                 self.iter_stack.push(IterState {
                     cursor: IterCursor::List { values, index: 0 },
@@ -1160,8 +1228,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let (start, end, step) = range_bounds_async(&self.stack[start_index..]).await?;
                 self.stack.truncate(start_index);
                 if range_has_next(start, end, step) {
-                    self.slots
-                        .ensure_assignable(binding, &self.chunk.slot_names)?;
+                    self.slots.ensure_assignable(
+                        binding,
+                        slot_names_for(self.chunk, self.active_function),
+                    )?;
                 }
                 self.iter_stack.push(IterState {
                     cursor: IterCursor::Range {
@@ -1175,7 +1245,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 });
             }
             Instruction::ResolveTypeRef(slot) => {
-                let slot_name = &self.chunk.slot_names[slot];
+                let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
                 let value = self.slots.get(slot).cloned().ok_or_else(|| {
                     RuntimeError::UndefinedVariable {
                         name: slot_name.text.to_string(),
@@ -1238,7 +1308,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::Jump(_)
             | Instruction::IterNext { .. }
             | Instruction::DeepCopyLoopBinding(_)
-            | Instruction::EndIter => {
+            | Instruction::EndIter
+            | Instruction::MakeClosure { .. }
+            | Instruction::Call { .. }
+            | Instruction::Map
+            | Instruction::Return => {
                 unreachable!("opcode is always completed by step_instruction_fast")
             }
         }
@@ -1266,8 +1340,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             IntrinsicOp::PushAssign(slot) => {
                 let mut item = Some(materialize_projected_async(self.pop_stack()?).await);
-                let slot_name = &self.chunk.slot_names[slot];
-                self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+                let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
+                self.slots
+                    .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
                 if let Some(Value::Ref(id)) = self.slots.get(slot) {
                     let target = Value::Ref(*id);
                     let value = self
@@ -1304,8 +1379,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                             }
                         })?;
                         let value = execute_push_builtin_async(current.clone(), item).await?;
-                        self.slots
-                            .assign(slot, value.clone(), &self.chunk.slot_names)?;
+                        self.slots.assign(
+                            slot,
+                            value.clone(),
+                            slot_names_for(self.chunk, self.active_function),
+                        )?;
                         self.record_assignment(slot);
                         self.last_value = Some(value);
                     }
@@ -1403,7 +1481,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.slots
             .get(slot)
             .ok_or_else(|| RuntimeError::UndefinedVariable {
-                name: self.chunk.slot_names[slot].text.to_string(),
+                name: slot_names_for(self.chunk, self.active_function)[slot]
+                    .text
+                    .to_string(),
             })
     }
 
@@ -1455,6 +1535,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     }
 
     fn record_assignment(&mut self, slot: usize) {
+        if self.active_function.is_some() {
+            return;
+        }
         let name = &self.chunk.slot_names[slot].text;
         if !self.assigned_globals.contains(name.as_ref()) {
             self.assigned_globals.insert(name.to_string());
@@ -1512,6 +1595,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         profile.finish()
     }
 }
-
+include!("functions.rs");
 include!("assignment.rs");
 include!("iteration.rs");

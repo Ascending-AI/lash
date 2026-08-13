@@ -29,6 +29,10 @@ impl CanonicalHeapObject {
                         .collect::<Result<_, ContinuationError>>()?,
                 }
             }
+            HeapObject::Closure { function, captures } => Self::Closure {
+                function: *function,
+                captures: canonical_items(captures, &location, 0)?,
+            },
         })
     }
 
@@ -52,6 +56,13 @@ impl CanonicalHeapObject {
                     .map(|field| field.value.into_runtime().map(|value| (field.name, value)))
                     .collect::<Result<_, _>>()?,
             )),
+            Self::Closure { function, captures } => HeapObject::Closure {
+                function,
+                captures: captures
+                    .into_iter()
+                    .map(CanonicalValue::into_runtime)
+                    .collect::<Result<_, _>>()?,
+            },
         })
     }
 }

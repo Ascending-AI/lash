@@ -82,10 +82,14 @@ impl Compiler {
             compile_stats,
             const_slots: Vec::new(),
             loop_contexts: Vec::new(),
+            functions: Vec::new(),
+            pending_functions: Vec::new(),
         }
     }
 
-    fn finish(self) -> Chunk {
+    fn finish(mut self) -> Chunk {
+        let root_code_len = self.code.len();
+        self.compile_pending_functions();
         let slot_names = self.slots.borrow().names.clone();
         let mut spans = self.spans;
         spans.resize(self.code.len(), None);
@@ -107,6 +111,69 @@ impl Compiler {
             compiled_schemas: self.compiled_schemas,
             assign_paths: self.assign_paths,
             resource_operation_batches: self.resource_operation_batches,
+            functions: self.functions,
+            root_code_len,
+        }
+    }
+
+    fn compile_pending_functions(&mut self) {
+        let mut next = 0;
+        while next < self.pending_functions.len() {
+            let definition = self.pending_functions[next]
+                .take()
+                .expect("pending function is compiled once");
+            debug_assert_eq!(next, self.functions.len());
+
+            let root_slots =
+                std::mem::replace(&mut self.slots, Rc::new(RefCell::new(SlotTable::default())));
+            let root_const_slots = std::mem::take(&mut self.const_slots);
+            let root_loops = std::mem::take(&mut self.loop_contexts);
+
+            let self_slot = definition.name.as_deref().map(|name| self.push_slot(name));
+            let parameter_slots = definition
+                .params
+                .iter()
+                .map(|name| self.push_slot(name))
+                .collect::<Vec<_>>();
+            let capture_slots = definition
+                .captures
+                .iter()
+                .map(|name| self.push_slot(name))
+                .collect::<Vec<_>>();
+            let entry_ip = self.code.len();
+            self.compile_expr(&definition.body);
+            self.code.push(Instruction::Return);
+            let slot_names = self.slots.borrow().names.clone().into_boxed_slice();
+            self.functions.push(CompiledFunction {
+                entry_ip,
+                parameter_count: definition.params.len(),
+                capture_count: definition.captures.len(),
+                self_slot,
+                parameter_slots: parameter_slots.into_boxed_slice(),
+                capture_slots: capture_slots.into_boxed_slice(),
+                slot_names,
+            });
+
+            self.slots = root_slots;
+            self.const_slots = root_const_slots;
+            self.loop_contexts = root_loops;
+            next += 1;
+        }
+    }
+
+    fn copy_expression_metadata(&mut self, original: &Expr, cloned: &Expr) {
+        let original_key = original as *const Expr as usize;
+        let cloned_key = cloned as *const Expr as usize;
+        if let Some(span) = self.expression_source_spans.get(&original_key).copied() {
+            self.expression_source_spans.insert(cloned_key, span);
+        }
+        if let Some(tracking) = &mut self.lashlang_execution
+            && let Some(path) = tracking.paths.get(&original_key).cloned()
+        {
+            tracking.paths.insert(cloned_key, path);
+        }
+        for (original_child, cloned_child) in original.children().zip(cloned.children()) {
+            self.copy_expression_metadata(original_child, cloned_child);
         }
     }
 
@@ -842,6 +909,9 @@ impl Compiler {
             },
             Expr::TypeLiteral(ty) => self.fold_type_expr(ty).map(wrap_type_schema_value),
             Expr::Block(_)
+            | Expr::Function(_)
+            | Expr::Call { .. }
+            | Expr::Map { .. }
             | Expr::Assign { .. }
             | Expr::For { .. }
             | Expr::While { .. }

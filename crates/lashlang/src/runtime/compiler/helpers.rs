@@ -143,6 +143,9 @@ fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::Cancel(_)
         | Expr::Print(_)
         | Expr::BuiltinCall { .. }
+        | Expr::Function(_)
+        | Expr::Call { .. }
+        | Expr::Map { .. }
         | Expr::Field { .. }
         | Expr::Index { .. }
         | Expr::Unary { .. }
@@ -200,6 +203,8 @@ pub(crate) fn is_pure_expr(expr: &Expr) -> bool {
         Expr::ResultUnwrap(expr) => is_pure_expr(expr),
         Expr::HostDescriptorConstructor { input, .. } => is_pure_expr(input),
         Expr::BuiltinCall { args, .. } => args.iter().all(is_pure_expr),
+        Expr::Function(function) => function.captures.is_empty(),
+        Expr::Call { .. } | Expr::Map { .. } => false,
         Expr::Field { target, .. } => is_pure_expr(target),
         Expr::Index { target, index } => is_pure_expr(target) && is_pure_expr(index),
         Expr::Unary { expr, .. } => is_pure_expr(expr),

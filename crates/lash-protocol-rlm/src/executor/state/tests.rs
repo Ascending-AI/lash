@@ -379,7 +379,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-9 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-10 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -390,14 +390,14 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_9_root_encodes_to_golden_bytes() {
+fn version_10_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "85a776657273696f6e09a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c",
-        "617282a46b696e64a6696e6c696e65a4626f6479c43e82a776657273696f6e02a7676c6f62616c739182a46e616d65",
+        "85a776657273696f6e0aa6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c",
+        "617282a46b696e64a6696e6c696e65a4626f6479c43e82a776657273696f6e03a7676c6f62616c739182a46e616d65",
         "a576616c7565a576616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f",
         "6d706f7369746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f73",
-        "68613235362f3033363138323834376139303931613136303166336436333430653361613239363737303734393766",
-        "6539363737383833626435356537333066373565626265a566696c657382b06e6f7465732f696e6c696e652e62696e",
+        "68613235362f6665656535373661643331663736333530373061393530316534633865353330626537323266303433",
+        "6634376666326461333566326165313033303039346430a566696c657382b06e6f7465732f696e6c696e652e62696e",
         "82a46b696e64a6696e6c696e65a4626f6479c402ff00af6e6f7465732f6c617267652e62696e82a46b696e64a46c65",
         "6166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f7368613235362f32656131363938386361",
         "3961336239373366663131363933653664653462643037383737353635356364363731356335613036613132306637",
@@ -485,7 +485,7 @@ fn version_9_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-9 root encoding changed; decide on a version bump before updating the golden"
+        "the version-10 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =
@@ -494,7 +494,7 @@ fn version_9_root_encodes_to_golden_bytes() {
     assert_eq!(
         root_leaf_keys(&decoded),
         [
-            "execution_state/sha256/036182847a9091a1601f3d6340e3aa2967707497fe9677883bd55e730f75ebbe"
+            "execution_state/sha256/feee576ad31f7635070a9501e4c8e530be722f043f47ff2da35f2ae1030094d0"
                 .to_string(),
             "execution_state/sha256/2ea16988ca9a3b973ff11693e6de4bd078775655cd6715c5a06a120f71b3e827"
                 .to_string(),

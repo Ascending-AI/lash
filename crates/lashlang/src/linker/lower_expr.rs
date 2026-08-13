@@ -688,6 +688,53 @@ impl<'module> Linker<'module> {
                     ))),
                 )
             }
+            Expr::Function(function) => {
+                for capture in &function.captures {
+                    if scope.get(capture).is_none() {
+                        return Err(LinkError::UnknownName {
+                            name: capture.to_string(),
+                            span: scope.span,
+                        });
+                    }
+                }
+                let mut function_scope = Scope::new(scope.process_body, scope.span);
+                for capture in &function.captures {
+                    function_scope.bind(capture, any_binding());
+                }
+                for param in &function.params {
+                    function_scope.bind(param, any_binding());
+                }
+                if let Some(name) = &function.name {
+                    function_scope.bind(name, any_binding());
+                }
+                let body = self.lower_expr(&function.body, &mut function_scope)?.0;
+                (
+                    Expr::Function(Box::new(crate::ast::FunctionExpr {
+                        name: function.name.clone(),
+                        params: function.params.clone(),
+                        captures: function.captures.clone(),
+                        body: Box::new(body),
+                    })),
+                    Some(any_binding()),
+                )
+            }
+            Expr::Call { function, args } => (
+                Expr::Call {
+                    function: Box::new(self.lower_expr(function, scope)?.0),
+                    args: args
+                        .iter()
+                        .map(|arg| self.lower_expr(arg, scope).map(|value| value.0))
+                        .collect::<Result<_, _>>()?,
+                },
+                Some(any_binding()),
+            ),
+            Expr::Map { items, function } => (
+                Expr::Map {
+                    items: Box::new(self.lower_expr(items, scope)?.0),
+                    function: Box::new(self.lower_expr(function, scope)?.0),
+                },
+                Some(any_binding()),
+            ),
             Expr::Field { target, field } => {
                 let (target, binding) = self.lower_expr(target, scope)?;
                 let ty =

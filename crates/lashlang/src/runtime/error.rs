@@ -34,6 +34,27 @@ pub enum FormatError {
 #[non_exhaustive]
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum RuntimeError {
+    /// Guest recursion exceeded the configured VM frame-depth limit.
+    #[error("lashlang frame depth limit of {limit} frames was exceeded")]
+    FrameDepthExceeded { limit: u64 },
+    /// A closure's stable function-table index cannot fit the durable wire.
+    #[error("lashlang function table exceeds the durable function index space")]
+    FunctionIndexOverflow,
+    /// A value used as a function was not a closure.
+    #[error("attempted to call a non-function {actual}")]
+    NonFunctionCall { actual: String },
+    /// A closure was called with the wrong number of arguments.
+    #[error("function takes {expected} arg(s), got {actual}")]
+    FunctionArgumentCount { expected: usize, actual: usize },
+    /// Closure metadata did not match the compiled function table.
+    #[error("closure function index {index} is not present in the compiled program")]
+    UnknownFunction { index: u32 },
+    /// Function values cannot cross host-facing value boundaries.
+    #[error("function values cannot cross a lashlang host boundary")]
+    FunctionValueAtHostBoundary,
+    /// Effects from callbacks require a resumable builtin protocol not yet present.
+    #[error("effects are not supported inside builtin callbacks")]
+    EffectInBuiltinCallback,
     /// Active VM execution exceeded its explicit instruction budget.
     #[error("lashlang instruction budget of {limit} instructions exceeded")]
     InstructionBudgetExceeded { limit: u64 },
@@ -382,6 +403,7 @@ impl RuntimeError {
             Self::InstructionBudgetExceeded { .. }
                 | Self::ExecutionDeadlineExceeded { .. }
                 | Self::MemoryLimitExceeded { .. }
+                | Self::FrameDepthExceeded { .. }
         )
     }
 }
@@ -397,6 +419,18 @@ mod tests {
     #[test]
     fn every_runtime_error_display_is_exact() {
         let errors = vec![
+            RuntimeError::FrameDepthExceeded { limit: 32 },
+            RuntimeError::FunctionIndexOverflow,
+            RuntimeError::NonFunctionCall {
+                actual: "number".into(),
+            },
+            RuntimeError::FunctionArgumentCount {
+                expected: 1,
+                actual: 2,
+            },
+            RuntimeError::UnknownFunction { index: 7 },
+            RuntimeError::FunctionValueAtHostBoundary,
+            RuntimeError::EffectInBuiltinCallback,
             RuntimeError::InstructionBudgetExceeded { limit: 10 },
             RuntimeError::ExecutionDeadlineExceeded { limit_ms: 20 },
             RuntimeError::UndefinedVariable {
@@ -617,6 +651,23 @@ mod tests {
 
         for error in errors {
             let expected = match &error {
+                RuntimeError::FrameDepthExceeded { .. } => {
+                    "lashlang frame depth limit of 32 frames was exceeded"
+                }
+                RuntimeError::FunctionIndexOverflow => {
+                    "lashlang function table exceeds the durable function index space"
+                }
+                RuntimeError::NonFunctionCall { .. } => "attempted to call a non-function number",
+                RuntimeError::FunctionArgumentCount { .. } => "function takes 1 arg(s), got 2",
+                RuntimeError::UnknownFunction { .. } => {
+                    "closure function index 7 is not present in the compiled program"
+                }
+                RuntimeError::FunctionValueAtHostBoundary => {
+                    "function values cannot cross a lashlang host boundary"
+                }
+                RuntimeError::EffectInBuiltinCallback => {
+                    "effects are not supported inside builtin callbacks"
+                }
                 RuntimeError::InstructionBudgetExceeded { .. } => {
                     "lashlang instruction budget of 10 instructions exceeded"
                 }

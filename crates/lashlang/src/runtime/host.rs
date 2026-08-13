@@ -250,7 +250,11 @@ pub struct ExecutionBounds {
     pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
     pub deadline: ExecutionBound<Duration>,
     pub memory_limit: ExecutionBound<std::num::NonZeroU64>,
+    pub max_frame_depth: std::num::NonZeroU64,
 }
+
+pub const DEFAULT_MAX_VM_FRAME_DEPTH: std::num::NonZeroU64 =
+    std::num::NonZeroU64::new(1_024).expect("the default frame depth is nonzero");
 
 impl ExecutionBounds {
     /// Builds a bound set.
@@ -267,7 +271,13 @@ impl ExecutionBounds {
             instruction_budget,
             deadline,
             memory_limit,
+            max_frame_depth: DEFAULT_MAX_VM_FRAME_DEPTH,
         }
+    }
+
+    pub const fn with_max_frame_depth(mut self, max_frame_depth: std::num::NonZeroU64) -> Self {
+        self.max_frame_depth = max_frame_depth;
+        self
     }
 
     pub const fn with_memory_limit(
