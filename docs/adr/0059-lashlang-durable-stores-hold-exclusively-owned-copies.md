@@ -64,6 +64,16 @@ into, and a cursor holds the elements it is handing out. Those handles confer no
 ownership, so they can never create a second owner. Every insertion into a
 durable store copies, so a transient duplicate can never become a durable one.
 
+User-function suspension adds one frames-aware qualification. The saved root
+frame remains the durable owner of root slots and globals while a function is
+active; the active callee and every saved function frame are transient borrowers
+for forest validation, although their values are serialized and traced as GC
+roots. This deliberately weakens the simple "all frame slots are durable roots"
+reading: a named function's `self_slot` legitimately aliases the closure owned
+by its caller, and caller/callee operands can temporarily retain the same heap
+value. One frame-aware root enumerator supplies both GC and wire validation so
+the two boundaries cannot disagree about that classification.
+
 Applying the validator to the encoders as well means a violation fails at the
 write that introduced it rather than at a later cold restore in another process,
 and cannot reach durable storage at all.
@@ -92,6 +102,14 @@ later and is recorded as future work, not taken here.
 A dialect that wants reference semantics — a future TypeScript lowering, for
 instance — omits the isolation lowering. The heap primitives stay
 reference-preserving; the decision lives in the compiler.
+
+Function values are VM-private durable values, not host values. Snapshot and
+continuation checkpoints retain closures, but materializing runtime globals for
+a host omits an entire binding if a closure occurs anywhere below it. This is a
+deliberate silent-omission policy: a host that round-trips only its materialized
+globals drops those closure-bearing bindings. Direct host-boundary uses such as
+effect arguments, formatting, projection, JSON conversion, and validation fail
+with the typed `FunctionValueAtHostBoundary` error instead.
 
 ## Consequences
 

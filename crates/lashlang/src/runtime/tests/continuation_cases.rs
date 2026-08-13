@@ -304,7 +304,7 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
     let program = compile_source("value = null\nfinish value").expect("program should compile");
     let slot_count = program.chunk.slot_names.len();
     let base = VmContinuation {
-        format_version: super::super::VM_CONTINUATION_FORMAT_VERSION,
+        format_version: VM_CONTINUATION_FORMAT_VERSION,
         instruction_pointer: 0,
         active_function: None,
         operand_stack: Vec::new(),

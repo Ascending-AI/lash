@@ -1,3 +1,4 @@
+use super::vm::{VM_CONTINUATION_FORMAT_VERSION, VmFrameReturnContinuation};
 use super::*;
 use crate::ast::{Expr, Program};
 use lash_sansio::sync::{LockResultExt, MutexExt};

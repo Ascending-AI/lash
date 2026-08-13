@@ -39,7 +39,7 @@ pub use cache::{
 #[allow(unused_imports)]
 pub(crate) use compiler::*;
 pub use entry_points::{
-    ExecutableProgram, compile, compile_linked, compile_linked_process,
+    ExecutableProgram, compile, compile_ast, compile_linked, compile_linked_process,
     compile_module_artifact_process, compile_process, execute, prewarm,
 };
 pub use heap::{
@@ -69,9 +69,8 @@ pub(crate) use schema::{
 pub(crate) use vm::SlotState;
 #[allow(unused_imports)]
 pub use vm::{
-    ContinuationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation, VmFrameContinuation,
-    VmFrameReturnContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmProfileContinuation, VmRunOutcome,
+    ContinuationError, Vm, VmContinuation, VmHeapContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmProfileContinuation, VmRunOutcome,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

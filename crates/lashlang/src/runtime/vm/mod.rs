@@ -25,11 +25,13 @@ mod heap_plan;
 
 #[cfg(test)]
 use continuation::TestSuspension;
+#[cfg(test)]
+pub(crate) use continuation::VM_CONTINUATION_FORMAT_VERSION;
 pub use continuation::{
-    ContinuationError, VM_CONTINUATION_FORMAT_VERSION, VmContinuation, VmFrameContinuation,
-    VmFrameReturnContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmProfileContinuation, VmRunOutcome,
+    ContinuationError, VmContinuation, VmHeapContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmProfileContinuation, VmRunOutcome,
 };
+pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
 use control::{VmMode, VmStep};
 use effects::VmEffect;
 

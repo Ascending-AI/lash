@@ -4,7 +4,7 @@ use thiserror::Error;
 use super::super::{ExecutionBound, HeapObject, HeapRestoreWire, PersistedRoots};
 use super::*;
 
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 2;
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
@@ -67,7 +67,7 @@ pub struct VmContinuation {
     )]
     pub globals: Record,
     pub iterator_stack: Vec<VmIteratorContinuation>,
-    pub frame_stack: Vec<VmFrameContinuation>,
+    pub(crate) frame_stack: Vec<VmFrameContinuation>,
     pub occurrence_counters: std::collections::BTreeMap<String, u64>,
     pub mode: ExecutionMode,
     pub profile: Option<VmProfileContinuation>,
@@ -82,7 +82,7 @@ pub struct VmContinuation {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct VmFrameContinuation {
+pub(crate) struct VmFrameContinuation {
     pub return_instruction_pointer: usize,
     pub function: Option<u32>,
     pub operand_stack_base: usize,
@@ -103,7 +103,7 @@ pub struct VmFrameContinuation {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum VmFrameReturnContinuation {
+pub(crate) enum VmFrameReturnContinuation {
     Direct,
     Map {
         #[serde(
@@ -230,6 +230,13 @@ impl VmHeapContinuation {
                 location: "continuation heap".to_string(),
                 variant: "invalid heap reference",
             })
+    }
+}
+
+impl VmContinuation {
+    /// Number of parked caller frames in this suspended VM.
+    pub fn frame_depth(&self) -> usize {
+        self.frame_stack.len()
     }
 }
 

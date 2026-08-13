@@ -75,11 +75,11 @@ pub use runtime::{
     ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
     ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
     ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
-    SnapshotDecodeError, State, VM_CONTINUATION_FORMAT_VERSION, Value, ValueProjectionContext,
-    ValueProjector, Vm, VmContinuation, VmFrameContinuation, VmFrameReturnContinuation,
+    SnapshotDecodeError, State, Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation,
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmProfileContinuation,
-    VmRunOutcome, compile, compile_linked, compile_linked_process, compile_module_artifact_process,
-    compile_process, execute, from_json, prewarm, unwrap_type_value,
+    VmRunOutcome, compile, compile_ast, compile_linked, compile_linked_process,
+    compile_module_artifact_process, compile_process, execute, from_json, prewarm,
+    unwrap_type_value,
 };
 #[doc(hidden)]
 pub use runtime::{

@@ -51,6 +51,29 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             })
         ));
     }
+
+    let mut heap = Heap::default();
+    let closure = heap
+        .allocate(HeapObject::Closure {
+            function: 99,
+            captures: Vec::new(),
+        })
+        .expect("allocate unknown snapshot closure");
+    let mut runtime_globals = Record::new();
+    runtime_globals.insert("f".to_string(), closure);
+    let bytes = Snapshot {
+        globals: Record::new(),
+        runtime_globals,
+        heap,
+    }
+    .to_canonical_bytes()
+    .expect("program-independent snapshot encoding accepts function metadata");
+    let decoded = Snapshot::from_canonical_bytes(&bytes)
+        .expect("program-independent snapshot decoding accepts function metadata");
+    assert!(matches!(
+        State::from_snapshot(decoded).validate_program(&program),
+        Err(RuntimeError::UnknownFunction { index: 99 })
+    ));
 }
 
 #[test]

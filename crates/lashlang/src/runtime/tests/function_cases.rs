@@ -723,6 +723,108 @@ async fn frame_depth_is_a_typed_execution_bound_and_gc_stress_preserves_closures
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn default_frame_depth_rejects_fifteen_hundred_recursive_calls() {
+    let host = FunctionBoundsHost {
+        bounds: ExecutionBounds::unbounded(),
+        collect_every_allocation: false,
+    };
+
+    assert!(matches!(
+        execute(&factorial_program(1_500.0), &mut State::new(), &host).await,
+        Err(RuntimeError::FrameDepthExceeded { limit })
+            if limit == DEFAULT_MAX_VM_FRAME_DEPTH.get()
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn closures_obey_the_complete_host_boundary_matrix() {
+    let closure = || function(None, &[], &[], Expr::Null);
+    let foreground_boundaries = [
+        ("effect argument", Expr::Print(Box::new(variable("f")))),
+        ("finish", Expr::Finish(Box::new(variable("f")))),
+        (
+            "JSON",
+            Expr::BuiltinCall {
+                name: "json_parse".into(),
+                args: vec![variable("f")],
+            },
+        ),
+        ("format", format_call("{}", vec![variable("f")])),
+        (
+            "projection",
+            Expr::BuiltinCall {
+                name: "to_string".into(),
+                args: vec![variable("f")],
+            },
+        ),
+        (
+            "schema",
+            Expr::BuiltinCall {
+                name: "validate".into(),
+                args: vec![
+                    variable("f"),
+                    Expr::TypeLiteral(Box::new(crate::ast::TypeExpr::Any)),
+                ],
+            },
+        ),
+    ];
+    for (boundary, expr) in foreground_boundaries {
+        let program = compile_program_internal(&Program::block(vec![assign("f", closure()), expr]));
+        assert!(
+            matches!(
+                execute_compiled(&program, &mut State::new(), &Host).await,
+                Err(RuntimeError::FunctionValueAtHostBoundary)
+            ),
+            "{boundary} must reject a closure before it reaches the host"
+        );
+    }
+
+    for (boundary, expr) in [
+        ("yield", Expr::Yield(Box::new(variable("f")))),
+        ("wake", Expr::Wake(Box::new(variable("f")))),
+    ] {
+        let program = compile_program_internal(&Program::block(vec![assign("f", closure()), expr]));
+        assert!(
+            matches!(
+                execute_compiled_process(
+                    &program,
+                    &mut State::new(),
+                    &RecordingProcessHost::default()
+                )
+                .await,
+                Err(RuntimeError::FunctionValueAtHostBoundary)
+            ),
+            "{boundary} must reject a closure before it reaches the host"
+        );
+    }
+
+    let checkpoint_program = compile_program_internal(&Program::block(vec![
+        assign("f", closure()),
+        Expr::Print(Box::new(Expr::Number(1.0))),
+        Expr::Finish(Box::new(Expr::Number(2.0))),
+    ]));
+    let checkpoint = find_instruction_continuation(&checkpoint_program, |continuation| {
+        continuation
+            .slots
+            .iter()
+            .flatten()
+            .any(|value| matches!(value, Value::Ref(_)))
+    })
+    .await;
+    let encoded = serde_json::to_vec(&checkpoint).expect("checkpoint with closure must encode");
+    let decoded: VmContinuation =
+        serde_json::from_slice(&encoded).expect("checkpoint with closure must decode");
+    let mut vm = Vm::resume_from(decoded, &checkpoint_program, &Host)
+        .expect("checkpoint with closure must resume");
+    assert_eq!(
+        vm.run_for_mode()
+            .await
+            .expect("resumed checkpoint must run"),
+        ExecutionOutcome::Finished(Value::Number(2.0))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn closure_heap_objects_round_trip_through_state_snapshot_v3() {
     let program = Program::block(vec![Expr::If {
         condition: Box::new(variable("initialize")),
