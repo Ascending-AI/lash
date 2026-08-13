@@ -421,19 +421,29 @@ impl Heap {
         // at the object a durable one owns, so the second import of the same
         // tree reuses the first. Durable values never reuse: two of them naming
         // one object is the sharing this heap refuses.
-        let mut first_import = FxHashMap::<(u8, usize), Value>::default();
+        // A batch is a handful of values, so the lookup is a scan over a vector
+        // that stays empty unless the batch actually has a transient holder to
+        // satisfy. A map here allocated on every instruction and cost more than
+        // the duplicate imports it saved.
+        let has_transient = values.len() > durable_count;
+        let mut durable_imports = Vec::<((u8, usize), Value)>::new();
         for (index, value) in values.into_iter().enumerate() {
             let identity = compound_identity(&value);
             if index >= durable_count
                 && let Some(identity) = identity
-                && let Some(existing) = first_import.get(&identity)
+                && let Some((_, existing)) = durable_imports
+                    .iter()
+                    .find(|(candidate, _)| *candidate == identity)
             {
                 imported.push(existing.clone());
                 continue;
             }
             let staged_value = self.stage_import(value, &mut next_id, &mut staged)?;
-            if let Some(identity) = identity {
-                first_import.entry(identity).or_insert(staged_value.clone());
+            if has_transient
+                && index < durable_count
+                && let Some(identity) = identity
+            {
+                durable_imports.push((identity, staged_value.clone()));
             }
             imported.push(staged_value);
         }

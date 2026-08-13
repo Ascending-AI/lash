@@ -3371,15 +3371,16 @@ mod tests {
                 "a changed short binding must not mint a leaf"
             );
             // The property under test is the assertion above: no leaf is minted,
-            // so 200 short bindings cost no root references and no manifest rows.
-            // The byte bound below is a generous sanity ceiling on top of that —
-            // the measured commit is about 33 KiB, and a regression that started
-            // minting leaves or writing a per-binding component would blow past
-            // 64 KiB long before it approached it. A tight byte assert here
-            // would fail on any harmless change to the payload strings without
-            // telling us anything the leaf-count assertion does not.
+            // so 200 short bindings cost no root references and no manifest
+            // rows. The byte bound is a sanity ceiling on top of that. The
+            // measurement is deterministic and has been 33,027 bytes since the
+            // pre-heap tree representation — the heap form encodes the same
+            // bytes for these bindings — so the ceiling is set well above it
+            // rather than one percent above it: a tight assert here fails on any
+            // harmless change to the payload strings while telling us nothing
+            // the leaf-count assertion does not.
             assert!(
-                commit_bytes < 64 * 1024,
+                commit_bytes < 48 * 1024,
                 "many short bindings must keep the per-commit floor low: {commit_bytes}"
             );
         });

@@ -420,31 +420,36 @@ async fn continuation_decode_accepts_transient_duplication() {
     assert_eq!(continuation.operand_stack.len(), 1);
 }
 
+/// A store must not allocate the same object twice.
+///
+/// The value a store leaves in its slot is also left in the last-value
+/// register, and importing it once per holder meant every literal store
+/// allocated its object twice and handed one straight to the collector. These
+/// counts are the whole point of the transient/durable split: a transient
+/// holder may point at what a durable one owns.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "diagnostic probe for allocation churn; run explicitly"]
-async fn allocation_churn_probe() {
-    for source in [
-        "xs = [[1]]\nfinish 0",
-        "xs = [1]\nfinish 0",
-        "xs = { a: [1] }\nfinish 0",
-        "xs = []\nxs = push(xs, [1])\nfinish 0",
-        "a = [1]\nxs = [a]\nfinish 0",
-        "xs = [[1]]\nys = xs\nfinish 0",
+async fn a_store_allocates_one_object_per_live_object() {
+    for (source, expected_allocations, expected_live) in [
+        ("xs = [1]\nfinish 0", 1, 1),
+        ("xs = [[1]]\nfinish 0", 2, 2),
+        ("xs = { a: [1] }\nfinish 0", 2, 2),
+        ("a = [1]\nxs = [a]\nfinish 0", 3, 3),
+        ("xs = [[1]]\nys = xs\nfinish 0", 4, 4),
+        // The discarded empty list is real garbage, not a duplicate import.
+        ("xs = []\nxs = push(xs, [1])\nfinish 0", 3, 2),
     ] {
-        let program = compile_source(source).expect("compile");
+        let program = compile_source(source).expect("probe program should compile");
         let mut state = State::new();
         execute_compiled(&program, &mut state, &Host)
             .await
-            .expect("run");
+            .expect("probe program should run");
         let (globals, mut heap) = state.take_runtime();
-        let before = heap.objects_in_id_order().count();
         let roots = globals.values().cloned().collect::<Vec<_>>();
         heap.collect(roots.iter());
-        println!(
-            "{source:?} allocations={} objects_before_collect={} live_objects={}",
-            heap.allocations(),
-            before,
-            heap.objects_in_id_order().count()
+        assert_eq!(
+            (heap.allocations(), heap.objects_in_id_order().count()),
+            (expected_allocations, expected_live),
+            "allocation count for {source:?}"
         );
     }
 }

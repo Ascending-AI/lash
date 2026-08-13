@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::HEAP_SIZE_SCHEDULE_VERSION;
 
 #[test]
 fn canonical_encoding_is_deterministic_for_map_order_and_nan_payload() {

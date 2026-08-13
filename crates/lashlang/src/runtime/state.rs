@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use super::{
-    ContinuationError, HEAP_SIZE_SCHEDULE_VERSION, Heap, HeapId, HeapObject, HeapRestoreWire,
-    ImageValue, PersistedRoots, ProjectedValue, Record, ResourceHandle, RuntimeError, Value,
-    record_with_capacity,
+    ContinuationError, Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, PersistedRoots,
+    ProjectedValue, Record, ResourceHandle, RuntimeError, Value, record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
