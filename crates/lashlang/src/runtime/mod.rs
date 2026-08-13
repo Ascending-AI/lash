@@ -18,7 +18,7 @@ mod compiler;
 pub(crate) use compiler::is_pure_expr;
 mod entry_points;
 mod error;
-pub use error::{FormatError, RuntimeError};
+pub use error::{ErrorTaxonomy, FormatError, RuntimeError};
 mod format;
 mod heap;
 mod host;

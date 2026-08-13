@@ -424,44 +424,272 @@ impl RuntimeError {
     /// Terminals which are structurally forbidden from consulting guest
     /// handlers. This is intentionally the only taxonomy classification used
     /// by the VM's error exit.
-    pub(crate) fn is_uncatchable_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::InstructionBudgetExceeded { .. }
-                | Self::ExecutionDeadlineExceeded { .. }
-                | Self::MemoryLimitExceeded { .. }
-                | Self::FrameDepthExceeded { .. }
-                | Self::HostCancelled
-        )
+    /// Which taxonomy row this error belongs to.
+    ///
+    /// The match is exhaustive on purpose: the taxonomy decides whether an
+    /// error bypasses guest handlers and whether the host classifies it as an
+    /// effect failure, and a new variant that silently defaulted to "catchable
+    /// runtime error" is exactly the hand-maintained-parallel-list defect this
+    /// layer exists to avoid. Adding a variant fails to compile until it
+    /// declares its class here.
+    pub fn taxonomy(&self) -> ErrorTaxonomy {
+        match self {
+            Self::FrameDepthExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::FunctionIndexOverflow => ErrorTaxonomy::Catchable,
+            Self::NonFunctionCall { .. } => ErrorTaxonomy::Catchable,
+            Self::FunctionArgumentCount { .. } => ErrorTaxonomy::Catchable,
+            Self::UnknownFunction { .. } => ErrorTaxonomy::Catchable,
+            Self::ClosureCaptureCountMismatch { .. } => ErrorTaxonomy::Catchable,
+            Self::FunctionValueAtHostBoundary => ErrorTaxonomy::Catchable,
+            Self::EffectInBuiltinCallback => ErrorTaxonomy::Catchable,
+            Self::InstructionBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::ExecutionDeadlineExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::MemoryLimitExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::HostCancelled => ErrorTaxonomy::UncatchableTerminal,
+            Self::DanglingHeapReference { .. } => ErrorTaxonomy::Catchable,
+            Self::HeapIdExhausted => ErrorTaxonomy::Catchable,
+            Self::UnexportedHeapReference { .. } => ErrorTaxonomy::Catchable,
+            Self::CyclicHostValue { .. } => ErrorTaxonomy::Catchable,
+            Self::UndefinedVariable { .. } => ErrorTaxonomy::Catchable,
+            Self::NonListIteration => ErrorTaxonomy::Catchable,
+            Self::SessionProcessAdminOutsideProcess { .. } => ErrorTaxonomy::Catchable,
+            Self::ForegroundControlInsideProcess { .. } => ErrorTaxonomy::Catchable,
+            Self::UnknownBuiltin { .. } => ErrorTaxonomy::Catchable,
+            Self::CannotReadField { .. } => ErrorTaxonomy::Catchable,
+            Self::ToolResultExpected { .. } => ErrorTaxonomy::Catchable,
+            Self::ToolResultMissingValue => ErrorTaxonomy::Catchable,
+            Self::ToolResultInvalidOk => ErrorTaxonomy::Catchable,
+            Self::CannotIndex { .. } => ErrorTaxonomy::Catchable,
+            Self::ImmutableImageFields => ErrorTaxonomy::Catchable,
+            Self::ImmutableImageFieldsThrough => ErrorTaxonomy::Catchable,
+            Self::ImmutableTupleIndexes => ErrorTaxonomy::Catchable,
+            Self::ImmutableTupleIndexesThrough => ErrorTaxonomy::Catchable,
+            Self::CannotAssignField { .. } => ErrorTaxonomy::Catchable,
+            Self::CannotAssignThroughField { .. } => ErrorTaxonomy::Catchable,
+            Self::CannotAssignIndex { .. } => ErrorTaxonomy::Catchable,
+            Self::CannotAssignThroughIndex { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidListAssignmentIndex => ErrorTaxonomy::Catchable,
+            Self::InvalidArgumentCount { .. } => ErrorTaxonomy::Catchable,
+            Self::EmptyUnsupported => ErrorTaxonomy::Catchable,
+            Self::KeysUnsupported => ErrorTaxonomy::Catchable,
+            Self::ValuesUnsupported => ErrorTaxonomy::Catchable,
+            Self::SliceUnsupported => ErrorTaxonomy::Catchable,
+            Self::FormatTemplateMissing => ErrorTaxonomy::Catchable,
+            Self::FormatTemplateInvalid { .. } => ErrorTaxonomy::Catchable,
+            Self::LenUnsupported => ErrorTaxonomy::Catchable,
+            Self::ContainsUnsupported => ErrorTaxonomy::Catchable,
+            Self::InUnsupported => ErrorTaxonomy::Catchable,
+            Self::JoinUnsupported => ErrorTaxonomy::Catchable,
+            Self::PushUnsupported => ErrorTaxonomy::Catchable,
+            Self::ShapingListRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::ShapingTextRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::ShapingNumberRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::ShapingComparableRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::ShapingEmptyList { .. } => ErrorTaxonomy::Catchable,
+            Self::SortByRecordRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::SortByEmptyPath => ErrorTaxonomy::Catchable,
+            Self::SortByMissingPath { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidRangeBound => ErrorTaxonomy::Catchable,
+            Self::InvalidRangeBoundType { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidIntegerDivisionArgument { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidIntegerDivisionArgumentType { .. } => ErrorTaxonomy::Catchable,
+            Self::ExpectedNumber => ErrorTaxonomy::Catchable,
+            Self::ExpectedNumberType { .. } => ErrorTaxonomy::Catchable,
+            Self::ExpectedText { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidIndex => ErrorTaxonomy::Catchable,
+            Self::InvalidCharacterIndex { .. } => ErrorTaxonomy::Catchable,
+            Self::IncompatibleSequenceConcatenation => ErrorTaxonomy::Catchable,
+            Self::ReadOnlyProjectedBinding { .. } => ErrorTaxonomy::Catchable,
+            Self::ValidateTypeLiteralRequired => ErrorTaxonomy::Catchable,
+            Self::NotTypeValue { .. } => ErrorTaxonomy::Catchable,
+            Self::UnwrappedToolResultFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::UnwrappedModuleOperationFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::MissingAssignmentIndex => ErrorTaxonomy::Catchable,
+            Self::MissingAssignmentField { .. } => ErrorTaxonomy::Catchable,
+            Self::MissingAssignmentKey { .. } => ErrorTaxonomy::Catchable,
+            Self::ListAssignmentIndexOutOfBounds => ErrorTaxonomy::Catchable,
+            Self::InvalidJson { .. } => ErrorTaxonomy::Catchable,
+            Self::EmptyGrepNeedle => ErrorTaxonomy::Catchable,
+            Self::Format(_) => ErrorTaxonomy::Catchable,
+            Self::ZeroRangeStep => ErrorTaxonomy::Catchable,
+            Self::RangeTooLarge { .. } => ErrorTaxonomy::Catchable,
+            Self::IntegerDivisionByZero { .. } => ErrorTaxonomy::Catchable,
+            Self::UnknownProcess { .. } => ErrorTaxonomy::Catchable,
+            Self::ProcessNotExported { .. } => ErrorTaxonomy::Catchable,
+            Self::ProcessRefNotExported { .. } => ErrorTaxonomy::Catchable,
+            Self::ArtifactProcessMissing { .. } => ErrorTaxonomy::Catchable,
+            Self::ValidationFailed { .. } => ErrorTaxonomy::Catchable,
+            Self::StartSiteMissing => ErrorTaxonomy::Catchable,
+            Self::LinkedArtifactMissing => ErrorTaxonomy::Catchable,
+            Self::LinkedProcessNotExported { .. } => ErrorTaxonomy::Catchable,
+            Self::ProcessStartFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::SleepFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::WaitSignalFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::SignalRunFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::CancelFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::ProcessEventFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::PrintFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::FinishFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::FailFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::ResourceBatchReceiverOutOfRange => ErrorTaxonomy::Catchable,
+            Self::ResourceBatchArgumentOutOfRange => ErrorTaxonomy::Catchable,
+            Self::InvalidResourceBatchResult => ErrorTaxonomy::Catchable,
+            Self::ResourceBatchFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::ResourceBatchResultCount { .. } => ErrorTaxonomy::Catchable,
+            Self::AggregateAwaitLeafOutOfRange => ErrorTaxonomy::Catchable,
+            Self::AggregateAwaitValueOutOfRange => ErrorTaxonomy::Catchable,
+            Self::InvalidAggregateAwaitRecordShape => ErrorTaxonomy::Catchable,
+            Self::VmStackUnderflow => ErrorTaxonomy::Catchable,
+            Self::MissingLoopState => ErrorTaxonomy::Catchable,
+            Self::ContextDependentIntrinsicMisdispatch { .. } => ErrorTaxonomy::Catchable,
+            Self::UncaughtException { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidExceptionState { .. } => ErrorTaxonomy::Catchable,
+        }
     }
 
     /// Stable guest-visible identity for a catchable runtime failure.
-    pub fn code(&self) -> String {
-        let debug = format!("{self:?}");
-        debug
-            .split([' ', '{', '('])
-            .next()
-            .unwrap_or("RuntimeError")
-            .to_string()
+    ///
+    /// Guest code branches on this string, so it is an explicit table rather
+    /// than anything derived from Rust identifiers: renaming a variant must be
+    /// a deliberate change to the guest contract, not a side effect. The
+    /// pinning test in this module enumerates every code.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::FrameDepthExceeded { .. } => "FrameDepthExceeded",
+            Self::FunctionIndexOverflow => "FunctionIndexOverflow",
+            Self::NonFunctionCall { .. } => "NonFunctionCall",
+            Self::FunctionArgumentCount { .. } => "FunctionArgumentCount",
+            Self::UnknownFunction { .. } => "UnknownFunction",
+            Self::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
+            Self::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            Self::EffectInBuiltinCallback => "EffectInBuiltinCallback",
+            Self::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+            Self::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
+            Self::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
+            Self::HostCancelled => "HostCancelled",
+            Self::DanglingHeapReference { .. } => "DanglingHeapReference",
+            Self::HeapIdExhausted => "HeapIdExhausted",
+            Self::UnexportedHeapReference { .. } => "UnexportedHeapReference",
+            Self::CyclicHostValue { .. } => "CyclicHostValue",
+            Self::UndefinedVariable { .. } => "UndefinedVariable",
+            Self::NonListIteration => "NonListIteration",
+            Self::SessionProcessAdminOutsideProcess { .. } => "SessionProcessAdminOutsideProcess",
+            Self::ForegroundControlInsideProcess { .. } => "ForegroundControlInsideProcess",
+            Self::UnknownBuiltin { .. } => "UnknownBuiltin",
+            Self::CannotReadField { .. } => "CannotReadField",
+            Self::ToolResultExpected { .. } => "ToolResultExpected",
+            Self::ToolResultMissingValue => "ToolResultMissingValue",
+            Self::ToolResultInvalidOk => "ToolResultInvalidOk",
+            Self::CannotIndex { .. } => "CannotIndex",
+            Self::ImmutableImageFields => "ImmutableImageFields",
+            Self::ImmutableImageFieldsThrough => "ImmutableImageFieldsThrough",
+            Self::ImmutableTupleIndexes => "ImmutableTupleIndexes",
+            Self::ImmutableTupleIndexesThrough => "ImmutableTupleIndexesThrough",
+            Self::CannotAssignField { .. } => "CannotAssignField",
+            Self::CannotAssignThroughField { .. } => "CannotAssignThroughField",
+            Self::CannotAssignIndex { .. } => "CannotAssignIndex",
+            Self::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
+            Self::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
+            Self::InvalidArgumentCount { .. } => "InvalidArgumentCount",
+            Self::EmptyUnsupported => "EmptyUnsupported",
+            Self::KeysUnsupported => "KeysUnsupported",
+            Self::ValuesUnsupported => "ValuesUnsupported",
+            Self::SliceUnsupported => "SliceUnsupported",
+            Self::FormatTemplateMissing => "FormatTemplateMissing",
+            Self::FormatTemplateInvalid { .. } => "FormatTemplateInvalid",
+            Self::LenUnsupported => "LenUnsupported",
+            Self::ContainsUnsupported => "ContainsUnsupported",
+            Self::InUnsupported => "InUnsupported",
+            Self::JoinUnsupported => "JoinUnsupported",
+            Self::PushUnsupported => "PushUnsupported",
+            Self::ShapingListRequired { .. } => "ShapingListRequired",
+            Self::ShapingTextRequired { .. } => "ShapingTextRequired",
+            Self::ShapingNumberRequired { .. } => "ShapingNumberRequired",
+            Self::ShapingComparableRequired { .. } => "ShapingComparableRequired",
+            Self::ShapingEmptyList { .. } => "ShapingEmptyList",
+            Self::SortByRecordRequired { .. } => "SortByRecordRequired",
+            Self::SortByEmptyPath => "SortByEmptyPath",
+            Self::SortByMissingPath { .. } => "SortByMissingPath",
+            Self::InvalidRangeBound => "InvalidRangeBound",
+            Self::InvalidRangeBoundType { .. } => "InvalidRangeBoundType",
+            Self::InvalidIntegerDivisionArgument { .. } => "InvalidIntegerDivisionArgument",
+            Self::InvalidIntegerDivisionArgumentType { .. } => "InvalidIntegerDivisionArgumentType",
+            Self::ExpectedNumber => "ExpectedNumber",
+            Self::ExpectedNumberType { .. } => "ExpectedNumberType",
+            Self::ExpectedText { .. } => "ExpectedText",
+            Self::InvalidIndex => "InvalidIndex",
+            Self::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
+            Self::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
+            Self::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
+            Self::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
+            Self::NotTypeValue { .. } => "NotTypeValue",
+            Self::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
+            Self::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
+            Self::MissingAssignmentIndex => "MissingAssignmentIndex",
+            Self::MissingAssignmentField { .. } => "MissingAssignmentField",
+            Self::MissingAssignmentKey { .. } => "MissingAssignmentKey",
+            Self::ListAssignmentIndexOutOfBounds => "ListAssignmentIndexOutOfBounds",
+            Self::InvalidJson { .. } => "InvalidJson",
+            Self::EmptyGrepNeedle => "EmptyGrepNeedle",
+            Self::Format(_) => "Format",
+            Self::ZeroRangeStep => "ZeroRangeStep",
+            Self::RangeTooLarge { .. } => "RangeTooLarge",
+            Self::IntegerDivisionByZero { .. } => "IntegerDivisionByZero",
+            Self::UnknownProcess { .. } => "UnknownProcess",
+            Self::ProcessNotExported { .. } => "ProcessNotExported",
+            Self::ProcessRefNotExported { .. } => "ProcessRefNotExported",
+            Self::ArtifactProcessMissing { .. } => "ArtifactProcessMissing",
+            Self::ValidationFailed { .. } => "ValidationFailed",
+            Self::StartSiteMissing => "StartSiteMissing",
+            Self::LinkedArtifactMissing => "LinkedArtifactMissing",
+            Self::LinkedProcessNotExported { .. } => "LinkedProcessNotExported",
+            Self::ProcessStartFailed { .. } => "ProcessStartFailed",
+            Self::SleepFailed { .. } => "SleepFailed",
+            Self::WaitSignalFailed { .. } => "WaitSignalFailed",
+            Self::SignalRunFailed { .. } => "SignalRunFailed",
+            Self::CancelFailed { .. } => "CancelFailed",
+            Self::ProcessEventFailed { .. } => "ProcessEventFailed",
+            Self::PrintFailed { .. } => "PrintFailed",
+            Self::FinishFailed { .. } => "FinishFailed",
+            Self::FailFailed { .. } => "FailFailed",
+            Self::ResourceBatchReceiverOutOfRange => "ResourceBatchReceiverOutOfRange",
+            Self::ResourceBatchArgumentOutOfRange => "ResourceBatchArgumentOutOfRange",
+            Self::InvalidResourceBatchResult => "InvalidResourceBatchResult",
+            Self::ResourceBatchFailed { .. } => "ResourceBatchFailed",
+            Self::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
+            Self::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
+            Self::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
+            Self::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
+            Self::VmStackUnderflow => "VmStackUnderflow",
+            Self::MissingLoopState => "MissingLoopState",
+            Self::ContextDependentIntrinsicMisdispatch { .. } => {
+                "ContextDependentIntrinsicMisdispatch"
+            }
+            Self::UncaughtException { .. } => "UncaughtException",
+            Self::InvalidExceptionState { .. } => "InvalidExceptionState",
+        }
+    }
+
+    pub(crate) fn is_uncatchable_terminal(&self) -> bool {
+        matches!(self.taxonomy(), ErrorTaxonomy::UncatchableTerminal)
     }
 
     pub(crate) fn is_effect_failure(&self) -> bool {
-        matches!(
-            self,
-            Self::UnwrappedToolResultFailed { .. }
-                | Self::UnwrappedModuleOperationFailed { .. }
-                | Self::ProcessStartFailed { .. }
-                | Self::SleepFailed { .. }
-                | Self::WaitSignalFailed { .. }
-                | Self::SignalRunFailed { .. }
-                | Self::CancelFailed { .. }
-                | Self::ProcessEventFailed { .. }
-                | Self::PrintFailed { .. }
-                | Self::FinishFailed { .. }
-                | Self::FailFailed { .. }
-                | Self::ResourceBatchFailed { .. }
-        )
+        matches!(self.taxonomy(), ErrorTaxonomy::EffectFailure)
     }
+}
+
+/// How the VM and its host must treat a [`RuntimeError`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorTaxonomy {
+    /// A host or execution-bound terminal: it ends execution and bypasses every
+    /// guest handler.
+    UncatchableTerminal,
+    /// A failure raised by a host effect. Catchable, and reported to the guest
+    /// as an `EffectError`.
+    EffectFailure,
+    /// An ordinary catchable runtime failure.
+    Catchable,
 }
 
 impl RuntimeError {
@@ -731,6 +959,10 @@ mod tests {
             },
         ];
 
+        for error in &errors {
+            assert_eq!(error.code(), expected_code(error), "{error:?}");
+        }
+
         for error in errors {
             let expected = match &error {
                 RuntimeError::FrameDepthExceeded { .. } => {
@@ -988,6 +1220,131 @@ mod tests {
             };
 
             assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    /// Guest-facing codes are a durable contract, so they are pinned here
+    /// exhaustively: renaming a variant breaks this match and forces the
+    /// author to decide, deliberately, whether the code the guest branches on
+    /// changes with it.
+    fn expected_code(error: &RuntimeError) -> &'static str {
+        match error {
+            RuntimeError::FrameDepthExceeded { .. } => "FrameDepthExceeded",
+            RuntimeError::FunctionIndexOverflow => "FunctionIndexOverflow",
+            RuntimeError::NonFunctionCall { .. } => "NonFunctionCall",
+            RuntimeError::FunctionArgumentCount { .. } => "FunctionArgumentCount",
+            RuntimeError::UnknownFunction { .. } => "UnknownFunction",
+            RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
+            RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
+            RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+            RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
+            RuntimeError::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
+            RuntimeError::HostCancelled => "HostCancelled",
+            RuntimeError::DanglingHeapReference { .. } => "DanglingHeapReference",
+            RuntimeError::HeapIdExhausted => "HeapIdExhausted",
+            RuntimeError::UnexportedHeapReference { .. } => "UnexportedHeapReference",
+            RuntimeError::CyclicHostValue { .. } => "CyclicHostValue",
+            RuntimeError::UndefinedVariable { .. } => "UndefinedVariable",
+            RuntimeError::NonListIteration => "NonListIteration",
+            RuntimeError::SessionProcessAdminOutsideProcess { .. } => {
+                "SessionProcessAdminOutsideProcess"
+            }
+            RuntimeError::ForegroundControlInsideProcess { .. } => "ForegroundControlInsideProcess",
+            RuntimeError::UnknownBuiltin { .. } => "UnknownBuiltin",
+            RuntimeError::CannotReadField { .. } => "CannotReadField",
+            RuntimeError::ToolResultExpected { .. } => "ToolResultExpected",
+            RuntimeError::ToolResultMissingValue => "ToolResultMissingValue",
+            RuntimeError::ToolResultInvalidOk => "ToolResultInvalidOk",
+            RuntimeError::CannotIndex { .. } => "CannotIndex",
+            RuntimeError::ImmutableImageFields => "ImmutableImageFields",
+            RuntimeError::ImmutableImageFieldsThrough => "ImmutableImageFieldsThrough",
+            RuntimeError::ImmutableTupleIndexes => "ImmutableTupleIndexes",
+            RuntimeError::ImmutableTupleIndexesThrough => "ImmutableTupleIndexesThrough",
+            RuntimeError::CannotAssignField { .. } => "CannotAssignField",
+            RuntimeError::CannotAssignThroughField { .. } => "CannotAssignThroughField",
+            RuntimeError::CannotAssignIndex { .. } => "CannotAssignIndex",
+            RuntimeError::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
+            RuntimeError::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
+            RuntimeError::InvalidArgumentCount { .. } => "InvalidArgumentCount",
+            RuntimeError::EmptyUnsupported => "EmptyUnsupported",
+            RuntimeError::KeysUnsupported => "KeysUnsupported",
+            RuntimeError::ValuesUnsupported => "ValuesUnsupported",
+            RuntimeError::SliceUnsupported => "SliceUnsupported",
+            RuntimeError::FormatTemplateMissing => "FormatTemplateMissing",
+            RuntimeError::FormatTemplateInvalid { .. } => "FormatTemplateInvalid",
+            RuntimeError::LenUnsupported => "LenUnsupported",
+            RuntimeError::ContainsUnsupported => "ContainsUnsupported",
+            RuntimeError::InUnsupported => "InUnsupported",
+            RuntimeError::JoinUnsupported => "JoinUnsupported",
+            RuntimeError::PushUnsupported => "PushUnsupported",
+            RuntimeError::ShapingListRequired { .. } => "ShapingListRequired",
+            RuntimeError::ShapingTextRequired { .. } => "ShapingTextRequired",
+            RuntimeError::ShapingNumberRequired { .. } => "ShapingNumberRequired",
+            RuntimeError::ShapingComparableRequired { .. } => "ShapingComparableRequired",
+            RuntimeError::ShapingEmptyList { .. } => "ShapingEmptyList",
+            RuntimeError::SortByRecordRequired { .. } => "SortByRecordRequired",
+            RuntimeError::SortByEmptyPath => "SortByEmptyPath",
+            RuntimeError::SortByMissingPath { .. } => "SortByMissingPath",
+            RuntimeError::InvalidRangeBound => "InvalidRangeBound",
+            RuntimeError::InvalidRangeBoundType { .. } => "InvalidRangeBoundType",
+            RuntimeError::InvalidIntegerDivisionArgument { .. } => "InvalidIntegerDivisionArgument",
+            RuntimeError::InvalidIntegerDivisionArgumentType { .. } => {
+                "InvalidIntegerDivisionArgumentType"
+            }
+            RuntimeError::ExpectedNumber => "ExpectedNumber",
+            RuntimeError::ExpectedNumberType { .. } => "ExpectedNumberType",
+            RuntimeError::ExpectedText { .. } => "ExpectedText",
+            RuntimeError::InvalidIndex => "InvalidIndex",
+            RuntimeError::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
+            RuntimeError::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
+            RuntimeError::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
+            RuntimeError::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
+            RuntimeError::NotTypeValue { .. } => "NotTypeValue",
+            RuntimeError::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
+            RuntimeError::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
+            RuntimeError::MissingAssignmentIndex => "MissingAssignmentIndex",
+            RuntimeError::MissingAssignmentField { .. } => "MissingAssignmentField",
+            RuntimeError::MissingAssignmentKey { .. } => "MissingAssignmentKey",
+            RuntimeError::ListAssignmentIndexOutOfBounds => "ListAssignmentIndexOutOfBounds",
+            RuntimeError::InvalidJson { .. } => "InvalidJson",
+            RuntimeError::EmptyGrepNeedle => "EmptyGrepNeedle",
+            RuntimeError::Format(_) => "Format",
+            RuntimeError::ZeroRangeStep => "ZeroRangeStep",
+            RuntimeError::RangeTooLarge { .. } => "RangeTooLarge",
+            RuntimeError::IntegerDivisionByZero { .. } => "IntegerDivisionByZero",
+            RuntimeError::UnknownProcess { .. } => "UnknownProcess",
+            RuntimeError::ProcessNotExported { .. } => "ProcessNotExported",
+            RuntimeError::ProcessRefNotExported { .. } => "ProcessRefNotExported",
+            RuntimeError::ArtifactProcessMissing { .. } => "ArtifactProcessMissing",
+            RuntimeError::ValidationFailed { .. } => "ValidationFailed",
+            RuntimeError::StartSiteMissing => "StartSiteMissing",
+            RuntimeError::LinkedArtifactMissing => "LinkedArtifactMissing",
+            RuntimeError::LinkedProcessNotExported { .. } => "LinkedProcessNotExported",
+            RuntimeError::ProcessStartFailed { .. } => "ProcessStartFailed",
+            RuntimeError::SleepFailed { .. } => "SleepFailed",
+            RuntimeError::WaitSignalFailed { .. } => "WaitSignalFailed",
+            RuntimeError::SignalRunFailed { .. } => "SignalRunFailed",
+            RuntimeError::CancelFailed { .. } => "CancelFailed",
+            RuntimeError::ProcessEventFailed { .. } => "ProcessEventFailed",
+            RuntimeError::PrintFailed { .. } => "PrintFailed",
+            RuntimeError::FinishFailed { .. } => "FinishFailed",
+            RuntimeError::FailFailed { .. } => "FailFailed",
+            RuntimeError::ResourceBatchReceiverOutOfRange => "ResourceBatchReceiverOutOfRange",
+            RuntimeError::ResourceBatchArgumentOutOfRange => "ResourceBatchArgumentOutOfRange",
+            RuntimeError::InvalidResourceBatchResult => "InvalidResourceBatchResult",
+            RuntimeError::ResourceBatchFailed { .. } => "ResourceBatchFailed",
+            RuntimeError::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
+            RuntimeError::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
+            RuntimeError::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
+            RuntimeError::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
+            RuntimeError::VmStackUnderflow => "VmStackUnderflow",
+            RuntimeError::MissingLoopState => "MissingLoopState",
+            RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => {
+                "ContextDependentIntrinsicMisdispatch"
+            }
+            RuntimeError::UncaughtException { .. } => "UncaughtException",
+            RuntimeError::InvalidExceptionState { .. } => "InvalidExceptionState",
         }
     }
 }
