@@ -19,7 +19,7 @@ workspace = true
 [features]
 default = []
 # Test/performance-only seams. Production builds cannot bypass the schema gate.
-testing = []
+testing = ["lash-core/testing"]
 
 [dependencies]
 lash-sansio = { workspace = true }

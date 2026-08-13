@@ -14,7 +14,7 @@ keywords = ["lash", "agent", "sqlite", "persistence", "store"]
 categories = ["database", "asynchronous"]
 
 [features]
-testing = []
+testing = ["lash-core/testing"]
 
 [lints]
 workspace = true

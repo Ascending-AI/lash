@@ -105,6 +105,13 @@ jobs:
           # shellcheck disable=SC2086
           cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
 
+      # The workspace check unifies testing features through dev-dependencies.
+      # Keep these package-scoped consumers honest about feature forwarding.
+      - name: Check package-scoped testing consumers
+        run: |
+          cargo check -p lash-protocol-rlm --features testing --locked
+          cargo check -p agent-workbench --locked
+
       - name: Check lash-runtime feature boundary
         run: |
           cargo check -p lash-runtime --no-default-features --locked
