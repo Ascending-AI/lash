@@ -85,6 +85,7 @@ impl LinkError {
             Self::IncompatibleBuiltinOperands { .. } => "incompatible_builtin_operands",
             Self::IncompatibleIterationTarget { .. } => "incompatible_iteration_target",
             Self::ModuleHash { .. } => "module_hash",
+            Self::NestingTooDeep { .. } => "nesting_too_deep",
         }
     }
 }

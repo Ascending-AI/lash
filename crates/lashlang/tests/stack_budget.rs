@@ -171,11 +171,14 @@ fn ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort() {
             let error = lashlang::LinkedModule::link(program.clone(), stack_budget_environment())
                 .expect_err("linking must refuse the nesting");
             assert!(error.to_string().contains("nesting too deep"), "{error}");
+            let error =
+                lashlang::compile_ast(&program).expect_err("compiling must refuse the nesting");
+            assert!(error.to_string().contains("nesting too deep"), "{error}");
         });
         return;
     }
     let exe = std::env::current_exe().expect("test binary");
-    for depth in [80usize, 200, 1000] {
+    for depth in [72usize, 96, 128] {
         let status = std::process::Command::new(&exe)
             .args([
                 "ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort",

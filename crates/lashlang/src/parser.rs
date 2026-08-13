@@ -167,7 +167,7 @@ pub fn parse_type_expression(source: &str) -> Result<TypeExpr, ParseError> {
 /// ample headroom; capping here also bounds every downstream AST walker
 /// (validate, lower, compile, eval), since the tree can never be deeper than
 /// the parser allowed.
-const MAX_NESTING_DEPTH: usize = 40;
+pub(crate) const MAX_NESTING_DEPTH: usize = 40;
 
 struct Parser {
     tokens: Vec<Token>,

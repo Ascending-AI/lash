@@ -19,6 +19,59 @@ pub struct Program {
     pub expression_source_spans: Vec<ExpressionSourceSpan>,
 }
 
+/// The nesting limit an AST must satisfy, whether it came from source or was
+/// built directly.
+///
+/// `Try`, `Throw`, `Function` and the other AST-only shapes have no source
+/// grammar to bound them, so every AST-construction entry point applies this
+/// explicitly and the whole pipeline (link, compile, execute) keeps the 2 MiB
+/// stack contract the parsed path already had.
+///
+/// It is the parser's own cap plus the constant overhead a parsed expression
+/// contributes — the deepest program the parser admits builds a tree a few
+/// levels deeper than its syntactic depth — and it stays well below the depth
+/// at which the cheapest AST chains exhaust that budget. Per-level stack cost
+/// varies by variant, so this bounds the tree rather than promising a
+/// per-variant margin; `tests/stack_budget.rs` pins the real pipeline cost at
+/// the parser cap.
+pub const MAX_AST_NESTING_DEPTH: usize = 64;
+
+const _: () = assert!(MAX_AST_NESTING_DEPTH > crate::parser::MAX_NESTING_DEPTH);
+
+/// An AST that nests deeper than [`MAX_AST_NESTING_DEPTH`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("expression nesting too deep (limit {limit}); flatten the program")]
+pub struct NestingTooDeep {
+    pub limit: usize,
+}
+
+/// Rejects an AST whose expression nesting exceeds [`MAX_AST_NESTING_DEPTH`].
+///
+/// The walk is iterative on purpose: a recursive measurement would overflow on
+/// exactly the inputs this exists to refuse. It descends through
+/// [`Expr::children`], which is exhaustive over the variants, so a new AST node
+/// is covered the moment it is added.
+pub fn check_ast_nesting_depth(program: &Program) -> Result<(), NestingTooDeep> {
+    let mut pending: Vec<(&Expr, usize)> = Vec::new();
+    pending.push((&program.main, 1));
+    for declaration in &program.declarations {
+        if let Declaration::Process(process) = declaration {
+            pending.push((&process.body, 1));
+        }
+    }
+    while let Some((expr, depth)) = pending.pop() {
+        if depth > MAX_AST_NESTING_DEPTH {
+            return Err(NestingTooDeep {
+                limit: MAX_AST_NESTING_DEPTH,
+            });
+        }
+        for child in expr.children() {
+            pending.push((child, depth + 1));
+        }
+    }
+    Ok(())
+}
+
 impl Program {
     pub fn block(expressions: Vec<Expr>) -> Self {
         Self {

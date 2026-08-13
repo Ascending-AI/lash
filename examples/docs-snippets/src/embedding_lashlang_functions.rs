@@ -58,7 +58,7 @@ async fn ast_only_functions_compile_execute_map_and_checkpoint() {
             function: Box::new(Expr::Variable("add_captured".into())),
         })),
     ]);
-    let compiled = compile_ast(&program);
+    let compiled = compile_ast(&program).expect("program nesting is within the cap");
     let outcome = execute(&compiled, &mut State::new(), &Host)
         .await
         .expect("AST-only functions execute");
@@ -76,7 +76,8 @@ async fn ast_only_functions_compile_execute_map_and_checkpoint() {
             function: Box::new(Expr::Variable("checkpoint".into())),
             args: vec![Expr::Number(1.0)],
         })),
-    ]));
+    ]))
+    .expect("program nesting is within the cap");
     let mut state = State::new();
     let mut vm = Vm::from_state(&checkpoint_program, &mut state, &Host).expect("checkpoint VM");
     assert_eq!(
@@ -97,7 +98,8 @@ async fn ast_only_exceptions_compile_and_execute() {
         }),
         finally: Some(Box::new(Expr::Null)),
     }));
-    let compiled = compile_ast(&Program::block(vec![Expr::Finish(Box::new(recovered))]));
+    let compiled = compile_ast(&Program::block(vec![Expr::Finish(Box::new(recovered))]))
+        .expect("program nesting is within the cap");
     let outcome = execute(&compiled, &mut State::new(), &Host)
         .await
         .expect("AST-only exceptions execute");
