@@ -1,9 +1,9 @@
 //! Public AST-only Lashlang function embedding example.
 
 use lashlang::{
-    AbilityOp, AbilityResult, AssignTarget, BinaryOp, ExecutionHost, ExecutionHostError,
-    ExecutionMode, ExecutionOutcome, Expr, FunctionExpr, Program, State, Value, Vm, VmRunOutcome,
-    compile_ast, execute,
+    AbilityOp, AbilityResult, AssignTarget, BinaryOp, CatchClause, ExecutionHost,
+    ExecutionHostError, ExecutionMode, ExecutionOutcome, Expr, FunctionExpr, Program, State,
+    TryExpr, Value, Vm, VmRunOutcome, compile_ast, execute,
 };
 
 struct Host;
@@ -85,4 +85,24 @@ async fn ast_only_functions_compile_execute_map_and_checkpoint() {
     );
     assert_eq!(vm.suspend().expect("function checkpoint").frame_depth(), 1);
     assert_eq!(lashlang::DEFAULT_MAX_VM_FRAME_DEPTH.get(), 1_024);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ast_only_exceptions_compile_and_execute() {
+    let recovered = Expr::Try(Box::new(TryExpr {
+        body: Box::new(Expr::Throw(Box::new(Expr::String("original".into())))),
+        catch: Some(CatchClause {
+            binding: "error".into(),
+            body: Box::new(Expr::Variable("error".into())),
+        }),
+        finally: Some(Box::new(Expr::Null)),
+    }));
+    let compiled = compile_ast(&Program::block(vec![Expr::Finish(Box::new(recovered))]));
+    let outcome = execute(&compiled, &mut State::new(), &Host)
+        .await
+        .expect("AST-only exceptions execute");
+    assert_eq!(
+        outcome,
+        ExecutionOutcome::Finished(Value::String("original".into()))
+    );
 }

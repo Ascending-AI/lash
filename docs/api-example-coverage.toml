@@ -15,6 +15,30 @@ schema_version = 1
 # their explicit dispositions here so that "not host-facing" never becomes
 # "not inventoried".
 [[low_level_api]]
+symbol = "lashlang::CatchClause"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:94#catch: Some(CatchClause {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:106#ExecutionOutcome::Finished(Value::String(\"original\".into()))"
+
+[[low_level_api]]
+symbol = "lashlang::TryExpr"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:92#let recovered = Expr::Try(Box::new(TryExpr {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:106#ExecutionOutcome::Finished(Value::String(\"original\".into()))"
+
+[[low_level_api]]
+symbol = "lashlang::Expr::Try"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:92#let recovered = Expr::Try(Box::new(TryExpr {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:106#ExecutionOutcome::Finished(Value::String(\"original\".into()))"
+
+[[low_level_api]]
+symbol = "lashlang::Expr::Throw"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:93#body: Box::new(Expr::Throw(Box::new(Expr::String(\"original\".into())))),"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:106#ExecutionOutcome::Finished(Value::String(\"original\".into()))"
+
+[[low_level_api]]
 symbol = "lashlang::FunctionExpr"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:33#Expr::Function(Box::new(FunctionExpr {"

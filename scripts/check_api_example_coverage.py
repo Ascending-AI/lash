@@ -172,11 +172,15 @@ REACHABLE_KINDS = {"enum", "struct", "trait", "type_alias", "union"}
 # but additions made for FIG-1302 still require an explicit, checked
 # disposition in the same registry.
 REQUIRED_LOW_LEVEL_API = {
+    "lashlang::CatchClause",
     "lashlang::DEFAULT_MAX_VM_FRAME_DEPTH",
     "lashlang::Expr::Call",
     "lashlang::Expr::Function",
     "lashlang::Expr::Map",
+    "lashlang::Expr::Throw",
+    "lashlang::Expr::Try",
     "lashlang::FunctionExpr",
+    "lashlang::TryExpr",
     "lashlang::VmContinuation::frame_depth",
     "lashlang::compile_ast",
 }
