@@ -257,6 +257,89 @@ fn suspended_typescript_run(stress_gc: bool) -> (Vec<u8>, ExecutionOutcome) {
     })
 }
 
+#[test]
+fn resumed_typescript_can_capture_aliases_created_after_the_first_suspend() {
+    futures::executor::block_on(async {
+        let program = lash_typescript::compile(
+            "const shared = { value: 1 }; print(1); const holder = { a: shared, b: shared }; print(2); finish(holder.a.value);",
+        )
+        .expect("TypeScript should compile");
+        let mut state = State::new();
+        let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install TypeScript VM");
+        assert_eq!(
+            vm.run_process_until_effect().await.expect("first print"),
+            VmRunOutcome::EffectCompleted
+        );
+        let first = vm.suspend().expect("first suspend");
+        assert!(
+            !first.reference_semantics,
+            "the first heap is still a forest"
+        );
+
+        let encoded = serde_json::to_vec(&first).expect("encode continuation");
+        let decoded = serde_json::from_slice(&encoded).expect("decode continuation");
+        let mut resumed = Vm::resume_from(decoded, &program, &Host).expect("resume TypeScript VM");
+        assert_eq!(
+            resumed
+                .run_process_until_effect()
+                .await
+                .expect("second print"),
+            VmRunOutcome::EffectCompleted
+        );
+        let second = resumed
+            .suspend()
+            .expect("capture aliases created after resume");
+        assert!(
+            second.reference_semantics,
+            "the shared heap requires the marker"
+        );
+    });
+}
+
+#[test]
+fn lashlang_resume_refuses_an_authored_typescript_reference_marker() {
+    futures::executor::block_on(async {
+        let program = lashlang::compile("print 1\nfinish 2").expect("compile Lashlang");
+        let mut state = State::new();
+        let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install Lashlang VM");
+        vm.run_process_until_effect().await.expect("run to print");
+        let continuation = vm.suspend().expect("capture Lashlang continuation");
+        let mut authored = serde_json::to_value(continuation).expect("encode continuation");
+        authored
+            .as_object_mut()
+            .expect("continuation object")
+            .insert("reference_semantics".into(), serde_json::Value::Bool(true));
+        let decoded = serde_json::from_value(authored).expect("decode authored continuation");
+
+        assert!(
+            Vm::resume_from(decoded, &program, &Host).is_err(),
+            "a TypeScript reference marker must not select Lashlang VM semantics"
+        );
+    });
+}
+
+#[test]
+fn lashlang_execution_refuses_a_shared_typescript_state() {
+    futures::executor::block_on(async {
+        let typescript = lash_typescript::compile(
+            "const shared = { value: 1 }; const holder = { a: shared, b: shared }; finish(holder.a.value);",
+        )
+        .expect("compile TypeScript");
+        let mut state = State::new();
+        lashlang::execute(&typescript, &mut state, &Host)
+            .await
+            .expect("create shared TypeScript state");
+
+        let lashlang = lashlang::compile("finish 1").expect("compile Lashlang");
+        assert!(
+            lashlang::execute(&lashlang, &mut state, &Host)
+                .await
+                .is_err(),
+            "Lashlang must reject a shared heap regardless of the stored marker"
+        );
+    });
+}
+
 fn normalized_continuation_bytes(
     program: &lashlang::CompiledProgram,
     host: &impl ExecutionHost,

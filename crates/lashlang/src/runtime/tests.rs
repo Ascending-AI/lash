@@ -64,6 +64,16 @@ impl ExecutionHost for Host {
     }
 }
 
+#[test]
+fn state_reference_semantics_are_derived_from_the_program() {
+    let program = compile("finish 1").expect("compile Lashlang");
+    let mut state = State::new();
+    state.reference_semantics = true;
+
+    let vm = Vm::from_state(&program, &mut state, &Host).expect("install Lashlang VM");
+    assert!(!vm.reference_semantics);
+}
+
 #[derive(Default)]
 struct RejectingAwaitHost;
 
