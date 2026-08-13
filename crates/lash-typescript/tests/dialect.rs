@@ -257,6 +257,38 @@ fn suspended_typescript_run(stress_gc: bool) -> (Vec<u8>, ExecutionOutcome) {
     })
 }
 
+fn normalized_continuation_bytes(
+    program: &lashlang::CompiledProgram,
+    host: &impl ExecutionHost,
+) -> Vec<u8> {
+    futures::executor::block_on(async {
+        let mut state = State::new();
+        let mut vm = Vm::from_state(program, &mut state, host).expect("install VM state");
+        assert_eq!(
+            vm.run_process_until_effect().await.expect("run to print"),
+            VmRunOutcome::EffectCompleted
+        );
+        let continuation = vm.suspend().expect("capture continuation");
+        let mut canonical = serde_json::to_value(continuation).expect("canonicalize continuation");
+        canonical
+            .as_object_mut()
+            .expect("continuation object")
+            .remove("active_execution_elapsed");
+        serde_json::to_vec(&canonical).expect("encode deterministic continuation")
+    })
+}
+
+#[test]
+fn equivalent_lashlang_and_typescript_have_identical_continuation_bytes() {
+    let lashlang = lashlang::compile("print 1\nfinish 2").expect("compile Lashlang");
+    let typescript = lash_typescript::compile("print(1); finish(2);").expect("compile TypeScript");
+
+    assert_eq!(
+        normalized_continuation_bytes(&typescript, &Host),
+        normalized_continuation_bytes(&lashlang, &Host)
+    );
+}
+
 #[test]
 fn continuation_is_cross_process_deterministic_and_gc_stable() {
     let normal = suspended_typescript_run(false);
@@ -264,4 +296,46 @@ fn continuation_is_cross_process_deterministic_and_gc_stable() {
 
     assert_eq!(normal, stress);
     assert_eq!(normal.1, ExecutionOutcome::Finished(Value::Number(2.0)));
+}
+
+#[test]
+fn typescript_determinism_process_probe() {
+    if std::env::var_os("LASH_TYPESCRIPT_DETERMINISM_PROBE").is_none() {
+        return;
+    }
+    let (bytes, outcome) = suspended_typescript_run(false);
+    assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(2.0)));
+    let encoded = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    println!("TYPESCRIPT_CONTINUATION:{encoded}");
+}
+
+#[test]
+fn independent_processes_dump_identical_typescript_continuations() {
+    fn probe() -> String {
+        let output = std::process::Command::new(std::env::current_exe().expect("current test exe"))
+            .args([
+                "--exact",
+                "typescript_determinism_process_probe",
+                "--nocapture",
+            ])
+            .env("LASH_TYPESCRIPT_DETERMINISM_PROBE", "1")
+            .output()
+            .expect("run continuation probe in a fresh process");
+        assert!(
+            output.status.success(),
+            "probe failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("probe output is UTF-8")
+            .lines()
+            .find_map(|line| line.strip_prefix("TYPESCRIPT_CONTINUATION:"))
+            .expect("probe emits continuation bytes")
+            .to_owned()
+    }
+
+    assert_eq!(probe(), probe());
 }
