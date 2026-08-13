@@ -194,6 +194,47 @@ async fn effect_suspension_inside_a_user_function_round_trips_the_frame_stack() 
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn effect_suspension_inside_a_user_function_with_heap_argument_round_trips() {
+    let program = compile_program_internal(&Program::block(vec![
+        assign(
+            "f",
+            function(
+                None,
+                &["n"],
+                &[],
+                Expr::Block(vec![
+                    Expr::Print(Box::new(Expr::Number(1.0))),
+                    variable("n"),
+                ]),
+            ),
+        ),
+        Expr::Finish(Box::new(call(
+            variable("f"),
+            vec![Expr::List(vec![Expr::Number(7.0), Expr::Number(8.0)])],
+        ))),
+    ]));
+    let host = Host;
+    let mut vm = continuation_test_vm(&program, &host);
+    vm.suspend_after_effects(1);
+    assert_eq!(
+        vm.run_for_mode()
+            .await
+            .expect("suspend after function effect"),
+        ExecutionOutcome::Continued
+    );
+    let continuation = vm
+        .suspend()
+        .expect("capture function continuation with heap argument");
+    assert_eq!(continuation.frame_stack.len(), 1);
+    assert_eq!(
+        round_trip_and_resume(&program, continuation).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Number(7.0), Value::Number(8.0)].into()
+        ))
+    );
+}
+
 struct FunctionBoundsHost {
     bounds: ExecutionBounds,
     collect_every_allocation: bool,
