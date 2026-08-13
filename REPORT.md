@@ -14,10 +14,11 @@ case by case: an emitted snapshot always decodes because sharing between roots
 is unrepresentable, and a reference can no longer hide inside an inline compound
 member because the decoder refuses those members outright.
 
-Per-instruction heapification no longer rescans iterator cursors, which is what
-made iterating a heap-backed list quadratic. A single pass over a 2,000-element
-list is 12.6x faster than the fix round; the existing `large_data` scenario is
-4.4x faster.
+Two quadratics are gone. Per-instruction heapification no longer rescans
+iterator cursors, and an instruction no longer exports the whole operand stack
+when it only reads its own operands. Iterating a 2,000-element list is 12.4x
+faster than the fix round, building an 800-element comprehension is 48.7x
+faster, and the existing `large_data` scenario is 4.2x faster.
 
 ## Disposition of the re-review findings
 
@@ -29,7 +30,7 @@ list is 12.6x faster than the fix round; the existing `large_data` scenario is
 | Sol P1: cache invalidation can be quadratic in ancestor depth | Mitigated, not eliminated. Invalidation returns immediately when nothing is materialized, which is the common case because `export_for_mutation` drops the whole reachable cache before mutating. When materialized values do exist the walk still visits reachable ancestors. The deep-chain mutation shape is now a perf scenario with a budget; it measures 1.06x faster than the fix round, so the shape is guarded even though the traversal bound is unchanged. |
 | Sol P2: the suspend equivalence test suspended both sides | Fixed. The control VM runs from the same starting point straight to completion and never calls `suspend`. Result, instruction meter and reachable heap accounting are compared against park and resume. |
 | Sol P2 / ADR-0044: the canonical byte test derived its oracle from the serializer | Fixed. An authored continuation wire, written from the wire schema, is decoded and re-encoded exactly. Authoring it caught two things the round-trip tests could not: the member-shape difference between a heap object and a value, and the exact logical-byte arithmetic. |
-| Opus N2: per-instruction heapification makes list iteration quadratic | Fixed. Iterator cursors and the extra-globals record are written once and read after that, so each carries a flag and is heapified once instead of rescanned after every instruction. Numbers below. |
+| Opus N2: per-instruction heapification makes list iteration quadratic | Fixed, and a second quadratic of the same kind with it. Iterator cursors and the extra-globals record are written once and read after that, so each carries a flag and is heapified once instead of rescanned after every instruction. Separately, every non-heap-aware instruction used to export the whole operand stack, so a comprehension accumulator sitting under a loop body was rebuilt on every instruction; opcodes whose stack access is exactly the top *k* values now declare it, and everything else keeps the conservative whole-stack behaviour. Numbers below. |
 | Opus N3: snapshot equality compares slot layout | Fixed. Two heaps are equal when they hold the same live objects under the same IDs with the same meters; storage layout is a private allocation detail a round trip legitimately compacts. Capturing a snapshot collects it, so a snapshot holds exactly what its roots reach. `decode(encode(state)) == state` is a passing property test over generated heap-shaping programs, and it fails against the previous equality. |
 | Opus N4: `ExecutionBounds::new` defaulted `memory_limit` | Fixed. It takes all three bounds; every in-repository caller states the memory limit. |
 | Opus N6: member overwrite left a stale parent edge | Fixed. One helper retargets a parent's outgoing edges, used by both member overwrite and object replacement, so the reverse-edge map is exact rather than an over-approximation waiting for a sweep. |
@@ -115,19 +116,24 @@ NaN normalizes to one quiet representation and negative zero keeps its sign.
 
 ## Performance
 
-Release build, `compiled_execute` mode, 200 iterations, one machine. "Fix round"
-is `0f746e09a` built in a separate worktree with the same scenario definitions
-copied in; both trees were measured back to back.
+Release build, `compiled_execute` mode, minimum of three interleaved runs of 100
+iterations each. "Fix round" is `0f746e09a` built in a separate worktree with the
+same scenario definitions copied in; the two binaries were measured alternately
+so shared-machine drift hits both. This machine carries unrelated load, so the
+minimum is the honest statistic here and single measurements varied by up to 75%.
 
 | Scenario | Fix round | This round | Change |
 | --- | ---: | ---: | ---: |
-| `heap_list_iteration` (2,000-element single pass) | 41.20 ms | 3.27 ms | 12.6x faster |
-| `heap_nested_loop` (inner pass over a growing list) | 5.97 ms | 3.30 ms | 1.8x faster |
-| `heap_allocation_churn` | 2.81 ms | 2.11 ms | 1.3x faster |
-| `heap_deep_chain_mutation` | 2.30 ms | 2.17 ms | 1.06x faster |
-| `large_data` | 5.28 ms | 1.19 ms | 4.4x faster |
-| `loop_control` | 0.267 ms | 0.129 ms | 2.1x faster |
-| `type_system_stress` | 0.850 ms | 0.962 ms | 1.13x slower |
+| `heap_comprehension_build` (800-element comprehension) | 70.96 ms | 1.46 ms | 48.7x faster |
+| `heap_list_iteration` (2,000-element single pass) | 25.81 ms | 2.08 ms | 12.4x faster |
+| `large_data` | 5.47 ms | 1.29 ms | 4.2x faster |
+| `loop_control` | 0.277 ms | 0.129 ms | 2.1x faster |
+| `heap_nested_loop` (inner pass over a growing list) | 4.86 ms | 2.93 ms | 1.7x faster |
+| `heap_allocation_churn` | 2.40 ms | 1.79 ms | 1.3x faster |
+| `heap_deep_chain_mutation` | 2.12 ms | 2.05 ms | 1.03x faster |
+| `indexed_assignment` | 0.064 ms | 0.061 ms | 1.05x faster |
+| `type_system_stress` | 0.872 ms | 0.956 ms | 1.10x slower |
+| `baseline` | 0.062 ms | 0.068 ms | 1.10x slower |
 
 At the size opus measured, a single pass over an 8,000-element list is about
 1-2 ms, obtained by differencing a build-and-pass program (7.6-12.4 ms) against
@@ -139,32 +145,41 @@ floor of these measurements.
 
 The scenarios committed to the guard are sized to keep the suite fast — 2,000
 elements for the list pass, 60 outer iterations for the nested loop, 150 for the
-deep chain. The 8,000-element figures came from temporarily raising the constant
-in both trees and are not a committed measurement.
+deep chain, 800 for the comprehension. The 8,000-element figures came from
+temporarily raising the constant in both trees and are not a committed
+measurement.
 
-Scenarios other than those listed moved by less than 15% in either direction,
-which is inside the run-to-run spread on this machine. `type_system_stress` is
-the one repeatable regression and is the alias-copy cost of deep isolation: it
-builds large record literals, and each literal member is now copied recursively.
+Scenarios not listed moved by less than 15% in either direction, inside the
+run-to-run spread. Two budgets moved, both for a measured reason:
 
-`large_data` measures 2,303,071 bytes per iteration, down from the 2,340,443 the
-fix round reported. Its byte override stays at 2,400,000 — 4.2% headroom on a
+- `type_system_stress` gets a 2,400,000-byte override (measured 2,297,758, 4.4%
+  headroom) against the 2,200,000 default. This is the alias-copy cost of deep
+  isolation and the one repeatable time regression too: the scenario builds large
+  record literals, and each literal member is now copied recursively. It is the
+  cost ADR 0059 accepts.
+- The aggregate profile scenario gets an 85,000-instruction budget (measured
+  70,523) against the 12,000 default, because the aggregate now includes five
+  heap scenarios that deliberately execute long loops. The aggregate is
+  correspondingly dominated by them.
+
+`large_data` measures 2,296,618 bytes per iteration, down from the 2,340,443 the
+fix round reported. Its byte override stays at 2,400,000 — 4.5% headroom on a
 metric whose run-to-run spread is under 0.01% — and its allocation ceiling stays
-at the unchanged 12,000 default. No other existing scenario's budget changed.
+at the unchanged 12,000 default.
 
 ## Verification
 
 | Gate | Result |
 | --- | --- |
 | `cargo check --workspace --all-targets --locked` | PASS |
-| `cargo test --workspace` | PENDING |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PENDING |
-| `cargo fmt --all --check` | PENDING |
-| `python3 scripts/lint_docs.py` | PENDING |
-| `bash scripts/check-rustdoc.sh` | PENDING |
-| `python3 scripts/check_test_quarantines.py` | PENDING |
-| `python3 scripts/check_api_example_coverage.py` | PENDING |
-| `just perf-guard` | PENDING |
+| `cargo test --workspace` | PASS — 130 suites, 0 failures |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS |
+| `cargo fmt --all --check` | PASS |
+| `python3 scripts/lint_docs.py` | PASS — 46 HTML pages, 42 registry pages |
+| `bash scripts/check-rustdoc.sh` | PASS — 583 documented, 0 missing |
+| `python3 scripts/check_test_quarantines.py` | PASS |
+| `python3 scripts/check_api_example_coverage.py` | PASS — 8,005 entries |
+| `just perf-guard` | PASS — 260 Lashlang perf results, 0 budget failures, after the two budget changes above |
 
 ### Probe tests
 
@@ -190,6 +205,7 @@ Both reviewers' programs, as named tests in
 - `park_and_resume_is_invisible_to_a_straight_through_run`
 - `park_and_resume_never_exhausts_memory_earlier_than_a_straight_through_run`
 - `heap_backed_state_round_trips_as_an_equal_snapshot` (property test)
+- `isolation_preserves_cycles_with_fresh_ids`
 - `rejected_global_patch_leaves_byte_identical_state_and_no_dirty_marks`
 - `rejected_protected_name_patch_leaves_byte_identical_state`
 
