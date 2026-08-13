@@ -1001,7 +1001,7 @@ mod tests {
     }
 
     async fn execute_test_code(state: RlmExecutionState, code: String) -> RlmExecutionState {
-        let (state, response) = execute_code_unbounded_for_tests(
+        let (state, response) = Box::pin(execute_code_unbounded_for_tests(
             state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
@@ -1015,7 +1015,7 @@ mod tests {
             RlmProjectedBindings::default(),
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
-        )
+        ))
         .await
         .expect("execute test Lashlang");
         assert_eq!(response.error, None, "test Lashlang execution failed");
