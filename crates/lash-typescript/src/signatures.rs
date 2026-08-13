@@ -11,7 +11,7 @@ pub fn render_tool_signature(
     let input = json_schema_to_type_expr(input_schema);
     let output = output_schema.map_or(TypeExpr::Any, json_schema_to_type_expr);
     format!(
-        "declare function {}(input: {}): Promise<{}>;",
+        "declare function {}(input: {}): {};",
         render_identifier(name),
         render_type(&input),
         render_type(&output)
@@ -66,15 +66,21 @@ fn render_object(fields: &[TypeField]) -> String {
 }
 
 fn render_identifier(name: &str) -> String {
-    if is_identifier(name) {
+    const GENERATED_PREFIX: &str = "__lash_tool_";
+    if is_identifier(name) && !is_reserved_word(name) && !name.starts_with(GENERATED_PREFIX) {
         name.to_string()
     } else {
-        format!("tool_{}", sanitize_identifier(name))
+        let encoded = name
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        format!("{GENERATED_PREFIX}{encoded}")
     }
 }
 
 fn render_property_name(name: &str) -> String {
-    if is_identifier(name) {
+    if is_identifier(name) && !is_reserved_word(name) {
         name.to_string()
     } else {
         serde_json::to_string(name).expect("strings serialize")
@@ -90,22 +96,90 @@ fn is_identifier(name: &str) -> bool {
             .all(|character| character == '_' || character == '$' || character.is_alphanumeric())
 }
 
-fn sanitize_identifier(name: &str) -> String {
-    let value = name
-        .chars()
-        .map(|character| {
-            if character.is_alphanumeric() {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if value.is_empty() {
-        "anonymous".to_string()
-    } else {
-        value
-    }
+fn is_reserved_word(name: &str) -> bool {
+    matches!(
+        name,
+        "abstract"
+            | "accessor"
+            | "any"
+            | "as"
+            | "asserts"
+            | "async"
+            | "await"
+            | "bigint"
+            | "boolean"
+            | "break"
+            | "case"
+            | "catch"
+            | "class"
+            | "const"
+            | "constructor"
+            | "continue"
+            | "debugger"
+            | "declare"
+            | "default"
+            | "delete"
+            | "do"
+            | "else"
+            | "enum"
+            | "export"
+            | "extends"
+            | "false"
+            | "finally"
+            | "for"
+            | "from"
+            | "function"
+            | "get"
+            | "global"
+            | "if"
+            | "implements"
+            | "import"
+            | "in"
+            | "infer"
+            | "instanceof"
+            | "interface"
+            | "is"
+            | "keyof"
+            | "let"
+            | "module"
+            | "namespace"
+            | "never"
+            | "new"
+            | "null"
+            | "number"
+            | "object"
+            | "of"
+            | "override"
+            | "package"
+            | "private"
+            | "protected"
+            | "public"
+            | "readonly"
+            | "require"
+            | "return"
+            | "satisfies"
+            | "set"
+            | "static"
+            | "string"
+            | "super"
+            | "switch"
+            | "symbol"
+            | "this"
+            | "throw"
+            | "true"
+            | "try"
+            | "type"
+            | "typeof"
+            | "undefined"
+            | "unique"
+            | "unknown"
+            | "using"
+            | "var"
+            | "void"
+            | "while"
+            | "with"
+            | "yield"
+    )
 }
 
 #[cfg(test)]
@@ -128,7 +202,7 @@ mod tests {
         );
         assert_eq!(
             signature,
-            "declare function tool_search_docs(input: { limit?: number; query: string }): Promise<Array<string>>;"
+            "declare function __lash_tool_7365617263682d646f6373(input: { limit?: number; query: string }): Array<string>;"
         );
     }
 }

@@ -633,8 +633,20 @@ impl Lowerer {
         {
             if matches!(object.as_ref(), Expr::Ident(name) if name == "console") && method == "log"
             {
-                if !self.has_binding("console") && args.len() == 1 {
-                    return Ok(LashExpr::Print(Box::new(self.lower_expr(&args[0])?)));
+                if !self.has_binding("console") {
+                    let mut lowered = args
+                        .iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter();
+                    let joined = lowered.next().map_or_else(
+                        || LashExpr::String("".into()),
+                        |first| js_add(LashExpr::String("".into()), first),
+                    );
+                    let joined = lowered.fold(joined, |joined, value| {
+                        js_add(js_add(joined, LashExpr::String(" ".into())), value)
+                    });
+                    return Ok(LashExpr::Print(Box::new(joined)));
                 }
                 if self.has_binding("console") {
                     return Ok(LashExpr::Call {

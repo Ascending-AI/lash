@@ -406,6 +406,13 @@ impl Adapter {
             )),
             swc::Decl::TsInterface(_) | swc::Decl::TsTypeAlias(_) => Ok(Stmt::Empty),
             swc::Decl::Var(decl) => {
+                if decl.declare {
+                    return Err(reject(
+                        DiagnosticCode::DeclareUnsupported,
+                        "ambient declare declarations",
+                        span,
+                    ));
+                }
                 let kind = match decl.kind {
                     swc::VarDeclKind::Let => VarKind::Let,
                     swc::VarDeclKind::Const => VarKind::Const,
@@ -441,6 +448,13 @@ impl Adapter {
                 Ok(Stmt::Var { kind, declarations })
             }
             swc::Decl::Fn(decl) => {
+                if decl.declare {
+                    return Err(reject(
+                        DiagnosticCode::DeclareUnsupported,
+                        "ambient declare declarations",
+                        span,
+                    ));
+                }
                 if !decl.function.decorators.is_empty() {
                     return Err(reject(
                         DiagnosticCode::DecoratorUnsupported,
@@ -980,6 +994,16 @@ impl Adapter {
 fn binding_name(pattern: &swc::Pat, span: Span) -> Result<String, Diagnostic> {
     match pattern {
         swc::Pat::Ident(name) => Ok(name.id.sym.to_string()),
+        swc::Pat::Assign(_) => Err(reject(
+            DiagnosticCode::ParameterDefaultUnsupported,
+            "default parameters",
+            Some(source_span(span)),
+        )),
+        swc::Pat::Rest(_) => Err(reject(
+            DiagnosticCode::ParameterRestUnsupported,
+            "rest parameters",
+            Some(source_span(span)),
+        )),
         _ => Err(reject(
             DiagnosticCode::DestructuringUnsupported,
             "destructuring parameters",
