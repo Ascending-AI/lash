@@ -75,6 +75,9 @@ receipts, the rotated id, and the typed retirement response — never on model p
   `POST /api/button-trigger?session_id=<S>`, `GET /api/work?session_id=<S>`,
   `GET /api/work/{process_id}/await`, `POST /api/turn/cancel?session_id=<S>`, and
   `DELETE /api/session?session_id=<S>`.
+- The button-trigger request body is exactly `{"button":"Red"}` or
+  `{"button":"Blue"}`; the `button` value is case-sensitive, so lowercase `red` or
+  `blue` returns HTTP 422.
 - Durable truth on the default SQLite stack:
   `<data-dir>/lash-sessions/durable-core.db`. The live id has a `session_meta` row; the
   retired id has a `deleted_sessions` row and no live session metadata. Save query
@@ -150,12 +153,17 @@ Issue one second `GET /api/state?session_id=<retired-id>` and require the same s
 message so the refusal is stable rather than a transient race. Then gate every accepting
 or observing surface changed by the retirement fence:
 
-1. Record `GET /api/work?session_id=<retired-id>` and require its process-id set to equal
-   the saved Phase-1 retired work set. Submit
+1. Record `GET /api/work?session_id=<retired-id>`. The work read is scoped but
+   deliberately not behind the retirement fence: it returns HTTP 200 with a JSON list,
+   never 409. Because Phase 1 awaited the `retirement_job` to terminal and session
+   deletion prunes terminal process state (the delete response's `process_retention`
+   counters record the pruning), the expected set here is empty — do not require it to
+   equal the saved Phase-1 retired work set. Submit
    `POST /api/turn?session_id=<retired-id>` with a non-empty marker prompt. Require HTTP
    409 and the exact same canonical `error`; then read scoped work again and require the
-   complete process-id set to remain identical. Any accepted response, new work row, or
-   changed existing row means work escaped the fence → Abort/RCA.
+   complete process-id set to remain identical to the pre-turn read. Any accepted
+   response, new work row, or changed existing row means work escaped the fence →
+   Abort/RCA.
 2. Call `GET /api/observations?session_id=<retired-id>` without a cursor. Require HTTP
    409 JSON with the exact canonical `error`, not an NDJSON stream, empty snapshot, or
    generic failure.

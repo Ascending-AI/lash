@@ -37,6 +37,7 @@ mod tests {
             .expect("model spec")
     }
 
+    include!("tests/mail_payload.rs");
     include!("tests/commit_budget.rs");
     include!("tests/recoverable_chat.rs");
     include!("tests/continue_as_projection.rs");

@@ -57,6 +57,8 @@ structural outcomes only.
   its outcome plus the authoritative event log reconciled from the durable
   store — the host-facing wait-on-work-item seam, an alternative to polling
   `/api/work` for a terminal row.
+- The account compose form posts mail to `/api/accounts/{slug}/messages` as
+  `{"title":"<title>","text":"<text>"}`; both `title` and `text` are required.
 - **Disk** — two separate trees: `trace.jsonl` and `lashlang-execution.jsonl` live in the
   **data dir** (`AGENT_WORKBENCH_DATA_DIR`, default `.agent-workbench/`) and move with it
   when you override it; the dev script's pid/log/run metadata lives in its own state dir
@@ -112,7 +114,8 @@ registration that never fires fails there. Screenshot `05-registered.png`.
 ## Phase 6 — Fire the trigger from the UI
 
 In the **accounts** tab, use the **work** card's compose form to deliver a message with a
-distinctive title (e.g. `Quarterly report`). This is the host emitting `mail.received`
+distinctive title (e.g. `Quarterly report`) and text. The form sends the real mail fields
+`title` and `text` to `/api/accounts/work/messages`. This is the host emitting `mail.received`
 inside a Restate execution scope — **do not touch the chat from here on** (golden rule 2).
 
 Gates, in order:

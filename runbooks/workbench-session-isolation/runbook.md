@@ -43,6 +43,9 @@ state, never exact assistant prose.
   `GET /api/state?session_id=<S>`, `GET /api/triggers?session_id=<S>`,
   `POST /api/button-trigger?session_id=<S>`, and `GET /api/work?session_id=<S>`.
   `GET /api/work/{process_id}/await` supplies terminal evidence after ownership is proven.
+- The button-trigger request body is exactly `{"button":"Red"}` or
+  `{"button":"Blue"}`; the `button` value is case-sensitive, so lowercase `red` or
+  `blue` returns HTTP 422.
 - Deterministic companion gate:
   `cargo test -p agent-workbench concurrent_sessions_isolate_transcripts_triggers_and_processes`.
   It runs simultaneous turns and simultaneous session-scoped occurrences against shared

@@ -369,9 +369,10 @@ struct AddAccountRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InjectMessageRequest {
-    title: Option<String>,
-    text: Option<String>,
+    title: String,
+    text: String,
     model: Option<String>,
     model_variant: Option<String>,
 }

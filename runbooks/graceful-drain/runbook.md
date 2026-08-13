@@ -81,7 +81,7 @@ Require:
 - the companion later removes its container.
 
 **Fail if:** the container uses a name outside the task's ownership prefix, publishes a
-port outside `5540-5549`, the focused test or docs lint fails, or the run leaves a container
+port outside `5540-5599`, the focused test or docs lint fails, or the run leaves a container
 behind.
 
 ## Phase 1 — Seed an honestly in-flight deployment
