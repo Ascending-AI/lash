@@ -1,3 +1,7 @@
+use std::borrow::Cow;
+
+use serde::{Deserialize, Serialize};
+
 use crate::{ModuleRef, ProcessRef};
 use thiserror::Error;
 
@@ -5,7 +9,7 @@ use super::ExecutionHostError;
 
 /// A failure while interpolating arguments into a format template.
 #[non_exhaustive]
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FormatError {
     /// The template contains an opening brace without a matching closing brace.
     #[error("unmatched `{{` in format string")]
@@ -32,7 +36,7 @@ pub enum FormatError {
 
 /// A typed failure raised while executing compiled Lashlang code.
 #[non_exhaustive]
-#[derive(Clone, Debug, Error, PartialEq)]
+#[derive(Clone, Debug, Error, PartialEq, Serialize, Deserialize)]
 pub enum RuntimeError {
     /// Guest recursion exceeded the configured VM frame-depth limit.
     #[error("lashlang frame depth limit of {limit} frames was exceeded")]
@@ -89,7 +93,7 @@ pub enum RuntimeError {
     /// error is the backstop for an opcode that forgets to declare what it
     /// reads: the cell fails, the process lives.
     #[error("lashlang heap reference {id} reached {context} before it was exported")]
-    UnexportedHeapReference { id: u64, context: &'static str },
+    UnexportedHeapReference { id: u64, context: Cow<'static, str> },
     /// A host boundary cannot represent cyclic heap values.
     #[error("lashlang heap value contains a cycle through object {id}")]
     CyclicHostValue { id: u64 },
@@ -101,10 +105,10 @@ pub enum RuntimeError {
     NonListIteration,
     /// A process-administration keyword was used outside a process body.
     #[error("`{keyword}` can only be used inside a process body")]
-    SessionProcessAdminOutsideProcess { keyword: &'static str },
+    SessionProcessAdminOutsideProcess { keyword: Cow<'static, str> },
     /// A foreground-only control keyword was used inside a process body.
     #[error("`{keyword}` can't be used inside a process body")]
-    ForegroundControlInsideProcess { keyword: &'static str },
+    ForegroundControlInsideProcess { keyword: Cow<'static, str> },
     /// Execution referenced a builtin that is not defined.
     #[error("unknown builtin `{name}`")]
     UnknownBuiltin { name: String },
@@ -198,34 +202,34 @@ pub enum RuntimeError {
     /// A shaping builtin received a value that is not a list or tuple.
     #[error("`{builtin}` requires a list or tuple, got {actual}")]
     ShapingListRequired {
-        builtin: &'static str,
+        builtin: Cow<'static, str>,
         actual: String,
     },
     /// A text-shaping builtin received a non-text argument.
     #[error("`{builtin}` {argument} must be text, got {actual}")]
     ShapingTextRequired {
-        builtin: &'static str,
-        argument: &'static str,
+        builtin: Cow<'static, str>,
+        argument: Cow<'static, str>,
         actual: String,
     },
     /// A numeric aggregation encountered a non-number list element.
     #[error("`{builtin}` item {index} must be a number, got {actual}")]
     ShapingNumberRequired {
-        builtin: &'static str,
+        builtin: Cow<'static, str>,
         index: usize,
         actual: String,
     },
     /// An ordering builtin encountered a value that cannot share one ordering.
     #[error("`{builtin}` item {index} ({actual}) is not comparable with item 0 ({reference})")]
     ShapingComparableRequired {
-        builtin: &'static str,
+        builtin: Cow<'static, str>,
         index: usize,
         reference: String,
         actual: String,
     },
     /// An extrema builtin received an empty list.
     #[error("`{builtin}` requires a non-empty list")]
-    ShapingEmptyList { builtin: &'static str },
+    ShapingEmptyList { builtin: Cow<'static, str> },
     /// `sort_by` received an item that was not a record.
     #[error("`sort_by` item {index} must be a record, got {actual}")]
     SortByRecordRequired { index: usize, actual: String },
@@ -244,14 +248,14 @@ pub enum RuntimeError {
     /// Integer division received an argument that is not a finite integer.
     #[error("`{builtin}` {argument} must be a finite integer")]
     InvalidIntegerDivisionArgument {
-        builtin: &'static str,
-        argument: &'static str,
+        builtin: Cow<'static, str>,
+        argument: Cow<'static, str>,
     },
     /// Integer division received an argument of an unsupported value type.
     #[error("`{builtin}` {argument} must be a finite integer, got {actual}")]
     InvalidIntegerDivisionArgumentType {
-        builtin: &'static str,
-        argument: &'static str,
+        builtin: Cow<'static, str>,
+        argument: Cow<'static, str>,
         actual: String,
     },
     /// A numeric operation received a value that is not numeric.
@@ -269,8 +273,8 @@ pub enum RuntimeError {
     /// A character index was not a non-negative integer.
     #[error("`{builtin}` {argument} must be a non-negative integer")]
     InvalidCharacterIndex {
-        builtin: &'static str,
-        argument: &'static str,
+        builtin: Cow<'static, str>,
+        argument: Cow<'static, str>,
     },
     /// Concatenation mixed list and tuple values.
     #[error("can't concatenate list and tuple")]
@@ -320,7 +324,7 @@ pub enum RuntimeError {
     RangeTooLarge { limit: i128 },
     /// Integer division received a zero divisor.
     #[error("`{builtin}` divisor must not be 0")]
-    IntegerDivisionByZero { builtin: &'static str },
+    IntegerDivisionByZero { builtin: Cow<'static, str> },
     /// Process execution referenced an unknown process name.
     #[error("unknown process `{name}`")]
     UnknownProcess { name: String },
@@ -407,13 +411,13 @@ pub enum RuntimeError {
     MissingLoopState,
     /// A context-dependent intrinsic reached a generic path without an explicit arm.
     #[error("context-dependent intrinsic reached generic {context}")]
-    ContextDependentIntrinsicMisdispatch { context: &'static str },
+    ContextDependentIntrinsicMisdispatch { context: Cow<'static, str> },
     /// An explicitly thrown value escaped every handler.
     #[error("uncaught lashlang exception: {value}")]
     UncaughtException { value: super::Value },
     /// Bytecode violated the structured handler/finally stack discipline.
     #[error("invalid lashlang exception state: {reason}")]
-    InvalidExceptionState { reason: &'static str },
+    InvalidExceptionState { reason: Cow<'static, str> },
 }
 
 impl RuntimeError {
@@ -506,8 +510,12 @@ mod tests {
                 name: "name".into(),
             },
             RuntimeError::NonListIteration,
-            RuntimeError::SessionProcessAdminOutsideProcess { keyword: "finish" },
-            RuntimeError::ForegroundControlInsideProcess { keyword: "print" },
+            RuntimeError::SessionProcessAdminOutsideProcess {
+                keyword: "finish".into(),
+            },
+            RuntimeError::ForegroundControlInsideProcess {
+                keyword: "print".into(),
+            },
             RuntimeError::UnknownBuiltin {
                 name: "builtin".into(),
             },
@@ -561,26 +569,28 @@ mod tests {
             RuntimeError::JoinUnsupported,
             RuntimeError::PushUnsupported,
             RuntimeError::ShapingListRequired {
-                builtin: "sort",
+                builtin: "sort".into(),
                 actual: "text".into(),
             },
             RuntimeError::ShapingTextRequired {
-                builtin: "replace",
-                argument: "needle",
+                builtin: "replace".into(),
+                argument: "needle".into(),
                 actual: "int".into(),
             },
             RuntimeError::ShapingNumberRequired {
-                builtin: "sum",
+                builtin: "sum".into(),
                 index: 1,
                 actual: "text".into(),
             },
             RuntimeError::ShapingComparableRequired {
-                builtin: "sort",
+                builtin: "sort".into(),
                 index: 1,
                 reference: "number".into(),
                 actual: "string".into(),
             },
-            RuntimeError::ShapingEmptyList { builtin: "min" },
+            RuntimeError::ShapingEmptyList {
+                builtin: "min".into(),
+            },
             RuntimeError::SortByRecordRequired {
                 index: 2,
                 actual: "number".into(),
@@ -595,12 +605,12 @@ mod tests {
                 actual: "text".into(),
             },
             RuntimeError::InvalidIntegerDivisionArgument {
-                builtin: "floor_div",
-                argument: "dividend",
+                builtin: "floor_div".into(),
+                argument: "dividend".into(),
             },
             RuntimeError::InvalidIntegerDivisionArgumentType {
-                builtin: "floor_div",
-                argument: "divisor",
+                builtin: "floor_div".into(),
+                argument: "divisor".into(),
                 actual: "text".into(),
             },
             RuntimeError::ExpectedNumber,
@@ -612,8 +622,8 @@ mod tests {
             },
             RuntimeError::InvalidIndex,
             RuntimeError::InvalidCharacterIndex {
-                builtin: "char_at",
-                argument: "index",
+                builtin: "char_at".into(),
+                argument: "index".into(),
             },
             RuntimeError::IncompatibleSequenceConcatenation,
             RuntimeError::ReadOnlyProjectedBinding {
@@ -649,7 +659,7 @@ mod tests {
             RuntimeError::ZeroRangeStep,
             RuntimeError::RangeTooLarge { limit: 100 },
             RuntimeError::IntegerDivisionByZero {
-                builtin: "floor_div",
+                builtin: "floor_div".into(),
             },
             RuntimeError::UnknownProcess {
                 name: "process".into(),
@@ -717,7 +727,7 @@ mod tests {
             RuntimeError::VmStackUnderflow,
             RuntimeError::MissingLoopState,
             RuntimeError::ContextDependentIntrinsicMisdispatch {
-                context: "heap planning",
+                context: "heap planning".into(),
             },
         ];
 

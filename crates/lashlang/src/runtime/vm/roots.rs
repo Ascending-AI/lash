@@ -46,7 +46,7 @@ trait FinallyRootView {
 impl FinallyRootView for FinallyState {
     fn thrown_value(&self) -> Option<&Value> {
         match &self.completion {
-            FinallyCompletion::Throw { value } => Some(value),
+            FinallyCompletion::Throw { value, .. } => Some(value),
             FinallyCompletion::Normal { .. } => None,
         }
     }
@@ -55,7 +55,7 @@ impl FinallyRootView for FinallyState {
 impl FinallyRootView for VmFinallyContinuation {
     fn thrown_value(&self) -> Option<&Value> {
         match &self.completion {
-            VmFinallyCompletionContinuation::Throw { value } => Some(value),
+            VmFinallyCompletionContinuation::Throw { value, .. } => Some(value),
             VmFinallyCompletionContinuation::Normal { .. } => None,
         }
     }

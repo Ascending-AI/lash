@@ -99,7 +99,20 @@ pub enum VmFinallyCompletionContinuation {
             deserialize_with = "continuation_serde::deserialize_value"
         )]
         value: Value,
+        /// The typed runtime failure this throw was raised from, present only
+        /// when the VM routed a `RuntimeError` rather than an explicit
+        /// `throw`. It is what the trap re-raises if the cleanup chain ends
+        /// with no catch, so it is carried durably rather than rebuilt.
+        origin: Option<VmPendingErrorOriginContinuation>,
     },
+}
+
+/// A pending runtime failure travelling through a cleanup chain.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VmPendingErrorOriginContinuation {
+    pub error: RuntimeError,
+    pub instruction_pointer: usize,
+    pub span: Option<Span>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

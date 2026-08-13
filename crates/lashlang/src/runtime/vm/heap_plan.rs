@@ -215,7 +215,7 @@ pub(super) fn instruction_heap_plan(
         // touches no slot. The three that do carry a slot are declared above.
         I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op.fixed_argc().ok_or(
             RuntimeError::ContextDependentIntrinsicMisdispatch {
-                context: "heap planning",
+                context: "heap planning".into(),
             },
         )?)),
     };

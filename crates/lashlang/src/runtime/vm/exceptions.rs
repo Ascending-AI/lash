@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::lexer::Span;
+
 use super::super::{ExecutionHost, Instruction, RuntimeError, Value, record_with_capacity};
 use super::Vm;
 
@@ -25,8 +27,32 @@ pub(super) struct FinallyState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum FinallyCompletion {
-    Normal { resume_ip: usize },
-    Throw { value: Value },
+    Normal {
+        resume_ip: usize,
+    },
+    Throw {
+        value: Value,
+        /// The runtime failure this throw was raised from, if any. A value
+        /// thrown by an explicit `throw` has none; a routed `RuntimeError`
+        /// carries itself here so that a cleanup chain which ends without a
+        /// catch re-raises the original error instead of an exception record.
+        origin: Option<Box<PendingErrorOrigin>>,
+    },
+}
+
+/// The typed failure a pending throw was raised from, with the attribution the
+/// trap needs if the unwind ends with nothing catching it.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct PendingErrorOrigin {
+    pub(super) error: RuntimeError,
+    pub(super) instruction_ip: usize,
+    pub(super) span: Option<Span>,
+}
+
+/// What a `finally` escaped with when no handler took the pending throw.
+pub(super) struct FinallyEscape {
+    pub(super) value: Value,
+    pub(super) origin: Option<Box<PendingErrorOrigin>>,
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -50,14 +76,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn pop_exception_handler(&mut self) -> Result<(), RuntimeError> {
         let Some(handler) = self.handlers.pop() else {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "handler stack underflow",
+                reason: "handler stack underflow".into(),
             });
         };
         if handler.frame_depth != self.frames.len()
             || handler.frame_function != self.active_function
         {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "handler was popped from a different frame",
+                reason: "handler was popped from a different frame".into(),
             });
         }
         Ok(())
@@ -80,31 +106,31 @@ impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn abandon_finally(&mut self) -> Result<(), RuntimeError> {
         let Some(finally) = self.finally_stack.pop() else {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "finally stack underflow",
+                reason: "finally stack underflow".into(),
             });
         };
         if finally.frame_depth != self.frames.len()
             || finally.frame_function != self.active_function
         {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "finally was abandoned in a different frame",
+                reason: "finally was abandoned in a different frame".into(),
             });
         }
         self.stack.truncate(finally.stack_depth);
         Ok(())
     }
 
-    pub(super) fn finish_finally(&mut self) -> Result<Option<Value>, RuntimeError> {
+    pub(super) fn finish_finally(&mut self) -> Result<Option<FinallyEscape>, RuntimeError> {
         let Some(finally) = self.finally_stack.pop() else {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "finally stack underflow",
+                reason: "finally stack underflow".into(),
             });
         };
         if finally.frame_depth != self.frames.len()
             || finally.frame_function != self.active_function
         {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "finally completed in a different frame",
+                reason: "finally completed in a different frame".into(),
             });
         }
         self.stack.truncate(finally.stack_depth);
@@ -113,11 +139,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.ip = resume_ip;
                 Ok(None)
             }
-            FinallyCompletion::Throw { value } => {
-                if self.throw_value(value.clone())? {
+            FinallyCompletion::Throw { value, origin } => {
+                if self.throw_value(value.clone(), origin.clone())? {
                     Ok(None)
                 } else {
-                    Ok(Some(value))
+                    Ok(Some(FinallyEscape { value, origin }))
                 }
             }
         }
@@ -131,12 +157,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         error: &RuntimeError,
         instruction_ip: usize,
+        span: Option<Span>,
     ) -> Result<bool, RuntimeError> {
         let value = self.runtime_error_value(error, instruction_ip)?;
-        self.throw_value(value)
+        self.throw_value(
+            value,
+            Some(Box::new(PendingErrorOrigin {
+                error: error.clone(),
+                instruction_ip,
+                span,
+            })),
+        )
     }
 
-    pub(super) fn throw_value(&mut self, value: Value) -> Result<bool, RuntimeError> {
+    pub(super) fn throw_value(
+        &mut self,
+        value: Value,
+        origin: Option<Box<PendingErrorOrigin>>,
+    ) -> Result<bool, RuntimeError> {
         let mut imported = self.heap.import_values(vec![value], 0)?;
         let value = imported
             .pop()
@@ -167,7 +205,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .finally_ip
                     .expect("cleanup selection requires a finally target");
                 self.finally_stack.push(FinallyState {
-                    completion: FinallyCompletion::Throw { value },
+                    completion: FinallyCompletion::Throw { value, origin },
                     handler_depth: self.handlers.len(),
                     frame_depth: self.frames.len(),
                     frame_function: self.active_function,
@@ -194,7 +232,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     fn unwind_to_handler(&mut self, handler: &ExceptionHandler) -> Result<(), RuntimeError> {
         if handler.frame_depth > self.frames.len() {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "handler frame depth exceeds the active stack",
+                reason: "handler frame depth exceeds the active stack".into(),
             });
         }
         while self.frames.len() > handler.frame_depth {
@@ -202,13 +240,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         if self.active_function != handler.frame_function {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "handler frame identity does not match the active frame",
+                reason: "handler frame identity does not match the active frame".into(),
             });
         }
         if handler.stack_depth > self.stack.len() || handler.iterator_depth > self.iter_stack.len()
         {
             return Err(RuntimeError::InvalidExceptionState {
-                reason: "handler restore depth exceeds active VM state",
+                reason: "handler restore depth exceeds active VM state".into(),
             });
         }
         self.stack.truncate(handler.stack_depth);
@@ -228,7 +266,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .frames
             .pop()
             .ok_or(RuntimeError::InvalidExceptionState {
-                reason: "frame stack underflow during exception unwind",
+                reason: "frame stack underflow during exception unwind".into(),
             })?;
         self.stack.truncate(frame.operand_stack_base);
         self.slots = frame.slots;

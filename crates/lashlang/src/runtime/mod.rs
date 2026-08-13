@@ -71,7 +71,7 @@ pub(crate) use vm::SlotState;
 pub use vm::{
     ContinuationError, Vm, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmProfileContinuation, VmRunOutcome,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

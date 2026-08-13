@@ -54,7 +54,7 @@ pub(crate) fn append_stringified_value_direct(
         Value::Ref(id) => {
             return Err(RuntimeError::UnexportedHeapReference {
                 id: id.get(),
-                context: "string formatting",
+                context: "string formatting".into(),
             });
         }
         Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => {
@@ -81,7 +81,7 @@ pub(crate) fn append_stringified_value_async<'a>(
             Value::Ref(id) => {
                 return Err(RuntimeError::UnexportedHeapReference {
                     id: id.get(),
-                    context: "string formatting",
+                    context: "string formatting".into(),
                 });
             }
             Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => {

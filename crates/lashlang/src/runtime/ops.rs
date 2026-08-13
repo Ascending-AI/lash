@@ -322,7 +322,7 @@ async fn shaping_list(
             Ok(items.into_vec())
         }
         other => Err(RuntimeError::ShapingListRequired {
-            builtin,
+            builtin: builtin.into(),
             actual: value_type_name(&other).to_string(),
         }),
     }
@@ -345,7 +345,7 @@ fn validate_comparable_items(builtin: &'static str, items: &[Value]) -> Result<(
     for (index, item) in items.iter().enumerate() {
         if compare_shaping_values(first, item).is_none() {
             return Err(RuntimeError::ShapingComparableRequired {
-                builtin,
+                builtin: builtin.into(),
                 index,
                 reference: value_type_name(first).to_string(),
                 actual: value_type_name(item).to_string(),
@@ -395,8 +395,8 @@ async fn execute_sort_by_builtin(
     let path_value = materialize_projected_async(values[1].clone()).await;
     let Value::String(path) = path_value else {
         return Err(RuntimeError::ShapingTextRequired {
-            builtin: "sort_by",
-            argument: "field path",
+            builtin: "sort_by".into(),
+            argument: "field path".into(),
             actual: value_type_name(&path_value).to_string(),
         });
     };
@@ -444,7 +444,7 @@ async fn execute_sum_builtin(
     for (index, item) in items.iter().enumerate() {
         let Value::Number(number) = item else {
             return Err(RuntimeError::ShapingNumberRequired {
-                builtin: "sum",
+                builtin: "sum".into(),
                 index,
                 actual: value_type_name(item).to_string(),
             });
@@ -464,7 +464,9 @@ async fn execute_extreme_builtin(
     let items = shaping_list(builtin, &values[0], instructions_executed).await?;
     validate_comparable_items(builtin, &items)?;
     let Some(mut extreme) = items.first().cloned() else {
-        return Err(RuntimeError::ShapingEmptyList { builtin });
+        return Err(RuntimeError::ShapingEmptyList {
+            builtin: builtin.into(),
+        });
     };
     for item in &items[1..] {
         if compare_shaping_values(item, &extreme) == Some(wanted) {
@@ -487,8 +489,8 @@ async fn shaping_text(
             Ok(value.to_string())
         }
         other => Err(RuntimeError::ShapingTextRequired {
-            builtin,
-            argument,
+            builtin: builtin.into(),
+            argument: argument.into(),
             actual: value_type_name(&other).to_string(),
         }),
     }
@@ -979,7 +981,9 @@ pub(crate) fn execute_integer_div_builtin(
     let dividend = as_integer_div_arg(name, "dividend", &values[0])?;
     let divisor = as_integer_div_arg(name, "divisor", &values[1])?;
     if divisor == 0.0 {
-        return Err(RuntimeError::IntegerDivisionByZero { builtin: name });
+        return Err(RuntimeError::IntegerDivisionByZero {
+            builtin: name.into(),
+        });
     }
     Ok(Value::Number(round(dividend / divisor)))
 }
@@ -1002,15 +1006,15 @@ fn as_integer_div_arg(
 ) -> Result<f64, RuntimeError> {
     let Value::Number(number) = value else {
         return Err(RuntimeError::InvalidIntegerDivisionArgumentType {
-            builtin,
-            argument: arg_name,
+            builtin: builtin.into(),
+            argument: arg_name.into(),
             actual: value_type_name(value).to_string(),
         });
     };
     if !number.is_finite() || number.fract() != 0.0 {
         return Err(RuntimeError::InvalidIntegerDivisionArgument {
-            builtin,
-            argument: arg_name,
+            builtin: builtin.into(),
+            argument: arg_name.into(),
         });
     }
     Ok(*number)
@@ -1219,8 +1223,8 @@ fn as_non_negative_char_index(
     let number = as_number(value)?;
     if !number.is_finite() || number.fract() != 0.0 || number < 0.0 || number > usize::MAX as f64 {
         return Err(RuntimeError::InvalidCharacterIndex {
-            builtin,
-            argument: arg_name,
+            builtin: builtin.into(),
+            argument: arg_name.into(),
         });
     }
     Ok(number as usize)

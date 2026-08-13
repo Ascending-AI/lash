@@ -77,10 +77,10 @@ pub use runtime::{
     ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
     SnapshotDecodeError, State, Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
-    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmProfileContinuation,
-    VmRunOutcome, compile, compile_ast, compile_linked, compile_linked_process,
-    compile_module_artifact_process, compile_process, execute, from_json, prewarm,
-    unwrap_type_value,
+    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmPendingErrorOriginContinuation,
+    VmProfileContinuation, VmRunOutcome, compile, compile_ast, compile_linked,
+    compile_linked_process, compile_module_artifact_process, compile_process, execute, from_json,
+    prewarm, unwrap_type_value,
 };
 #[doc(hidden)]
 pub use runtime::{

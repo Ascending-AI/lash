@@ -485,7 +485,7 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
     }
 }
 
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[error("{message}")]
 pub struct ExecutionHostError {
     message: String,

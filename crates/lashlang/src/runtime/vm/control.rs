@@ -62,12 +62,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmOutcome::Finished(value) => Ok(ExecutionOutcome::Finished(value)),
             #[cfg(test)]
             VmOutcome::Suspended => Ok(ExecutionOutcome::Continued),
-            VmOutcome::ProcessFinished(_) => {
-                Err(RuntimeError::SessionProcessAdminOutsideProcess { keyword: "finish" })
-            }
-            VmOutcome::ProcessFailed(_) => {
-                Err(RuntimeError::SessionProcessAdminOutsideProcess { keyword: "fail" })
-            }
+            VmOutcome::ProcessFinished(_) => Err(RuntimeError::SessionProcessAdminOutsideProcess {
+                keyword: "finish".into(),
+            }),
+            VmOutcome::ProcessFailed(_) => Err(RuntimeError::SessionProcessAdminOutsideProcess {
+                keyword: "fail".into(),
+            }),
         }
     }
 
@@ -135,11 +135,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             #[cfg(test)]
             VmOutcome::Suspended => Ok(ExecutionOutcome::Continued),
             VmOutcome::ProcessFinished(_) => Err(RuntimeFailure {
-                error: RuntimeError::SessionProcessAdminOutsideProcess { keyword: "finish" },
+                error: RuntimeError::SessionProcessAdminOutsideProcess {
+                    keyword: "finish".into(),
+                },
                 span: None,
             }),
             VmOutcome::ProcessFailed(_) => Err(RuntimeFailure {
-                error: RuntimeError::SessionProcessAdminOutsideProcess { keyword: "fail" },
+                error: RuntimeError::SessionProcessAdminOutsideProcess {
+                    keyword: "fail".into(),
+                },
                 span: None,
             }),
         }
@@ -421,7 +425,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         span: Option<Span>,
     ) -> Result<(), VmTrap> {
         if !error.is_uncatchable_terminal() && self.has_exception_scope() {
-            match self.throw_runtime_error(&error, instruction_ip) {
+            match self.throw_runtime_error(&error, instruction_ip, span) {
                 Ok(true) => return Ok(()),
                 Ok(false) => {}
                 Err(terminal) => {

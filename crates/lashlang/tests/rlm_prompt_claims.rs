@@ -1337,10 +1337,10 @@ finish {
     let error = execute("finish min([])", &mut state, &host)
         .await
         .expect_err("empty extrema are typed errors");
-    assert!(matches!(
-        error,
-        ExecuteError::Runtime(lashlang::RuntimeError::ShapingEmptyList { builtin: "min" })
-    ));
+    let ExecuteError::Runtime(lashlang::RuntimeError::ShapingEmptyList { builtin }) = error else {
+        panic!("empty extrema are typed errors: {error:?}")
+    };
+    assert_eq!(builtin, "min");
 }
 
 // ─────────────────────────────────────────────────────────────────────

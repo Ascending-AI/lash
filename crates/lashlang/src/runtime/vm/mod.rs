@@ -31,7 +31,7 @@ pub(crate) use continuation::VM_CONTINUATION_FORMAT_VERSION;
 pub use continuation::{
     ContinuationError, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmProfileContinuation, VmRunOutcome,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
 };
 pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
 use control::{VmMode, VmStep};
@@ -453,7 +453,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         .collect::<Result<Vec<_>, _>>()?,
                     value => {
                         return Err(RuntimeError::ShapingListRequired {
-                            builtin: "map",
+                            builtin: "map".into(),
                             actual: super::value_type_name(&value).to_string(),
                         });
                     }
@@ -483,15 +483,33 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::AbandonFinally => self.abandon_finally()?,
             Instruction::EndFinally => {
-                if let Some(value) = self.finish_finally()? {
-                    return Err(RuntimeError::UncaughtException {
-                        value: self.heap.export(&value)?,
+                if let Some(escape) = self.finish_finally()? {
+                    // A cleanup chain that ends with nothing catching it
+                    // re-raises what it was unwinding. Only a value thrown by
+                    // an explicit `throw` becomes an `UncaughtException`; a
+                    // routed runtime failure keeps its variant, and its
+                    // attribution is restored so the trap still points at the
+                    // failing expression rather than the cleanup block.
+                    return Err(match escape.origin {
+                        Some(origin) => {
+                            self.pending_error_span = origin.span.or_else(|| {
+                                self.chunk
+                                    .spans
+                                    .get(origin.instruction_ip)
+                                    .copied()
+                                    .flatten()
+                            });
+                            origin.error
+                        }
+                        None => RuntimeError::UncaughtException {
+                            value: self.heap.export(&escape.value)?,
+                        },
                     });
                 }
             }
             Instruction::Throw => {
                 let value = self.pop_stack()?;
-                if !self.throw_value(value.clone())? {
+                if !self.throw_value(value.clone(), None)? {
                     return Err(RuntimeError::UncaughtException {
                         value: self.heap.export(&value)?,
                     });
@@ -752,7 +770,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ProcessWaitSignal { name } => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "wait_signal",
+                        keyword: "wait_signal".into(),
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::WaitSignal { name })));
@@ -766,7 +784,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ProcessYield => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "yield",
+                        keyword: "yield".into(),
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::ProcessEvent(
@@ -776,7 +794,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ProcessWake => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "wake",
+                        keyword: "wake".into(),
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::ProcessEvent(
@@ -786,7 +804,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ProcessFail => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "fail",
+                        keyword: "fail".into(),
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::Fail)));
@@ -1117,7 +1135,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::Print => {
                 if self.mode == VmMode::Process {
-                    return Err(RuntimeError::ForegroundControlInsideProcess { keyword: "print" });
+                    return Err(RuntimeError::ForegroundControlInsideProcess {
+                        keyword: "print".into(),
+                    });
                 }
                 return Ok(VmStep::Effect(VmEffect::Print));
             }
@@ -1372,7 +1392,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let argc =
                     op.fixed_argc()
                         .ok_or(RuntimeError::ContextDependentIntrinsicMisdispatch {
-                            context: "intrinsic dispatch",
+                            context: "intrinsic dispatch".into(),
                         })?;
                 let start = self
                     .stack
