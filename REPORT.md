@@ -160,11 +160,12 @@ the host process rather than returning a typed error. `LinkedModule::link`,
 governs both — and a syntactic level is not an AST level. Block-bodied
 constructs (`if`, `while`, `for`) build an `Expr::Block` inside them and cost
 two, so the parser's old limit of 40 admitted an 81-level tree. Measured on a
-2 MiB thread, the full link/compile/execute pipeline aborts at an AST depth of
-about 74 for the most expensive per-level variant (nested `try`/`catch`/
-`finally`) and about 79 for the cheapest block-bodied one. The deepest `if`
-chain the parser accepted therefore already aborted in `link` before this layer
-existed, which the parser's own doc comment claimed was impossible.
+2 MiB thread, the full link/compile/execute pipeline first aborts at an AST
+depth of 74 for the most expensive per-level variant (nested `try`/`catch`/
+`finally`) and at 77 for the cheapest block-bodied one. The deepest `if` chains
+the parser accepted — syntactic 37 to 39, AST 77 to 81 — therefore already
+aborted in `link` before this layer existed, which the parser's own doc comment
+claimed was impossible.
 
 So the budget is derived from measurement and enforced at the AST level:
 `MAX_AST_NESTING_DEPTH` is 64, ten levels under the tighter cliff, and the
@@ -262,11 +263,10 @@ The compiler emits a scope-extent table into the chunk — one entry per
 `PushHandler`, carrying its install site, handler and finally targets, and the
 end of the region it protects. A durable handler record must name one of those
 scopes exactly, and consecutive records in one frame must form a strictly nested
-chain of them, which makes reordered and forged handler stacks unrepresentable
-rather than merely defended against inside the VM. Requiring an exact scope
-match also closes the weaker target check: a handler target one instruction past
-its catch entry, or a finally target borrowed from another scope, no longer
-passes as "somewhere inside the right function".
+chain of them. Requiring an exact scope match also closes the weaker target
+check: a handler target one instruction past its catch entry, or a finally
+target borrowed from another scope, no longer passes as "somewhere inside the
+right function".
 
 Nesting alone still left every handler unanchored: it only had to name *some*
 scope in the right function, so a single-entry stack could be pointed at a
@@ -288,6 +288,34 @@ adds the scope-extent chain, the anchor, and the per-record range checks, so
 `Vm::resume_from` refuses these shapes as well as serde does; that matters
 because `VmContinuation`'s stacks are public API a host embedding can build in
 Rust without touching the wire.
+
+### What that validation does and does not make unrepresentable
+
+Stated precisely, because "unrepresentable" is easy to over-claim. Three
+families are now refused rather than defended against inside the VM:
+
+- **Reordering** — a handler stack whose records are permuted, including the
+  same-frame swap where every per-record invariant survives.
+- **Substitution of a live scope** — a handler retargeted at any other scope the
+  compiler emitted, including a sibling cleanup-only scope, because the
+  innermost handler of each frame must be live at that frame's code position.
+- **Structural nesting** — records that do not form a strictly nested chain of
+  real scopes, and targets that are not the entry points of one.
+
+Two families remain **unvalidated**, and both need flow-sensitive information
+the chunk does not carry today — the set of handlers that *must* be installed at
+a given instruction, rather than the set that *may* be:
+
+- **Omission.** Dropping a handler from the stack leaves the remainder
+  structurally valid, so a mandatory cleanup can still be skipped by deleting
+  its record instead of retargeting it.
+- **Re-installation during its own cleanup.** A handler is not on the stack
+  while its own `finally` body runs, but nothing proves a record was not put
+  back there.
+
+Both are authored-blob-only, like the families above. They are filed as a
+follow-up for flow-sensitive expected-handler-chain metadata, which is the shape
+that would close them; this layer does not claim they are closed.
 
 ## Test coverage
 

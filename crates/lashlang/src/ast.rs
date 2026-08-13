@@ -28,11 +28,11 @@ pub struct Program {
 /// stack contract the parsed path already had.
 ///
 /// The value is derived from measurement, not arithmetic. On a 2 MiB thread the
-/// full link/compile/execute pipeline aborts at an AST depth of roughly 74 for
-/// the most expensive per-level variant (nested `try`/`catch`/`finally`) and
-/// roughly 79 for the cheapest block-bodied one, so 64 keeps at least ten
-/// levels of margin under the tighter cliff. `tests/stack_budget.rs` pins that
-/// margin with the most expensive variant at exactly this depth.
+/// full link/compile/execute pipeline first aborts at an AST depth of 74 for the
+/// most expensive per-level variant (nested `try`/`catch`/`finally`) and at 77
+/// for the cheapest block-bodied one, so 64 keeps ten levels of margin under
+/// the tighter cliff. `tests/stack_budget.rs` pins that margin with the most
+/// expensive variant at exactly this depth.
 ///
 /// The parser's own cap is set so that no program it accepts can exceed this:
 /// a syntactic level is not an AST level, and block-bodied constructs

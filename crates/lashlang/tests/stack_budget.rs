@@ -137,9 +137,9 @@ fn stack_budget_environment() -> LashlangHostEnvironment {
 
 /// The AST cap is only sound if the *most expensive* per-level AST variant
 /// meets the 2 MiB budget at exactly that depth. Nested `try`/`catch`/`finally`
-/// is that variant — it aborts about ten levels above the cap, where the
-/// cheapest block-bodied shape aborts about fifteen above — so this is the test
-/// that earns the constant. The other budget tests cover cheaper shapes.
+/// is that variant — it first aborts ten levels above the cap, where the
+/// cheapest block-bodied shape first aborts thirteen above — so this is the
+/// test that earns the constant. The other budget tests cover cheaper shapes.
 #[test]
 fn stack_budget_most_expensive_ast_variant_at_the_nesting_cap() {
     run_on_stack_budget("stack-budget-ast-cap", || {
