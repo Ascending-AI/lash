@@ -164,11 +164,21 @@ impl State {
         Ok(outcome)
     }
 
+    /// Captures the state as a persistable snapshot.
+    ///
+    /// The captured heap is collected: a snapshot holds exactly the objects its
+    /// roots reach, which is also exactly what the wire carries. Without this a
+    /// snapshot taken straight after execution carries whatever garbage the last
+    /// collection cycle had not reached yet, and `decode(encode(snapshot))`
+    /// could not equal `snapshot`.
     pub fn snapshot(&self) -> Snapshot {
+        let mut heap = self.heap.clone();
+        let roots = self.runtime_globals.values().cloned().collect::<Vec<_>>();
+        heap.collect(roots.iter());
         Snapshot {
             globals: self.globals.clone(),
             runtime_globals: self.runtime_globals.clone(),
-            heap: self.heap.clone(),
+            heap,
         }
     }
 

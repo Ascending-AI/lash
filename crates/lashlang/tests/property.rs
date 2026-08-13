@@ -757,6 +757,61 @@ fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &st
     )
 }
 
+/// One statement in a generated heap-shaping program.
+///
+/// The interesting states for the persistence oracle are the ones a real
+/// session reaches: containers built, aliased, appended to, mutated through a
+/// path, iterated, and discarded so the heap ends up with vacant storage slots.
+#[derive(Clone, Debug)]
+enum HeapStep {
+    Seed(u8),
+    Alias,
+    PushRow(u8),
+    ConcatRow(u8),
+    NestInRecord,
+    MutateFirst(u8),
+    Discard,
+    IterateCopy,
+}
+
+impl HeapStep {
+    fn to_source(&self) -> String {
+        match self {
+            Self::Seed(n) => format!("base = [[{n}], [{}]]\n", n.wrapping_add(1)),
+            Self::Alias => "alias = base\n".to_string(),
+            Self::PushRow(n) => format!("base = push(base, [{n}])\n"),
+            Self::ConcatRow(n) => format!("base = base + [[{n}]]\n"),
+            Self::NestInRecord => "holder = { rows: base, tag: \"held\" }\n".to_string(),
+            Self::MutateFirst(n) => format!("base[0] = [{n}]\n"),
+            Self::Discard => "scratch = [[9], [8], [7]]\nscratch = 0\n".to_string(),
+            Self::IterateCopy => {
+                "copies = []\nfor row in base { copies = push(copies, row) }\n".to_string()
+            }
+        }
+    }
+}
+
+fn heap_step_strategy() -> impl Strategy<Value = HeapStep> {
+    prop_oneof![
+        any::<u8>().prop_map(HeapStep::Seed),
+        Just(HeapStep::Alias),
+        any::<u8>().prop_map(HeapStep::PushRow),
+        any::<u8>().prop_map(HeapStep::ConcatRow),
+        Just(HeapStep::NestInRecord),
+        any::<u8>().prop_map(HeapStep::MutateFirst),
+        Just(HeapStep::Discard),
+        Just(HeapStep::IterateCopy),
+    ]
+}
+
+fn heap_program_strategy() -> impl Strategy<Value = Vec<HeapStep>> {
+    (
+        any::<u8>().prop_map(HeapStep::Seed),
+        proptest::collection::vec(heap_step_strategy(), 0..8),
+    )
+        .prop_map(|(seed, rest)| std::iter::once(seed).chain(rest).collect())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 256,
@@ -882,6 +937,44 @@ proptest! {
                 prop_assert!(has_label, "@label metadata was lost for {variant}");
             }
         }
+    }
+
+
+    /// `decode(encode(state)) == state` for states a program actually produces.
+    ///
+    /// Snapshot equality is the oracle every persistence test leans on, so this
+    /// exercises it over heap-backed states rather than plain trees: it fails if
+    /// equality is too strict (comparing private storage layout a round trip
+    /// compacts) and it fails if a round trip loses roots, objects or meters.
+    /// The encoded bytes must also be a fixed point, and the restored state must
+    /// answer the same as the original when execution continues on it.
+    #[test]
+    fn heap_backed_state_round_trips_as_an_equal_snapshot(
+        steps in heap_program_strategy()
+    ) {
+        let source = steps.iter().map(HeapStep::to_source).collect::<String>() + "finish 0\n";
+        let host = DeterministicHost;
+        let mut state = State::new();
+        prop_assume!(run_execute(&source, &mut state, &host).is_ok());
+
+        let snapshot = state.snapshot();
+        let encoded = snapshot.to_canonical_bytes().expect("heap-backed snapshot encode");
+        let decoded = Snapshot::from_canonical_bytes(&encoded).expect("heap-backed snapshot decode");
+        prop_assert_eq!(&decoded, &snapshot);
+        prop_assert_eq!(
+            decoded.to_canonical_bytes().expect("re-encode"),
+            encoded
+        );
+
+        let mut restored = State::from_snapshot(decoded);
+        let read = "finish base\n";
+        let original = run_execute(read, &mut state, &host);
+        let continued = run_execute(read, &mut restored, &host);
+        prop_assert_eq!(original.is_ok(), continued.is_ok());
+        if let (Ok(original), Ok(continued)) = (original, continued) {
+            prop_assert_eq!(finished(original), finished(continued));
+        }
+        prop_assert_eq!(restored.snapshot(), state.snapshot());
     }
 
     #[test]

@@ -269,3 +269,50 @@ async fn multi_root_program_state_always_decodes() {
         Some(list(vec![list(vec![number(1.0)]), list(vec![number(2.0)])]))
     );
 }
+
+/// `decode(encode(state)) == state` for a program that allocated, discarded and
+/// re-allocated, which leaves the heap holding vacant storage slots and a free
+/// list.
+///
+/// Snapshot equality is the oracle the round-trip tests lean on, so it has to
+/// compare what the wire actually carries — live objects under their IDs, the
+/// roots that name them, and the meters — rather than the private storage
+/// layout, which a round trip legitimately compacts.
+#[tokio::test(flavor = "current_thread")]
+async fn snapshot_equality_survives_a_round_trip_after_temporaries() {
+    let mut state = State::new();
+    run(
+        &mut state,
+        r#"
+        kept = [[1], [2]]
+        for n in range(0, 40) {
+          scratch = [{ n: n }, { n: n + 1 }]
+        }
+        kept = push(kept, [3])
+        finish 0
+        "#,
+    )
+    .await;
+
+    let snapshot = state.snapshot();
+    let bytes = snapshot.to_canonical_bytes().expect("state should encode");
+    let decoded = Snapshot::from_canonical_bytes(&bytes).expect("state should decode");
+
+    assert_eq!(
+        decoded, snapshot,
+        "a decoded snapshot must equal the snapshot it came from"
+    );
+    assert_eq!(
+        decoded
+            .to_canonical_bytes()
+            .expect("decoded snapshot should re-encode"),
+        bytes,
+        "accepted bytes are a fixed point"
+    );
+
+    // And the equality is not vacuous: a state with different heap contents
+    // compares unequal.
+    let mut other = State::from_snapshot(decoded);
+    run(&mut other, "kept = push(kept, [4])\nfinish 0").await;
+    assert_ne!(other.snapshot(), snapshot);
+}
