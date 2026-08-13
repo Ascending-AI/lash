@@ -53076,6 +53076,14 @@ disposition = "unused-justify"
 reason = "Conformance-only class 4 contract consumed by all bundled durable backends; it proves production hydration and ordinary commit preserve arbitrary keys as budget-free unchanged refs and exact bytes, while intentional absence still deletes."
 
 [[api]]
+symbol = "lash::testing::conformance::coordinate_tool_provider_with_services"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: conformance-suite embedders drive one provider through the production coordinator and supplied durable services; the cross-backend simulator differential exercises this seam at crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:478."
+
+[[api]]
 symbol = "lash::testing::conformance::checkpoint_rejects_unknown_component_ref"
 kind = "function"
 availability = "all-features"

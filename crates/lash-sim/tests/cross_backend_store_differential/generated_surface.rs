@@ -474,25 +474,26 @@ impl SurfaceRunner {
                 let processes = lash_core::testing::effect_backed_process_service(Arc::clone(
                     &self.process_registry,
                 ));
-                let completed = lash_core::testing::coordinate_tool_provider_with_services(
-                    controller.clone(),
-                    Arc::clone(&processes),
-                    SURFACE_SESSION,
-                    SurfaceIntentProvider::definition(),
-                    Arc::new(SurfaceIntentProvider),
-                    lash_core::PreparedToolCall::from_parts(
-                        "surface-intent-call",
-                        lash_core::ToolId::from("tool:surface_intent_provider"),
-                        "surface_intent_provider",
-                        serde_json::json!({}),
-                        None,
-                        serde_json::Value::Null,
-                    ),
-                )
-                .await
-                .map_err(|error| {
-                    format!("{} provider/coordinator row failed: {error}", self.name)
-                })?;
+                let completed =
+                    lash_core::testing::conformance::coordinate_tool_provider_with_services(
+                        controller.clone(),
+                        Arc::clone(&processes),
+                        SURFACE_SESSION,
+                        SurfaceIntentProvider::definition(),
+                        Arc::new(SurfaceIntentProvider),
+                        lash_core::PreparedToolCall::from_parts(
+                            "surface-intent-call",
+                            lash_core::ToolId::from("tool:surface_intent_provider"),
+                            "surface_intent_provider",
+                            serde_json::json!({}),
+                            None,
+                            serde_json::Value::Null,
+                        ),
+                    )
+                    .await
+                    .map_err(|error| {
+                        format!("{} provider/coordinator row failed: {error}", self.name)
+                    })?;
                 let intent_outcomes = completed.intent_outcomes.clone();
                 let literal_intent_outcomes = vec![
                     lash_core::ToolIntentExecutionOutcome::Executed {

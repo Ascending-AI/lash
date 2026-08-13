@@ -20,6 +20,8 @@
 //! `#[tokio::test]`. Embedders with custom backends can run them via
 //! `lash::testing::conformance`.
 
+pub use super::coordinate_tool_provider_with_services;
+
 mod artifact_store;
 mod attachment_owner;
 mod attachment_store;
