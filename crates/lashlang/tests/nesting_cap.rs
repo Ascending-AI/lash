@@ -13,10 +13,14 @@ use lashlang::{
     check_ast_nesting_depth, parse,
 };
 
+/// One nestable parsed shape: a name and a generator that builds it `depth`
+/// levels deep.
+type ParsedShape = (&'static str, fn(usize) -> String);
+
 /// The parsed shapes a program can nest, chosen to span the per-level AST cost
 /// range: the block-bodied constructs are the expensive end, the literal and
 /// operator shapes the cheap end.
-fn parsed_shape_family() -> Vec<(&'static str, fn(usize) -> String)> {
+fn parsed_shape_family() -> Vec<ParsedShape> {
     fn nest(depth: usize, wrap: impl Fn(usize, String) -> String, leaf: &str) -> String {
         let mut source = String::from(leaf);
         for level in 0..depth {

@@ -1,7 +1,7 @@
 # FIG-1303 implementation report
 
-Status: complete on `samuel-fig-1303`, after one adversarial review round and
-its fixes.
+Status: complete on `samuel-fig-1303`, after two adversarial review rounds and
+their fixes.
 
 ## Delivered commits
 
@@ -19,6 +19,14 @@ its fixes.
 | `0606e076e` | Cap AST nesting depth at the construction entry points. |
 | `0b872cf1d` | Classify runtime errors exhaustively and pin their codes. |
 | `276abc2db` | Fold the review round's covering cases into the suite; wire host cancellation. |
+| `83dbda356` | Red-side: the AST cap refusing parsed programs. |
+| `3cfec80f9` | Make one nesting budget govern the parser and the AST. |
+| `662a51120` | Red-side: handler scope substitution. |
+| `d2f0c9161` | Anchor each durable handler scope to a live code position. |
+| `b7ee34103` | Red-side: uncatchable-state and loop-control holes. |
+| `d29ec2c36` | Make internal exception state terminal; refuse stray loop control. |
+| `86a880c18` | Pin deferred process-terminal behaviour and every error code. |
+| `ab832df7a` | Exercise the layer's remaining public API. |
 
 ## Design
 
@@ -141,23 +149,45 @@ iterator bindings as iterators are unwound. Occurrence counters are independent
 continuation state, so retry after catch allocates the next occurrence and
 replay key.
 
-### Nesting depth of AST-built programs
+### One nesting budget for the parser and the AST
 
-The parser's nesting cap bounds parsed programs, and the linker's 2 MiB stack
-contract is anchored on it. `Try`, `Throw`, `Function` and the other AST-only
-shapes have no source grammar, so nothing bounded them: a dialect that lowered a
-deeply nested `try` aborted the host process on a stack overflow rather than
-returning a typed error. `LinkedModule::link`, `compile_ast` and
-`compile_process` now apply `check_ast_nesting_depth` first.
+`Try`, `Throw`, `Function` and the other AST-only shapes have no source grammar,
+so nothing bounded them: a dialect that lowered a deeply nested `try` aborted
+the host process rather than returning a typed error. `LinkedModule::link`,
+`compile_ast` and `compile_process` now run `validate_ast` first.
 
-The check is a generic iterative walk over `Expr::children`, which is exhaustive
-over the variants, so it covers every AST node rather than only the new ones,
-and it cannot itself overflow on the inputs it exists to refuse.
-`MAX_AST_NESTING_DEPTH` sits above the deepest tree the parser can produce and
-below the depth at which the cheapest AST chains exhaust the budget; per-level
-stack cost varies by variant, so it bounds the tree rather than promising a
-per-variant margin. `compile_ast` now returns a `Result`, which is the only
-signature change.
+`link` is the shared entry for parsed *and* AST-built programs, so one budget
+governs both — and a syntactic level is not an AST level. Block-bodied
+constructs (`if`, `while`, `for`) build an `Expr::Block` inside them and cost
+two, so the parser's old limit of 40 admitted an 81-level tree. Measured on a
+2 MiB thread, the full link/compile/execute pipeline aborts at an AST depth of
+about 74 for the most expensive per-level variant (nested `try`/`catch`/
+`finally`) and about 79 for the cheapest block-bodied one. The deepest `if`
+chain the parser accepted therefore already aborted in `link` before this layer
+existed, which the parser's own doc comment claimed was impossible.
+
+So the budget is derived from measurement and enforced at the AST level:
+`MAX_AST_NESTING_DEPTH` is 64, ten levels under the tighter cliff, and the
+parser's `MAX_NESTING_DEPTH` drops from 40 to 30 so the worst parsed shape (two
+AST levels per syntactic level plus a statement's constant) lands at 63. That
+narrows the accepted source language, and it turns a host-process abort into the
+typed error the limit already promised.
+
+No constant relation carries this — a comparison between two numbers cannot see
+the per-level cost difference. `tests/nesting_cap.rs` walks a family of parsed
+shapes (`if`/`while`/`for`/record/list/paren/unary/binary/comprehension/call) to
+the parser's refusal point and requires every accepted program to pass the depth
+check *and* link, and reports the deepest tree the family can build.
+`tests/stack_budget.rs` re-pins the 2 MiB budget at the cap using the most
+expensive per-level variant rather than the cheapest.
+
+`validate_ast` also covers loop-control placement: `break` and `continue` have
+no parser to reject them out of place, and a host-built function body carrying a
+stray `break` previously panicked the public `compile_ast`. Both checks are
+iterative walks over `Expr::children`, exhaustive over the variants, and neither
+can overflow on the inputs it exists to refuse. `compile_ast` and
+`LinkedModule::link` now return typed errors (`InvalidAst` / `LinkError`), which
+is the only signature change.
 
 ### Lashlang lowering decision
 
@@ -187,12 +217,22 @@ No prompt, parser, diagnostic, or benchmark snapshot changed.
 | Instruction, deadline, memory, or frame-depth exhaustion | No | The taxonomy prevents handler lookup; instruction/deadline checks terminate directly from `enforce_execution_bounds`, while memory/frame terminals are rejected by the same central classification when raised at allocation/call sites. |
 | Host cancellation | No | The cooperative `ExecutionHost::is_cancelled` probe terminates in `enforce_execution_bounds` as `HostCancelled`, before any handler lookup. `LashlangProcessHost` forwards the engine's cancellation token to it, so the row is live in production. |
 
+`InvalidExceptionState` is an uncatchable terminal too. It is raised *by* the
+exception machinery when the bytecode has violated the handler/finally
+discipline, and routing it back through a handler stack that has just been shown
+inconsistent is the one place a catchable classification cannot be defended.
+
 The classification is a single exhaustive `RuntimeError::taxonomy` match rather
 than two hand-maintained `matches!` lists, so a new variant fails to compile
 until it declares its class; `is_uncatchable_terminal` and `is_effect_failure`
 read it and keep their signatures. `RuntimeError::code` is likewise an explicit
-static table pinned by an exhaustive test, not a string derived from `Debug`, so
-renaming a Rust variant cannot silently change a value guest code branches on.
+static table, not a string derived from `Debug`, so renaming a Rust variant
+cannot silently change a value guest code branches on. The pinning test covers
+instances rather than only match arms: the exhaustive match forces a new variant
+to declare a code, and a count of distinct observed codes against the declared
+list forces it to be constructed and asserted. That check found eight variants
+that had been classified but never instantiated, three of whose expected display
+strings had drifted from the real ones unnoticed.
 
 `enforce_execution_bounds` documents the direct terminal boundary.
 `route_runtime_error` is the single defensive classification point for errors
@@ -228,10 +268,23 @@ match also closes the weaker target check: a handler target one instruction past
 its catch entry, or a finally target borrowed from another scope, no longer
 passes as "somewhere inside the right function".
 
+Nesting alone still left every handler unanchored: it only had to name *some*
+scope in the right function, so a single-entry stack could be pointed at a
+sibling scope — substituting one cleanup-only scope for its sibling ran the
+wrong cleanup and skipped the mandatory one, the same harm the nesting rule was
+written to prevent, reached by a different one-field edit. The innermost handler
+of each frame is therefore anchored to the code position that frame is sitting
+at: the active frame's instruction pointer, or a parked frame's return site.
+Outer handlers of the same frame stay anchored to the inner one through the
+nesting chain, which makes them a consequence rather than a separate rule. A
+scope is live over `(push_ip, end_ip]` — a handler is never on the stack while
+its own `finally` body runs, and suspension inside a `catch` body is covered by
+the catch-cleanup scope's own extent.
+
 Decode-time validation covers what needs no compiled program — handler frame
 depths never shrink, per-frame operand and iterator depths never shrink, and the
 finally stack's handler and frame depths never shrink. Resume-time validation
-adds the scope-extent chain and the per-record range checks, so
+adds the scope-extent chain, the anchor, and the per-record range checks, so
 `Vm::resume_from` refuses these shapes as well as serde does; that matters
 because `VmContinuation`'s stacks are public API a host embedding can build in
 Rust without touching the wire.
@@ -252,14 +305,18 @@ Rust without touching the wire.
 | Unwinding across a builtin callback frame | `a_throw_escapes_a_builtin_map_callback` |
 | Thrown-slot aliasing and catch-binding copy semantics | `every_boundary_of_a_caught_throw_stays_capturable`; `mutating_the_catch_binding_leaves_the_thrown_slot_alone` |
 | Retry occurrence and replay identity | `effect_failure_catch_retry_is_a_new_occurrence` proves occurrences advance from 1 to 2 |
-| Malformed durable state | `malformed_exception_continuations_fail_closed` covers out-of-range handler, cross-function target, oversized stack base, invalid finally target, and frame-identity mismatch; `exception_wire_cases.rs` covers reordered handler stacks (cross-frame and same-frame), handler and finally targets that are not scope entries, and a non-monotonic finally stack |
+| Malformed durable state | `malformed_exception_continuations_fail_closed` covers out-of-range handler, cross-function target, oversized stack base, invalid finally target, and frame-identity mismatch; `exception_wire_cases.rs` covers reordered handler stacks (cross-frame and same-frame), handler and finally targets that are not scope entries, a non-monotonic finally stack, and handlers substituted for a sibling cleanup scope or an unrelated catch scope |
+| Internal invariant violations stay terminal | `an_invalid_exception_state_bypasses_a_surrounding_catch` |
 | Format-version fail-closed | `a_v2_shaped_continuation_fails_closed` |
 | Cross-process determinism and exactly-once cleanup | `independent_processes_dump_identical_exception_continuations`; `a_cleanup_chain_is_exactly_once_across_a_process_boundary` |
 | GC stress with live handler/error state | `effects_suspend_inside_finally_with_pending_errors_and_gc_stress` compares stress and non-stress continuation bytes and resumes the pending heap error |
 | Renderer refusal | `the_renderer_declines_try_and_throw_at_every_nesting` |
-| AST-only nesting bound | `stack_budget_ast_try_finally_at_parser_max_depth` pins the per-level cost of the new variants through the full pipeline on 2 MiB; `ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort` drives real depths in child processes, because an abort cannot be caught in-process |
+| AST-only nesting bound | `stack_budget_most_expensive_ast_variant_at_the_nesting_cap` pins the 2 MiB budget at the cap with the most expensive per-level variant; `stack_budget_ast_try_finally_at_parser_max_depth` pins the new variants at the parser's cap; `ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort` drives real depths in child processes, because an abort cannot be caught in-process |
+| The parser's cap stays inside the AST cap | `every_parsed_shape_the_parser_accepts_stays_inside_the_ast_cap` walks ten parsed shape families to the parser's refusal point and requires each accepted program to pass the depth check and to link; `the_worst_parsed_shape_stays_inside_the_ast_cap` reports the deepest tree the family can build |
+| Loop control placement | `loop_control_outside_a_loop_is_a_typed_error_not_a_panic`; `a_bare_continue_at_the_program_root_is_a_typed_error` |
+| Deferred process terminals | `finish_inside_a_try_does_not_run_the_finally`; `fail_inside_a_try_does_not_run_the_finally` pin the deferral in process mode |
 | Taxonomy and code stability | `every_runtime_error_display_is_exact` also pins every variant's guest-facing code through an exhaustive match |
-| Public API route | `embedding_lashlang_functions::ast_only_exceptions_compile_and_execute` compiles and executes only through public AST APIs |
+| Public API route | `embedding_lashlang_functions::ast_only_exceptions_compile_and_execute` compiles and executes only through public AST APIs; `ast_construction_is_validated_before_compilation`, `runtime_errors_carry_a_code_and_a_taxonomy` and `a_suspended_cleanup_chain_exposes_its_exception_state` exercise the layer's remaining public surface, and all of it is now inventoried in `docs/api-example-coverage.toml` |
 
 ### Existing test edits
 
@@ -290,6 +347,20 @@ red-side regression committed before each fix.
 | `ExecutionHost::is_cancelled` unwired in production | P3 | Wired; see the deferred item below for the end-to-end test |
 | `workflow_graph.rs` wildcard-swallows `Try`/`Throw` | P3 | Documented explicitly, with the renderer refusal pinned |
 
+A second, decisive fresh-eyes verification of that fix round returned BLOCK.
+Those findings are closed here, again red-side first.
+
+| Finding | Severity | Status |
+|---|---|---|
+| The AST cap refuses parsed programs the parser accepts | BLOCKER | Fixed (one measured budget; parser cap 40 to 30) |
+| A durable handler may name any scope in its function | BLOCKER | Fixed (scope anchored to a live code position) |
+| `Finish`/`Fail` inside a `try` skip the `finally` | P2 | Deliberate deferral, now documented and pinned |
+| `break`/`continue` in an AST-only function body panics `compile_ast` | P2 | Fixed (`validate_ast`) |
+| New public API absent from the coverage registry | P3 | Fixed (12 symbols registered and exercised) |
+| Breaking embedder changes carry no release note | P3 | Flagged below for the PR body |
+| `InvalidExceptionState` classified catchable | P3 | Fixed (uncatchable terminal) |
+| The code pin pins arms, not instances | P4 | Fixed (variant-count assertion) |
+
 `break`/`continue` inside a `finally` body is implemented to ECMA-262
 completion-replacement semantics rather than rejected at link time: the pending
 completion is discarded by `AbandonFinally` and the jump continues, and the
@@ -301,20 +372,47 @@ walk.
 | Command | Result |
 |---|---|
 | `cargo check --workspace --all-targets --locked` | Pass |
-| `cargo test --workspace` | Pass |
+| `cargo test --workspace` | Pass, 136 test targets, 0 failures, run to the final doc-test target |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Pass |
 | `cargo fmt --all --check` | Pass |
 | `python3 scripts/check_included_file_formatting.py` | Pass, 37 included files |
-| `python3 scripts/lint_docs.py` | Pass |
-| `bash scripts/check-rustdoc.sh` | Pass |
+| `python3 scripts/lint_docs.py` | Pass, 46 HTML pages and 42 registry pages |
+| `bash scripts/check-rustdoc.sh` | Pass, 599 documented public members, 0 missing |
 | `python3 scripts/check_test_quarantines.py` | Pass |
-| `python3 scripts/check_api_example_coverage.py` | Pass |
-| `just perf-guard` | Pass |
+| `python3 scripts/check_api_example_coverage.py` | Pass, 8,065 entries |
+| `just perf-guard` | Pass, both legs with `--enforce-budgets` on this worktree's own target dir: 297 lashlang perf results plus 1 instruction profile, every scenario `within_stack_budget` against 2 MiB, no budget breached |
 | `bash scripts/check-production-file-size.sh` | Pass |
 | `git diff --check` | Pass |
 
+## Release notes owed by the PR body
+
+Two commits make breaking embedder changes without a `Release-Notes:` trailer of
+their own, so the PR body must carry them:
+
+- `0606e076e` makes `compile_ast` and `LinkedModule::link` return a `Result`.
+  Every embedder constructing an AST has to handle the new typed error.
+- `0b872cf1d` changes `RuntimeError`'s borrowed `&'static str` payloads to
+  `Cow<'static, str>`, which breaks anyone matching on them against a literal,
+  and pins the guest-visible `code()` strings as an explicit contract.
+
+The nesting-limit change carries its own trailer on `3cfec80f9`.
+
 ## Deferred items
 
+- **`finish` and `fail` inside a `try` do not run the `finally`.** This is a
+  deliberate deferral, not an oversight. They are *process terminals*, not
+  function returns; ECMA-262's analogue (`process.exit`) skips `finally` too,
+  and deciding process-terminal-versus-completion semantics belongs in the layer
+  that has a real `return` to test against, not in one that has none.
+  **Constraint on FIG-1304/1305: a TypeScript `return` must lower to a real
+  function return and never to `Expr::Finish`.** If it does, cleanups are
+  dropped silently. `finish_inside_a_try_does_not_run_the_finally` and
+  `fail_inside_a_try_does_not_run_the_finally` pin the current behaviour in
+  process mode and name that constraint in their failure messages, so a lowering
+  that violates it trips red. (In *foreground* mode `fail` instead raises the
+  catchable `SessionProcessAdminOutsideProcess`, which does route through the
+  handler stack and run the finally — an artifact of the mode check, and one
+  more reason to pin rather than leave implicit.)
 - TS syntax and ECMA-262 lowering consume the AST/bytecode capability in a later
   layer.
 - Textual lashlang exception syntax remains absent by design.
