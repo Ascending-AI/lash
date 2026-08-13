@@ -961,11 +961,47 @@ mod tests {
             RuntimeError::ContextDependentIntrinsicMisdispatch {
                 context: "heap planning".into(),
             },
+            RuntimeError::MemoryLimitExceeded {
+                limit: 64,
+                attempted: 128,
+            },
+            RuntimeError::HostCancelled,
+            RuntimeError::DanglingHeapReference { id: 7 },
+            RuntimeError::HeapIdExhausted,
+            RuntimeError::UnexportedHeapReference {
+                id: 7,
+                context: "string formatting".into(),
+            },
+            RuntimeError::CyclicHostValue { id: 7 },
+            RuntimeError::UncaughtException {
+                value: crate::Value::Null,
+            },
+            RuntimeError::InvalidExceptionState {
+                reason: "test".into(),
+            },
         ];
 
         for error in &errors {
             assert_eq!(error.code(), expected_code(error), "{error:?}");
         }
+        // The exhaustive match in `expected_code` forces a new variant to
+        // declare a code, but nothing forces it into `errors`, so a variant
+        // could be classified and never instantiated. Counting distinct codes
+        // against the arm count closes that: a variant that is never built here
+        // fails this assertion.
+        let mut observed: Vec<&'static str> = errors.iter().map(RuntimeError::code).collect();
+        observed.sort_unstable();
+        observed.dedup();
+        assert_eq!(
+            observed.len(),
+            RUNTIME_ERROR_VARIANT_COUNT,
+            "every RuntimeError variant must be constructed and asserted here; \
+             missing: {:?}",
+            RUNTIME_ERROR_CODES
+                .iter()
+                .filter(|code| !observed.contains(code))
+                .collect::<Vec<_>>()
+        );
 
         for error in errors {
             let expected = match &error {
@@ -996,17 +1032,19 @@ mod tests {
                     "lashlang execution deadline of 20ms exceeded"
                 }
                 RuntimeError::MemoryLimitExceeded { .. } => {
-                    "lashlang logical memory limit exceeded"
+                    "lashlang logical memory limit of 64 bytes exceeded (allocation would reach 128 bytes)"
                 }
                 RuntimeError::HostCancelled => "lashlang execution was cancelled by the host",
-                RuntimeError::DanglingHeapReference { .. } => "dangling lashlang heap reference",
+                RuntimeError::DanglingHeapReference { .. } => "dangling lashlang heap reference 7",
                 RuntimeError::HeapIdExhausted => {
                     "lashlang heap allocation identity space exhausted"
                 }
                 RuntimeError::UnexportedHeapReference { .. } => {
-                    "lashlang heap reference 7 reached string formatting"
+                    "lashlang heap reference 7 reached string formatting before it was exported"
                 }
-                RuntimeError::CyclicHostValue { .. } => "lashlang heap value contains a cycle",
+                RuntimeError::CyclicHostValue { .. } => {
+                    "lashlang heap value contains a cycle through object 7"
+                }
                 RuntimeError::UndefinedVariable { .. } => "unknown name `name`",
                 RuntimeError::NonListIteration => "`for` expects a list or tuple",
                 RuntimeError::SessionProcessAdminOutsideProcess { .. } => {
@@ -1226,6 +1264,124 @@ mod tests {
             assert_eq!(error.to_string(), expected);
         }
     }
+
+    /// Every guest-facing code, in declaration order. The list is the pin's
+    /// completeness half: `expected_code` forces each variant to declare one,
+    /// this forces each declared one to be exercised.
+    const RUNTIME_ERROR_CODES: [&str; 110] = [
+        "FrameDepthExceeded",
+        "FunctionIndexOverflow",
+        "NonFunctionCall",
+        "FunctionArgumentCount",
+        "UnknownFunction",
+        "ClosureCaptureCountMismatch",
+        "FunctionValueAtHostBoundary",
+        "EffectInBuiltinCallback",
+        "InstructionBudgetExceeded",
+        "ExecutionDeadlineExceeded",
+        "MemoryLimitExceeded",
+        "HostCancelled",
+        "DanglingHeapReference",
+        "HeapIdExhausted",
+        "UnexportedHeapReference",
+        "CyclicHostValue",
+        "UndefinedVariable",
+        "NonListIteration",
+        "SessionProcessAdminOutsideProcess",
+        "ForegroundControlInsideProcess",
+        "UnknownBuiltin",
+        "CannotReadField",
+        "ToolResultExpected",
+        "ToolResultMissingValue",
+        "ToolResultInvalidOk",
+        "CannotIndex",
+        "ImmutableImageFields",
+        "ImmutableImageFieldsThrough",
+        "ImmutableTupleIndexes",
+        "ImmutableTupleIndexesThrough",
+        "CannotAssignField",
+        "CannotAssignThroughField",
+        "CannotAssignIndex",
+        "CannotAssignThroughIndex",
+        "InvalidListAssignmentIndex",
+        "InvalidArgumentCount",
+        "EmptyUnsupported",
+        "KeysUnsupported",
+        "ValuesUnsupported",
+        "SliceUnsupported",
+        "FormatTemplateMissing",
+        "FormatTemplateInvalid",
+        "LenUnsupported",
+        "ContainsUnsupported",
+        "InUnsupported",
+        "JoinUnsupported",
+        "PushUnsupported",
+        "ShapingListRequired",
+        "ShapingTextRequired",
+        "ShapingNumberRequired",
+        "ShapingComparableRequired",
+        "ShapingEmptyList",
+        "SortByRecordRequired",
+        "SortByEmptyPath",
+        "SortByMissingPath",
+        "InvalidRangeBound",
+        "InvalidRangeBoundType",
+        "InvalidIntegerDivisionArgument",
+        "InvalidIntegerDivisionArgumentType",
+        "ExpectedNumber",
+        "ExpectedNumberType",
+        "ExpectedText",
+        "InvalidIndex",
+        "InvalidCharacterIndex",
+        "IncompatibleSequenceConcatenation",
+        "ReadOnlyProjectedBinding",
+        "ValidateTypeLiteralRequired",
+        "NotTypeValue",
+        "UnwrappedToolResultFailed",
+        "UnwrappedModuleOperationFailed",
+        "MissingAssignmentIndex",
+        "MissingAssignmentField",
+        "MissingAssignmentKey",
+        "ListAssignmentIndexOutOfBounds",
+        "InvalidJson",
+        "EmptyGrepNeedle",
+        "Format",
+        "ZeroRangeStep",
+        "RangeTooLarge",
+        "IntegerDivisionByZero",
+        "UnknownProcess",
+        "ProcessNotExported",
+        "ProcessRefNotExported",
+        "ArtifactProcessMissing",
+        "ValidationFailed",
+        "StartSiteMissing",
+        "LinkedArtifactMissing",
+        "LinkedProcessNotExported",
+        "ProcessStartFailed",
+        "SleepFailed",
+        "WaitSignalFailed",
+        "SignalRunFailed",
+        "CancelFailed",
+        "ProcessEventFailed",
+        "PrintFailed",
+        "FinishFailed",
+        "FailFailed",
+        "ResourceBatchReceiverOutOfRange",
+        "ResourceBatchArgumentOutOfRange",
+        "InvalidResourceBatchResult",
+        "ResourceBatchFailed",
+        "ResourceBatchResultCount",
+        "AggregateAwaitLeafOutOfRange",
+        "AggregateAwaitValueOutOfRange",
+        "InvalidAggregateAwaitRecordShape",
+        "VmStackUnderflow",
+        "MissingLoopState",
+        "ContextDependentIntrinsicMisdispatch",
+        "UncaughtException",
+        "InvalidExceptionState",
+    ];
+
+    const RUNTIME_ERROR_VARIANT_COUNT: usize = RUNTIME_ERROR_CODES.len();
 
     /// Guest-facing codes are a durable contract, so they are pinned here
     /// exhaustively: renaming a variant breaks this match and forces the

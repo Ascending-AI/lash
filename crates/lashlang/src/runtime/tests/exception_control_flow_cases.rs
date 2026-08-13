@@ -623,3 +623,62 @@ async fn a_suspended_cleanup_chain_resumes_with_the_original_error() {
         Err(RuntimeError::LenUnsupported)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Process terminals inside a protected region.
+//
+// `finish` and `fail` end the process; they are not function returns, and
+// ECMA's analogue (`process.exit`) skips `finally` too. FIG-1303 defers the
+// question deliberately rather than deciding process-terminal-vs-completion
+// semantics in a layer with no `return` to test against. These tests pin the
+// current behaviour so the FIG-1304/1305 constraint — a TypeScript `return`
+// must lower to a real function return, never to `Expr::Finish` — trips a red
+// test if it is ever violated, instead of silently dropping cleanups.
+// ---------------------------------------------------------------------------
+
+async fn control_flow_terminal_cleanups(terminal: Expr) -> (String, usize) {
+    let host = ExceptionRecordingHost::default();
+    let program = Program::block(vec![exception_try(
+        terminal,
+        None,
+        Some(exception_resource_call(
+            "echo",
+            Expr::String("cleanup".into()),
+        )),
+    )]);
+    let compiled = compile_program(&program);
+    let slots = SlotState::from_globals(
+        Record::new(),
+        &compiled.chunk.slot_names,
+        &ProjectedBindings::new(),
+    );
+    let mut vm = Vm::new_with_mode(&compiled.chunk, slots, &host, ExecutionMode::Process);
+    let outcome = format!("{:?}", vm.run_for_mode().await);
+    let cleanups = host.operations.lock_recover().len();
+    (outcome, cleanups)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn finish_inside_a_try_does_not_run_the_finally() {
+    let (outcome, cleanups) =
+        control_flow_terminal_cleanups(Expr::Finish(Box::new(Expr::String("done".into())))).await;
+    assert!(outcome.contains("Finished"), "{outcome}");
+    assert_eq!(
+        cleanups, 0,
+        "DEFERRED (FIG-1303): `finish` is a process terminal and skips the finally. \
+         If this is now 1, a lowering has started routing a return through `finish`; \
+         decide the semantics before changing this number."
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fail_inside_a_try_does_not_run_the_finally() {
+    let (outcome, cleanups) =
+        control_flow_terminal_cleanups(Expr::Fail(Box::new(Expr::String("bad".into())))).await;
+    assert!(outcome.contains("Failed"), "{outcome}");
+    assert_eq!(
+        cleanups, 0,
+        "DEFERRED (FIG-1303): `fail` is a process terminal and skips the finally. \
+         See `finish_inside_a_try_does_not_run_the_finally`."
+    );
+}
