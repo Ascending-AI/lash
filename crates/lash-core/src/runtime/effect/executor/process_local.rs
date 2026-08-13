@@ -158,26 +158,55 @@ impl ProcessLocalExecution {
                     )
                 })?;
                 let result = registry.append_event(&process_id, request).await?;
-                let ordinal = registry
-                    .count_events_through(
-                        &process_id,
-                        result.event.event_type.as_str(),
-                        result.event.sequence,
-                    )
-                    .await?;
-                let key = effect_controller
-                    .await_event_key(
-                        &crate::ExecutionScope::process(&process_id),
-                        crate::AwaitEventWaitIdentity::process_signal(
-                            &process_id,
-                            &signal_name,
-                            ordinal,
-                        ),
-                    )
-                    .await?;
-                let _ = effect_controller
-                    .resolve_await_event(&key, crate::Resolution::Ok(result.event.payload.clone()))
-                    .await?;
+                let waiting_ordinal =
+                    registry
+                        .get_process(&process_id)
+                        .await?
+                        .and_then(|record| match record.wait {
+                            Some(crate::WaitState {
+                                kind:
+                                    crate::WaitKind::Signal {
+                                        name,
+                                        event_type,
+                                        ordinal,
+                                        ..
+                                    },
+                                ..
+                            }) if name == signal_name && event_type == result.event.event_type => {
+                                Some(ordinal)
+                            }
+                            _ => None,
+                        });
+                let ordinal = match waiting_ordinal {
+                    Some(ordinal) => ordinal,
+                    None => {
+                        registry
+                            .count_events_through(
+                                &process_id,
+                                result.event.event_type.as_str(),
+                                result.event.sequence,
+                            )
+                            .await?
+                    }
+                };
+                if ordinal > 0 {
+                    let key = effect_controller
+                        .await_event_key(
+                            &crate::ExecutionScope::process(&process_id),
+                            crate::AwaitEventWaitIdentity::process_signal(
+                                &process_id,
+                                &signal_name,
+                                ordinal,
+                            ),
+                        )
+                        .await?;
+                    let _ = effect_controller
+                        .resolve_await_event(
+                            &key,
+                            crate::Resolution::Ok(result.event.payload.clone()),
+                        )
+                        .await?;
+                }
                 Ok(ProcessEffectOutcome::Signal {
                     event: Box::new(result.event),
                 })
@@ -193,5 +222,128 @@ impl ProcessLocalExecution {
                 })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TestProcessRegistryWriteExt as _;
+
+    #[tokio::test]
+    async fn signal_prefers_declared_wait_ordinal_when_event_count_diverges() {
+        let process_id = "declared-signal-ordinal";
+        let signal_name = "ready";
+        let event_type =
+            crate::runtime::process_signal_event_type(signal_name).expect("signal event type");
+        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        registry
+            .register_process(
+                crate::ProcessRegistration::new(
+                    process_id,
+                    crate::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    crate::RecoveryDisposition::ExternallyOwned,
+                    crate::ProcessProvenance::host(),
+                )
+                .with_extra_event_types([crate::ProcessEventType {
+                    name: event_type.clone(),
+                    payload_schema: crate::LashSchema::any(),
+                    semantics: crate::ProcessEventSemanticsSpec::default(),
+                }]),
+            )
+            .await
+            .expect("register process");
+        registry
+            .set_process_wait(
+                process_id,
+                crate::WaitState {
+                    kind: crate::WaitKind::Signal {
+                        name: signal_name.to_string(),
+                        event_type: event_type.clone(),
+                        key: crate::runtime::process_signal_wait_key(process_id, signal_name, 7),
+                        ordinal: 7,
+                    },
+                    since_ms: 1,
+                },
+            )
+            .await
+            .expect("park process on deliberately divergent ordinal");
+
+        let controller = Arc::new(InlineRuntimeEffectController::default());
+        let payload = serde_json::json!({"value": "wake-seven"});
+        let outcome = controller
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    crate::RuntimeInvocation::effect(
+                        crate::RuntimeScope::new("runtime"),
+                        "signal-divergent-ordinal",
+                        crate::RuntimeEffectKind::Process,
+                        "signal-divergent-ordinal",
+                    ),
+                    crate::RuntimeEffectCommand::process(crate::ProcessCommand::Signal {
+                        process_id: process_id.to_string(),
+                        signal_name: signal_name.to_string(),
+                        signal_id: "signal-1".to_string(),
+                        request: crate::ProcessEventAppendRequest::new(
+                            event_type.clone(),
+                            payload.clone(),
+                        )
+                        .with_replay_key("signal-divergent-ordinal:1"),
+                    }),
+                ),
+                crate::RuntimeEffectLocalExecutor::processes(
+                    Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+                    None,
+                )
+                .with_process_effect_controller(controller.clone()),
+            )
+            .await
+            .expect("execute signal command");
+        assert!(matches!(
+            outcome,
+            crate::RuntimeEffectOutcome::Process {
+                result: crate::ProcessEffectOutcome::Signal { .. }
+            }
+        ));
+        assert_eq!(
+            registry
+                .count_events_through(process_id, &event_type, u64::MAX)
+                .await
+                .expect("count appended signal events"),
+            1,
+            "the event-count derivation must actually diverge from the declared wait ordinal"
+        );
+
+        let declared_key = controller
+            .await_event_key(
+                &crate::ExecutionScope::process(process_id),
+                crate::AwaitEventWaitIdentity::process_signal(process_id, signal_name, 7),
+            )
+            .await
+            .expect("derive declared wait key");
+        assert_eq!(
+            controller
+                .peek_await_event(&declared_key)
+                .await
+                .expect("read declared wait key"),
+            Some(crate::Resolution::Ok(payload))
+        );
+        let counted_key = controller
+            .await_event_key(
+                &crate::ExecutionScope::process(process_id),
+                crate::AwaitEventWaitIdentity::process_signal(process_id, signal_name, 1),
+            )
+            .await
+            .expect("derive event-count key");
+        assert_eq!(
+            controller
+                .peek_await_event(&counted_key)
+                .await
+                .expect("read event-count key"),
+            None,
+            "the fallback count must not override a matching declared WaitState ordinal"
+        );
     }
 }

@@ -22,6 +22,7 @@ const STANDARD_TRANSCRIPT_ACTOR: &str = "standard";
 #[derive(Clone, Copy, Debug)]
 struct StandardProtocolScenarioCoverage {
     test_name: &'static str,
+    declared_test: fn(),
     display_name: &'static str,
     owned_invariant: &'static str,
 }
@@ -30,6 +31,7 @@ macro_rules! standard_protocol_coverage {
     ($test_fn:ident, $display_name:literal, $owned_invariant:literal) => {
         StandardProtocolScenarioCoverage {
             test_name: stringify!($test_fn),
+            declared_test: $test_fn,
             display_name: $display_name,
             owned_invariant: $owned_invariant,
         }
@@ -99,6 +101,7 @@ fn standard_protocol_scenario_coverage_metadata_is_unique_and_complete() {
     assert_eq!(STANDARD_PROTOCOL_SCENARIO_COVERAGE.len(), 9);
     let mut names = BTreeSet::new();
     for coverage in STANDARD_PROTOCOL_SCENARIO_COVERAGE {
+        let _declared_test = coverage.declared_test;
         assert!(
             coverage
                 .test_name

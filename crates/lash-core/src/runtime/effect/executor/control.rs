@@ -455,13 +455,53 @@ pub(crate) mod facade_ops {
     ///
     /// This is not integrator surface, carries no stability promise, and exists
     /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    #[async_trait::async_trait]
     pub trait ScopedEffectControllerFacadeOps {
         fn execution_scope(&self) -> &ExecutionScope;
+
+        /// Executes one facade-owned process effect while making this controller
+        /// available to the local process command itself. Borrowed controllers
+        /// are proxied across the process task boundary; shared controllers can
+        /// be passed through directly.
+        #[doc(hidden)]
+        async fn execute_process_effect(
+            &self,
+            envelope: RuntimeEffectEnvelope,
+            local_executor: RuntimeEffectLocalExecutor<'static>,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
     }
 
+    #[async_trait::async_trait]
     impl ScopedEffectControllerFacadeOps for ScopedEffectController<'_> {
         fn execution_scope(&self) -> &ExecutionScope {
             &self.scope
+        }
+
+        async fn execute_process_effect(
+            &self,
+            envelope: RuntimeEffectEnvelope,
+            local_executor: RuntimeEffectLocalExecutor<'static>,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+            let controller = self.controller();
+            let (owned_controller, task_requests) = if let Some(owned) = self.owned_controller() {
+                (owned, None)
+            } else {
+                let (proxy, requests) =
+                    EffectTaskController::scoped(controller, self.execution_scope().clone())?;
+                (
+                    proxy
+                        .owned_controller()
+                        .expect("effect-task proxy owns its controller"),
+                    Some(requests),
+                )
+            };
+            let local_executor = local_executor.with_process_effect_controller(owned_controller);
+            if let Some(task_requests) = task_requests {
+                drive_effect_controller_task(controller, envelope, local_executor, task_requests)
+                    .await
+            } else {
+                controller.execute_effect(envelope, local_executor).await
+            }
         }
     }
 }
