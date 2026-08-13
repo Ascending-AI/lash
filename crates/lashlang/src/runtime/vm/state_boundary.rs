@@ -1,3 +1,5 @@
+use crate::runtime::CompilationDialect;
+
 impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Builds a VM from authored globals for an externally driven execution.
     ///
@@ -9,10 +11,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         host: &'a H,
     ) -> Result<Self, RuntimeError> {
         state.validate_program(program)?;
+        if program.dialect == CompilationDialect::Typescript {
+            state.reference_semantics = true;
+        }
         let projected = host.projected_bindings();
         let (globals, heap) = state.take_runtime();
         let slots = SlotState::from_globals(globals, &program.chunk.slot_names, &projected);
         let mut vm = Self::new_with_mode(&program.chunk, slots, host, host.execution_mode());
+        if state.reference_semantics {
+            vm.reference_semantics = true;
+        }
         vm.install_heap(heap);
         if host.profile_execution() {
             vm.enable_profile();

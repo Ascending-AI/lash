@@ -140,6 +140,7 @@ pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 pub struct CompiledProgram {
     pub(crate) chunk: Chunk,
     pub(crate) compile_stats: CompileStats,
+    pub(crate) dialect: CompilationDialect,
 }
 
 impl std::fmt::Debug for CompiledProgram {
@@ -147,6 +148,7 @@ impl std::fmt::Debug for CompiledProgram {
         f.debug_struct("CompiledProgram")
             .field("instruction_count", &self.chunk.code.len())
             .field("compile_stats", &self.compile_stats)
+            .field("dialect", &self.dialect)
             .finish()
     }
 }

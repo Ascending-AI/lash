@@ -9,6 +9,7 @@ impl<'de> Deserialize<'de> for VmContinuation {
         #[derive(Deserialize)]
         struct Wire {
             format_version: u32,
+            reference_semantics: bool,
             instruction_pointer: usize,
             active_function: Option<u32>,
             #[serde(deserialize_with = "continuation_serde::deserialize_values")]
@@ -43,6 +44,7 @@ impl<'de> Deserialize<'de> for VmContinuation {
         }
         let continuation = Self {
             format_version: wire.format_version,
+            reference_semantics: wire.reference_semantics,
             instruction_pointer: wire.instruction_pointer,
             active_function: wire.active_function,
             operand_stack: wire.operand_stack,

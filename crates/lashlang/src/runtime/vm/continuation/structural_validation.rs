@@ -293,14 +293,16 @@ pub(super) fn validate_continuation(
             }
         }
     }
-    continuation
-        .heap
-        .heap
-        .validate_persisted_graph(&continuation_forest_roots(continuation))
-        .map_err(|reason| ContinuationError::UnserializableValue {
-            location: format!("continuation heap: {reason}"),
-            variant: "invalid heap object graph",
-        })?;
+    let roots = continuation_forest_roots(continuation);
+    let validation = if continuation.reference_semantics {
+        continuation.heap.heap.validate_persisted_graph(&roots)
+    } else {
+        continuation.heap.heap.validate_persisted_forest(&roots)
+    };
+    validation.map_err(|reason| ContinuationError::UnserializableValue {
+        location: format!("continuation heap: {reason}"),
+        variant: "invalid heap object graph",
+    })?;
     Ok(())
 }
 

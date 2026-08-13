@@ -96,6 +96,7 @@ async fn a_non_monotonic_handler_stack_is_refused() {
     };
     let authored = VmContinuation {
         format_version: VM_CONTINUATION_FORMAT_VERSION,
+        reference_semantics: false,
         instruction_pointer: throw_ip,
         active_function: Some(0),
         operand_stack: vec![Value::String("boom".into())],

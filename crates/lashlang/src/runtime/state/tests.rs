@@ -35,6 +35,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             globals: Record::new(),
             runtime_globals,
             heap,
+            reference_semantics: false,
         };
         let bytes = snapshot
             .to_canonical_bytes()
@@ -65,6 +66,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
         globals: Record::new(),
         runtime_globals,
         heap,
+        reference_semantics: false,
     }
     .to_canonical_bytes()
     .expect("program-independent snapshot encoding accepts function metadata");
@@ -417,6 +419,7 @@ fn canonical_heap_with(
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: None,
         heap: Some(CanonicalHeap {
+            reference_semantics: false,
             next_id,
             allocation_counter,
             live_logical_bytes,
@@ -585,7 +588,7 @@ fn canonical_decode_rejects_counter_accounting_schedule_and_root_order() {
 }
 
 #[test]
-fn canonical_decode_accepts_shared_dags_and_rejects_cycles_and_unreachable_objects() {
+fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
     let id = HeapId::from_counter(1);
     let empty_bytes = super::super::heap::HeapObject::List(Vec::new()).logical_bytes();
     let shared = canonical_heap_with(
@@ -607,11 +610,11 @@ fn canonical_decode_accepts_shared_dags_and_rejects_cycles_and_unreachable_objec
         1,
         empty_bytes,
     );
-    let shared_snapshot = Snapshot::from_canonical_bytes(&named_bytes(&shared))
-        .expect("shared roots preserve one heap identity");
-    assert_eq!(
-        shared_snapshot.runtime_globals.get("a"),
-        shared_snapshot.runtime_globals.get("b")
+    assert!(
+        Snapshot::from_canonical_bytes(&named_bytes(&shared))
+            .expect_err("shared roots must be rejected")
+            .to_string()
+            .contains("must have one owner")
     );
 
     let cyclic_object = super::super::heap::HeapObject::List(vec![Value::Ref(id)]);
@@ -630,12 +633,13 @@ fn canonical_decode_accepts_shared_dags_and_rejects_cycles_and_unreachable_objec
         1,
         cyclic_object.logical_bytes(),
     );
-    // Host values remain acyclic even though aliases are accepted.
+    // A rooted self-cycle is refused as a second owner: the root holds the
+    // object and so does the object itself.
     assert!(
         Snapshot::from_canonical_bytes(&named_bytes(&cycle))
             .expect_err("cycles must be rejected")
             .to_string()
-            .contains("acyclic")
+            .contains("must have one owner")
     );
 
     // A cycle no root names has one owner per object and still must not
@@ -670,7 +674,8 @@ fn canonical_decode_accepts_shared_dags_and_rejects_cycles_and_unreachable_objec
             .contains("acyclic")
     );
 
-    // A repeated reference inside one root is a valid aliasing DAG.
+    // A repeated reference inside one root is a DAG, not a tree, and is
+    // refused even though only one root names it.
     let diamond_child = super::super::heap::HeapObject::List(Vec::new());
     let diamond_root =
         super::super::heap::HeapObject::List(vec![Value::Ref(second), Value::Ref(second)]);
@@ -698,8 +703,12 @@ fn canonical_decode_accepts_shared_dags_and_rejects_cycles_and_unreachable_objec
         2,
         diamond_root.logical_bytes() + diamond_child.logical_bytes(),
     );
-    Snapshot::from_canonical_bytes(&named_bytes(&diamond))
-        .expect("a within-root diamond must preserve shared identity");
+    assert!(
+        Snapshot::from_canonical_bytes(&named_bytes(&diamond))
+            .expect_err("a within-root diamond must be rejected")
+            .to_string()
+            .contains("must have one owner")
+    );
 
     let unreachable = canonical_heap_with(
         Vec::new(),

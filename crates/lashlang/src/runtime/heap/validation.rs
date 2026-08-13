@@ -203,6 +203,47 @@ impl Heap {
         }
         Ok(())
     }
+
+    /// Checks Lashlang's original exclusive-ownership forest invariant.
+    pub(crate) fn validate_persisted_forest(
+        &self,
+        roots: &PersistedRoots<'_>,
+    ) -> Result<(), String> {
+        let mut owners = BTreeMap::<HeapId, String>::new();
+        for (name, root) in &roots.durable {
+            for id in value_refs(root) {
+                claim_owner(self, &mut owners, id, format!("root `{name}`"))?;
+            }
+        }
+        for (parent, object) in self.objects_in_id_order() {
+            for id in object.child_refs() {
+                claim_owner(self, &mut owners, id, format!("object {}", parent.get()))?;
+            }
+        }
+        self.validate_persisted_graph(roots)
+    }
+}
+
+fn claim_owner(
+    heap: &Heap,
+    owners: &mut BTreeMap<HeapId, String>,
+    id: HeapId,
+    owner: String,
+) -> Result<(), String> {
+    heap.get(id)
+        .map_err(|_| format!("dangling heap reference {}", id.get()))?;
+    match owners.entry(id) {
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            entry.insert(owner);
+            Ok(())
+        }
+        std::collections::btree_map::Entry::Occupied(entry) => Err(format!(
+            "heap object {} must have one owner, but {} and {} both hold it",
+            id.get(),
+            entry.get(),
+            owner
+        )),
+    }
 }
 
 #[cfg(test)]

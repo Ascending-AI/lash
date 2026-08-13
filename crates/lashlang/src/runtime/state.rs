@@ -57,6 +57,7 @@ pub struct State {
     pub(super) globals: Record,
     pub(super) runtime_globals: Record,
     pub(super) heap: Heap,
+    pub(super) reference_semantics: bool,
 }
 
 impl PartialEq for State {
@@ -64,6 +65,7 @@ impl PartialEq for State {
         self.globals == other.globals
             && self.runtime_globals == other.runtime_globals
             && self.heap == other.heap
+            && self.reference_semantics == other.reference_semantics
     }
 }
 
@@ -180,6 +182,7 @@ impl State {
             globals: self.globals.clone(),
             runtime_globals: self.runtime_globals.clone(),
             heap,
+            reference_semantics: self.reference_semantics,
         }
     }
 
@@ -188,6 +191,7 @@ impl State {
             globals: snapshot.globals,
             runtime_globals: snapshot.runtime_globals,
             heap: snapshot.heap,
+            reference_semantics: snapshot.reference_semantics,
         }
     }
 
@@ -244,6 +248,7 @@ pub struct Snapshot {
     globals: Record,
     runtime_globals: Record,
     heap: Heap,
+    reference_semantics: bool,
 }
 
 impl PartialEq for Snapshot {
@@ -251,6 +256,7 @@ impl PartialEq for Snapshot {
         self.globals == other.globals
             && self.runtime_globals == other.runtime_globals
             && self.heap == other.heap
+            && self.reference_semantics == other.reference_semantics
     }
 }
 
@@ -260,6 +266,7 @@ impl Snapshot {
             globals,
             runtime_globals: Record::new(),
             heap: Heap::default(),
+            reference_semantics: false,
         }
     }
 
@@ -338,6 +345,7 @@ struct CanonicalSnapshot {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CanonicalHeap {
+    reference_semantics: bool,
     next_id: u64,
     allocation_counter: u64,
     live_logical_bytes: u64,
@@ -446,17 +454,29 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
         let runtime_globals = snapshot.runtime_globals.clone();
         let root_values = runtime_globals.values().cloned().collect::<Vec<_>>();
         heap.collect(root_values.iter());
-        // The writer checks the same forest invariant the reader enforces, in
+        // The writer checks the same ownership invariant the reader enforces, in
         // release builds too. A violation then fails here, at the encode that
         // introduced it, rather than in another process at a later cold
         // restore — and it can never be written to durable storage at all.
         let mut forest_roots = PersistedRoots::default();
         forest_roots.durable_all(runtime_globals.iter());
-        heap.validate_persisted_graph(&forest_roots)
-            .map_err(|reason| ContinuationError::UnserializableValue {
-                location: format!("snapshot heap: {reason}"),
-                variant: "shared heap object",
-            })?;
+        let reference_semantics = match heap.validate_persisted_forest(&forest_roots) {
+            Ok(()) => false,
+            Err(_) if snapshot.reference_semantics => {
+                heap.validate_persisted_graph(&forest_roots)
+                    .map_err(|reason| ContinuationError::UnserializableValue {
+                        location: format!("snapshot heap: {reason}"),
+                        variant: "shared heap object",
+                    })?;
+                true
+            }
+            Err(reason) => {
+                return Err(ContinuationError::UnserializableValue {
+                    location: format!("snapshot heap: {reason}"),
+                    variant: "shared heap object",
+                });
+            }
+        };
         drop(forest_roots);
         let mut roots = runtime_globals.iter().collect::<Vec<_>>();
         roots.sort_unstable_by_key(|(name, _)| *name);
@@ -464,6 +484,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
             version: LASHLANG_SNAPSHOT_VERSION,
             globals: None,
             heap: Some(CanonicalHeap {
+                reference_semantics,
                 next_id: heap.next_id,
                 allocation_counter: heap.allocations(),
                 live_logical_bytes: heap.live_logical_bytes(),
@@ -504,9 +525,11 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                 globals: bindings_into_record(globals, "globals")?,
                 runtime_globals: Record::new(),
                 heap: Heap::default(),
+                reference_semantics: false,
             }),
             (None, Some(heap_wire)) => {
                 let CanonicalHeap {
+                    reference_semantics,
                     next_id,
                     allocation_counter,
                     live_logical_bytes,
@@ -532,8 +555,12 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                 .map_err(SnapshotDecodeError::InvalidEncoding)?;
                 let mut forest_roots = PersistedRoots::default();
                 forest_roots.durable_all(runtime_globals.iter());
-                heap.validate_persisted_graph(&forest_roots)
-                    .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                let validation = if reference_semantics {
+                    heap.validate_persisted_graph(&forest_roots)
+                } else {
+                    heap.validate_persisted_forest(&forest_roots)
+                };
+                validation.map_err(SnapshotDecodeError::InvalidEncoding)?;
                 // The heap form's depth lives in its chain of objects, not in
                 // its MessagePack nesting, so the structural guard cannot see
                 // it. Checking here — before anything materializes a root —
@@ -561,6 +588,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     globals,
                     runtime_globals,
                     heap,
+                    reference_semantics,
                 })
             }
             _ => Err(SnapshotDecodeError::InvalidEncoding(
@@ -658,6 +686,7 @@ fn validate_canonical_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeErro
 
 const SNAPSHOT_FIELDS: &[&str] = &["version", "globals", "heap"];
 const HEAP_FIELDS: &[&str] = &[
+    "reference_semantics",
     "next_id",
     "allocation_counter",
     "live_logical_bytes",

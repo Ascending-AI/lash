@@ -52,6 +52,7 @@ impl TestSuspension {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct VmContinuation {
     pub format_version: u32,
+    pub reference_semantics: bool,
     pub instruction_pointer: usize,
     pub active_function: Option<u32>,
     #[serde(
@@ -722,6 +723,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap: Self::new_heap(host),
             heap_initialized: false,
             extras_heapified: false,
+            reference_semantics: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -757,6 +759,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap: Self::new_heap(host),
             heap_initialized: false,
             extras_heapified: false,
+            reference_semantics: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -881,8 +884,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             })
             .collect::<Result<Vec<_>, ContinuationError>>()?;
 
-        let continuation = VmContinuation {
+        let mut continuation = VmContinuation {
             format_version: VM_CONTINUATION_FORMAT_VERSION,
+            reference_semantics: false,
             instruction_pointer: self.ip,
             active_function: self
                 .active_function
@@ -915,7 +919,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_execution_elapsed: self.active_execution_elapsed,
             heap: VmHeapContinuation::new(self.heap.clone()),
         };
-        validate_continuation(&continuation)?;
+        if let Err(error) = validate_continuation(&continuation) {
+            if !self.reference_semantics {
+                return Err(error);
+            }
+            continuation.reference_semantics = true;
+            validate_continuation(&continuation)?;
+        }
         Ok(continuation)
     }
 
@@ -1119,6 +1129,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             },
             heap_initialized: true,
             extras_heapified: false,
+            reference_semantics: continuation.reference_semantics,
             // A resumed VM records assignments from here on. Continuations are
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are
@@ -1138,6 +1149,7 @@ mod tests {
     fn empty_continuation(heap: Heap) -> VmContinuation {
         VmContinuation {
             format_version: VM_CONTINUATION_FORMAT_VERSION,
+            reference_semantics: false,
             instruction_pointer: 0,
             active_function: None,
             operand_stack: Vec::new(),
@@ -1182,7 +1194,7 @@ mod tests {
         let error = validate_continuation(&continuation)
             .expect_err("a cyclic continuation must be rejected");
         assert!(
-            error.to_string().contains("must be acyclic"),
+            error.to_string().contains("must have one owner"),
             "unexpected rejection: {error}"
         );
 

@@ -52,6 +52,7 @@ pub fn compile_ast_with_dialect(
     Ok(CompiledProgram {
         chunk,
         compile_stats,
+        dialect,
     })
 }
 
@@ -60,6 +61,7 @@ pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
     CompiledProgram {
         chunk,
         compile_stats,
+        dialect: super::CompilationDialect::Lashlang,
     }
 }
 
@@ -81,6 +83,7 @@ pub fn compile_linked_with_dialect(
     CompiledProgram {
         chunk,
         compile_stats,
+        dialect,
     }
 }
 
@@ -145,6 +148,7 @@ pub fn compile_linked_process(
     Ok(CompiledProgram {
         chunk,
         compile_stats,
+        dialect: super::CompilationDialect::Lashlang,
     })
 }
 
@@ -183,6 +187,7 @@ pub fn compile_module_artifact_process(
     Ok(CompiledProgram {
         chunk,
         compile_stats,
+        dialect: super::CompilationDialect::Lashlang,
     })
 }
 
@@ -250,6 +255,9 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
     projected: &ProjectedBindings,
     scratch: Option<&mut ExecutionScratch>,
 ) -> Result<ExecutionOutcome, RuntimeError> {
+    if program.dialect == super::CompilationDialect::Typescript {
+        state.reference_semantics = true;
+    }
     if let Some(scratch) = scratch {
         let (globals, heap) = state.take_runtime();
         let slots = SlotState::from_globals_with_scratch(
@@ -265,6 +273,9 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
             scratch,
             host.execution_mode(),
         );
+        if state.reference_semantics {
+            vm.reference_semantics = true;
+        }
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.recycle_into_state_parts(scratch)?;
@@ -274,6 +285,9 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         let (globals, heap) = state.take_runtime();
         let slots = SlotState::from_globals(globals, &program.chunk.slot_names, projected);
         let mut vm = Vm::new_with_mode(&program.chunk, slots, host, host.execution_mode());
+        if state.reference_semantics {
+            vm.reference_semantics = true;
+        }
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.into_state_parts()?;

@@ -236,6 +236,7 @@ pub struct Vm<'a, H> {
     /// Whether the extra-globals record has been imported into the heap. It is
     /// written once, when the VM is built or restored, and only read after that.
     extras_heapified: bool,
+    pub(crate) reference_semantics: bool,
     assigned_globals: std::collections::BTreeSet<String>,
     #[cfg(test)]
     test_suspension: TestSuspension,
