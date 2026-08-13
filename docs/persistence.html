@@ -60,7 +60,7 @@
       </div>
       <aside class="contract">
         <strong>Start fresh when the version moves</strong>
-        <p>This release uses SQLite durable-core version 35, process-registry version 23, effect version 9, and trigger version 5, plus Postgres component version 49. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
+        <p>This release uses SQLite durable-core version 36, process-registry version 23, effect version 9, and trigger version 5, plus Postgres component version 50. Versions 36 and 50 persist the runtime-minted executor discriminator on session lease rows. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
       </aside>
       <aside class="contract">
         <strong>Provisioning Postgres yourself</strong>
@@ -106,7 +106,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
     </div>
 
     <div class="section" id="wiring">
@@ -188,7 +188,7 @@ lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()
+    .build(crate::example_process_owner())
 }</code></pre>
       <p><code>PostgresStorage::connect</code> creates the exact supported schema on an empty database and rejects mismatched component versions. Runtime checkpoints, pending turn inputs, queued work, process rows, triggers, attachment manifests, and Lashlang artifacts live in Postgres. Attachment bytes live in S3-compatible object storage under content-addressed keys; MinIO uses the same implementation with an endpoint URL and path-style mode.</p>
       <p><code>PostgresStoreConfig</code> applies connection-level backstops by default: a 10 second <code>lock_timeout</code> and a 30 second <code>statement_timeout</code>. Mutating session work first claims the advisory session execution lease; session commits perform the head-revision CAS and any claim-ownership checks in one transaction. Postgres serialization failures, deadlocks, and lock-acquisition timeouts on the backstop write surface as retryable conflicts so hosts can reload and retry instead of treating ordinary write contention as an opaque backend failure.</p>
@@ -281,7 +281,7 @@ if let Some(process_report) = report.process {
         </div>
         <div class="listing__row">
           <div class="listing__label">lease state</div>
-          <div class="listing__body"><p><code>core.session_lease_diagnostics(session_id)</code> for a session's execution lane (holder identity, generation, expiry, renewal state), and <code>core.processes()</code> for a process lease. Both are snapshot reads that never mutate the row; the commit compare-and-set stays the authority, so no host behavior may be gated on either. <a href="./operations.html#stuck-turn">Triaging a stuck turn</a> is the procedure they serve.</p></div>
+          <div class="listing__body"><p><code>core.session_lease_diagnostics(session_id)</code> for a session's execution lane (owner id, boot incarnation, executor id, generation, expiry, renewal state), and <code>core.processes()</code> for a process lease. Both are snapshot reads that never mutate the row; the commit compare-and-set stays the authority, so no host behavior may be gated on either. <a href="./operations.html#stuck-turn">Triaging a stuck turn</a> is the procedure they serve.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">process state</div>
@@ -345,23 +345,26 @@ match outcome {
         <h2>Session Lane And CAS</h2>
         <p>At most one mutating runner holds the advisory session execution lease at a time. Stores check the expected head revision in the same transaction as the atomic commit; mismatch rolls back with no partial state.</p>
       </div>
-      <p>Concurrent turns from two workers on the same session id normally resolve at the lease boundary. A busy session returns <code>session_execution_busy</code> before the turn starts; a runner may return <code>session_execution_lease_lost</code> when an operation observes handoff. Lease loss alone does not veto the turn driver's current-head commit, but it does veto a nested plugin or observer commit borrowing that held lane: the borrowed fence is checked before receipt replay or mutation. If the head CAS backstop fires, the loser receives a turn-level error such as <code>store_commit_failed</code>; these are not <code>TurnStop</code> variants.</p>
-      <p>Durable workflow hosts that already serialize one logical invocation can open the session with <code>SessionBuilder::session_execution_owner(LeaseOwnerIdentity::opaque(...))</code>. Reentry requires the same owner id and the same incarnation id; a retry that represents a new process incarnation must claim or reclaim through the fenced lease path instead of clearing the old owner. Local CLI runtimes attach process liveness metadata so a crashed same-host holder can be reclaimed quickly, while opaque or cross-host holders fall back to the TTL backstop. Composing owner identity, lease timings, and drain into a failover policy is covered in <a href="./operations.html">running in production</a>.</p>
+      <p>Concurrent turns from two workers on the same session id normally serialize at the lease boundary. If a lane-less persistence boundary observes a busy holder after its work is already complete, it proceeds to the session-head CAS instead of discarding that work; a stale head returns a typed conflict with no partial write. Lease loss still vetoes a nested plugin or observer commit borrowing a held lane, because that write claims the holder's authority. Durable effect replay uses its separate authoritative lease lane and is unchanged.</p>
+      <p>Every host supplies <code>LashCoreBuilder::build</code> a <code>LeaseOwnerIdentity</code>: the owner id is stable per worker or process, never per turn, and the incarnation changes once per boot. Every runtime open mints a fresh executor id below that host identity. Reentry requires the exact triple <code>(owner_id, incarnation_id, executor_id)</code>; a parked runtime resumed by that same open retains its executor, while a second open in the same process is a distinct Busy claimant. The core carries the host owner into every session runtime it constructs.</p>
       <pre data-lang="rust" data-snippet="persistence#commit-conflict-retry"><code>use lash::runtime::RuntimeErrorCode;
 
 match session.turn(input).run().await {
     Ok(turn) =&gt; persist(turn)?,
-    Err(lash::EmbedError::Runtime(err))
-        if err.code == RuntimeErrorCode::SessionExecutionBusy =&gt;
-    {
-        retry_later(err)?;
-    }
     Err(lash::EmbedError::Runtime(err))
         if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =&gt;
     {
         // The durable lane moved to another owner before commit: reopen and retry.
         let session = core.session(chat_id).open().await?;
         retry_or_report(err, session)?;
+    }
+    Err(lash::EmbedError::Runtime(err))
+        if err.code == RuntimeErrorCode::SessionExecutionLaneBusy =&gt;
+    {
+        // A durable workflow controller's queued drain found the lane held by
+        // a live executor and stopped waiting: nothing was consumed, so let
+        // the engine's retry policy re-drive this invocation unchanged.
+        retry_later(err)?;
     }
     Err(lash::EmbedError::Runtime(err))
         if err.code == RuntimeErrorCode::StoreCommitContended =&gt;
@@ -376,6 +379,7 @@ match session.turn(input).run().await {
     }
     Err(other) =&gt; bail!(other),
 }</code></pre>
+      <p>The retry ladder distinguishes authority loss from safe redrive: <code>session_execution_lease_lost</code> requires reopening durable state, while <code>session_execution_lane_busy</code> means a durable queued drain consumed nothing and left its row pending, so the workflow engine may retry the same invocation unchanged. <code>store_commit_contended</code> is likewise safe to retry unchanged; an ambiguous <code>store_commit_failed</code> requires reload before retry.</p>
       <p>Hosts expecting concurrent access should serialize at their layer or re-open the session after conflict and decide how to merge intent.</p>
     </div>
 
@@ -437,7 +441,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;
+    .build(crate::example_process_owner())?;
 
 // Per request: open a session keyed by the app's chat id.
 let session = core.session(chat_id).open().await?;</code></pre>

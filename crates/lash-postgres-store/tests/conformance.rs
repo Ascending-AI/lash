@@ -523,6 +523,7 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         .try_claim_session_execution_lease_with_token(
             session_id,
             &owner,
+            "postgres-conformance-executor",
             &lash_core::LeaseClaimNonce::new(),
             120_000,
         )
@@ -605,7 +606,7 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
     let store = Arc::new(storage.session_store(session_id));
     let owner = lash_core::LeaseOwnerIdentity::opaque("renewal-owner", "renewal-incarnation");
     let predecessor = store
-        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .try_claim_session_execution_lease(session_id, &owner, "renewal-executor", 120_000)
         .await
         .expect("claim renewal predecessor")
         .acquired()
@@ -624,9 +625,16 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
 
     let claim_store = Arc::clone(&store);
     let claim_owner = owner.clone();
+    let claim_executor_id = predecessor.executor_id.clone();
     let claim = tokio::spawn(async move {
         claim_store
-            .try_claim_session_execution_lease(session_id, &claim_owner, 120_000)
+            .try_claim_session_execution_lease_with_token(
+                session_id,
+                &claim_owner,
+                &claim_executor_id,
+                &lash_core::LeaseClaimNonce::for_testing("postgres-concurrent-renewal-successor"),
+                120_000,
+            )
             .await
     });
     wait_for_session_lease_advisory_waiters(storage.pool(), 1).await;
@@ -1075,7 +1083,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("enqueue original wake");
     let owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
     let lease = match store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(session_id, &owner, "wake-executor-1", 60_000)
         .await
         .expect("claim target session")
     {
@@ -1268,7 +1276,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("enqueue second sequence after source lock release");
     let second_owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
     let second_lease = store
-        .try_claim_session_execution_lease(session_id, &second_owner, 60_000)
+        .try_claim_session_execution_lease(session_id, &second_owner, "wake-executor-2", 60_000)
         .await
         .expect("claim target for second sequence")
         .acquired()
@@ -1464,7 +1472,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("record turn-owned intent");
     let owner = lash_core::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
     let lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &owner, 60_000)
+        .try_claim_session_execution_lease(SESSION_ID, &owner, "clock-executor", 60_000)
         .await
         .expect("claim clock test lease")
         .acquired()
@@ -1525,7 +1533,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 49, "Postgres component schema pin");
+    assert_eq!(current_version, 50, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'

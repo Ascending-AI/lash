@@ -110,7 +110,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
         ))
         .store_factory(store_factory.clone())
         .trace_jsonl_path(trace_path.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
     session
@@ -233,7 +233,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
                 lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
             ))
             .store_factory(store_factory.clone())
-            .build()?;
+            .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     reopened_session
         .turn(TurnInput::text("continue after compaction"))
@@ -274,7 +274,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         ))
         .store_factory(store_factory.clone())
         .trace_jsonl_path(trace_path.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
     session
@@ -373,7 +373,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         ))
         .plugin(Arc::new(injection_plugin))
         .store_factory(store_factory.clone())
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
     for ordinal in 0..=THRESHOLD_TURNS {
@@ -434,7 +434,7 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
         lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
     ))
     .store_factory(store_factory.clone())
-    .build()?;
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
     let primed = session

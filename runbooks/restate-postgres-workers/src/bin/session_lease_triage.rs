@@ -16,9 +16,9 @@
 //!   that is the case a takeover reported from the loser's renewal path missed
 //!   entirely.
 //! * `livelock`: the cause the procedure names for repeated CAS rejections: two
-//!   concurrent writers on one session under a single explicit
-//!   `session_execution_owner`, so the second reenters the first's lease instead
-//!   of being rejected as busy, and the loser's commit dies on the head CAS.
+//!   concurrent runtime opens on one session under one host owner. Their owner
+//!   and boot incarnation match, their runtime-minted executor ids differ, the
+//!   busy claimant stays lane-less, and the loser's commit dies on the head CAS.
 //!
 //! Fault injection is deliberate and uses only public store surface. The
 //! `takeover` phase seeds an abandoned lease row (TTL zero, claimed through the
@@ -263,13 +263,12 @@ impl Backend {
         })
     }
 
-    /// A core wired for one deterministic turn. `owner` is the explicit
-    /// session-execution identity; the livelock phase depends on two writers
-    /// sharing one, which is exactly the misconfiguration the docs name.
+    /// A core wired for one deterministic turn. The owner is mandatory and
+    /// belongs to the core's worker/process lifetime.
     fn core(
         &self,
         provider: lash::provider::ProviderHandle,
-        owner: Option<LeaseOwnerIdentity>,
+        owner: LeaseOwnerIdentity,
         timings: lash::durability::LeaseTimings,
     ) -> Result<TurnCore> {
         let attachments = tempfile::tempdir().context("attachment dir for a triage turn")?;
@@ -304,11 +303,10 @@ impl Backend {
             })
             .lease_timings(timings)
             .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
-            .build()
+            .build(owner)
             .context("build a session-lease-triage core")?;
         Ok(TurnCore {
             core,
-            owner,
             _attachments: attachments,
         })
     }
@@ -326,17 +324,13 @@ impl Backend {
 
 struct TurnCore {
     core: lash::LashCore,
-    owner: Option<LeaseOwnerIdentity>,
     _attachments: tempfile::TempDir,
 }
 
 impl TurnCore {
     async fn open(&self, session_id: &str) -> Result<lash::LashSession> {
-        let mut builder = self.core.session(session_id);
-        if let Some(owner) = self.owner.clone() {
-            builder = builder.session_execution_owner(owner);
-        }
-        builder
+        self.core
+            .session(session_id)
             .open()
             .await
             .with_context(|| format!("open session `{session_id}`"))
@@ -458,6 +452,7 @@ fn reading(diagnostics: Option<&SessionLeaseDiagnostics>) -> Value {
         "expired_for_ms": expired_for_ms,
         "holder_owner_id": holder.map(|holder| holder.owner.owner_id.clone()),
         "holder_incarnation_id": holder.map(|holder| holder.owner.incarnation_id.clone()),
+        "holder_executor_id": holder.map(|holder| holder.executor_id.clone()),
         "fencing_token": holder.map(|holder| holder.generation),
         "claimed_at_epoch_ms": holder.map(|holder| holder.claimed_at_epoch_ms),
         "expires_at_epoch_ms": holder.map(|holder| holder.expires_at_epoch_ms),
@@ -485,7 +480,7 @@ async fn provider_hang(
 
     let running = backend.core(
         provider.handle.clone(),
-        Some(holder.clone()),
+        holder.clone(),
         observable_timings(),
     )?;
     let session = running.open(&session_id).await?;
@@ -500,7 +495,11 @@ async fn provider_hang(
 
     // A second core sharing only the durable store: the operator's vantage
     // point, not the running worker's.
-    let observer = backend.core(scripted_provider(), None, quiet_timings())?;
+    let observer = backend.core(
+        scripted_provider(),
+        owner("triage-observer", "triage-observer:boot-1"),
+        quiet_timings(),
+    )?;
     let claimed = capture
         .await_event("session_execution_lease.acquired", GATE_TIMEOUT)
         .await?;
@@ -586,11 +585,7 @@ async fn lease_takeover(
 
     // Materialize the session with one committed turn, so the lane belongs to a
     // real session rather than a bare row.
-    let seed = backend.core(
-        scripted_provider(),
-        Some(successor.clone()),
-        quiet_timings(),
-    )?;
+    let seed = backend.core(scripted_provider(), successor.clone(), quiet_timings())?;
     let seed_session = seed.open(&session_id).await?;
     seed_session
         .turn(lash::TurnInput::text(TURN_PROMPT))
@@ -604,7 +599,7 @@ async fn lease_takeover(
     // through the store, so there is no guard and no renewal loop behind it.
     let store = backend.store(&session_id).await?;
     let abandoned = store
-        .try_claim_session_execution_lease(&session_id, &abandoned_by, 0)
+        .try_claim_session_execution_lease(&session_id, &abandoned_by, "lease-takeover-executor", 0)
         .await
         .map_err(anyhow::Error::msg)
         .context("seed the abandoned lane")?
@@ -612,7 +607,11 @@ async fn lease_takeover(
         .context("an unheld lane is acquirable")?;
     capture.reset();
 
-    let observer = backend.core(scripted_provider(), None, quiet_timings())?;
+    let observer = backend.core(
+        scripted_provider(),
+        owner("triage-observer", "triage-observer:boot-1"),
+        quiet_timings(),
+    )?;
     let before = observer
         .core
         .session_lease_diagnostics(&session_id)
@@ -620,11 +619,7 @@ async fn lease_takeover(
         .map_err(anyhow::Error::msg)?;
 
     // A real turn sweeps the lane. Its claim is the takeover.
-    let sweeper = backend.core(
-        scripted_provider(),
-        Some(successor.clone()),
-        quiet_timings(),
-    )?;
+    let sweeper = backend.core(scripted_provider(), successor.clone(), quiet_timings())?;
     let sweeper_session = sweeper.open(&session_id).await?;
     let swept = sweeper_session
         .turn(lash::TurnInput::text(TURN_PROMPT))
@@ -677,11 +672,10 @@ async fn lease_takeover(
 ///
 /// One collision is ordinary contention and proves nothing; the docs diagnose
 /// *repeated* `commit_cas_rejected` with `lease_lost = false` as livelock, so the
-/// harness has to produce recurrence. Sharing an identity is what makes it
-/// recur: the second writer reenters the first's lease instead of being rejected
-/// as busy, so nothing serializes the pair and every round collides again. Each
-/// round the loser reloads and retries, exactly as a retry-on-conflict host does,
-/// which is the shape that turns contention into a cycle.
+/// harness has to produce recurrence. The host owner is shared, but each runtime
+/// open mints a distinct executor id. The second writer therefore observes Busy
+/// and remains lane-less; recurrence comes from routing/retry policy sending the
+/// pair back to the same head, never from lease reentry.
 async fn commit_cas_livelock(
     backend: &Backend,
     capture: &LeaseTraceCapture,
@@ -703,11 +697,10 @@ async fn commit_cas_livelock(
         let stalled_provider = StallingProvider::new();
         let stalled_core = backend.core(
             stalled_provider.handle.clone(),
-            Some(shared.clone()),
+            shared.clone(),
             quiet_timings(),
         )?;
-        let racer_core =
-            backend.core(scripted_provider(), Some(shared.clone()), quiet_timings())?;
+        let racer_core = backend.core(scripted_provider(), shared.clone(), quiet_timings())?;
         let stalled_session = stalled_core.open(&session_id).await?;
         let racer_session = racer_core.open(&session_id).await?;
 
@@ -725,8 +718,8 @@ async fn commit_cas_livelock(
             bail!("round {round}: the stalled turn never reached the provider: {settled:?}");
         }
 
-        // The peer reenters the same lease (shared identity, so no busy rejection)
-        // and publishes first.
+        // The peer has the same host owner but a distinct runtime executor. It
+        // observes Busy, remains lane-less, and publishes first under head CAS.
         let racer = racer_session
             .turn(lash::TurnInput::text(TURN_PROMPT))
             .turn_id(format!("lease-triage-livelock-{round}-racer"))
@@ -764,7 +757,11 @@ async fn commit_cas_livelock(
     }
 
     let rejections = capture.named("session_execution_lease.commit_cas_rejected");
-    let observer = backend.core(scripted_provider(), None, quiet_timings())?;
+    let observer = backend.core(
+        scripted_provider(),
+        owner("triage-observer", "triage-observer:boot-1"),
+        quiet_timings(),
+    )?;
     let after = observer
         .core
         .session_lease_diagnostics(&session_id)

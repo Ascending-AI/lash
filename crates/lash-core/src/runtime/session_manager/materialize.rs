@@ -23,8 +23,11 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
         plugins,
         crate::runtime::lifecycle::RuntimePersistenceBindings::new(store_binding.clone()),
         current.host.process_registry.clone(),
-        plan.initial_runtime_state.clone(),
-        plan.relation.clone(),
+        crate::runtime::lifecycle::RuntimeSessionAssembly::new(
+            plan.initial_runtime_state.clone(),
+            plan.relation.clone(),
+            current.runtime_lease_owner.clone(),
+        ),
     )
     .await
     .map_err(|err| crate::PluginError::Session(err.to_string()))?;

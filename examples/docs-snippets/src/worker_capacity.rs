@@ -124,7 +124,7 @@ mod tests {
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))
-            .build()
+            .build(crate::example_process_owner())
             .expect("build core with custom worker capacity");
         use lash::process::{
             ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,

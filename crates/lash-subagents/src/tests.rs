@@ -929,6 +929,7 @@ async fn run_seed_probe_inner(
             },
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>,
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(policy.clone()),
     );
@@ -948,6 +949,10 @@ async fn run_seed_probe_inner(
                 lash_core::TurnBudget::Unbounded,
             ))
         },
+        lash_core::LeaseOwnerIdentity::opaque(
+            "lash-subagents-test-worker",
+            "lash-subagents-test-boot",
+        ),
     )
     .await
     .expect("runtime");

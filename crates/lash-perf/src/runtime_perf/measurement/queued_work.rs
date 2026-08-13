@@ -68,6 +68,7 @@ async fn run_once_queued_work_claim_stress(
                     .try_claim_session_execution_lease(
                         &session_id,
                         &owner,
+                        "run-once-queued-work-claim-stress-executor",
                         QUEUED_WORK_CLAIM_TTL_MS,
                     )
                     .await?
@@ -500,6 +501,7 @@ async fn run_once_turn_input_ingress_interrupt(
                     .try_claim_session_execution_lease(
                         &session_id,
                         &owner,
+                        "run-once-turn-input-ingress-interrupt-executor",
                         QUEUED_WORK_CLAIM_TTL_MS,
                     )
                     .await?

@@ -42,6 +42,17 @@ pub fn queued_work_claim_policy(max_rows: usize) -> crate::QueuedWorkClaimPolicy
     }
 }
 
+/// Fresh test executor host identity used by runtime construction.
+///
+/// Each call represents a distinct boot/executor recovery attempt so crash
+/// matrices cannot accidentally reenter a predecessor's lease.
+pub fn runtime_lease_owner() -> crate::LeaseOwnerIdentity {
+    crate::LeaseOwnerIdentity::opaque(
+        "lash-core-test-worker",
+        format!("lash-core-test-boot:{}", uuid::Uuid::new_v4()),
+    )
+}
+
 /// Synthesize the response produced when a plugin aborts an in-flight LLM
 /// stream after `events` have reached core's stream accumulator.
 ///

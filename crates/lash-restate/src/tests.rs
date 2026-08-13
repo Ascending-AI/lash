@@ -3784,6 +3784,7 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
         &self,
         session_id: &str,
         owner: &lash_core::LeaseOwnerIdentity,
+        executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<lash_core::SessionExecutionLeaseClaimOutcome, lash_core::StoreError> {
@@ -3792,6 +3793,7 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
             .try_claim_session_execution_lease_with_token(
                 session_id,
                 owner,
+                executor_id,
                 claim_nonce,
                 lease_ttl_ms,
             )
@@ -5601,7 +5603,10 @@ async fn restate_enqueue_never_errors_after_commit() {
         .queued_work_driver(lash_core::facade_support::QueuedWorkDriver::new(
             queued_work.clone(),
         ))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "lash-restate-fig430-test",
+            "lash-restate-fig430-test-boot",
+        ))
         .expect("build FIG-430 core");
     let session = core
         .session(session_id)
@@ -5745,6 +5750,10 @@ async fn replay_test_runtime_with_plugins_and_registry(
     let mut builder = lash_core::facade_support::LashRuntime::builder(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
+        lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-replay-test",
+            "lash-restate-replay-test-boot",
+        ),
     )
     .with_session_id(session_id)
     .with_policy(policy)
@@ -5860,6 +5869,7 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         &*store,
         session_id,
         &blocking_owner,
+        "restate-handler-replay-retries-final-lash-commit-idempotently-executor",
         60_000,
     )
     .await
@@ -6236,6 +6246,7 @@ finish (await handle)?
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&process_registry),
+            lash_core::testing::runtime_lease_owner(),
         ));
     context.install_process_worker(process_worker);
 
@@ -8379,6 +8390,7 @@ fn recovery_worker_with_plugins(
             runtime_host,
             store_factory,
             registry,
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy()),
     )
@@ -9258,6 +9270,7 @@ async fn process_deployment_driver_and_workflow_share_registry() {
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&driver_registry),
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_change_hub(driver.change_hub()),
     );

@@ -86,6 +86,7 @@ async fn claiming_the_lane_traces_the_session_generation_and_holder() {
             Arc::clone(&store),
             "lease-observability",
             &claimant,
+            "claiming-the-lane-traces-the-session-generation-and-holder-executor",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -130,7 +131,12 @@ async fn a_dead_holder_is_still_reported_as_taken_over_by_the_winner() {
     // it through the store rather than a guard is the point, because a dead
     // holder has no guard and emits nothing at all.
     let dead_generation = store
-        .try_claim_session_execution_lease(session_id, &dead, 0)
+        .try_claim_session_execution_lease(
+            session_id,
+            &dead,
+            "a-dead-holder-is-still-reported-as-taken-over-by-the-winner-executor",
+            0,
+        )
         .await
         .expect("seed the abandoned row")
         .acquired()
@@ -142,6 +148,7 @@ async fn a_dead_holder_is_still_reported_as_taken_over_by_the_winner() {
             Arc::clone(&store),
             session_id,
             &sweeper,
+            "a-dead-holder-is-still-reported-as-taken-over-by-the-winner-executor",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -202,6 +209,7 @@ async fn claiming_a_released_lane_reports_no_takeover() {
             Arc::clone(&store),
             session_id,
             &owner("worker-a", "worker-a:boot-1"),
+            "claiming-a-released-lane-reports-no-takeover-executor",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -214,6 +222,7 @@ async fn claiming_a_released_lane_reports_no_takeover() {
             Arc::clone(&store),
             session_id,
             &owner("worker-b", "worker-b:boot-1"),
+            "claiming-a-released-lane-reports-no-takeover-executor-2",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -250,6 +259,7 @@ async fn a_live_holder_that_is_swept_reports_only_its_own_renewal_failure() {
             Arc::clone(&store),
             session_id,
             &holder,
+            "a-live-holder-that-is-swept-reports-only-its-own-renewal-failure-executor",
             short_timings(),
             Arc::new(SystemClock),
         )
@@ -273,6 +283,7 @@ async fn a_live_holder_that_is_swept_reports_only_its_own_renewal_failure() {
             Arc::clone(&store),
             session_id,
             &successor,
+            "a-live-holder-that-is-swept-reports-only-its-own-renewal-failure-executor-2",
             short_timings(),
             Arc::new(SystemClock),
         )
@@ -350,6 +361,7 @@ async fn a_transient_renewal_error_neither_loses_the_lane_nor_reports_a_takeover
             Arc::clone(&store) as Arc<dyn crate::store::RuntimePersistence>,
             session_id,
             &holder,
+            "a-transient-renewal-error-neither-loses-the-lane-nor-reports-a-takeover-executor",
             short_timings(),
             Arc::new(SystemClock),
         )
@@ -406,7 +418,12 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
 
     // A live foreign holder, so the claimant below has no lane of its own.
     let _held = store
-        .try_claim_session_execution_lease(session_id, &holder, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &holder,
+            "a-lane-less-writer-that-loses-the-cas-is-still-attributable-executor",
+            60_000,
+        )
         .await
         .expect("claim the lane")
         .acquired()
@@ -419,6 +436,7 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
                 Arc::clone(&store),
                 session_id,
                 &claimant,
+                "a-lane-less-writer-that-loses-the-cas-is-still-attributable-executor",
                 LeaseTimings::default(),
                 Arc::new(SystemClock),
             )
@@ -431,6 +449,7 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
             session_id,
             None,
             &claimant,
+            "claimant-executor",
             &StoreError::HeadRevisionConflict {
                 expected: 3,
                 actual: 4,
@@ -466,11 +485,11 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
     assert_eq!(rejected.field("actual_head_revision"), "4");
 }
 
-/// Two live successor incarnations may both pass the same-owner advisory, but
-/// only one can publish. Neither attempt may rotate, release, renew, or displace
-/// the predecessor row, and an unrelated owner must still stop at the lease.
+/// Every live-holder claimant reaches the head CAS, regardless of owner shape.
+/// A stale head loses without a partial write, while a current head publishes.
+/// No lane-less attempt may rotate, release, renew, or displace the holder row.
 #[tokio::test]
-async fn successor_incarnations_race_only_at_head_cas_without_touching_predecessor_lane() {
+async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
     let session_id = "lease-successor-incarnation-race";
     let clock = Arc::new(crate::testing::TestClock::new(1_000));
     let store: Arc<dyn crate::store::RuntimePersistence> = Arc::new(
@@ -482,7 +501,12 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
     let loser = owner("workflow-owner", "workflow-owner:successor-loser");
     let foreign = owner("foreign-owner", "foreign-owner:incarnation");
     let predecessor_row = store
-        .try_claim_session_execution_lease(session_id, &predecessor, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &predecessor,
+            "busy-claimants-race-only-at-head-cas-without-touching-holder-lane-executor",
+            60_000,
+        )
         .await
         .expect("predecessor claims the lane")
         .acquired()
@@ -493,6 +517,7 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
             Arc::clone(&store),
             generation_commit(session_id, 11, 0),
             &winner,
+            "successor-winner-executor",
             LeaseTimings::default(),
             clock.clone(),
         )
@@ -512,6 +537,7 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
             Arc::clone(&store),
             generation_commit(session_id, 12, 0),
             &loser,
+            "successor-loser-executor",
             LeaseTimings::default(),
             clock.clone(),
         )
@@ -532,22 +558,21 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
             "the rejected successor must write nothing"
         );
 
-        let foreign_refusal = commit_runtime_state_with_fresh_session_execution_lease(
+        let foreign_publication = commit_runtime_state_with_fresh_session_execution_lease(
             Arc::clone(&store),
             generation_commit(session_id, 13, 1),
             &foreign,
+            "foreign-successor-executor",
             LeaseTimings::default(),
             clock.clone(),
         )
-        .await;
-        assert!(
-            matches!(foreign_refusal, Err(StoreError::Backend(ref message)) if message.contains("is busy")),
-            "a different owner must retain the hard busy refusal: {foreign_refusal:?}"
-        );
+        .await
+        .expect("a different owner with the current head publishes under the CAS");
+        assert_eq!(foreign_publication.head_revision, 2);
         assert_eq!(
             published_generation(&store).await,
-            (1, Some(11)),
-            "the different-owner refusal must write nothing"
+            (2, Some(13)),
+            "the different-owner append must publish exactly once"
         );
         assert_eq!(
             store
@@ -560,15 +585,19 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
     })
     .await;
 
-    let advisories = capture.named("session_execution_lease.successor_busy_advisory");
+    let busy_events = capture.named("session_execution_lease.busy");
+    assert_eq!(busy_events.len(), 3, "every busy claim remains observable");
+    let advisories = capture.named("session_execution_lease.commit_busy_advisory");
     assert_eq!(
         advisories.len(),
-        2,
-        "both successor incarnations use the advisory arm"
+        3,
+        "every lane-less persistence claimant uses the advisory arm"
     );
     let expected_owner_sha = crate::stable_hash::sha256_hex(predecessor.owner_id.as_bytes());
     let expected_incarnation_sha =
         crate::stable_hash::sha256_hex(predecessor.incarnation_id.as_bytes());
+    let expected_executor_sha =
+        crate::stable_hash::sha256_hex(predecessor_row.executor_id.as_bytes());
     for advisory in advisories {
         assert_eq!(advisory.level, "INFO");
         assert_eq!(advisory.field("session_id"), session_id);
@@ -578,12 +607,16 @@ async fn successor_incarnations_race_only_at_head_cas_without_touching_predecess
             expected_incarnation_sha
         );
         assert_eq!(
+            advisory.field("holder_executor_id_sha256"),
+            expected_executor_sha
+        );
+        assert_eq!(
             advisory.field("message"),
-            "same logical owner, different incarnation: proceeding under the commit CAS fence"
+            "live lease holder observed: proceeding under the commit CAS fence"
         );
         assert_eq!(
             advisory.field_count(),
-            7,
+            8,
             "the event field shape is intentional"
         );
     }
@@ -609,7 +642,12 @@ async fn publish_on_one_side_of_ttl(
     let predecessor = owner("ttl-owner", "ttl-owner:predecessor");
     let successor = owner("ttl-owner", "ttl-owner:successor");
     let predecessor_row = store
-        .try_claim_session_execution_lease(session_id, &predecessor, short_timings().ttl_ms())
+        .try_claim_session_execution_lease(
+            session_id,
+            &predecessor,
+            "publish-on-one-side-of-ttl-executor",
+            short_timings().ttl_ms(),
+        )
         .await
         .expect("predecessor claims boundary lane")
         .acquired()
@@ -623,6 +661,7 @@ async fn publish_on_one_side_of_ttl(
             Arc::clone(&store),
             generation_commit(session_id, 21, 0),
             &successor,
+            "ttl-successor-executor",
             short_timings(),
             clock.clone(),
         )
@@ -663,7 +702,7 @@ async fn pre_ttl_advisory_and_post_ttl_displacement_converge_on_publication() {
     );
     assert_eq!(
         pre_capture
-            .named("session_execution_lease.successor_busy_advisory")
+            .named("session_execution_lease.commit_busy_advisory")
             .len(),
         1,
         "before TTL the successor uses the lane-less advisory arm"
@@ -675,7 +714,7 @@ async fn pre_ttl_advisory_and_post_ttl_displacement_converge_on_publication() {
     );
     assert!(
         post_capture
-            .named("session_execution_lease.successor_busy_advisory")
+            .named("session_execution_lease.commit_busy_advisory")
             .is_empty()
     );
     assert_eq!(
@@ -698,6 +737,7 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
             Arc::clone(&store),
             session_id,
             &holder,
+            "a-rejected-commit-cas-traces-the-losing-generation-and-head-revisions-executor",
             LeaseTimings::default(),
             Arc::new(SystemClock),
         )
@@ -710,6 +750,7 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
             session_id,
             Some(&guard.commit_evidence()),
             &holder,
+            "holder-executor",
             &StoreError::HeadRevisionConflict {
                 expected: 7,
                 actual: 9,
@@ -721,6 +762,7 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
             session_id,
             Some(&guard.commit_evidence()),
             &holder,
+            "holder-executor",
             &StoreError::Backend("unrelated backend failure".to_string()),
         );
         guard.release_if_live().await.expect("release the lane");

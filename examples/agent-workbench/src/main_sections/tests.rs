@@ -415,7 +415,7 @@ mod tests {
             .model(model)
             .store_factory(Arc::clone(&core_store_factory))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -494,7 +494,7 @@ mod tests {
             .model(model)
             .store_factory(store_factory)
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -583,7 +583,7 @@ finish "observed through live replay"
             .model(model.clone())
             .store_factory(Arc::clone(&store_factory))
             .disable_queued_work_driver()
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let session = core
             .session("workbench-observation-stream")
@@ -680,7 +680,7 @@ finish "gap source"
                     ..lash::observe::InMemoryLiveReplayStoreConfig::default()
                 },
             )))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let session = core
             .session("workbench-observation-gap")
@@ -763,7 +763,7 @@ finish "gap source"
             .model(model)
             .store_factory(Arc::clone(&core_store_factory))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -897,7 +897,7 @@ finish "gap source"
                 WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
             ))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let session = core.session(session_id).open().await.expect("open session");
 
@@ -980,7 +980,7 @@ finish initial
                 WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
             ))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let session = core.session(session_id).open().await.expect("open session");
 
@@ -1043,7 +1043,7 @@ finish initial
                 WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
             ))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -1239,7 +1239,7 @@ finish initial
                 lash::CommitBudget::bounded(1024 * 1024, 512),
                 lash::QueuedWorkBatchingConfig::new(1),
             ))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -1402,7 +1402,7 @@ finish initial
             .store_factory(Arc::clone(&core_store_factory))
             .plugin(Arc::new(WorkbenchPluginFactory::new("")))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -1873,7 +1873,7 @@ finish initial
             .process_work_driver(process_deployment.process_work_driver())
             .queued_work_driver(queued_work_driver.clone())
             .lease_timings(lease_timings)
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_worker = lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config()
@@ -2196,7 +2196,7 @@ finish initial
                 lash::CommitBudget::bounded(1024 * 1024, 512),
                 lash::QueuedWorkBatchingConfig::new(1),
             ))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core")
     }
 

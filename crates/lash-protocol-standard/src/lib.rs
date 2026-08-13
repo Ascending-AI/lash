@@ -996,6 +996,10 @@ mod tests {
             lash_core::facade_support::LashRuntime::builder(
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
+                lash_core::LeaseOwnerIdentity::opaque(
+                    "protocol-standard-test-worker",
+                    "protocol-standard-test-boot",
+                ),
             )
             .with_session_id("standard-batch-session")
             .with_policy(policy)

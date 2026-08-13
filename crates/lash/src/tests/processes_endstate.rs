@@ -238,7 +238,7 @@ fn process_test_core(
         config.durability.process_env_store = process_env_store;
         config
     })
-    .build()
+    .build(crate::testing::runtime_lease_owner())
 }
 
 fn in_memory_process_env_store() -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
@@ -1088,7 +1088,7 @@ fn process_test_core_with_sink(
         config.durability.process_env_store = process_env_store;
         config
     })
-    .build()
+    .build(crate::testing::runtime_lease_owner())
 }
 
 /// Inline-tier end to end across the process wait, observation, and retention
@@ -1265,8 +1265,8 @@ fn recovery_process_worker(
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
-        )
-        .with_lease_owner(owner),
+            owner,
+        ),
     )
 }
 

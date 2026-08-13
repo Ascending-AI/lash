@@ -32,7 +32,10 @@ async fn durable_core_without_advanced(
     )))
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
     .termination(lash::durability::TerminationPolicy::default())
-    .build()
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "durable-builder-test-worker",
+        "durable-builder-test-boot",
+    ))
 }
 
 fn main() {

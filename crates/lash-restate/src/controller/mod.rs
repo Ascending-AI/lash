@@ -435,6 +435,16 @@ where
         lash_core::EffectReplayOwnership::Controller
     }
 
+    /// Restate re-drives this handler invocation, so its retry policy - not a
+    /// sleep inside one invocation - is the right place to pace a queued drain
+    /// that found the session execution lane held by a live foreign executor.
+    /// The deployment-level [`RestateEffectHost`](crate::RestateEffectHost)
+    /// deliberately does not opt in: it serves requests from outside a handler,
+    /// where nothing re-drives the caller.
+    fn durable_workflow_controller(&self) -> bool {
+        true
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         true
     }

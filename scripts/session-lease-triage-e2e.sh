@@ -103,8 +103,11 @@ def event(record, name):
     return matched[0]
 
 
-def require_identity_fields(record, name, entry):
-    for field in ("session_id", "fencing_token", "owner_id", "incarnation_id"):
+def require_identity_fields(record, name, entry, require_generation=True):
+    fields = ["session_id", "owner_id", "incarnation_id", "executor_id"]
+    if require_generation:
+        fields.append("fencing_token")
+    for field in fields:
         if entry.get(field) in (None, ""):
             fail(
                 f"{record['checkpoint']}/{record['backend']}: {name!r} omits {field!r}: {entry}"
@@ -201,13 +204,13 @@ for backend, record in checkpoints("commit_cas_livelock", "04-commit-cas-liveloc
         if not round_record["loser_rejected"]:
             fail(f"{backend}: a round's stale writer was accepted: {round_record}")
     for rejected in record["commit_cas_rejected"]:
-        require_identity_fields(record, "commit_cas_rejected", rejected)
+        require_identity_fields(record, "commit_cas_rejected", rejected, require_generation=False)
         if rejected["level"] != "WARN":
             fail(f"{backend}: commit_cas_rejected must warn, got {rejected['level']}")
         if rejected["lease_lost"] is not False:
             fail(f"{backend}: livelock is a rejection while the lane is still held: {rejected}")
-        if rejected["lane_held"] is not True:
-            fail(f"{backend}: these writers do hold the lane by reentry: {rejected}")
+        if rejected["lane_held"] is not False:
+            fail(f"{backend}: the CAS loser must be the distinct lane-less executor: {rejected}")
         if rejected["actual_head_revision"] <= rejected["expected_head_revision"]:
             fail(f"{backend}: the rejection did not name a head that had moved on: {rejected}")
     if record["lease_lost_count"] or record["taken_over_count"]:

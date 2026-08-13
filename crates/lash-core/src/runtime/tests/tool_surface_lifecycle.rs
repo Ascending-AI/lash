@@ -195,11 +195,13 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         session_id: "parked-session".to_string(),
         relation: crate::SessionRelation::Root,
     });
+    let owner = crate::LeaseOwnerIdentity::opaque("parked-test-worker", "parked-test-boot");
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state("parked-session"),
         Some(store.clone() as Arc<dyn crate::RuntimePersistence>),
+        owner.clone(),
     )
     .await
     .expect("persistent runtime");
@@ -217,7 +219,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         .session_admission_count
         .load(std::sync::atomic::Ordering::SeqCst);
     let parked = runtime.park().await.expect("park runtime");
-    let resumed = LashRuntime::resume(parked, &env)
+    let resumed = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("resume runtime");
     assert_eq!(
@@ -265,10 +267,15 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     .with_process_registry(registry.clone())
     .with_session_store_factory(factory.clone())
     .build();
-    let runtime =
-        LashRuntime::from_environment(&env, standard_test_policy(), root_state(session_id), None)
-            .await
-            .expect("runtime with process tool filter");
+    let runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state(session_id),
+        None,
+        crate::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("runtime with process tool filter");
 
     for process_id in ["allowed-process", "filtered-process", "filtered-cancel"] {
         let mut registration = crate::ProcessRegistration::new(
@@ -444,10 +451,15 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     .with_runtime_host_config(test_host_config().core)
     .with_process_registry(registry.clone())
     .build();
-    let runtime =
-        LashRuntime::from_environment(&env, standard_test_policy(), root_state(session_id), None)
-            .await
-            .expect("runtime with process registry");
+    let runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state(session_id),
+        None,
+        crate::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("runtime with process registry");
     registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(
@@ -565,6 +577,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         standard_test_policy(),
         root_state(parent_session_id),
         None,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("runtime with process registry");
@@ -804,12 +817,14 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
     let store_dyn: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let owner = crate::LeaseOwnerIdentity::opaque("surface-test-worker", "surface-test-boot");
 
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state("persisted-live-surface"),
         Some(store_dyn),
+        owner.clone(),
     )
     .await
     .expect("initial persistent runtime");
@@ -828,7 +843,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let parked = runtime.park().await.expect("park initial runtime");
 
     surface.replace(vec![original.clone(), discovered.clone()]);
-    let mut resumed = LashRuntime::resume(parked, &env)
+    let mut resumed = LashRuntime::resume(parked, &env, owner.clone())
         .await
         .expect("cold resume with changed live source");
     let resumed_state = resumed.tool_state().expect("resumed tool state");
@@ -878,7 +893,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     );
 
     let parked = resumed.park().await.expect("park rebuilt runtime");
-    let resumed_again = LashRuntime::resume(parked, &env)
+    let resumed_again = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("second cold resume");
     assert_eq!(
@@ -919,6 +934,7 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         standard_test_policy(),
         root_state("fork-parent"),
         None,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("parent runtime");
@@ -1038,6 +1054,7 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
         test_host_config(),
         crate::RuntimeServices::new(plugins),
         root_state("compose-child"),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("hidden child runtime");
@@ -1101,6 +1118,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         test_host_config(),
         crate::PersistentRuntimeServices::new(plugins, store.clone()),
         root_state("cold-hidden-child"),
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("initial hidden persistent runtime");
@@ -1133,6 +1151,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         test_host_config(),
         crate::PersistentRuntimeServices::new(plugins, store),
         state,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("cold rebuild with host-supplied child authority");
@@ -1166,11 +1185,13 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
+    let owner = crate::LeaseOwnerIdentity::opaque("orphan-test-worker", "orphan-test-boot");
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state("orphan-lifecycle"),
         Some(store),
+        owner.clone(),
     )
     .await
     .expect("initial persistent runtime");
@@ -1186,7 +1207,7 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     let parked = runtime.park().await.expect("persist original source");
 
     surface.replace(Vec::new());
-    let mut resumed = LashRuntime::resume(parked, &env)
+    let mut resumed = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("session opens while dynamic source is absent");
     let orphaned = resumed.tool_state().expect("orphaned state");
@@ -1259,6 +1280,7 @@ async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing()
         standard_test_policy(),
         root_state("apply-state-round-trip"),
         None,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .expect("live runtime");

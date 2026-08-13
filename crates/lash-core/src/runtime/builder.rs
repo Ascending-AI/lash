@@ -12,6 +12,7 @@ enum PluginSource {
 }
 
 pub struct EmbeddedRuntimeBuilder {
+    runtime_lease_owner: crate::LeaseOwnerIdentity,
     session_id: Option<String>,
     policy: Option<SessionPolicy>,
     plugin_options: crate::PluginOptions,
@@ -40,8 +41,10 @@ impl EmbeddedRuntimeBuilder {
     pub fn new(
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
+        runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self {
+            runtime_lease_owner,
             session_id: None,
             policy: None,
             plugin_options: crate::PluginOptions::default(),
@@ -327,8 +330,11 @@ impl EmbeddedRuntimeBuilder {
             plugins,
             persistence,
             self.process_registry,
-            state,
-            crate::SessionRelation::Root,
+            super::lifecycle::RuntimeSessionAssembly::new(
+                state,
+                crate::SessionRelation::Root,
+                self.runtime_lease_owner,
+            ),
         )
         .await?;
         runtime.host.process_work_driver = self.drivers.process;
@@ -345,7 +351,8 @@ impl LashRuntime {
     pub fn builder(
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
+        runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> EmbeddedRuntimeBuilder {
-        EmbeddedRuntimeBuilder::new(commit_budget, queued_work_batching)
+        EmbeddedRuntimeBuilder::new(commit_budget, queued_work_batching, runtime_lease_owner)
     }
 }

@@ -81,7 +81,7 @@ async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after
                 failure: None,
                 standard_protocol: false,
             }))
-            .build()?;
+            .build(crate::testing::runtime_lease_owner())?;
 
     let error = core
         .shutdown()
@@ -112,7 +112,7 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .plugin(Arc::new(SurfacePluginFactory))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("plugin-surface").open().await?;
     let events = RecordingEvents::default();
 
@@ -156,7 +156,7 @@ async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("static-tools").open().await?;
 
     let state = session.admin().tools().state().await?;
@@ -171,7 +171,7 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("tool-state").open().await?;
     let app_tool = lash_core::ToolId::from("tool:app_lookup");
 
@@ -222,7 +222,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("persisted-tools").open().await?;
     session
         .admin()
@@ -250,7 +250,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
             .model(mock_model_spec())
             .tools(Arc::new(AppTools))
             .store_factory(Arc::new(ReusableStoreFactory { store }))
-            .build()?;
+            .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = reopened_core.session("persisted-tools").open().await?;
     let state = reopened.admin().tools().state().await?;
@@ -329,7 +329,7 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
                 .configure_plugins(|plugins| {
                     plugins.replace(projection.clone());
                 })
-                .build()?;
+                .build(crate::testing::runtime_lease_owner())?;
         let standard_session = standard_core.session("standard-projection").open().await?;
         let standard_events = RecordingEvents::default();
         let _ = standard_session
@@ -372,7 +372,7 @@ finish "done""#,
                 .configure_plugins(|plugins| {
                     plugins.replace(projection);
                 })
-                .build()?;
+                .build(crate::testing::runtime_lease_owner())?;
             let rlm_session = rlm_core.session("rlm-projection").open().await?;
             let rlm_events = RecordingEvents::default();
             let _ = rlm_session

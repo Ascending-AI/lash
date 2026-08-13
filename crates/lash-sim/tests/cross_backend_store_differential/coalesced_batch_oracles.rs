@@ -208,7 +208,12 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                 format!("literal-oracle-{}:incarnation", runner.name),
             );
             let lease = store
-                .try_claim_session_execution_lease(&runner.session_id, &owner, SESSION_LEASE_TTL_MS)
+                .try_claim_session_execution_lease(
+                    &runner.session_id,
+                    &owner,
+                    "coalesced-batch-oracle-executor",
+                    SESSION_LEASE_TTL_MS,
+                )
                 .await
                 .expect("claim literal-oracle session lease")
                 .acquired()
@@ -363,7 +368,12 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             format!("ready-gap-a-{}:incarnation", runner.name),
         );
         let lease = store
-            .try_claim_session_execution_lease(&runner.session_id, &owner, SESSION_LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                &runner.session_id,
+                &owner,
+                "coalesced-batch-oracle-executor",
+                SESSION_LEASE_TTL_MS,
+            )
             .await
             .expect("claim first ready-gap session lease")
             .acquired()
@@ -411,7 +421,12 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             format!("ready-gap-b-{}:incarnation", runner.name),
         );
         let lease = store
-            .try_claim_session_execution_lease(&runner.session_id, &owner, SESSION_LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                &runner.session_id,
+                &owner,
+                "coalesced-batch-oracle-executor",
+                SESSION_LEASE_TTL_MS,
+            )
             .await
             .expect("claim successor ready-gap session lease")
             .acquired()

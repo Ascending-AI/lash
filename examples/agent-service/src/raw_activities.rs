@@ -357,7 +357,10 @@ finish "done through raw activities"
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
             )))
-            .build()
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "agent-service-raw-activity-test",
+                "agent-service-raw-activity-test-boot",
+            ))
             .expect("core");
         let turn_work_driver = core.turn_work_driver();
         #[cfg(not(feature = "restate"))]
@@ -365,7 +368,6 @@ finish "done through raw activities"
             core,
             turn_work_driver,
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
-            lash::persistence::LeaseOwnerIdentity::opaque("agent-service-test", "test"),
             "scripted-model".to_string(),
             None,
             durability,
@@ -377,7 +379,6 @@ finish "done through raw activities"
             Arc::new(Mutex::new(
                 AppDb::open(&data_dir.join("app.db")).expect("app db"),
             )),
-            lash::persistence::LeaseOwnerIdentity::opaque("agent-service-test", "test"),
             "scripted-model".to_string(),
             None,
             durability,

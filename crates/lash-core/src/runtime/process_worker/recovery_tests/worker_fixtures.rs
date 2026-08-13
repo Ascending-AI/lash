@@ -92,13 +92,13 @@ pub(super) async fn worker_with_engine_registry_timings_and_supplier(
         runtime_host,
         Arc::new(TestSessionStoreFactory),
         Arc::clone(&registry),
+        local_owner("engine-worker", "host-a", "engine-start"),
     )
     .with_session_policy(policy)
     .with_process_execution_concurrency(concurrency)
     .expect("valid test process execution concurrency")
     .with_change_hub(driver.change_hub())
-    .with_process_work_driver(driver)
-    .with_lease_owner(local_owner("engine-worker", "host-a", "engine-start"));
+    .with_process_work_driver(driver);
     if let Some(supplier) = supplier {
         config = config.with_worker_slot_supplier(supplier);
     }

@@ -58,7 +58,7 @@ let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .trace_sink(trace_sink)
     .trace_level(TraceLevel::Extended)
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
           <p><code>TraceLevel::Standard</code> (default): turns, tool calls, LLM start/complete, token usage. <code>TraceLevel::Extended</code> adds provider stream chunks, prompt-component hashes, and runtime stream deltas. Extended is verbose; use for provider debugging.</p>
         </div>
 
@@ -90,7 +90,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
           <pre data-lang="rust" data-snippet="tracing#lashlang-graph-store"><code>use std::sync::Arc;
 
 use lash::tracing::{JsonlTraceSink, TeeTraceSink, TraceLashlangGraphStore, TraceSink};
@@ -121,7 +121,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // Start bounded; tune both limits for your backend's latency envelope.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build()?;
+    .build(crate::example_process_owner())?;
 
 let graph = lashlang_graphs.graph("process:process-id");</code></pre>
           <p>Tracking records use <code>TraceEvent::LashlangExecution</code> with typed payloads for execution start/finish, node start/complete/fail, branch selection, and child execution links. Every payload includes a deterministic <code>event_key</code> so <code>TraceLashlangGraphStore</code> dedupes replayed records. Graph keys are derived from runtime identity, such as <code>effect:session:turn:effect-id</code> for foreground code and <code>process:process-id</code> for durable processes. Graph snapshots are derived from trace events and safe for host UIs, dashboards, tests, and debugging; they are not canonical process state.</p>
@@ -373,7 +373,7 @@ let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .trace_sink(sink)
     .trace_level(TraceLevel::Extended)
-    .build()?;</code></pre>
+    .build(crate::example_process_owner())?;</code></pre>
           <p><code>OtelTraceSink::flush</code> is deliberately a no-op: the sink only starts and ends spans on your tracer, while the buffering that risks span loss on exit lives in your <code>BatchSpanProcessor</code> / exporter. Flushing it is the host's duty — call <code>force_flush()</code> (or <code>shutdown()</code>) on your <code>TracerProvider</code> before the process exits. Lash never owns the provider, so it cannot do this for you; <code>LashCore::flush_trace_sink</code> flushes the sink only.</p>
           <p>Span names are derived from the typed event. Turn, LLM, and tool lifecycles become nested spans (<code>lash.turn</code>, <code>lash.llm</code>, <code>lash.tool</code>); a tool produces one <code>lash.tool</code> span whether it was a standard native call or ran inside a code block, because both flow through the same emission seam. Runtime exec diagnostics collapse into a <code>lash.exec_code</code> family, with the precise phase (<code>exec_code_started</code> / <code>exec_code_completed</code> / <code>exec_code_failed</code>) on the <code>lash.protocol.diagnostic_phase</code> attribute; observation-projection diagnostics get <code>lash.observation_projection</code>, and other protocol steps stay <code>lash.protocol_step</code>. The channel map that ties these span names back to the other reporting surfaces is <a href="./reporting.html">Reporting channels</a>.</p>
         </div>

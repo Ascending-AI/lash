@@ -210,7 +210,12 @@ impl RuntimeScenarioContext {
         let owner = lease_owner(self.host_behavior.lease_owner_id);
         let lease = self
             .store()
-            .try_claim_session_execution_lease(self.session_id, &owner, 60_000)
+            .try_claim_session_execution_lease(
+                self.session_id,
+                &owner,
+                "ensure-lease-executor",
+                60_000,
+            )
             .await
             .expect("claim session execution lease")
             .acquired()

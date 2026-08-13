@@ -21,7 +21,12 @@ impl RuntimeScenarioContext {
         let stale_owner = lease_owner("runtime-scenario-stale-holder");
         let holder = self
             .store()
-            .try_claim_session_execution_lease(self.session_id, &stale_owner, STALE_HOLDER_TTL_MS)
+            .try_claim_session_execution_lease(
+                self.session_id,
+                &stale_owner,
+                "expire-stale-holder-executor",
+                STALE_HOLDER_TTL_MS,
+            )
             .await
             .expect("claim stale-holder session execution lease")
             .acquired()
@@ -30,7 +35,12 @@ impl RuntimeScenarioContext {
         self.clock.advance(STALE_HOLDER_TTL_MS - 1);
         let busy = self
             .store()
-            .try_claim_session_execution_lease(self.session_id, &claimant, 60_000)
+            .try_claim_session_execution_lease(
+                self.session_id,
+                &claimant,
+                "expire-stale-holder-executor-2",
+                60_000,
+            )
             .await
             .expect("claimant observes busy stale-holder lease");
         assert!(
@@ -41,7 +51,12 @@ impl RuntimeScenarioContext {
         self.clock.advance(1);
         let reclaimed = self
             .store()
-            .try_claim_session_execution_lease(self.session_id, &claimant, 60_000)
+            .try_claim_session_execution_lease(
+                self.session_id,
+                &claimant,
+                "expire-stale-holder-executor-3",
+                60_000,
+            )
             .await
             .expect("claim session execution lease after stale-holder TTL")
             .acquired()
@@ -57,6 +72,7 @@ impl RuntimeScenarioContext {
                 .try_claim_session_execution_lease(
                     self.session_id,
                     &local_lease_owner("runtime-scenario-late-claimant", "late-claimant-start"),
+                    "expire-stale-holder-executor-4",
                     60_000,
                 )
                 .await

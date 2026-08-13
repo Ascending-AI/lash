@@ -10,7 +10,7 @@ use super::*;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 
 const CONTROLLED_LEASE_TTL_MS: u64 = 50;
-const REALTIME_SCAFFOLDING_LEASE_TTL_MS: u64 = 50;
+const REALTIME_SCAFFOLDING_LEASE_TTL_MS: u64 = 500;
 // Real database operations can be descheduled between claiming a lease and
 // observing it. This is a harness stall allowance, not the semantic expiry
 // boundary: controlled-clock backends still prove the 50 ms contract exactly.
@@ -34,7 +34,7 @@ impl RuntimePersistenceLeaseTiming {
         Self::Controlled(std::sync::Arc::new(advance))
     }
 
-    fn scaffolding_lease_ttl_ms(&self) -> u64 {
+    pub(super) fn scaffolding_lease_ttl_ms(&self) -> u64 {
         match self {
             Self::Realtime => REALTIME_SCAFFOLDING_LEASE_TTL_MS,
             Self::Controlled(_) => CONTROLLED_LEASE_TTL_MS,
@@ -50,6 +50,18 @@ impl RuntimePersistenceLeaseTiming {
     fn advance_to_semantic_expiry(&self) {
         if let Self::Controlled(advance) = self {
             advance(1);
+        }
+    }
+
+    /// Let one durable queued-drain wait slice pass in this backend's own time
+    /// domain: real sleeping where the backend owns its clock, an injected-clock
+    /// advance otherwise.
+    pub(super) async fn pass_wait_slice(&self, slice_ms: u64) {
+        match self {
+            Self::Realtime => {
+                tokio::time::sleep(std::time::Duration::from_millis(slice_ms)).await;
+            }
+            Self::Controlled(advance) => advance(slice_ms),
         }
     }
 
@@ -389,7 +401,12 @@ pub async fn runtime_persistence_clock_expiry(
         .await
         .expect("enqueue clock-expiry turn input");
     let stale_lease = store
-        .try_claim_session_execution_lease(session_id, &stale_owner, TTL_MS)
+        .try_claim_session_execution_lease(
+            session_id,
+            &stale_owner,
+            "runtime-persistence-clock-expiry-executor",
+            TTL_MS,
+        )
         .await
         .expect("claim clock-expiry stale lease")
         .acquired()
@@ -415,7 +432,12 @@ pub async fn runtime_persistence_clock_expiry(
     advance(TTL_MS);
 
     let successor_lease = store
-        .try_claim_session_execution_lease(session_id, &successor, TTL_MS)
+        .try_claim_session_execution_lease(
+            session_id,
+            &successor,
+            "runtime-persistence-clock-expiry-executor-2",
+            TTL_MS,
+        )
         .await
         .expect("claim clock-expiry successor lease")
         .acquired()
@@ -521,12 +543,17 @@ where
     session_execution_lease_contract(make("root")).await;
     borrowed_session_execution_lease_commit_contract(make("borrowed-commit-fence")).await;
     same_incarnation_rotation_gates_claims_not_commits(make("root")).await;
+    same_host_distinct_executors_are_lane_less_without_revoking_holder(make(
+        "fig1133-same-host-session",
+    ))
+    .await;
     session_execution_lease_fence_authority(make("lease-fence-authority").as_ref()).await;
     concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(make(
         "concurrent-rotation-renewal",
     ))
     .await;
     session_execution_lease_expires_by_ttl_contract(&|| make("ttl-expiry"), lease_timing).await;
+    super::durable_queued_drain_wait_contract(make("durable-queued-drain"), lease_timing).await;
     session_execution_lease_diagnostic_read_contract(make("lease-diagnostic")).await;
     session_execution_lease_displacement_contract(make("lease-displacement")).await;
     // [`QueuedWorkStore`]: durable queued-work ingress, ordering, and claim
@@ -2120,7 +2147,12 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
         .await
         .expect("enqueue checkpoint queued work");
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "checkpoint-work-claims-both-families-once-executor",
+            60_000,
+        )
         .await
         .expect("claim checkpoint session lease")
         .acquired()
@@ -2189,7 +2221,12 @@ async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn Ru
         .await
         .expect("enqueue oversized checkpoint queued work");
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "checkpoint-budget-refusal-executor",
+            60_000,
+        )
         .await
         .expect("claim checkpoint atomicity session lease")
         .acquired()
@@ -2242,7 +2279,12 @@ pub async fn checkpoint_claim_probe_transaction_counts(
     let turn_id = crate::TurnId::from(format!("{session_id}:counter-turn"));
     let owner = lease_owner(&format!("{session_id}:checkpoint-counter-owner"));
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "checkpoint-claim-probe-transaction-counts-executor",
+            60_000,
+        )
         .await
         .expect("claim checkpoint counter lease")
         .acquired()
@@ -2475,7 +2517,12 @@ async fn claim_session_execution_lease_for_test(
 ) -> crate::SessionExecutionLease {
     let owner = lease_owner(owner_id);
     store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "claim-session-execution-lease-for-test-executor",
+            60_000,
+        )
         .await
         .expect("claim session execution lease")
         .acquired()
@@ -2767,6 +2814,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .try_claim_session_execution_lease_with_token(
             "fresh-retry",
             &fresh_retry_owner,
+            "fresh-retry-executor",
             &fresh_retry_nonce,
             120_000,
         )
@@ -2775,10 +2823,12 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .acquired()
         .expect("fresh retry claim acquired");
     assert_eq!(fresh_retry.lease_token, fresh_retry_nonce.as_str());
+    assert_eq!(fresh_retry.lease_term_ms, 120_000);
     let fresh_retried = store
         .try_claim_session_execution_lease_with_token(
             "fresh-retry",
             &fresh_retry_owner,
+            "fresh-retry-executor",
             &fresh_retry_nonce,
             120_000,
         )
@@ -2795,7 +2845,12 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     release_session_execution_lease_for_test(&store, &fresh_retried).await;
 
     let takeover_predecessor = store
-        .try_claim_session_execution_lease("takeover-retry", &lease_owner("takeover-old"), 0)
+        .try_claim_session_execution_lease(
+            "takeover-retry",
+            &lease_owner("takeover-old"),
+            "session-execution-lease-contract-executor",
+            0,
+        )
         .await
         .expect("claim immediately-expiring takeover predecessor")
         .acquired()
@@ -2806,6 +2861,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .try_claim_session_execution_lease_with_token(
             "takeover-retry",
             &takeover_owner,
+            "takeover-new-executor",
             &takeover_nonce,
             120_000,
         )
@@ -2819,6 +2875,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .try_claim_session_execution_lease_with_token(
             "takeover-retry",
             &takeover_owner,
+            "takeover-new-executor",
             &takeover_nonce,
             120_000,
         )
@@ -2834,15 +2891,33 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     );
     release_session_execution_lease_for_test(&store, &takeover_retried).await;
 
-    let first = claim_session_execution_lease_for_test(&store, "root", "owner-a").await;
     let owner_a = lease_owner("owner-a");
+    let first_nonce = crate::LeaseClaimNonce::for_testing("owner-a-first-token");
+    let first = store
+        .try_claim_session_execution_lease_with_token(
+            "root",
+            &owner_a,
+            "owner-a-executor",
+            &first_nonce,
+            120_000,
+        )
+        .await
+        .expect("owner A first claim")
+        .acquired()
+        .expect("owner A first claim acquired");
     let owner_a_next = crate::LeaseOwnerIdentity::opaque("owner-a", "owner-a:next-incarnation");
     let owner_b = lease_owner("owner-b");
     let owner_c = lease_owner("owner-c");
     let owner_expired = lease_owner("owner-expired");
     let reentry_nonce = crate::LeaseClaimNonce::new();
     let reentered = store
-        .try_claim_session_execution_lease_with_token("root", &owner_a, &reentry_nonce, 120_000)
+        .try_claim_session_execution_lease_with_token(
+            "root",
+            &owner_a,
+            "owner-a-executor",
+            &reentry_nonce,
+            130_000,
+        )
         .await
         .expect("same incarnation may re-enter live session lease")
         .acquired()
@@ -2853,13 +2928,20 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     );
     assert_eq!(reentered.fencing_token, first.fencing_token);
     assert_eq!(reentered.lease_token, reentry_nonce.as_str());
+    assert_eq!(reentered.lease_term_ms, 130_000);
     assert_eq!(
         reentered.claimed_at_epoch_ms, first.claimed_at_epoch_ms,
         "same-incarnation rotation preserves when the lane was first acquired"
     );
     assert!(reentered.expires_at_epoch_ms >= first.expires_at_epoch_ms);
     let retried = store
-        .try_claim_session_execution_lease_with_token("root", &owner_a, &reentry_nonce, 120_000)
+        .try_claim_session_execution_lease_with_token(
+            "root",
+            &owner_a,
+            "owner-a-executor",
+            &reentry_nonce,
+            140_000,
+        )
         .await
         .expect("retry same claim attempt")
         .acquired()
@@ -2867,10 +2949,16 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     assert_eq!(retried.lease_token, reentered.lease_token);
     assert_eq!(retried.fencing_token, reentered.fencing_token);
     assert_eq!(retried.claimed_at_epoch_ms, reentered.claimed_at_epoch_ms);
+    assert_eq!(retried.lease_term_ms, 140_000);
     assert!(
         matches!(
             store
-                .try_claim_session_execution_lease("root", &owner_a_next, 60_000)
+                .try_claim_session_execution_lease(
+                    "root",
+                    &owner_a_next,
+                    "session-execution-lease-contract-executor-2",
+                    60_000
+                )
                 .await
                 .expect("try same owner next incarnation"),
             crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
@@ -2880,7 +2968,12 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     assert!(
         matches!(
             store
-                .try_claim_session_execution_lease("root", &owner_b, 60_000)
+                .try_claim_session_execution_lease(
+                    "root",
+                    &owner_b,
+                    "session-execution-lease-contract-executor-3",
+                    60_000
+                )
                 .await
                 .expect("try concurrent session lease"),
             crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
@@ -2888,13 +2981,14 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         "a live session execution lease must exclude concurrent owners"
     );
     let renewed = store
-        .renew_session_execution_lease(&reentered.fence(), 120_000)
+        .renew_session_execution_lease(&reentered.fence(), 150_000)
         .await
         .expect("renew live session lease");
     assert_eq!(renewed.session_id, reentered.session_id);
     assert_eq!(renewed.owner, reentered.owner);
     assert_eq!(renewed.lease_token, reentered.lease_token);
     assert_eq!(renewed.fencing_token, reentered.fencing_token);
+    assert_eq!(renewed.lease_term_ms, 150_000);
     assert!(renewed.expires_at_epoch_ms >= reentered.expires_at_epoch_ms);
     let mut lock_lifecycle_authority = reentered.fence();
     lock_lifecycle_authority.fencing_token = lock_lifecycle_authority
@@ -2942,6 +3036,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .release_session_execution_lease(&crate::SessionExecutionLeaseAuthority {
             session_id: first.session_id.clone(),
             owner: first.owner.clone(),
+            executor_id: "owner-a-executor".to_string(),
             lease_token: format!("{}:stale", first.lease_token),
             fencing_token: first.fencing_token,
         })
@@ -2954,7 +3049,12 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     assert!(
         matches!(
             store
-                .try_claim_session_execution_lease("root", &owner_b, 60_000)
+                .try_claim_session_execution_lease(
+                    "root",
+                    &owner_b,
+                    "session-execution-lease-contract-executor-4",
+                    60_000
+                )
                 .await
                 .expect("try after stale release"),
             crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
@@ -2976,7 +3076,12 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     assert!(
         matches!(
             store
-                .try_claim_session_execution_lease("root", &owner_b, 60_000)
+                .try_claim_session_execution_lease(
+                    "root",
+                    &owner_b,
+                    "session-execution-lease-contract-executor-5",
+                    60_000
+                )
                 .await
                 .expect("claim after stale retained release"),
             crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
@@ -3014,7 +3119,12 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     assert!(
         matches!(
             store
-                .try_claim_session_execution_lease("root", &owner_c, 60_000)
+                .try_claim_session_execution_lease(
+                    "root",
+                    &owner_c,
+                    "session-execution-lease-contract-executor-6",
+                    60_000
+                )
                 .await
                 .expect("try after old release"),
             crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
@@ -3024,7 +3134,12 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     release_session_execution_lease_for_test(&store, &second).await;
 
     let expired = store
-        .try_claim_session_execution_lease("root", &owner_expired, 0)
+        .try_claim_session_execution_lease(
+            "root",
+            &owner_expired,
+            "session-execution-lease-contract-executor-7",
+            0,
+        )
         .await
         .expect("claim expiring lease")
         .acquired()
@@ -3127,8 +3242,15 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
 pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn RuntimePersistence>) {
     let session_id = "borrowed-commit-fence";
     let owner = lease_owner("borrowed-commit-owner");
+    let first_nonce = crate::LeaseClaimNonce::for_testing("borrowed-commit-first-token");
     let held = store
-        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            "borrowed-commit-executor",
+            &first_nonce,
+            120_000,
+        )
         .await
         .expect("claim borrowed-commit lane")
         .acquired()
@@ -3161,7 +3283,13 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
     assert_eq!(renewed.fencing_token, held.fencing_token);
 
     let replay_successor = store
-        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            "borrowed-commit-executor",
+            &crate::LeaseClaimNonce::for_testing("borrowed-commit-replay-token"),
+            120_000,
+        )
         .await
         .expect("rotate the fence before replaying the same operation")
         .acquired()
@@ -3177,7 +3305,13 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
     assert_ne!(replay_successor.lease_token, held.lease_token);
 
     let lapsed = store
-        .try_claim_session_execution_lease(session_id, &owner, 0)
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            "borrowed-commit-executor",
+            &crate::LeaseClaimNonce::for_testing("borrowed-commit-lapsed-token"),
+            0,
+        )
         .await
         .expect("rotate to an immediately lapsed borrowed-commit lane")
         .acquired()
@@ -3195,7 +3329,13 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
     ));
 
     let rotated = store
-        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            "borrowed-commit-executor",
+            &crate::LeaseClaimNonce::for_testing("borrowed-commit-rotated-token"),
+            120_000,
+        )
         .await
         .expect("rotate borrowed-commit lane")
         .acquired()
@@ -3231,6 +3371,7 @@ async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn Runti
         .try_claim_session_execution_lease_with_token(
             "root",
             &overlap_owner,
+            "same-incarnation-executor",
             &overlap_predecessor_nonce,
             60_000,
         )
@@ -3243,6 +3384,7 @@ async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn Runti
         .try_claim_session_execution_lease_with_token(
             "root",
             &overlap_owner,
+            "same-incarnation-executor",
             &overlap_successor_nonce,
             60_000,
         )
@@ -3291,6 +3433,138 @@ async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn Runti
     release_session_execution_lease_for_test(&store, &overlap_successor).await;
 }
 
+/// One host may open the same session more than once. The runtime-minted
+/// executor discriminator keeps those opens out of the reentry arm while the
+/// stable host owner remains shared. This law runs unchanged on in-memory,
+/// SQLite, PostgreSQL, and the perf conformance backend.
+pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let owner = crate::LeaseOwnerIdentity::opaque("fig1133-host", "fig1133-boot");
+    let first_nonce = crate::LeaseClaimNonce::for_testing("fig1133-first-token");
+    let first = store
+        .try_claim_session_execution_lease_with_token(
+            "fig1133-same-host-session",
+            &owner,
+            "fig1133-executor-a",
+            &first_nonce,
+            120_000,
+        )
+        .await
+        .expect("first executor claim")
+        .acquired()
+        .expect("first executor acquires the lane");
+    assert_eq!(first.session_id, "fig1133-same-host-session");
+    assert_eq!(first.owner.owner_id, "fig1133-host");
+    assert_eq!(first.owner.incarnation_id, "fig1133-boot");
+    assert_eq!(first.executor_id, "fig1133-executor-a");
+    assert_eq!(first.lease_token, "fig1133-first-token");
+    assert_eq!(first.fencing_token, 1);
+
+    let second_nonce = crate::LeaseClaimNonce::for_testing("fig1133-second-token");
+    let holder = match store
+        .try_claim_session_execution_lease_with_token(
+            "fig1133-same-host-session",
+            &owner,
+            "fig1133-executor-b",
+            &second_nonce,
+            120_000,
+        )
+        .await
+        .expect("second executor receives a typed claim outcome")
+    {
+        crate::SessionExecutionLeaseClaimOutcome::Busy { holder } => holder,
+        crate::SessionExecutionLeaseClaimOutcome::Acquired(_) => {
+            panic!("second same-host executor must be lane-less")
+        }
+    };
+    assert_eq!(holder.session_id, "fig1133-same-host-session");
+    assert_eq!(holder.owner.owner_id, "fig1133-host");
+    assert_eq!(holder.owner.incarnation_id, "fig1133-boot");
+    assert_eq!(holder.executor_id, "fig1133-executor-a");
+    assert_eq!(holder.lease_token, "fig1133-first-token");
+    assert_eq!(holder.fencing_token, 1);
+    let holder_after_busy = store
+        .get_session_execution_lease("fig1133-same-host-session")
+        .await
+        .expect("read holder after busy result")
+        .expect("busy result leaves holder row present");
+    assert_eq!(holder_after_busy, first);
+
+    let renewed = store
+        .renew_session_execution_lease(&first.fence(), 120_000)
+        .await
+        .expect("the first holder renews after the second executor is refused");
+    assert_eq!(renewed.owner.owner_id, "fig1133-host");
+    assert_eq!(renewed.owner.incarnation_id, "fig1133-boot");
+    assert_eq!(renewed.executor_id, "fig1133-executor-a");
+    assert_eq!(renewed.lease_token, "fig1133-first-token");
+    assert_eq!(renewed.fencing_token, 1);
+
+    let mut committed_state = RuntimeSessionState {
+        session_id: "fig1133-same-host-session".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let fenced_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
+        &committed_state,
+        &[],
+        crate::OperationId::new(
+            crate::ExecutionScope::runtime_operation("fig1133-holder-mid-turn"),
+            "commit",
+        ),
+    );
+    let fenced_result = store
+        .commit_runtime_state(fenced_commit.borrowing_session_execution_lease(first.fence()))
+        .await
+        .expect("first holder's fenced mid-turn commit remains authorized");
+    assert_eq!(fenced_result.head_revision, 1);
+    committed_state.head_revision = 1;
+
+    let make_lane_less_commit = |executor: &'static str| {
+        RuntimeCommit::persisted_state_with_operation_for_testing(
+            &committed_state,
+            &[],
+            crate::OperationId::new(
+                crate::ExecutionScope::runtime_operation(format!("fig1133-lane-less-{executor}")),
+                "commit",
+            ),
+        )
+    };
+    let barrier = Arc::new(tokio::sync::Barrier::new(3));
+    let first_store = Arc::clone(&store);
+    let second_store = Arc::clone(&store);
+    let first_barrier = Arc::clone(&barrier);
+    let second_barrier = Arc::clone(&barrier);
+    let first_commit = make_lane_less_commit("a");
+    let second_commit = make_lane_less_commit("b");
+    let first_writer = crate::task::spawn(async move {
+        first_barrier.wait().await;
+        first_store.commit_runtime_state(first_commit).await
+    });
+    let second_writer = crate::task::spawn(async move {
+        second_barrier.wait().await;
+        second_store.commit_runtime_state(second_commit).await
+    });
+    barrier.wait().await;
+    let first_result = first_writer.await.expect("join first lane-less writer");
+    let second_result = second_writer.await.expect("join second lane-less writer");
+    let results = [first_result, second_result];
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(
+                result,
+                Err(StoreError::HeadRevisionConflict {
+                    expected: 1,
+                    actual: 2
+                })
+            ))
+            .count(),
+        1
+    );
+}
+
 /// Probe the claim/renew race through the public API on every backend. Embedded
 /// stores serialize the operations under one writer lock; PostgreSQL uses the
 /// same per-session advisory lock. Either linearization is legal, but a renewal
@@ -3301,8 +3575,15 @@ async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linea
 ) {
     let session_id = "concurrent-rotation-renewal";
     let owner = lease_owner("concurrent-rotation-owner");
+    let predecessor_nonce = crate::LeaseClaimNonce::for_testing("concurrent-predecessor-token");
     let predecessor = store
-        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            "concurrent-claim-executor",
+            &predecessor_nonce,
+            120_000,
+        )
         .await
         .expect("claim concurrent predecessor")
         .acquired()
@@ -3320,6 +3601,7 @@ async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linea
             .try_claim_session_execution_lease_with_token(
                 session_id,
                 &claim_owner,
+                "concurrent-claim-executor",
                 &successor_nonce,
                 120_000,
             )
@@ -3376,7 +3658,12 @@ async fn session_execution_lease_expires_by_ttl_contract<F>(
         let holder_owner = lease_owner("stale-holder");
         let claimant = lease_owner("ttl-claimant");
         let holder = store
-            .try_claim_session_execution_lease(&session_id, &holder_owner, CONTROLLED_LEASE_TTL_MS)
+            .try_claim_session_execution_lease(
+                &session_id,
+                &holder_owner,
+                "session-execution-lease-expires-by-ttl-contract-executor",
+                lease_timing.scaffolding_lease_ttl_ms(),
+            )
             .await
             .expect("claim stale-holder lease")
             .acquired()
@@ -3384,7 +3671,12 @@ async fn session_execution_lease_expires_by_ttl_contract<F>(
 
         lease_timing.advance_to_just_before_semantic_expiry();
         let outcome = store
-            .try_claim_session_execution_lease(&session_id, &claimant, 60_000)
+            .try_claim_session_execution_lease(
+                &session_id,
+                &claimant,
+                "session-execution-lease-expires-by-ttl-contract-executor-2",
+                60_000,
+            )
             .await
             .expect("claimant observes stale-holder lease");
         match outcome {
@@ -3429,7 +3721,8 @@ async fn session_execution_lease_expires_by_ttl_contract<F>(
     }
     panic!(
         "could not observe the stale-holder lease within its {} ms semantic TTL after {} attempts",
-        CONTROLLED_LEASE_TTL_MS, REALTIME_LEASE_OBSERVATION_ATTEMPTS
+        lease_timing.scaffolding_lease_ttl_ms(),
+        REALTIME_LEASE_OBSERVATION_ATTEMPTS
     );
 }
 
@@ -3455,7 +3748,12 @@ async fn claim_session_execution_lease_until_acquired(
     let deadline = std::time::Instant::now() + REALTIME_LEASE_STALL_ALLOWANCE;
     loop {
         match store
-            .try_claim_session_execution_lease(session_id, claimant, 60_000)
+            .try_claim_session_execution_lease(
+                session_id,
+                claimant,
+                "claim-session-execution-lease-until-acquired-executor",
+                60_000,
+            )
             .await
             .unwrap_or_else(|error| panic!("claim after {context}: {error}"))
         {
@@ -3487,6 +3785,7 @@ async fn claim_queued_work_under_short_lease(
             .try_claim_session_execution_lease(
                 session_id,
                 owner,
+                "claim-queued-work-under-short-lease-executor",
                 lease_timing.scaffolding_lease_ttl_ms(),
             )
             .await
@@ -3525,6 +3824,7 @@ async fn claim_turn_input_under_short_lease(
             .try_claim_session_execution_lease(
                 session_id,
                 owner,
+                "claim-turn-input-under-short-lease-executor",
                 lease_timing.scaffolding_lease_ttl_ms(),
             )
             .await
@@ -3593,7 +3893,12 @@ async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Runtime
     // A lapsed holder is the ambiguous case triage must see, so expiry is
     // reported rather than filtered out.
     let lapsing = store
-        .try_claim_session_execution_lease("lease-diagnostics", &lease_owner("diag-lapsed"), 0)
+        .try_claim_session_execution_lease(
+            "lease-diagnostics",
+            &lease_owner("diag-lapsed"),
+            "session-execution-lease-diagnostic-read-contract-executor",
+            0,
+        )
         .await
         .expect("claim an immediately expiring lease")
         .acquired()
@@ -3651,7 +3956,12 @@ pub async fn session_execution_lease_displacement(
 
     // A first claim on a row nobody ever held displaces nobody.
     let opening = store
-        .try_claim_session_execution_lease(session_id, &first, 0)
+        .try_claim_session_execution_lease(
+            session_id,
+            &first,
+            "session-execution-lease-displacement-executor",
+            0,
+        )
         .await
         .expect("first claim")
         .acquisition()
@@ -3664,7 +3974,12 @@ pub async fn session_execution_lease_displacement(
 
     // Taking over a lapsed holder must name that exact holder and generation.
     let takeover = store
-        .try_claim_session_execution_lease(session_id, &second, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &second,
+            "session-execution-lease-displacement-executor-2",
+            60_000,
+        )
         .await
         .expect("claim the lapsed lane")
         .acquisition()
@@ -3696,9 +4011,16 @@ pub async fn session_execution_lease_displacement(
         "the displacement must report the lapsed holder's own expiry"
     );
 
-    // Same-incarnation reentry advances nothing, so it displaces nobody.
+    // Exact same-executor reentry advances nothing, so it displaces nobody.
+    let reentry_nonce = crate::LeaseClaimNonce::for_testing("displacement-reentry-token");
     let reentry = store
-        .try_claim_session_execution_lease(session_id, &second, 60_000)
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &second,
+            &takeover.lease.executor_id,
+            &reentry_nonce,
+            60_000,
+        )
         .await
         .expect("reenter the live lane")
         .acquisition()
@@ -3717,7 +4039,12 @@ pub async fn session_execution_lease_displacement(
         .await
         .expect("release the lane");
     let after_release = store
-        .try_claim_session_execution_lease(session_id, &first, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &first,
+            "session-execution-lease-displacement-executor-3",
+            60_000,
+        )
         .await
         .expect("claim a released lane")
         .acquisition()
@@ -3760,13 +4087,25 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
         .await
         .expect("enqueue input behind the lease fence");
     let predecessor = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            "lease-fence-executor",
+            &crate::LeaseClaimNonce::for_testing("lease-fence-predecessor-token"),
+            60_000,
+        )
         .await
         .expect("claim fence predecessor")
         .acquired()
         .expect("fence predecessor acquired");
     let successor = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            "lease-fence-executor",
+            &crate::LeaseClaimNonce::for_testing("lease-fence-successor-token"),
+            60_000,
+        )
         .await
         .expect("rotate fence token for the same owner")
         .acquired()
@@ -3799,7 +4138,12 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
         .await
         .expect("release live successor before expiry case");
     let expired = store
-        .try_claim_session_execution_lease(session_id, &lease_owner("lease-fence-expired"), 0)
+        .try_claim_session_execution_lease(
+            session_id,
+            &lease_owner("lease-fence-expired"),
+            "session-execution-lease-fence-authority-executor",
+            0,
+        )
         .await
         .expect("claim immediately expired fence")
         .acquired()
@@ -3814,7 +4158,12 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
     ));
 
     let current = store
-        .try_claim_session_execution_lease(session_id, &lease_owner("lease-fence-current"), 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &lease_owner("lease-fence-current"),
+            "session-execution-lease-fence-authority-executor-2",
+            60_000,
+        )
         .await
         .expect("claim current fence")
         .acquired()
@@ -4998,7 +5347,12 @@ async fn claim_both_generation_fenced_lanes(
         .await
         .expect("enqueue generation-fenced turn input");
     let lease = store
-        .try_claim_session_execution_lease(session_id, owner, lease_ttl_ms)
+        .try_claim_session_execution_lease(
+            session_id,
+            owner,
+            "claim-both-generation-fenced-lanes-executor",
+            lease_ttl_ms,
+        )
         .await
         .expect("claim session lease for both claim lanes")
         .acquired()
@@ -5154,7 +5508,12 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
         );
     }
     let queue_lease = store
-        .try_claim_session_execution_lease(queue_session, &queue_owner, 60_000)
+        .try_claim_session_execution_lease(
+            queue_session,
+            &queue_owner,
+            "same-generation-claim-scans-reach-rows-beyond-the-scan-surplus-executor",
+            60_000,
+        )
         .await
         .expect("claim bounded-scan queue session lease")
         .acquired()
@@ -5190,7 +5549,12 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
         );
     }
     let command_lease = store
-        .try_claim_session_execution_lease(command_session, &command_owner, 60_000)
+        .try_claim_session_execution_lease(
+            command_session,
+            &command_owner,
+            "same-generation-claim-scans-reach-rows-beyond-the-scan-surplus-executor-2",
+            60_000,
+        )
         .await
         .expect("claim bounded-scan command session lease")
         .acquired()
@@ -5224,7 +5588,12 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
         );
     }
     let input_lease = store
-        .try_claim_session_execution_lease(input_session, &input_owner, 60_000)
+        .try_claim_session_execution_lease(
+            input_session,
+            &input_owner,
+            "same-generation-claim-scans-reach-rows-beyond-the-scan-surplus-executor-3",
+            60_000,
+        )
         .await
         .expect("claim bounded-scan turn-input session lease")
         .acquired()
@@ -7824,13 +8193,23 @@ async fn session_execution_lease_first_claim_excludes_concurrent_reopen_handles(
 
     let open_claim = crate::task::spawn(async move {
         open_barrier.wait().await;
-        open.try_claim_session_execution_lease("first-claim-race", &open_owner, 60_000)
-            .await
+        open.try_claim_session_execution_lease(
+            "first-claim-race",
+            &open_owner,
+            "session-execution-lease-first-claim-excludes-concurrent-reopen-handles-executor",
+            60_000,
+        )
+        .await
     });
     let reopen_claim = crate::task::spawn(async move {
         reopen_barrier.wait().await;
         reopen
-            .try_claim_session_execution_lease("first-claim-race", &reopen_owner, 60_000)
+            .try_claim_session_execution_lease(
+                "first-claim-race",
+                &reopen_owner,
+                "session-execution-lease-first-claim-excludes-concurrent-reopen-handles-executor-2",
+                60_000,
+            )
             .await
     });
 

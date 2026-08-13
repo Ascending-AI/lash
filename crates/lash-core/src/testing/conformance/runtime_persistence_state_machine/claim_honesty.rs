@@ -23,7 +23,7 @@ where
             .map_err(|error| error.to_string())?;
         let stale_owner = owner(0);
         let stale_lease = store
-            .try_claim_session_execution_lease(SESSION_ID, &stale_owner, 60_000)
+            .try_claim_session_execution_lease(SESSION_ID, &stale_owner, "run-executor", 60_000)
             .await
             .map_err(|error| error.to_string())?
             .acquired()
@@ -46,7 +46,12 @@ where
             .map_err(|error| error.to_string())?;
         let successor_owner = owner(1);
         let _successor_lease = store
-            .try_claim_session_execution_lease(SESSION_ID, &successor_owner, 60_000)
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &successor_owner,
+                "run-executor-2",
+                60_000,
+            )
             .await
             .map_err(|error| error.to_string())?
             .acquired()
@@ -123,7 +128,12 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let predecessor_owner = owner(0);
     let predecessor_lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &predecessor_owner, 60_000)
+        .try_claim_session_execution_lease(
+            SESSION_ID,
+            &predecessor_owner,
+            "law-reclaimed-predecessor-rejection-survives-successor-head-advance-executor",
+            60_000,
+        )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -147,7 +157,12 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
 
     let successor_owner = owner(1);
     let successor_lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &successor_owner, 60_000)
+        .try_claim_session_execution_lease(
+            SESSION_ID,
+            &successor_owner,
+            "law-reclaimed-predecessor-rejection-survives-successor-head-advance-executor-2",
+            60_000,
+        )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()

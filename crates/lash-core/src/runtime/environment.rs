@@ -85,6 +85,8 @@ pub struct ParkedSession {
     pub(crate) session_id: String,
     pub(crate) store: Arc<dyn crate::store::RuntimePersistence>,
     pub(crate) policy: crate::SessionPolicy,
+    pub(crate) runtime_lease_owner: crate::LeaseOwnerIdentity,
+    pub(crate) runtime_lease_executor_id: String,
 }
 
 impl ParkedSession {

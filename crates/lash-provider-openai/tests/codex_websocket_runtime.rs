@@ -53,7 +53,10 @@ fn websocket_core(provider: ProviderHandle) -> LashCore {
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "codex-websocket-runtime-test",
+            "codex-websocket-runtime-test-boot",
+        ))
         .expect("core")
 }
 
@@ -177,7 +180,10 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "codex-websocket-runtime-tool-test",
+            "codex-websocket-runtime-tool-test-boot",
+        ))
         .expect("core");
     let session = core
         .session("codex-ws-runtime-tool")

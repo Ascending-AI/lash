@@ -127,7 +127,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
             lash_core::facade_support::PluginSpec::new()
                 .with_context_compactor(100, Arc::new(FixedCompactor)),
         )))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("compact-context").open().await?;
     session
         .turn(TurnInput::text("old durable request"))
@@ -242,7 +242,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-idempotency").open().await?;
 
     let first = session
@@ -277,7 +277,7 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queue-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
@@ -327,7 +327,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .disable_queued_work_driver()
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pending-input-facade-cancel").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
@@ -409,7 +409,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("process-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
     let process_id = "observed-process";
@@ -472,7 +472,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-trigger").open().await?;
     let before = session.admin().state().persist_current().await?;
 
@@ -539,7 +539,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("nonblocking-observation").open().await?;
     let turn_session = session.clone();
     let scoped_effect_controller = turn_scope(&turn_session.session_id());
@@ -598,7 +598,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .advanced()
         .runtime_host_config(runtime_host)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-cancel").open().await?;
     session
         .processes()
@@ -653,7 +653,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         ))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-filter-bypass").open().await?;
     for process_id in ["host-filter-signal", "host-filter-cancel"] {
         session
@@ -739,7 +739,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
         .process_work_driver(driver)
         .advanced()
         .runtime_host_config(runtime_host)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-cancel-all").open().await?;
     for process_id in ["host-process-a", "host-process-b"] {
         session
@@ -796,7 +796,7 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
         .provider(mock_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("observation-mutations").open().await?;
 
     session
@@ -899,7 +899,7 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
         if let Some(store_factory) = store_factory.clone() {
             builder = builder.store_factory(store_factory);
         }
-        let core = builder.build()?;
+        let core = builder.build(crate::testing::runtime_lease_owner())?;
         let session = core.session(&parent_session_id).open().await?;
 
         for process_id in [&create_process_id, &fork_process_id] {

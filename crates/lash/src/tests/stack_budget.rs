@@ -26,7 +26,7 @@ finish {
                 lash_core::facade_support::InMemorySessionStoreFactory::new(),
             ))
             .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .build()?;
+            .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("stack-budget-rlm-lashlang").open().await?;
         let events = RecordingEvents::default();
 

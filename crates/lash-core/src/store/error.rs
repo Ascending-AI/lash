@@ -4,6 +4,7 @@
 pub enum SessionExecutionLeaseRenewalInstallMismatch {
     Session,
     OwnerIncarnation,
+    Executor,
     LeaseToken,
     FencingToken,
     ExpiryRegressed,
@@ -14,6 +15,7 @@ impl SessionExecutionLeaseRenewalInstallMismatch {
         match self {
             Self::Session => "session",
             Self::OwnerIncarnation => "owner_incarnation",
+            Self::Executor => "executor",
             Self::LeaseToken => "lease_token",
             Self::FencingToken => "fencing_token",
             Self::ExpiryRegressed => "expiry",

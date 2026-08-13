@@ -441,10 +441,12 @@ CREATE TABLE lash_durable_read_fixture.lash_session_execution_leases (
     session_id text NOT NULL,
     lease_owner_id text,
     lease_owner_incarnation_id text,
+    lease_executor_id text,
     lease_owner_liveness_json text,
     lease_token text,
     lease_fencing_token bigint DEFAULT 0 NOT NULL,
     lease_claimed_at_ms bigint DEFAULT 0 NOT NULL,
+    lease_term_ms bigint DEFAULT 0 NOT NULL,
     lease_expires_at_ms bigint DEFAULT 0 NOT NULL
 );
 
@@ -844,14 +846,14 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 49);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 50);
 
 
 --
 -- Data for Name: lash_session_execution_leases; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('durable-read-fixture', 'durable-read-session-owner', 'durable-read-session-incarnation', NULL, 'durable-read-retained-session-lease', 2, 1700000000000, 1700000000100);
+INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('durable-read-fixture', 'durable-read-session-owner', 'durable-read-session-incarnation', 'durable-read-retained-executor', NULL, 'durable-read-retained-session-lease', 2, 1700000000000, 100, 1700000000100);
 
 
 --

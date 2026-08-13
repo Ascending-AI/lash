@@ -51,7 +51,7 @@ pub(super) fn runtime_core_for_scripts(
         builder = builder.disable_queued_work_driver();
     }
     let core = builder
-        .build()
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     Ok((core, transport, provider_kind))
 }

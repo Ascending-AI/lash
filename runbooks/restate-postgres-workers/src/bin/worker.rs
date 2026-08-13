@@ -7,7 +7,7 @@ use lash::observe::SessionResume;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
-    ExecutionScope, LeaseOwnerIdentity, ProcessEventAppendRequest, facade_support::TurnOutcome,
+    ExecutionScope, ProcessEventAppendRequest, facade_support::TurnOutcome,
     facade_support::TurnStop,
 };
 use lash_postgres_store::PostgresStorage;
@@ -155,14 +155,8 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session_execution_owner_id = format!("E2eTurnWorkflow/{}/run", request.workflow_id);
-        let session_execution_owner = LeaseOwnerIdentity::opaque(
-            session_execution_owner_id.clone(),
-            format!("{session_execution_owner_id}/incarnation"),
-        );
         let session = core
             .session(DEFAULT_SESSION_ID)
-            .session_execution_owner(session_execution_owner)
             .open()
             .await
             .map_err(terminal_error)?;
@@ -203,14 +197,8 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session_execution_owner_id = format!("E2eTurnWorkflow/{}/run", request.workflow_id);
-        let session_execution_owner = LeaseOwnerIdentity::opaque(
-            session_execution_owner_id.clone(),
-            format!("{session_execution_owner_id}/incarnation"),
-        );
         let session = core
             .session(turn_session_id(&request.workflow_id))
-            .session_execution_owner(session_execution_owner)
             .open()
             .await
             .map_err(terminal_error)?;
@@ -305,7 +293,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = open_e2e_session(core, &request.workflow_id).await?;
+        let session = open_e2e_session(core).await?;
         let first = session
             .enqueue(TurnInput::text(format!(
                 "Run queued frame switch. workflow_id={} frame_switch_queued_start=true",
@@ -406,7 +394,7 @@ impl AppState {
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
-        let session = open_e2e_session(core, &request.workflow_id).await?;
+        let session = open_e2e_session(core).await?;
         session
             .enqueue(TurnInput::text(format!(
                 "Run cancellable frame switch. workflow_id={} frame_switch_cancel_start=true",
@@ -746,17 +734,9 @@ fn prompt_for_request(request: &TurnRequest) -> String {
     }
 }
 
-async fn open_e2e_session(
-    core: &lash::LashCore,
-    workflow_id: &str,
-) -> HandlerResult<lash::LashSession> {
-    let owner_id = format!("E2eTurnWorkflow/{workflow_id}/run");
+async fn open_e2e_session(core: &lash::LashCore) -> HandlerResult<lash::LashSession> {
     Ok(core
         .session(DEFAULT_SESSION_ID)
-        .session_execution_owner(LeaseOwnerIdentity::opaque(
-            owner_id.clone(),
-            format!("{owner_id}/incarnation"),
-        ))
         .open()
         .await
         .map_err(terminal_error)?)

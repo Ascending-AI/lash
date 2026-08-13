@@ -45,7 +45,7 @@ mod derived_notes_tests {
             )
             .store_factory(Arc::clone(&store_factory))
             .plugin(plugin as Arc<dyn PluginFactory>)
-            .build()
+            .build(crate::test_core_owner())
             .expect("build derived-notes core");
 
         let session = core

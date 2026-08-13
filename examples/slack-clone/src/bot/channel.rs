@@ -27,7 +27,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 use lash::messages::{MessageOrigin, MessageRole};
 use lash::persistence::ChronologicalPayload;
-use lash::persistence::LeaseOwnerIdentity;
 use lash::{LashCore, LashSession, TurnInput};
 use tokio::sync::RwLock;
 
@@ -158,7 +157,6 @@ pub struct ChannelBot {
     ledger: EventLedger,
     identity: BotIdentity,
     verification_token: String,
-    session_owner: LeaseOwnerIdentity,
     /// One lock per routed session. Channels preserve admission order, while
     /// independent threads in the same channel remain fully parallel.
     session_locks: SessionLockRegistry,
@@ -179,7 +177,6 @@ impl ChannelBot {
         ledger: EventLedger,
         identity: BotIdentity,
         verification_token: String,
-        session_owner: LeaseOwnerIdentity,
     ) -> Self {
         Self {
             core,
@@ -187,7 +184,6 @@ impl ChannelBot {
             ledger,
             identity,
             verification_token,
-            session_owner,
             session_locks: Arc::new(Mutex::new(HashMap::new())),
             directory: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(test)]
@@ -561,7 +557,6 @@ impl ChannelBot {
             match threads::open_thread_session(
                 &self.core,
                 &self.ledger,
-                &self.session_owner,
                 record,
                 #[cfg(test)]
                 &self.missing_root_observed,
@@ -989,7 +984,6 @@ impl ChannelBot {
         let session = self
             .core
             .session(session_id(channel))
-            .session_execution_owner(self.session_owner.clone())
             .open()
             .await
             .with_context(|| format!("open session for channel {channel}"))?;

@@ -82,7 +82,7 @@ async fn lazy_projection(provider: ProviderHandle, model: lash::ModelSpec) -> an
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
 
     // `my_docs_projection` implements `lashlang::ProjectedHostDescriptor`.
     let docs_ref = registry.register_memory(Arc::new(my_docs_projection));
@@ -134,7 +134,7 @@ async fn prompt_template(provider: ProviderHandle) -> anyhow::Result<()> {
             "App",
             "Answer as the host application assistant.",
         ))
-        .build()?;
+        .build(crate::example_process_owner())?;
 
     let session = core
         .session("customer-42")
@@ -333,7 +333,7 @@ async fn tone_session(
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
 
     let session = core
         .session(chat_id)

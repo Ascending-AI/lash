@@ -49,6 +49,10 @@ impl AwaitEventResolver for InlineEffectHost {
         self.controller.replay_ownership()
     }
 
+    fn durable_workflow_controller(&self) -> bool {
+        self.controller.durable_workflow_controller()
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         self.controller.allows_process_lifetime_completion_keys()
             || self
@@ -153,6 +157,10 @@ struct InlineHostScopedController {
 impl AwaitEventResolver for InlineHostScopedController {
     fn replay_ownership(&self) -> crate::EffectReplayOwnership {
         self.controller.replay_ownership()
+    }
+
+    fn durable_workflow_controller(&self) -> bool {
+        self.controller.durable_workflow_controller()
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {

@@ -124,7 +124,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         core_builder = core_builder.queued_work_driver(queued_work_driver);
     }
     let core = core_builder
-        .build()
+        .build(crate::test_core_owner())
         .expect("build test core");
     let process_observer = core
         .processes()

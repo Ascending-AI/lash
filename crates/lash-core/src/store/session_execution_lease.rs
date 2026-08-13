@@ -82,6 +82,7 @@ impl SessionExecutionLeaseRefusalOperation {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SessionExecutionLeaseRefusalFacts<'a> {
     pub current_owner: Option<&'a LeaseOwnerIdentity>,
+    pub current_executor_id: Option<&'a str>,
     pub current_token: Option<&'a str>,
     pub current_fencing_token: Option<u64>,
     pub current_expires_at_epoch_ms: Option<u64>,
@@ -95,10 +96,12 @@ impl<'a> SessionExecutionLeaseRefusalFacts<'a> {
     /// Capture the owner-and-token subset consulted by renewal and release.
     pub fn lifecycle(
         current_owner: Option<&'a LeaseOwnerIdentity>,
+        current_executor_id: Option<&'a str>,
         current_token: Option<&'a str>,
     ) -> Self {
         Self {
             current_owner,
+            current_executor_id,
             current_token,
             ..Self::default()
         }
@@ -129,9 +132,11 @@ pub fn trace_session_execution_lease_refusal(
         .current_owner
         .map(|owner| owner.incarnation_id.as_str())
         .unwrap_or("none");
+    let current_executor_id = facts.current_executor_id.unwrap_or("none");
     let owner_matched = facts
         .current_owner
         .is_some_and(|owner| owner.same_incarnation(&presented.owner));
+    let executor_matched = facts.current_executor_id == Some(presented.executor_id.as_str());
     let token_matched = facts.current_token == Some(presented.lease_token.as_str());
     let session_matched = facts
         .requested_session_id
@@ -161,6 +166,8 @@ pub fn trace_session_execution_lease_refusal(
         "missing_current_lease"
     } else if !owner_matched {
         "owner_mismatch"
+    } else if !executor_matched {
+        "executor_mismatch"
     } else if generation_matched == Some(false) {
         "generation_mismatch"
     } else if expiry_matched == Some(false) {
@@ -197,10 +204,13 @@ pub fn trace_session_execution_lease_refusal(
         session_id = presented.session_id.as_str(),
         presented_owner_id = presented.owner.owner_id.as_str(),
         presented_incarnation_id = presented.owner.incarnation_id.as_str(),
+        presented_executor_id = presented.executor_id.as_str(),
         current_owner_id,
         current_incarnation_id,
+        current_executor_id,
         session_matched = ?session_matched,
         owner_matched,
+        executor_matched,
         token_matched,
         presented_fencing_token = presented.fencing_token,
         current_fencing_token = ?facts.current_fencing_token,
@@ -219,6 +229,11 @@ pub fn trace_session_execution_lease_refusal(
 }
 
 /// Stable identity for a lease holder.
+///
+/// Hosts keep `owner_id` stable for one worker or process, never one turn, and
+/// assign a new `incarnation_id` on every process boot. The slack-clone example
+/// is the reference shape: one constant worker owner id plus its boot-specific
+/// incarnation.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LeaseOwnerIdentity {
     pub owner_id: String,
@@ -262,20 +277,19 @@ impl LeaseOwnerIdentity {
     pub fn same_incarnation(&self, other: &LeaseOwnerIdentity) -> bool {
         self.owner_id == other.owner_id && self.incarnation_id == other.incarnation_id
     }
-
-    /// Reports whether two identities name the same logical owner through different incarnations.
-    pub(crate) fn same_owner_other_incarnation(&self, other: &LeaseOwnerIdentity) -> bool {
-        self.owner_id == other.owner_id && self.incarnation_id != other.incarnation_id
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionExecutionLease {
     pub session_id: String,
     pub owner: LeaseOwnerIdentity,
+    /// Runtime-minted identity for one executor open under the host owner.
+    pub executor_id: String,
     pub lease_token: String,
     pub fencing_token: u64,
     pub claimed_at_epoch_ms: u64,
+    /// Store-authored duration installed by the most recent claim, reentry, or renewal.
+    pub lease_term_ms: u64,
     pub expires_at_epoch_ms: u64,
 }
 
@@ -292,8 +306,24 @@ pub struct SessionExecutionLease {
 pub struct SessionExecutionLeaseAuthority {
     pub session_id: String,
     pub owner: LeaseOwnerIdentity,
+    pub executor_id: String,
     pub lease_token: String,
     pub fencing_token: u64,
+}
+
+/// The caller-supplied identity one session-execution-lease claim installs.
+///
+/// Backends take these four values as one value because they *are* one fact -
+/// the row the claim writes. As loose parameters, the executor id and the lease
+/// token are two adjacent `&str`s that a backend could silently transpose,
+/// which would make one host's executor another's lease authority.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct SessionExecutionLeaseClaimIdentity<'a> {
+    pub session_id: &'a str,
+    pub owner: &'a LeaseOwnerIdentity,
+    pub executor_id: &'a str,
+    pub lease_token: &'a str,
 }
 
 /// The lease-row facts every backend loads before deciding whether a retained
@@ -305,6 +335,7 @@ pub struct SessionExecutionLeaseAuthority {
 #[derive(Clone, Copy, Debug)]
 pub struct SessionExecutionLeaseFenceFacts<'a> {
     pub owner: Option<&'a LeaseOwnerIdentity>,
+    pub executor_id: Option<&'a str>,
     pub lease_token: Option<&'a str>,
     pub fencing_token: u64,
     pub expires_at_epoch_ms: u64,
@@ -313,7 +344,7 @@ pub struct SessionExecutionLeaseFenceFacts<'a> {
 /// Require the one canonical session-execution-lease fence predicate.
 ///
 /// A retained guard has authority only while it names the requested session,
-/// the current holder incarnation, the current fencing generation, the current
+/// the current holder executor (owner, incarnation, and executor id), the current fencing generation, the current
 /// lease token, and a lease whose expiry is strictly after `now_epoch_ms`.
 /// Every refusal uses the same typed error construction from this function.
 #[doc(hidden)]
@@ -328,6 +359,7 @@ pub fn require_current_session_execution_lease(
             current
                 .owner
                 .is_some_and(|owner| owner.same_incarnation(&presented.owner))
+                && current.executor_id == Some(presented.executor_id.as_str())
                 && current.fencing_token == presented.fencing_token
                 && current.expires_at_epoch_ms > now_epoch_ms
                 && current.lease_token == Some(presented.lease_token.as_str())
@@ -342,6 +374,7 @@ pub fn require_current_session_execution_lease(
             presented,
             SessionExecutionLeaseRefusalFacts {
                 current_owner: current.and_then(|current| current.owner),
+                current_executor_id: current.and_then(|current| current.executor_id),
                 current_token: current.and_then(|current| current.lease_token),
                 current_fencing_token: current.map(|current| current.fencing_token),
                 current_expires_at_epoch_ms: current.map(|current| current.expires_at_epoch_ms),
@@ -363,6 +396,7 @@ impl SessionExecutionLease {
         SessionExecutionLeaseAuthority {
             session_id: self.session_id.clone(),
             owner: self.owner.clone(),
+            executor_id: self.executor_id.clone(),
             lease_token: self.lease_token.clone(),
             fencing_token: self.fencing_token,
         }
@@ -400,7 +434,8 @@ pub struct SessionExecutionLeaseAcquisition {
     /// Backends must report `Some` exactly when the row named a *different* owner
     /// incarnation immediately before this claim, and `None` otherwise: a first
     /// claim, a reclaim of a row whose holder released it (nothing was taken from
-    /// anyone), or same-incarnation reentry (which advances no generation).
+    /// anyone), or exact owner/incarnation/executor reentry (which advances no
+    /// generation).
     /// Boxed for the same reason `ProcessRecord`'s optional facts are: a claim
     /// outcome is awaited on the turn path, so an inline copy grows every turn
     /// future, and this field is `None` on the common claim.
@@ -412,6 +447,7 @@ pub struct SessionExecutionLeaseAcquisition {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionExecutionLeaseDisplacement {
     pub owner: LeaseOwnerIdentity,
+    pub executor_id: String,
     /// The fencing token the displaced holder held, which ADR 0029 calls its
     /// generation. Strictly below the token the displacing claim received.
     pub fencing_token: u64,
@@ -435,6 +471,7 @@ impl SessionExecutionLeaseAcquisition {
     pub fn displacing_observed(
         lease: SessionExecutionLease,
         displaced: LeaseOwnerIdentity,
+        displaced_executor_id: String,
         displaced_fencing_token: u64,
         displaced_expired_at_epoch_ms: u64,
     ) -> Self {
@@ -442,6 +479,7 @@ impl SessionExecutionLeaseAcquisition {
             lease,
             displaced: Some(Box::new(SessionExecutionLeaseDisplacement {
                 owner: displaced,
+                executor_id: displaced_executor_id,
                 fencing_token: displaced_fencing_token,
                 expired_at_epoch_ms: displaced_expired_at_epoch_ms,
             })),
@@ -476,12 +514,13 @@ mod tests {
         let authority = SessionExecutionLeaseAuthority {
             session_id: "session".to_string(),
             owner: LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            executor_id: "executor".to_string(),
             lease_token: "lease".to_string(),
             fencing_token: 7,
         };
         assert_eq!(
             serde_json::to_string(&authority).expect("serialize lease authority"),
-            r#"{"session_id":"session","owner":{"owner_id":"owner","incarnation_id":"incarnation"},"lease_token":"lease","fencing_token":7}"#
+            r#"{"session_id":"session","owner":{"owner_id":"owner","incarnation_id":"incarnation"},"executor_id":"executor","lease_token":"lease","fencing_token":7}"#
         );
     }
 
@@ -491,11 +530,13 @@ mod tests {
         let authority = SessionExecutionLeaseAuthority {
             session_id: "session".to_string(),
             owner: owner.clone(),
+            executor_id: "executor".to_string(),
             lease_token: "current-token".to_string(),
             fencing_token: 7,
         };
         let current = SessionExecutionLeaseFenceFacts {
             owner: Some(&owner),
+            executor_id: Some("executor"),
             lease_token: Some("current-token"),
             fencing_token: 7,
             expires_at_epoch_ms: 101,

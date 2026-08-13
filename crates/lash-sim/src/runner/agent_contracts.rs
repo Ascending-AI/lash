@@ -668,7 +668,7 @@ async fn facade_final_value_execution_inner(
         builder = builder.tools(tools);
     }
     let core = builder
-        .build()
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
         .session(session_id)
@@ -1000,7 +1000,7 @@ fn agent_process_contract_core_with_options_and_effect_host(
         builder = builder.turn_budget(lash::TurnBudget::bounded(max_turns));
     }
     let core = builder
-        .build()
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     Ok((core, graph_store))
 }

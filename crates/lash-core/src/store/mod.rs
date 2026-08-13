@@ -1253,9 +1253,10 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// Try to claim the durable single-writer execution lane for `session_id`.
     /// Returns [`SessionExecutionLeaseClaimOutcome::Busy`] when another owner
     /// holds an unexpired lease. Expired or released leases may be reclaimed
-    /// and receive a higher fencing token. A live same-incarnation claim rotates the
-    /// lease token but preserves the fencing generation; renewal never rotates either
-    /// token. An unexpired lease held by the same owner id but a different incarnation is busy.
+    /// and receive a higher fencing token. A live claim reenters only when its
+    /// owner id, boot incarnation, and runtime-minted executor id all match;
+    /// reentry rotates the lease token but preserves the fencing generation.
+    /// Renewal never rotates either token. Any live mismatch is busy.
     ///
     /// A granted claim must carry
     /// [`SessionExecutionLeaseAcquisition::displaced`] naming the lapsed holder
@@ -1263,17 +1264,28 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// only truthful report of a takeover: the displaced runner is frequently
     /// dead or frozen (that is why its lease lapsed), so nothing it would have
     /// logged is guaranteed to happen. A claim that displaced nobody, including
-    /// same-incarnation reentry and a reclaim of a released row, reports `None`.
+    /// exact owner/incarnation/executor reentry and a reclaim of a released row,
+    /// reports `None`.
+    /// `executor_id` is the caller's own runtime-open discriminator and must be
+    /// supplied: it is identity, and a default that minted one per call would
+    /// make reentry unreachable through this method while silently changing the
+    /// claimant on every retry. Only the claim nonce - a per-attempt
+    /// capability, not identity - is minted here, so a caller that needs one
+    /// nonce across an ambiguous-outcome retry uses
+    /// [`try_claim_session_execution_lease_with_token`](Self::try_claim_session_execution_lease_with_token)
+    /// directly.
     async fn try_claim_session_execution_lease(
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        executor_id: &str,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let claim_nonce = LeaseClaimNonce::new();
         self.try_claim_session_execution_lease_with_token(
             session_id,
             owner,
+            executor_id,
             &claim_nonce,
             lease_ttl_ms,
         )
@@ -1291,6 +1303,7 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        executor_id: &str,
         claim_nonce: &LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError>;

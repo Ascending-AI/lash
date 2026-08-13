@@ -63,7 +63,7 @@ the case that used to go unreported.
    error is captured. A run that treats lease loss as proof of failure contradicts the
    contract the docs stake the "do not kill it" instruction on.
 4. **Livelock is recurrence, not one collision.** Every round of sustained misrouting must
-   produce a rejection carrying `lease_lost = false`, `lane_held = true`, and a head revision
+   produce a rejection carrying `lease_lost = false`, `lane_held = false`, and a head revision
    that moved on, with no `taken_over` in the timeline. A single rejection is ordinary
    concurrent-writer contention and the operations page says so separately; a run that shows
    one collision has not evidenced the diagnosis that prescribes an identity fix.
@@ -153,24 +153,25 @@ the loser was alive, so the run silently substituted the easy case for the one u
 ## Phase 3 — Livelock: sustained misrouting, repeated rejections
 
 **Setup.** `04-commit-cas-livelock.jsonl`. Three rounds of the misconfiguration the docs
-name: two writers are handed the same session under one explicit
-`session_execution_owner`, so the second reenters the first's lease instead of being
-rejected as busy, and both run a turn at once. Each round is a fresh pair, which is what a
-retry-on-conflict host does after losing.
+name: two runtime opens are handed the same session under one explicit core worker identity.
+Their owner id and boot incarnation match, but their runtime-minted executor ids differ. The
+second claim is therefore Busy rather than reentry; the busy claimant remains lane-less, both
+run a turn at once, and the head CAS alone selects the winner. Each round is a fresh pair,
+which is what a retry-on-conflict host does after losing.
 
 **Action.** Read `rounds_attempted`, `rounds_with_a_rejection`, the per-round records, and
 every `commit_cas_rejected` event.
 
 **Expected observable evidence.** Every round has exactly one winner and one rejected
 commit, so `rounds_with_a_rejection` equals `rounds_attempted` and the rejection count is at
-least one per round. Each rejection is `WARN` and carries session id, generation, owner id,
-incarnation id, `lease_lost = false`, `lane_held = true`, and an `actual_head_revision`
+least one per round. Each rejection is `WARN` and carries session id, owner id, incarnation
+id, executor id, `lease_lost = false`, `lane_held = false`, and an `actual_head_revision`
 strictly above `expected_head_revision`. No `session_execution_lease.lost` and no `taken_over` appear, so the
 situation is unambiguously a recurring race rather than a handoff.
 
 **Judgment — FAIL if:** any round has zero or two winners, any round produces no rejection
 (then the misrouting is not actually recurring and the run has proved contention, not
-livelock), a rejection reports `lease_lost = true` or `lane_held = false`, the head revisions
+livelock), a rejection reports `lease_lost = true` or `lane_held = true`, the head revisions
 do not show the head moving on, or a handoff event appears alongside.
 
 ## Phase 4 — Score the documented procedure against the observed run
@@ -183,7 +184,7 @@ rendered section text as `06-docs-claims.txt`.
 |---|---|
 | The read is a snapshot that never claims, renews, or releases | `02-provider-hang.jsonl` (repeated reads against a live holder), `01-facade-read-tests.log` |
 | An absent session reads differently from an unheld lane | `01-facade-read-tests.log` |
-| Every lease event carries session id, generation, and holder identity | all three phase artifacts |
+| Every lease event carries session id and the applicable owner, incarnation, and executor identities | all three phase artifacts |
 | The four events sit at the levels the table names | `acquired`/`taken_over` INFO, `lost`/`commit_cas_rejected` WARN, in all three artifacts |
 | `Current` with no `session_execution_lease.lost` means the turn is blocked inside itself | `02-provider-hang.jsonl` |
 | The winner reports `taken_over` naming the holder it displaced, even when that holder is dead | `03-lease-takeover.jsonl` (`lease_lost_count` is 0) |
@@ -195,11 +196,11 @@ rendered section text as `06-docs-claims.txt`.
 A page that promises a reading the companion never produced, or a companion observation the
 page omits, is a **contract violation** between docs and behavior: report it as a finding.
 
-The livelock row's *cause* is only partly observable here: the harness stages the shared
-identity directly rather than routing two host requests into it, so it evidences the
-mechanism (reentry, recurrence, and a rejected commit each round) and leaves the
-host-routing half to the deployment. Say so in the scorecard rather than claiming the cause
-was reproduced end to end.
+The livelock row's *cause* is only partly observable here: the harness stages the shared host
+identity directly rather than routing two host requests into it, so it evidences distinct
+per-open executors, Busy/lane-less publication, recurrence, and a rejected commit each round,
+while leaving the host-routing half to the deployment. Identical owner/incarnation/executor
+triples would indicate unintended reentry and must fail the scorecard.
 
 ## Phase 5 — Teardown and score
 
@@ -215,7 +216,7 @@ confirm no container or host port was left behind (the companion owns none).
 | Winner-emitted takeover | one `taken_over` from the winner naming the abandoned holder and generation | | `03-lease-takeover.jsonl` |
 | Dead loser stays silent | `lease_lost_count` is 0, so the event does not depend on loser liveness | | `03-lease-takeover.jsonl` |
 | Lease loss is not failure | the sweeping turn's fate recorded and self-consistent | | `03-lease-takeover.jsonl` |
-| CAS livelock recurs | every round: one commit, one rejection with `lease_lost = false` and `lane_held = true` | | `04-commit-cas-livelock.jsonl` |
+| CAS livelock recurs | every round: one commit, one rejection with `lease_lost = false` and `lane_held = false` from a different executor under the same host owner | | `04-commit-cas-livelock.jsonl` |
 | Backend agreement | every phase reported the same verdicts on each configured backend | | all phase artifacts |
 | Docs agreement | every scored claim matched an artifact | | `06-docs-claims.txt` |
 | Teardown | panic gate clean; no owned containers or ports remain | | `session-lease-triage-e2e.log` |

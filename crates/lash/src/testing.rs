@@ -4,6 +4,11 @@
 pub use lash_core::TestLocalProcessRegistry;
 pub use lash_core::testing::{TestProvider, TestProviderBuilder};
 
+#[cfg(test)]
+pub(crate) fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {
+    lash_core::LeaseOwnerIdentity::opaque("lash-runtime-test-worker", "lash-runtime-test-boot")
+}
+
 /// The normalized behavior-transcript vocabulary. Render a scenario's real facts
 /// into it and pin the result with an inline `insta` snapshot; see
 /// `docs/adr/0050-behavior-transcripts-are-one-normalized-vocabulary.md`.

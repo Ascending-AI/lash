@@ -165,7 +165,48 @@ the rendered transcript and `/api/state.messages`, with no active address left. 
 id must differ from the cancelled turn. Screenshot `05-post-restart-completed.png`; save
 state as `05-post-restart-state.json`.
 
-## Phase 5 — Teardown and score
+## Phase 5 — FIG-1117 worker-restart lease companion
+
+### Replace the Workbench worker inside the lease TTL
+
+Run this companion after Phase 4, with Restate healthy. It is a separate worker-restart
+geometry: do not count the engine bounce above as either arm. Record the configured session
+lease TTL and use monotonic timestamps to prove both post-loss commits start before the dead
+worker's original lease could expire.
+
+1. Start a shape-pinned long turn, record its exact session/turn address and the Workbench
+   PID, and gate a real `exec_code_started` record. Run `just agent-workbench-restart <port>`
+   without changing the data directory or Restate. Require the PID and boot incarnation to
+   change while the session and turn address remain exact.
+
+   Record the lease identity triple on both sides of the restart:
+   `owner_id`, `incarnation_id`, `executor_id`. All three must change across a real process
+   replacement — a new boot mints a new incarnation, and each runtime open inside it mints a
+   new executor id. This is what makes the replacement worker a *foreign* claimant to the
+   dead worker's still-live lease row, which is precisely the geometry both arms below
+   exercise. An unchanged incarnation means the restart did not happen; an unchanged
+   executor under a changed incarnation means the identity is being derived from something
+   process-stable, which is a **FAIL**.
+2. **Same-turn successor arm:** allow Restate to redrive that exact turn. Require its user and
+   assistant nodes to commit exactly once, the UI/API/store projections to agree, and the
+   trace to show the replacement worker observed the still-live holder before the original
+   TTL elapsed. The `session_execution_lease.busy` evidence must name the *dead* worker's
+   executor as `holder_executor_id` and the replacement's as `claimant_executor_id`: a
+   redrive is not reentry, and identical triples there would mean the runtime handed a
+   rebuilt open its predecessor's identity. Save `06a-same-turn-{state,store,trace}.json` and report this arm separately.
+3. **New-turn-within-TTL arm:** immediately submit a fresh marker turn through the replacement
+   worker, while the timestamp is still inside that same original TTL window. Require its
+   distinct turn id and ordered user/assistant nodes to commit exactly once, with UI/API/store
+   agreement. A busy-lease error is a failure; a typed `HeadRevisionConflict` is acceptable
+   only for an actual overlapping writer and must carry complete loser evidence. Save
+   `06b-new-turn-{state,store,trace}.json` and report this arm separately.
+
+The deterministic companions are
+`same_turn_successor_within_dead_lease_ttl_commits_under_head_cas` and
+`new_turn_within_dead_lease_ttl_commits_under_head_cas`. Restoring the former busy-holder
+refusal must make the new-turn arm fail; record that RED proof with the run.
+
+## Phase 6 — Teardown and score
 
 Run `just agent-workbench-down <port>` and confirm both the Workbench process and managed
 Restate container are gone.
@@ -179,6 +220,8 @@ Restate container are gone.
 | UI reconvergence | exact pre-bounce address restores running pill + Stop | | `03-reconverged-*` |
 | Stop after reconnect | committed Cancelled terminal carries matching user evidence; baseline process reaches Cancelled with `process.cancel_requested` | | `04-restarted-cancelled.png`, receipt/state/work JSON |
 | Normal post-restart commit | new turn commits and UI/API transcript agree | | `05-post-restart-*` |
+| FIG-1117 same-turn successor | replacement boot commits the exact redriven turn inside the dead lease TTL | | `06a-same-turn-*` |
+| FIG-1117 new turn inside TTL | replacement boot commits a distinct new turn inside the same dead lease TTL | | `06b-new-turn-*` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
 
 **Aggregate:** after bouncing only the Restate engine, did the unchanged Workbench

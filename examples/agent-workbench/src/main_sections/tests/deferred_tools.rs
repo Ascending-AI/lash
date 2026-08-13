@@ -52,7 +52,7 @@ fn deferred_tools_test_core(
             lash::CommitBudget::bounded(1024 * 1024, 512),
             lash::QueuedWorkBatchingConfig::new(1),
         ))
-        .build()
+        .build(crate::test_core_owner())
         .expect("build deferred-tool test core")
 }
 

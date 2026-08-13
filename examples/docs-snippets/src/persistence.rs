@@ -45,7 +45,7 @@ async fn sqlite_core(
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:sqlite-core
     Ok(())
 }
@@ -130,7 +130,7 @@ fn build_persistent_core(
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()
+        .build(crate::example_process_owner())
 }
 // docs:end:postgres-core
 
@@ -197,16 +197,19 @@ async fn commit_conflict_retry(
     match session.turn(input).run().await {
         Ok(turn) => persist(turn)?,
         Err(lash::EmbedError::Runtime(err))
-            if err.code == RuntimeErrorCode::SessionExecutionBusy =>
-        {
-            retry_later(err)?;
-        }
-        Err(lash::EmbedError::Runtime(err))
             if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>
         {
             // The durable lane moved to another owner before commit: reopen and retry.
             let session = core.session(chat_id).open().await?;
             retry_or_report(err, session)?;
+        }
+        Err(lash::EmbedError::Runtime(err))
+            if err.code == RuntimeErrorCode::SessionExecutionLaneBusy =>
+        {
+            // A durable workflow controller's queued drain found the lane held by
+            // a live executor and stopped waiting: nothing was consumed, so let
+            // the engine's retry policy re-drive this invocation unchanged.
+            retry_later(err)?;
         }
         Err(lash::EmbedError::Runtime(err))
             if err.code == RuntimeErrorCode::StoreCommitContended =>
@@ -268,7 +271,7 @@ async fn shared_factory(
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
 
     // Per request: open a session keyed by the app's chat id.
     let session = core.session(chat_id).open().await?;

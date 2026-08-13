@@ -1343,6 +1343,7 @@ async fn property_runtime(
         )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(store)),
         state,
+        crate::testing::runtime_lease_owner(),
     )
     .await
     .map_err(|error| error.to_string())
@@ -1359,7 +1360,12 @@ async fn commit_runtime_state_for_property(
         format!("session-graph-property-{owner_suffix}-incarnation"),
     );
     let lease = store
-        .try_claim_session_execution_lease(&session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            &session_id,
+            &owner,
+            "commit-runtime-state-for-property-executor",
+            60_000,
+        )
         .await?
         .acquired()
         .ok_or(crate::StoreError::Contended)?;

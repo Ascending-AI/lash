@@ -844,7 +844,7 @@ impl GeneratedRuntimeWorld {
                 tool_name.clone(),
                 Arc::clone(&key_slot),
             )) as Arc<dyn lash_core::ToolProvider>)
-            .build()
+            .build(crate::sim_process_owner())
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let session = core
             .session(session_alias.clone())

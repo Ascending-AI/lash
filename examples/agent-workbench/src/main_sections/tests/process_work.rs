@@ -64,7 +64,7 @@ mod process_work_tests {
             .model(model)
             .store_factory(Arc::clone(&core_store_factory))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -254,7 +254,7 @@ mod process_work_tests {
             .model(model)
             .store_factory(core_store_factory)
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()
@@ -920,7 +920,7 @@ mod process_work_tests {
             .model(model)
             .store_factory(core_store_factory)
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
             .processes()

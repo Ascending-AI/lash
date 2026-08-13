@@ -36,15 +36,16 @@ The lease token is a per-claim nonce and one required component of
 execution-fence authority as well as lock lifecycle authority. It does not
 become session-head commit authority.
 
-- Every distinct claim, including same-incarnation reentry, mints a fresh
+- Every distinct claim, including exact owner/incarnation/executor reentry, mints a fresh
   `LeaseClaimNonce`. Retrying one ambiguous claim reuses the same nonce and must
   return the exact durable token without advancing generation or changing
   `claimed_at`. The nonce has no value-taking constructor and no `Display`
   implementation; hosts can clone a minted value for retry but cannot derive one
   from stable owner data.
-- Same-owner reentry therefore rotates the lock-lifecycle token, and releasing
-  that reentered claim clears the durable lane row. Reentry is only for a
-  genuinely lane-less context. A nested runtime commit whose caller already
+- Same-executor reentry therefore rotates the lock-lifecycle token, and releasing
+  that reentered claim clears the durable lane row. A second runtime open under
+  the same host owner has a different executor id and is Busy, never reentrant.
+  A nested runtime commit whose caller already
   holds the session-execution lane borrows the outer guard's current authority:
   it makes no fresh claim, performs no rotation, and performs no release on
   success or failure. The outer guard remains the owner of renewal and release.

@@ -1349,7 +1349,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::flush_trace_sink"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:127#core.flush_trace_sink()?;"
+usage = "examples/docs-snippets/src/operations.rs:124#core.flush_trace_sink()?;"
 
 [[api]]
 symbol = "lash::LashCore::fork_at"
@@ -1460,8 +1460,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::session_lease_diagnostics"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:293#.session_lease_diagnostics(SESSION_ID)"
-assertion = "examples/agent-service/src/lease_triage.rs:310#assert_eq!(diagnostics.session_id, SESSION_ID);"
+usage = "examples/agent-service/src/lease_triage.rs:307#.session_lease_diagnostics(SESSION_ID)"
+assertion = "examples/agent-service/src/lease_triage.rs:324#assert_eq!(diagnostics.session_id, SESSION_ID);"
 
 [[api]]
 symbol = "lash::LashCore::session_was_deleted"
@@ -1480,7 +1480,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::shutdown"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/slack-clone/src/bot.rs:195#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
+usage = "examples/slack-clone/src/bot.rs:193#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
 assertion = "examples/slack-clone/tests/mcp.rs:451#!process_exists(pid),"
 
 [[api]]
@@ -1591,7 +1591,7 @@ aliases = ["lash::prelude::LashCoreBuilder::commit_budget"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/commit_budget.rs:61#.commit_budget(bounded)"
-assertion = "examples/agent-workbench/src/main_sections/tests/commit_budget.rs:67#assert!(configured.is_ok());"
+assertion = "examples/agent-workbench/src/main_sections/tests/commit_budget.rs:67#assert!(configured.is_ok(), \"an explicit commit budget should build\");"
 
 [[api]]
 symbol = "lash::LashCoreBuilder::configure_plugins"
@@ -2351,7 +2351,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::ModelSpec", "lash_core::ModelSpec"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/state.rs:8#use lash::{LashCore, LashSession, ModelSpec, TurnWorkDriver};"
+usage = "examples/agent-service/src/state.rs:7#use lash::{LashCore, LashSession, ModelSpec, TurnWorkDriver};"
 
 [[api]]
 symbol = "lash::ModelSpec::builder"
@@ -2983,7 +2983,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1139#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1131#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -3629,15 +3629,6 @@ aliases = ["lash::prelude::SessionBuilder::provider"]
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::SessionBuilder::provider to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::SessionBuilder::session_execution_owner"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash::prelude::SessionBuilder::session_execution_owner"]
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "The current example use of lash::SessionBuilder::session_execution_owner is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
 symbol = "lash::SessionBuilder::session_spec"
@@ -6333,7 +6324,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnResult::duration", "lash::turn::TurnResult::duration"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:208#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
+usage = "examples/docs-snippets/src/operations.rs:205#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
 
 [[api]]
 symbol = "lash::TurnResult::errors"
@@ -6396,7 +6387,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnResult::started_at", "lash::turn::TurnResult::started_at"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:207#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:204#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::TurnResult::state"
@@ -9222,15 +9213,6 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_change_hub` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself and the Restate durable effect-host adapter -- this function is exercised in-repo at crates/lash/src/core.rs:781, crates/lash/src/core.rs:1344, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash::durability::DurableProcessWorkerConfig::with_lease_owner"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_lease_owner"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_lease_owner` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: judged downstream-host runbooks and facade agent-scenario tests -- this function is exercised in-repo at runbooks/restate-postgres-workers/src/bin/process_operator_flow.rs:120, crates/lash/src/tests/processes_endstate.rs:1221, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency"
 kind = "function"
 availability = "default+all-features"
@@ -11678,7 +11660,7 @@ availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/routes.rs:938#.attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new("
-assertion = "examples/agent-service/src/routes.rs:993#.any(|line| line.get(\"type\").and_then(serde_json::Value::as_str)"
+assertion = "examples/agent-service/src/routes.rs:995#.any(|line| line.get(\"type\").and_then(serde_json::Value::as_str)"
 
 [[api]]
 symbol = "lash::persistence::FileAttachmentStore::new"
@@ -11687,7 +11669,7 @@ availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/routes.rs:938#.attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new("
-assertion = "examples/agent-service/src/routes.rs:993#.any(|line| line.get(\"type\").and_then(serde_json::Value::as_str)"
+assertion = "examples/agent-service/src/routes.rs:995#.any(|line| line.get(\"type\").and_then(serde_json::Value::as_str)"
 
 [[api]]
 symbol = "lash::persistence::FileAttachmentStore::root"
@@ -12487,7 +12469,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LeaseOwnerIdentity"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/state.rs:24#session_owner: LeaseOwnerIdentity,"
+usage = "examples/slack-clone/src/bot/runtime.rs:93#pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {"
 
 [[api]]
 symbol = "lash::persistence::LeaseOwnerIdentity::incarnation_id"
@@ -12505,8 +12487,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LeaseOwnerIdentity::opaque"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:951#lash::persistence::LeaseOwnerIdentity::opaque(\"agent-service-test\", \"test\"),"
-assertion = "examples/agent-service/src/routes.rs:995#\"stream should expose an opaque live replay cursor: {lines:#?}\""
+usage = "examples/agent-service/src/routes.rs:941#.build(lash::persistence::LeaseOwnerIdentity::opaque("
+assertion = "examples/agent-service/src/routes.rs:997#\"stream should expose an opaque live replay cursor: {lines:#?}\""
 
 [[api]]
 symbol = "lash::persistence::LeaseOwnerIdentity::owner_id"
@@ -14870,6 +14852,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::SessionExecutionLease::executor_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SessionExecutionLease::executor_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers persist the runtime-open executor discriminator used for exact reentry, renewal, and fencing; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
 symbol = "lash::persistence::SessionExecutionLease::fence"
 kind = "function"
 availability = "default+all-features"
@@ -14886,6 +14877,15 @@ aliases = ["lash_core::SessionExecutionLease::fencing_token"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLease::lease_term_ms"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SessionExecutionLease::lease_term_ms"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers persist the exact store-authored term on claim, reentry, and renewal; the core queued-drain policy and backend conformance suites consume and pin it directly."
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLease::lease_token"
@@ -14976,6 +14976,15 @@ aliases = ["lash_core::SessionExecutionLeaseAuthority::fencing_token"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAuthority::executor_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SessionExecutionLeaseAuthority::executor_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers require the runtime-open executor discriminator as part of exact commit and release authority; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLeaseAuthority::lease_token"
@@ -15086,6 +15095,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement::executor_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SessionExecutionLeaseDisplacement::executor_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers report which lapsed runtime-open executor a successful takeover displaced; backend conformance suites pin the atomic report directly."
+
+[[api]]
 symbol = "lash::persistence::SessionExecutionLeaseDisplacement::fencing_token"
 kind = "field"
 availability = "default+all-features"
@@ -15120,6 +15138,15 @@ aliases = ["lash_core::SessionExecutionLeaseRenewalInstallMismatch::ExpiryRegres
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete consumer: the core renewal task traces a regressed response expiry as the precise install-refusal cause."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseRenewalInstallMismatch::Executor"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::SessionExecutionLeaseRenewalInstallMismatch::Executor"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete consumer: the core renewal task traces a response for another runtime-open executor as the precise install-refusal cause."
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLeaseRenewalInstallMismatch::FencingToken"
@@ -15173,8 +15200,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionExecutionLeaseStore::get_session_execution_lease"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:302#.get_session_execution_lease(SESSION_ID)"
-assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(holder.owner, row.owner);"
+usage = "examples/agent-service/src/lease_triage.rs:316#.get_session_execution_lease(SESSION_ID)"
+assertion = "examples/agent-service/src/lease_triage.rs:320#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLeaseStore::release_session_execution_lease"
@@ -15554,8 +15581,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:292#let diagnostics: SessionLeaseDiagnostics = core"
-assertion = "examples/agent-service/src/lease_triage.rs:310#assert_eq!(diagnostics.session_id, SESSION_ID);"
+usage = "examples/agent-service/src/lease_triage.rs:306#let diagnostics: SessionLeaseDiagnostics = core"
+assertion = "examples/agent-service/src/lease_triage.rs:324#assert_eq!(diagnostics.session_id, SESSION_ID);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseDiagnostics::holder"
@@ -15563,8 +15590,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:298#            .holder"
-assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(holder.owner, row.owner);"
+usage = "examples/agent-service/src/lease_triage.rs:312#            .holder"
+assertion = "examples/agent-service/src/lease_triage.rs:320#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseDiagnostics::observed_at_epoch_ms"
@@ -15572,8 +15599,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:129#observed_at_epoch_ms: Some(diagnostics.observed_at_epoch_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:311#assert!(diagnostics.observed_at_epoch_ms > 0);"
+usage = "examples/agent-service/src/lease_triage.rs:131#observed_at_epoch_ms: Some(diagnostics.observed_at_epoch_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:325#assert!(diagnostics.observed_at_epoch_ms > 0);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseDiagnostics::renewal"
@@ -15581,8 +15608,8 @@ kind = "function"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:118#let renewal = diagnostics.renewal();"
-assertion = "examples/agent-service/src/lease_triage.rs:313#diagnostics.renewal(),"
+usage = "examples/agent-service/src/lease_triage.rs:120#let renewal = diagnostics.renewal();"
+assertion = "examples/agent-service/src/lease_triage.rs:327#diagnostics.renewal(),"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseDiagnostics::session_id"
@@ -15590,8 +15617,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:126#session_id: diagnostics.session_id.clone(),"
-assertion = "examples/agent-service/src/lease_triage.rs:310#assert_eq!(diagnostics.session_id, SESSION_ID);"
+usage = "examples/agent-service/src/lease_triage.rs:128#session_id: diagnostics.session_id.clone(),"
+assertion = "examples/agent-service/src/lease_triage.rs:324#assert_eq!(diagnostics.session_id, SESSION_ID);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder"
@@ -15599,8 +15626,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:297#let holder: &SessionLeaseHolder = diagnostics"
-assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(holder.owner, row.owner);"
+usage = "examples/agent-service/src/lease_triage.rs:311#let holder: &SessionLeaseHolder = diagnostics"
+assertion = "examples/agent-service/src/lease_triage.rs:320#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder::claimed_at_epoch_ms"
@@ -15608,8 +15635,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:133#claimed_at_epoch_ms: holder.map(|holder| holder.claimed_at_epoch_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:308#assert_eq!(holder.claimed_at_epoch_ms, row.claimed_at_epoch_ms);"
+usage = "examples/agent-service/src/lease_triage.rs:136#claimed_at_epoch_ms: holder.map(|holder| holder.claimed_at_epoch_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:322#assert_eq!(holder.claimed_at_epoch_ms, row.claimed_at_epoch_ms);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder::expires_at_epoch_ms"
@@ -15617,8 +15644,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:134#expires_at_epoch_ms: holder.map(|holder| holder.expires_at_epoch_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:309#assert_eq!(holder.expires_at_epoch_ms, row.expires_at_epoch_ms);"
+usage = "examples/agent-service/src/lease_triage.rs:137#expires_at_epoch_ms: holder.map(|holder| holder.expires_at_epoch_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:323#assert_eq!(holder.expires_at_epoch_ms, row.expires_at_epoch_ms);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder::generation"
@@ -15626,8 +15653,17 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:132#generation: holder.map(|holder| holder.generation),"
-assertion = "examples/agent-service/src/lease_triage.rs:307#assert_eq!(holder.generation, row.fencing_token);"
+usage = "examples/agent-service/src/lease_triage.rs:135#generation: holder.map(|holder| holder.generation),"
+assertion = "examples/agent-service/src/lease_triage.rs:321#assert_eq!(holder.generation, row.fencing_token);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseHolder::executor_id"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:134#holder_executor_id: holder.map(|holder| holder.executor_id.clone()),"
+assertion = "examples/agent-service/src/lease_triage.rs:293#report.holder_executor_id.as_deref(),"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder::owner"
@@ -15635,8 +15671,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:130#holder_owner_id: holder.map(|holder| holder.owner.owner_id.clone()),"
-assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(holder.owner, row.owner);"
+usage = "examples/agent-service/src/lease_triage.rs:132#holder_owner_id: holder.map(|holder| holder.owner.owner_id.clone()),"
+assertion = "examples/agent-service/src/lease_triage.rs:320#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal"
@@ -15644,8 +15680,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:120#SessionLeaseRenewal::Unheld => LeaseTriage::Unheld,"
-assertion = "examples/agent-service/src/lease_triage.rs:413#assert_eq!(report.triage, LeaseTriage::Unheld);"
+usage = "examples/agent-service/src/lease_triage.rs:122#SessionLeaseRenewal::Unheld => LeaseTriage::Unheld,"
+assertion = "examples/agent-service/src/lease_triage.rs:439#assert_eq!(report.triage, LeaseTriage::Unheld);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Current"
@@ -15653,8 +15689,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:121#SessionLeaseRenewal::Current { .. } => LeaseTriage::ProviderHangShape,"
-assertion = "examples/agent-service/src/lease_triage.rs:276#assert_eq!(report.triage, LeaseTriage::ProviderHangShape);"
+usage = "examples/agent-service/src/lease_triage.rs:123#SessionLeaseRenewal::Current { .. } => LeaseTriage::ProviderHangShape,"
+assertion = "examples/agent-service/src/lease_triage.rs:286#assert_eq!(report.triage, LeaseTriage::ProviderHangShape);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Current::expires_in_ms"
@@ -15662,8 +15698,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:136#SessionLeaseRenewal::Current { expires_in_ms } => Some(expires_in_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:284#report.expires_in_ms.is_some_and(|remaining| remaining > 0),"
+usage = "examples/agent-service/src/lease_triage.rs:139#SessionLeaseRenewal::Current { expires_in_ms } => Some(expires_in_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:298#report.expires_in_ms.is_some_and(|remaining| remaining > 0),"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Lapsed"
@@ -15671,8 +15707,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:122#SessionLeaseRenewal::Lapsed { .. } => LeaseTriage::LeaseLost,"
-assertion = "examples/agent-service/src/lease_triage.rs:336#assert_eq!(report.triage, LeaseTriage::LeaseLost);"
+usage = "examples/agent-service/src/lease_triage.rs:124#SessionLeaseRenewal::Lapsed { .. } => LeaseTriage::LeaseLost,"
+assertion = "examples/agent-service/src/lease_triage.rs:355#assert_eq!(report.triage, LeaseTriage::LeaseLost);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Lapsed::expired_for_ms"
@@ -15680,8 +15716,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:140#SessionLeaseRenewal::Lapsed { expired_for_ms } => Some(expired_for_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:339#assert!(report.expired_for_ms.is_some());"
+usage = "examples/agent-service/src/lease_triage.rs:143#SessionLeaseRenewal::Lapsed { expired_for_ms } => Some(expired_for_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:358#assert!(report.expired_for_ms.is_some());"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Unheld"
@@ -15689,8 +15725,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:120#SessionLeaseRenewal::Unheld => LeaseTriage::Unheld,"
-assertion = "examples/agent-service/src/lease_triage.rs:413#assert_eq!(report.triage, LeaseTriage::Unheld);"
+usage = "examples/agent-service/src/lease_triage.rs:122#SessionLeaseRenewal::Unheld => LeaseTriage::Unheld,"
+assertion = "examples/agent-service/src/lease_triage.rs:439#assert_eq!(report.triage, LeaseTriage::Unheld);"
 
 [[api]]
 symbol = "lash::persistence::SessionMeta"
@@ -15780,7 +15816,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionNodeRecord::message_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/slack-clone/src/bot/threads.rs:296#node.message_id()"
+usage = "examples/slack-clone/src/bot/threads.rs:290#node.message_id()"
 assertion = "examples/slack-clone/src/tests/bot_events.rs:894#!requests[2].contains(\"later channel turn\"),"
 
 [[api]]
@@ -29779,7 +29815,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderHandle::close"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:119#let _ = provider.close().await;"
+usage = "examples/docs-snippets/src/operations.rs:116#let _ = provider.close().await;"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::complete"
@@ -33055,8 +33091,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1057#gap: Box::new(RemoteLiveReplayGap {"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1059#gap: Box::new(RemoteLiveReplayGap {"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGap::latest_cursor"
@@ -33064,8 +33100,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1061#latest_cursor: \"cursor-after\".to_string(),"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1063#latest_cursor: \"cursor-after\".to_string(),"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGap::latest_revision"
@@ -33073,8 +33109,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1062#latest_revision: 7,"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1064#latest_revision: 7,"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGap::protocol_version"
@@ -33082,8 +33118,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1051#protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1053#protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGap::reason"
@@ -33091,8 +33127,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1063#reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1065#reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGap::requested_cursor"
@@ -33100,8 +33136,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1060#requested_cursor: \"cursor-before\".to_string(),"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1062#requested_cursor: \"cursor-before\".to_string(),"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGap::session_id"
@@ -33109,8 +33145,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1052#session_id: \"session-1\".to_string(),"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1054#session_id: \"session-1\".to_string(),"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGap::validate"
@@ -33126,8 +33162,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1063#reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1065#reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGapReason::Trimmed"
@@ -33135,8 +33171,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1063#reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1065#reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGapReason::Unavailable"
@@ -33192,8 +33228,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1050#observation: Box::new(RemoteSessionObservation {"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1052#observation: Box::new(RemoteSessionObservation {"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservation::cursor"
@@ -33201,8 +33237,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1053#cursor: \"cursor-after\".to_string(),"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1055#cursor: \"cursor-after\".to_string(),"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservation::from_core"
@@ -33218,8 +33254,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1051#protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1053#protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservation::session_id"
@@ -33227,8 +33263,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1052#session_id: \"session-1\".to_string(),"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1054#session_id: \"session-1\".to_string(),"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservation::turn_index"
@@ -33236,8 +33272,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1054#turn_index: 3,"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1056#turn_index: 3,"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservation::usage"
@@ -33245,8 +33281,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1055#usage: lash_remote_protocol::RemoteUsage::default(),"
-assertion = "examples/agent-service/src/routes.rs:1068#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
+usage = "examples/agent-service/src/routes.rs:1057#usage: lash_remote_protocol::RemoteUsage::default(),"
+assertion = "examples/agent-service/src/routes.rs:1070#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservation::validate"
@@ -42978,6 +43014,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
+symbol = "lash::runtime::AwaitEventResolver::durable_workflow_controller"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::AwaitEventResolver::durable_workflow_controller"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: durable workflow controllers override this capability so queued drains use bounded lease-aware waiting; one-shot hosts inherit the false default."
+
+[[api]]
 symbol = "lash::runtime::AwaitEventResolver::peek_await_event"
 kind = "function"
 availability = "default+all-features"
@@ -43843,14 +43888,6 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::runtime::LashRuntime::set_provider to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::LashRuntime::set_runtime_lease_owner"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::runtime::LashRuntime::set_runtime_lease_owner to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::runtime::LashRuntime::snapshot_execution_state"
@@ -46438,7 +46475,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:200#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
+usage = "examples/docs-snippets/src/persistence.rs:200#if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::AttachmentSourcePolicyDenied"
@@ -47498,22 +47535,22 @@ disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match the typed diagnostic to choose retry, terminal settlement, or caller-bug handling."
 
 [[api]]
-symbol = "lash::runtime::RuntimeErrorCode::SessionExecutionBusy"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::RuntimeErrorCode::SessionExecutionBusy"]
-area = "sessions-turns"
-disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:200#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
-
-[[api]]
 symbol = "lash::runtime::RuntimeErrorCode::SessionExecutionLeaseLost"
 kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::SessionExecutionLeaseLost"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:205#if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>"
+usage = "examples/docs-snippets/src/persistence.rs:200#if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>"
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::SessionExecutionLaneBusy"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::SessionExecutionLaneBusy"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/persistence.rs:207#if err.code == RuntimeErrorCode::SessionExecutionLaneBusy =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::SessionHeadRefresh"
@@ -47603,7 +47640,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::StoreCommitContended"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:212#if err.code == RuntimeErrorCode::StoreCommitContended =>"
+usage = "examples/docs-snippets/src/persistence.rs:215#if err.code == RuntimeErrorCode::StoreCommitContended =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::StoreCommitFailed"
@@ -47612,7 +47649,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::StoreCommitFailed"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:217#Err(lash::EmbedError::Runtime(err)) if err.code == RuntimeErrorCode::StoreCommitFailed => {"
+usage = "examples/docs-snippets/src/persistence.rs:220#Err(lash::EmbedError::Runtime(err)) if err.code == RuntimeErrorCode::StoreCommitFailed => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::StoreCommitNodeBudgetExceeded"
@@ -52296,6 +52333,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::effect_host_await_events to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::durable_queued_drain_wait_contract"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable-store conformance embedders run this executable law to pin bounded queued-drain waiting, takeover after expiry, and non-consumption while a live executor owns the lane."
+
+[[api]]
 symbol = "lash::testing::conformance::effect_host_await_events_cold_instance"
 kind = "function"
 availability = "all-features"
@@ -52534,6 +52579,14 @@ availability = "all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::same_generation_claim_scans_reach_rows_beyond_the_scan_surplus to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::same_host_distinct_executors_are_lane_less_without_revoking_holder"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable-store conformance embedders run this executable law to prove distinct runtime opens under one host owner cannot share or revoke a live session lane."
 
 [[api]]
 symbol = "lash::testing::conformance::sample_store_contract_operations"
@@ -57206,7 +57259,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:486#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:488#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:275#assert_eq!(call_usage.len(), 1);"
 
 [[api]]
@@ -57245,7 +57298,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted::usage"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:486#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:488#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:275#assert_eq!(call_usage.len(), 1);"
 
 [[api]]
@@ -70814,7 +70867,7 @@ aliases = ["lash::prelude::LashCoreBuilder::queued_work_batching"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/commit_budget.rs:62#.queued_work_batching(batching)"
-assertion = "examples/agent-workbench/src/main_sections/tests/commit_budget.rs:67#assert!(configured.is_ok());"
+assertion = "examples/agent-workbench/src/main_sections/tests/commit_budget.rs:67#assert!(configured.is_ok(), \"an explicit commit budget should build\");"
 
 [[api]]
 symbol = "lash::QueuedWorkBatchingConfig"
@@ -70969,7 +71022,7 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::effects"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1017#.effects(controller)"
+usage = "examples/agent-workbench/src/restate.rs:746#.effects(controller)"
 reason = "The Restate selected-drain workflow binds its durable effect controller before streaming; controller ownership is verified by the workflow integration tests rather than at this call site."
 
 [[api]]
@@ -71195,7 +71248,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1017#.effects(controller)"
+usage = "examples/agent-workbench/src/restate.rs:746#.effects(controller)"
 reason = "The Restate workbench selected drain uses the controller-scoped builder; its workflow outcome is checked by higher-level integration coverage."
 
 [[api]]
@@ -71236,7 +71289,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1018#.stream_to(&ui_events)"
+usage = "examples/agent-workbench/src/restate.rs:747#.stream_to(&ui_events)"
 reason = "The Restate workbench streams a controller-scoped selected drain into its UI sink; higher-level workflow tests validate the emitted reply."
 
 [[api]]

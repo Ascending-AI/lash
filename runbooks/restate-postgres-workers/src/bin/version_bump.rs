@@ -218,7 +218,12 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         .effect_host(Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
-        .build()
+        // A boot UUID, not the PID: the contract is that the incarnation changes
+        // on every process boot, and PIDs are reused.
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "version-bump-worker",
+            uuid::Uuid::new_v4().to_string(),
+        ))
         .context("build version-bump core")?;
 
     let session = core

@@ -432,7 +432,6 @@ pub async fn start_bot(
         SqliteHandle::open(&data_dir.join("events.db"), ledger::SCHEMA).expect("open test ledger");
     let mut runtime_config = RuntimeConfig::new(data_dir.join("lash"));
     runtime_config.trace_to_stderr = false;
-    let session_owner = runtime::session_owner(&runtime_config.incarnation);
     let model = ModelSpec::builder("mock/model")
         .context_window_tokens(200_000)
         .build()
@@ -446,7 +445,6 @@ pub async fn start_bot(
         EventLedger::new(ledger_database),
         identity,
         VERIFICATION_TOKEN.to_string(),
-        session_owner,
     ));
     bot.refresh_directory().await.expect("preload directory");
     bot

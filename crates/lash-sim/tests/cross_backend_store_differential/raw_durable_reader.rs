@@ -132,23 +132,14 @@ impl RawDurableReader {
                 let session_execution_leases = store
                     .raw_session_execution_leases_for_testing()
                     .into_iter()
-                    .map(
-                        |(
-                            _session_id,
-                            owner,
-                            lease_token_present,
-                            fencing_token,
-                            claimed_at_epoch_ms,
-                            expires_at_epoch_ms,
-                        )| SessionExecutionLeaseObservation {
-                            owner,
-                            lease_token_present,
-                            fencing_token,
-                            claimed: claimed_at_epoch_ms != 0,
-                            ttl_ms: (claimed_at_epoch_ms != 0)
-                                .then_some(expires_at_epoch_ms - claimed_at_epoch_ms),
-                        },
-                    )
+                    .map(|row| SessionExecutionLeaseObservation {
+                        owner: row.owner,
+                        executor_id: row.executor_id,
+                        lease_token: row.lease_token,
+                        fencing_token: row.fencing_token,
+                        claimed: row.claimed_at_epoch_ms != 0,
+                        lease_term_ms: (row.claimed_at_epoch_ms != 0).then_some(row.lease_term_ms),
+                    })
                     .collect();
                 RawDurableState {
                     head_revision: store.raw_head_revision_for_testing(),
@@ -327,8 +318,9 @@ impl RawDurableReader {
                     .map(session_meta_observation);
                 let lease_rows: Vec<LeaseRow> = sqlx::query_as(
                     "SELECT lease_owner_id, lease_owner_incarnation_id,
-                            lease_owner_liveness_json, lease_token,
-                            lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms
+                            lease_owner_liveness_json, lease_executor_id, lease_token,
+                            lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms,
+                            lease_term_ms
                      FROM lash_session_execution_leases
                      WHERE session_id = $1",
                 )
@@ -343,17 +335,20 @@ impl RawDurableReader {
                             owner_id,
                             incarnation_id,
                             liveness_json,
+                            executor_id,
                             lease_token,
                             fencing_token,
                             claimed_at_epoch_ms,
-                            expires_at_epoch_ms,
+                            _expires_at_epoch_ms,
+                            lease_term_ms,
                         )| SessionExecutionLeaseObservation {
                             owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
-                            lease_token_present: lease_token.is_some(),
+                            executor_id,
+                            lease_token,
                             fencing_token: fencing_token as u64,
                             claimed: claimed_at_epoch_ms != 0,
-                            ttl_ms: (claimed_at_epoch_ms != 0)
-                                .then_some((expires_at_epoch_ms - claimed_at_epoch_ms) as u64),
+                            lease_term_ms: (claimed_at_epoch_ms != 0)
+                                .then_some(lease_term_ms as u64),
                         },
                     )
                     .collect();

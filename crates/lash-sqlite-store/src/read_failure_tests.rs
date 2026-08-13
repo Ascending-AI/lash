@@ -242,6 +242,7 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
         .try_claim_session_execution_lease_with_token(
             session_id,
             &owner,
+            "read-failure-executor",
             &lash_core::LeaseClaimNonce::new(),
             120_000,
         )

@@ -78,6 +78,7 @@ async fn run(mode: &str) -> Result<()> {
     );
     let lease_timings = LeaseTimings::new(RECOVERY_LEASE_TTL, RECOVERY_LEASE_RENEW_INTERVAL)
         .context("validate frame-crash recovery lease timings")?;
+    let owner = LeaseOwnerIdentity::opaque("frame-crash-worker", uuid::Uuid::new_v4().to_string());
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
@@ -96,14 +97,9 @@ async fn run(mode: &str) -> Result<()> {
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .disable_queued_work_driver()
         .lease_timings(lease_timings)
-        .build()
+        .build(owner)
         .context("build frame-crash core")?;
-    let owner = LeaseOwnerIdentity::opaque(
-        "frame-crash-worker",
-        format!("frame-crash-worker:{}", std::process::id()),
-    );
-    let session_builder = core.session(SESSION_ID).session_execution_owner(owner);
-    let session = session_builder.open().await?;
+    let session = core.session(SESSION_ID).open().await?;
 
     match mode {
         "commit" => {

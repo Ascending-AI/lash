@@ -199,7 +199,12 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("enqueue claim-fenced next-turn input");
     let first_owner = crate::LeaseOwnerIdentity::opaque("peek-fence-first", "incarnation");
     let first_lease = fenced_store
-        .try_claim_session_execution_lease(&fenced_request.session_id, &first_owner, 60_000)
+        .try_claim_session_execution_lease(
+            &fenced_request.session_id,
+            &first_owner,
+            "session-store-factory-claimable-queued-work-peek-executor",
+            60_000,
+        )
         .await
         .expect("claim first session execution lease")
         .acquired()
@@ -275,7 +280,12 @@ async fn session_store_factory_claimable_queued_work_peek(
     );
     let successor = crate::LeaseOwnerIdentity::opaque("peek-fence-successor", "incarnation");
     let successor_lease = fenced_store
-        .try_claim_session_execution_lease(&fenced_request.session_id, &successor, 60_000)
+        .try_claim_session_execution_lease(
+            &fenced_request.session_id,
+            &successor,
+            "session-store-factory-claimable-queued-work-peek-executor-2",
+            60_000,
+        )
         .await
         .expect("claim successor session execution lease")
         .acquired()
@@ -1035,6 +1045,7 @@ async fn session_store_factory_rejects_writes_after_delete(
             .try_claim_session_execution_lease(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque("deleted-owner", "deleted-incarnation"),
+                "session-store-factory-rejects-writes-after-delete-executor",
                 60_000,
             )
             .await,
@@ -1923,6 +1934,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .try_claim_session_execution_lease(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("delete-session-owner", "before-delete"),
+            "session-store-factory-delete-removes-store-and-is-idempotent-executor",
             60_000,
         )
         .await

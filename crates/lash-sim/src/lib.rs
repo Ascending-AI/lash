@@ -33,6 +33,25 @@ pub mod trace;
 mod transcript;
 mod usage_oracle;
 
+fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
+    static INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    lash_core::LeaseOwnerIdentity::opaque(
+        "lash-sim",
+        INCARNATION
+            .get_or_init(|| {
+                format!(
+                    "{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos()
+                )
+            })
+            .clone(),
+    )
+}
+
 pub use artifacts::{
     FixedScriptManifest, FixedScriptProof, FixedScriptSummary, GeneratedPostgresReplayReport,
     GeneratedSimProfileReport, ScriptHashManifest,

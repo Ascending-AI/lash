@@ -103,13 +103,13 @@ pub struct DurableProcessWorkerConfig {
     /// bound: two workers sharing one registry may execute twice this many.
     process_execution_concurrency: ProcessExecutionConcurrency,
     worker_slot_supplier: Option<Arc<dyn super::WorkerSlotSupplier>>,
-    /// Owner identity stem this worker derives per-recovery lease owners from.
+    /// Required host owner identity this worker derives per-recovery lease owners from.
     ///
     /// Each recovery attempt claims with a unique `(owner_id, incarnation_id)`
     /// derived from this identity — a live lease held by an earlier attempt
     /// must fence a later sweep pass rather than be re-entered as the same
-    /// incarnation. Defaults to a fresh identity per config; recovery waits for
-    /// an earlier owner's lease TTL before taking over.
+    /// incarnation. Recovery waits for an earlier owner's lease TTL before
+    /// taking over.
     pub lease_owner: crate::LeaseOwnerIdentity,
 }
 
@@ -125,6 +125,7 @@ impl DurableProcessWorkerConfig {
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
         process_registry: Arc<dyn ProcessRegistry>,
+        lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         let clock = Arc::clone(&runtime_host.clock);
         Self {
@@ -140,10 +141,7 @@ impl DurableProcessWorkerConfig {
             turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot::default(),
             process_execution_concurrency: ProcessExecutionConcurrency::DEFAULT,
             worker_slot_supplier: None,
-            lease_owner: crate::LeaseOwnerIdentity::opaque(
-                format!("durable-process-worker:{}", uuid::Uuid::new_v4()),
-                uuid::Uuid::new_v4().to_string(),
-            ),
+            lease_owner,
         }
     }
 
@@ -193,13 +191,6 @@ impl DurableProcessWorkerConfig {
         self
     }
 
-    /// Set the owner identity this worker presents when claiming process
-    /// leases. See [`DurableProcessWorkerConfig::lease_owner`].
-    pub fn with_lease_owner(mut self, lease_owner: crate::LeaseOwnerIdentity) -> Self {
-        self.lease_owner = lease_owner;
-        self
-    }
-
     pub fn with_queued_work_driver(mut self, driver: QueuedWorkDriver) -> Self {
         self.queued_work_driver = Some(driver);
         self
@@ -219,12 +210,14 @@ impl DurableProcessWorkerConfig {
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
         process_registry: Arc<dyn ProcessRegistry>,
+        lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::new(
             Arc::new(PluginHost::new(plugin_factories.into_iter().collect())),
             runtime_host,
             session_store_factory,
             process_registry,
+            lease_owner,
         )
     }
 
@@ -233,12 +226,14 @@ impl DurableProcessWorkerConfig {
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
         process_registry: Arc<dyn ProcessRegistry>,
+        lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::from_plugin_factories(
             plugin_stack.into_factories(),
             runtime_host,
             session_store_factory,
             process_registry,
+            lease_owner,
         )
     }
 }
@@ -1506,6 +1501,7 @@ impl DurableProcessWorker {
         let mut builder = EmbeddedRuntimeBuilder::new(
             self.config.runtime_host.durability.commit_budget,
             self.config.runtime_host.durability.queued_work_batching,
+            self.config.lease_owner.clone(),
         )
         .with_session_id(session_id.to_string())
         .with_plugin_host(self.config.plugin_host.as_ref().clone())

@@ -154,12 +154,17 @@ impl LashRuntime {
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             commit.turn_commit = append_stamp;
             commit.debug_assert_append_envelope_scope();
+            let _pre_commit_phase = super::RuntimeNamedPhase::begin(
+                self.turn_phase_probe.clone(),
+                "session_graph_append.pre_commit",
+            );
             // Lane-less public runtime operation: callers append between turn
             // drivers, so this handle owns no retained execution guard.
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(&store),
                 commit,
                 &self.runtime_lease_owner,
+                &self.runtime_lease_executor_id,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
             )
@@ -730,6 +735,7 @@ impl LashRuntime {
                 store,
                 commit,
                 &self.runtime_lease_owner,
+                &self.runtime_lease_executor_id,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
             )
@@ -787,6 +793,7 @@ impl LashRuntime {
             store,
             commit,
             &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
             self.host.core.control.lease_timings,
             Arc::clone(&self.host.core.clock),
         )

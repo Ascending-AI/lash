@@ -598,7 +598,10 @@ finish "done via Restate E2E"
             .trigger_store(trigger_store)
             .effect_host(turn_deployment.effect_host())
             .process_work_driver(process_deployment.process_work_driver())
-            .build()
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "agent-service-test",
+                "test",
+            ))
             .expect("build test core");
         let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
             db: Arc::clone(&app_db),
@@ -611,7 +614,6 @@ finish "done via Restate E2E"
             core,
             turn_deployment.turn_work_driver(),
             app_db,
-            lash::persistence::LeaseOwnerIdentity::opaque("agent-service-test", "test"),
             "mock-model".to_string(),
             None,
             AgentServiceDurability::Restate,

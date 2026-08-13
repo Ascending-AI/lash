@@ -127,6 +127,7 @@ impl CurrentSessionCapability {
                 Arc::clone(store),
                 commit,
                 &self.runtime_lease_owner,
+                &self.runtime_lease_executor_id,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
             )

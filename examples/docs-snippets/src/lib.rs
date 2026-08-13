@@ -9,6 +9,16 @@
 //! so incomplete host wiring fails at runtime resolution.
 #![allow(dead_code, unused_variables, unused_imports)]
 
+fn example_process_owner() -> lash::persistence::LeaseOwnerIdentity {
+    static INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    lash::persistence::LeaseOwnerIdentity::opaque(
+        "docs-snippets-worker",
+        INCARNATION
+            .get_or_init(|| uuid::Uuid::new_v4().to_string())
+            .clone(),
+    )
+}
+
 mod architecture_execution;
 mod architecture_providers;
 mod embedding;

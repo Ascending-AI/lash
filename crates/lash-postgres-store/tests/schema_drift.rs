@@ -1141,7 +1141,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 49")
+                && rendered.contains("expected 50")
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
@@ -1383,7 +1383,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 49 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 50 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -1514,7 +1514,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(49)", "finding_total=0"],
+        &["found_version=Some(50)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1686,7 +1686,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=49"]
+    for field in ["component=lash-postgres-store", "expected_version=50"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)

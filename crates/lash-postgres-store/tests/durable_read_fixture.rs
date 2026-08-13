@@ -56,7 +56,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 49);
+    assert_eq!(PostgresStorage::schema_version(), 50);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -243,12 +243,13 @@ async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) 
     .expect("normalize server-authoritative fixture process lease");
     sqlx::query(
         "UPDATE lash_session_execution_leases
-         SET lease_claimed_at_ms = $2, lease_expires_at_ms = $3
+         SET lease_claimed_at_ms = $2, lease_expires_at_ms = $3, lease_term_ms = $4
          WHERE session_id = $1",
     )
     .bind(fixture::SESSION_ID)
     .bind(fixture::FIXTURE_WRITE_MS as i64)
     .bind((fixture::FIXTURE_WRITE_MS + 100) as i64)
+    .bind(100_i64)
     .execute(storage.pool())
     .await
     .expect("normalize server-authoritative fixture session lease");

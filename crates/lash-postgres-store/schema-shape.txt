@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 49
+version 50
 table lash_attachment_manifest
   column attachment_id text not-null
   column canonical_uri text not-null
@@ -237,11 +237,13 @@ table lash_schema_versions
   primary-key (component)
 table lash_session_execution_leases
   column lease_claimed_at_ms bigint not-null default
+  column lease_executor_id text nullable
   column lease_expires_at_ms bigint not-null default
   column lease_fencing_token bigint not-null default
   column lease_owner_id text nullable
   column lease_owner_incarnation_id text nullable
   column lease_owner_liveness_json text nullable
+  column lease_term_ms bigint not-null default
   column lease_token text nullable
   column session_id text not-null
   primary-key (session_id)

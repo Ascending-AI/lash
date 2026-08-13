@@ -49,6 +49,8 @@ pub struct SessionLeaseHolder {
     /// Which runner holds the lane: a stable `owner_id` per replica plus the
     /// `incarnation_id` that replica bumps each boot.
     pub owner: LeaseOwnerIdentity,
+    /// Runtime-minted discriminator for the executor open under that host.
+    pub executor_id: String,
     /// The lane's monotonic fencing token. ADR 0029 calls this the session-lease
     /// *generation*: queued-work and turn-input claims pin it instead of
     /// carrying a TTL of their own, and every takeover advances it.
@@ -109,6 +111,7 @@ impl SessionLeaseDiagnostics {
             observed_at_epoch_ms,
             holder: row.map(|lease| SessionLeaseHolder {
                 owner: lease.owner,
+                executor_id: lease.executor_id,
                 generation: lease.fencing_token,
                 claimed_at_epoch_ms: lease.claimed_at_epoch_ms,
                 expires_at_epoch_ms: lease.expires_at_epoch_ms,
@@ -179,6 +182,7 @@ mod tests {
     fn holder_expiring_at(expires_at_epoch_ms: u64) -> Option<SessionLeaseHolder> {
         Some(SessionLeaseHolder {
             owner: LeaseOwnerIdentity::opaque("worker-a", "worker-a:boot-1"),
+            executor_id: "executor-a".to_string(),
             generation: 4,
             claimed_at_epoch_ms: 1_000,
             expires_at_epoch_ms,
@@ -250,15 +254,18 @@ mod tests {
             Some(lash_core::SessionExecutionLease {
                 session_id: "s".to_string(),
                 owner: LeaseOwnerIdentity::opaque("worker-b", "worker-b:boot-2"),
+                executor_id: "executor-b".to_string(),
                 lease_token: "token".to_string(),
                 fencing_token: 9,
                 claimed_at_epoch_ms: 4_000,
+                lease_term_ms: 5_000,
                 expires_at_epoch_ms: 9_000,
             }),
         );
         let holder = diagnostics.holder.expect("held row reports a holder");
         assert_eq!(holder.owner.owner_id, "worker-b");
         assert_eq!(holder.owner.incarnation_id, "worker-b:boot-2");
+        assert_eq!(holder.executor_id, "executor-b");
         assert_eq!(holder.generation, 9);
         assert_eq!(holder.claimed_at_epoch_ms, 4_000);
         assert_eq!(holder.expires_at_epoch_ms, 9_000);

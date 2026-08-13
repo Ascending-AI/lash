@@ -119,9 +119,9 @@ fn process_worker(
         ),
         Arc::new(storage.session_store_factory_with_shared_process_registry()),
         registry,
+        lease_owner,
     )
-    .with_trigger_store(Arc::new(storage.trigger_store()))
-    .with_lease_owner(lease_owner);
+    .with_trigger_store(Arc::new(storage.trigger_store()));
     lash::durability::DurableProcessWorker::new(config)
 }
 
@@ -346,7 +346,10 @@ fn core(
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "process-operator-flow-worker",
+            uuid::Uuid::new_v4().to_string(),
+        ))
         .context("build process operator-flow core")
 }
 

@@ -264,34 +264,43 @@ impl InMemorySessionStore {
         *self.session_meta.lock_recover() = Some(meta);
     }
 
-    pub fn raw_session_execution_leases_for_testing(
-        &self,
-    ) -> Vec<(
-        String,
-        Option<crate::LeaseOwnerIdentity>,
-        bool,
-        u64,
-        u64,
-        u64,
-    )> {
+    pub fn raw_session_execution_leases_for_testing(&self) -> Vec<RawSessionExecutionLeaseRow> {
         let mut rows = self
             .session_execution_leases
             .lock_recover()
             .iter()
-            .map(|(session_id, lease)| {
-                (
-                    session_id.clone(),
-                    lease.owner.clone(),
-                    lease.lease_token.is_some(),
-                    lease.fencing_token,
-                    lease.claimed_at_epoch_ms,
-                    lease.expires_at_epoch_ms,
-                )
+            .map(|(session_id, lease)| RawSessionExecutionLeaseRow {
+                session_id: session_id.clone(),
+                owner: lease.owner.clone(),
+                executor_id: lease.executor_id.clone(),
+                lease_token: lease.lease_token.clone(),
+                fencing_token: lease.fencing_token,
+                claimed_at_epoch_ms: lease.claimed_at_epoch_ms,
+                lease_term_ms: lease.lease_term_ms,
+                expires_at_epoch_ms: lease.expires_at_epoch_ms,
             })
             .collect::<Vec<_>>();
-        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows.sort_by(|left, right| left.session_id.cmp(&right.session_id));
         rows
     }
+}
+
+/// One raw session-execution-lease row as the in-memory store holds it.
+///
+/// The differential reader compares these field by field, so the shape is a
+/// named struct rather than a wide tuple: a caller that mismatches
+/// `claimed_at_epoch_ms` against `expires_at_epoch_ms` would otherwise still
+/// typecheck.
+#[derive(Clone, Debug)]
+pub struct RawSessionExecutionLeaseRow {
+    pub session_id: String,
+    pub owner: Option<crate::LeaseOwnerIdentity>,
+    pub executor_id: Option<String>,
+    pub lease_token: Option<String>,
+    pub fencing_token: u64,
+    pub claimed_at_epoch_ms: u64,
+    pub lease_term_ms: u64,
+    pub expires_at_epoch_ms: u64,
 }
 
 impl super::InMemorySessionStoreFactory {

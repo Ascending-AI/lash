@@ -158,10 +158,12 @@ CREATE TABLE IF NOT EXISTS session_execution_leases (
     session_id               TEXT PRIMARY KEY,
     lease_owner_id           TEXT,
     lease_owner_incarnation_id TEXT,
+    lease_executor_id        TEXT,
     lease_owner_liveness_json TEXT,
     lease_token              TEXT,
     lease_fencing_token      INTEGER NOT NULL DEFAULT 0,
     lease_claimed_at_ms      INTEGER NOT NULL DEFAULT 0,
+    lease_term_ms            INTEGER NOT NULL DEFAULT 0,
     lease_expires_at_ms      INTEGER NOT NULL DEFAULT 0
 );
 
@@ -352,9 +354,11 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Version 33 replaces that JSON carrier with structural columns and narrow
 /// ordered child tables. Older databases are rejected and recreated; there is
 /// no JSON or compatibility read path.
-/// Version 35 adds queued-work batch identity and coalescing metadata. Version
-/// 34 is reserved by FIG-1133 and is intentionally skipped.
-pub(crate) const SCHEMA_VERSION: i32 = 35;
+/// Version 35 adds queued-work batch identity and coalescing metadata.
+/// Version 36 adds the runtime-minted executor discriminator and store-authored
+/// lease term to session lease rows. Older databases are rejected and recreated;
+/// there is no compatibility read path.
+pub(crate) const SCHEMA_VERSION: i32 = 36;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

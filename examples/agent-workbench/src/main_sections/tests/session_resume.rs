@@ -54,7 +54,7 @@
             .store_factory(Arc::clone(&first_store_factory))
             .process_registry(Arc::clone(&first_registry))
             .disable_queued_work_driver()
-            .build()
+            .build(crate::test_core_owner())
             .expect("build first workbench core");
         let first_session = first_core
             .session(session_id.clone())
@@ -212,7 +212,7 @@
             .store_factory(Arc::clone(&resumed_store_factory))
             .process_registry(Arc::clone(&resumed_registry))
             .disable_queued_work_driver()
-            .build()
+            .build(crate::test_core_owner())
             .expect("build reconstructed workbench core");
         let resumed_session_ids = WorkbenchSessionIds::persistent(session_id_path)
             .expect("reopen persistent session id");

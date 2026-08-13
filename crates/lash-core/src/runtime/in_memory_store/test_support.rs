@@ -138,11 +138,12 @@ impl InMemorySessionStore {
                     .get(record_id)
                     .expect("session-lease counter snapshot row");
                 format!(
-                    "{}:{:?}:{:?}:{}:{}",
+                    "{}:{:?}:{:?}:{}:{}:{}",
                     row.fencing_token,
                     row.owner,
                     row.lease_token,
                     row.claimed_at_epoch_ms,
+                    row.lease_term_ms,
                     row.expires_at_epoch_ms
                 )
             }
@@ -483,6 +484,7 @@ mod tests {
         let authority = crate::SessionExecutionLeaseAuthority {
             session_id: "session".to_string(),
             owner: owner.clone(),
+            executor_id: "session-executor".to_string(),
             lease_token: "session-lease".to_string(),
             fencing_token: 1,
         };

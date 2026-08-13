@@ -172,7 +172,12 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         .expect("bind session to store");
     let owner = lease_owner("gc-test");
     let session_lease = store
-        .try_claim_session_execution_lease("root", &owner, 60_000)
+        .try_claim_session_execution_lease(
+            "root",
+            &owner,
+            "gc-keeps-live-committed-checkpoint-blobs-executor",
+            60_000,
+        )
         .await
         .expect("claim session execution lease")
         .acquired()
@@ -275,7 +280,12 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
         .expect("enqueue turn input");
     let owner = lease_owner("sqlite-claim-id-owner");
     let lease = store
-        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "sqlite-claims-pin-both-production-claim-id-spellings-executor",
+            60_000,
+        )
         .await
         .expect("claim session execution lease")
         .acquired()
@@ -320,7 +330,12 @@ async fn second_claim_on_held_batch_is_not_won() {
         .await
         .expect("enqueue");
     let session_lease = store
-        .try_claim_session_execution_lease("root", &lease_owner("session-owner"), 60_000)
+        .try_claim_session_execution_lease(
+            "root",
+            &lease_owner("session-owner"),
+            "second-claim-on-held-batch-is-not-won-executor",
+            60_000,
+        )
         .await
         .expect("claim session execution lease")
         .acquired()
@@ -385,11 +400,16 @@ fn concurrent_claims_never_double_own_a_batch() {
     let session_fence = {
         let store = block_on(Store::open(&path)).expect("lease store");
         let owner = lease_owner("session-owner");
-        block_on(store.try_claim_session_execution_lease("root", &owner, 60_000))
-            .expect("claim session execution lease")
-            .acquired()
-            .expect("session execution lease")
-            .fence()
+        block_on(store.try_claim_session_execution_lease(
+            "root",
+            &owner,
+            "concurrent-claims-never-double-own-a-batch-executor",
+            60_000,
+        ))
+        .expect("claim session execution lease")
+        .acquired()
+        .expect("session execution lease")
+        .fence()
     };
 
     let barrier = Arc::new(std::sync::Barrier::new(2));
@@ -474,8 +494,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 35"),
-        "error must report the real expected version 35: {message}"
+        message.contains("schema version 36"),
+        "error must report the real expected version 36: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -511,7 +531,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 35);
+    assert_eq!(user_version, 36);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')

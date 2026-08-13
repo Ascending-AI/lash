@@ -15,7 +15,6 @@ use crate::{
 };
 use generated_prefix::generated_prefix;
 use proptest::prelude::*;
-use proptest::strategy::ValueTree;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 use run_shape::{RunShape, RunShapeTotals};
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,7 +29,10 @@ const MAX_OPS: usize = 48;
 const GENERATED_PREFIX_OPS: usize = 11;
 const DEDICATED_LAW_SEED: u64 = 0xded1_ca7e;
 mod generated_prefix;
+mod generator;
 mod run_shape;
+use generator::generated_case;
+pub use generator::sample_store_contract_operations;
 /// Fresh process-registry and runtime-persistence handles for one generated case.
 pub struct StoreContractHandles {
     pub registry: Arc<dyn ProcessRegistry>,
@@ -301,90 +303,6 @@ where
             .tail_prune_ops_with_effect
             .load(Ordering::Relaxed),
     );
-}
-
-fn generated_case() -> impl Strategy<Value = GeneratedCase> {
-    (
-        any::<u64>(),
-        prop::collection::vec(operation(), 1..=(MAX_OPS - GENERATED_PREFIX_OPS)),
-    )
-        .prop_map(|(seed, random_operations)| {
-            let mut operations = generated_prefix();
-            operations.extend(random_operations);
-            GeneratedCase { seed, operations }
-        })
-}
-
-/// Deterministically sample the shared store-contract operation alphabet.
-///
-/// The required prefix prevents small differential budgets from starving the
-/// process, lease, wake-delivery, queue, and prune surfaces. Remaining steps
-/// come from the exact strategy used by the property-law harness.
-pub fn sample_store_contract_operations(runner_seed: u64, max_ops: usize) -> Vec<StoreContractOp> {
-    let mut operations = generated_prefix();
-    operations.truncate(max_ops);
-    if operations.len() == max_ops {
-        return operations;
-    }
-
-    let mut runner = TestRunner::new(Config {
-        cases: 1,
-        failure_persistence: None,
-        rng_seed: RngSeed::Fixed(runner_seed),
-        ..Config::default()
-    });
-    while operations.len() < max_ops {
-        operations.push(
-            operation()
-                .new_tree(&mut runner)
-                .expect("store-contract operation strategy must generate")
-                .current(),
-        );
-    }
-    operations
-}
-
-fn operation() -> impl Strategy<Value = StoreContractOp> {
-    prop_oneof![
-        4 => (0..PROCESS_COUNT, 0_u8..3, 1_u8..4, prop::option::of(0..SESSION_COUNT))
-            .prop_map(|(process, disposition, max_attempts, wake_target)| StoreContractOp::Register {
-                process, disposition, max_attempts, wake_target,
-            }),
-        4 => (0..PROCESS_COUNT, 0_u8..3, 1_u8..5)
-            .prop_map(|(process, owner, attempt)| StoreContractOp::FirstStart { process, owner, attempt }),
-        2 => (0..PROCESS_COUNT, any::<bool>())
-            .prop_map(|(process, stale)| StoreContractOp::EnterWait { process, stale }),
-        2 => (0..PROCESS_COUNT, any::<bool>())
-            .prop_map(|(process, stale)| StoreContractOp::ClearWait { process, stale }),
-        2 => (0..PROCESS_COUNT, 0_u8..3)
-            .prop_map(|(process, value)| StoreContractOp::SetExternalRef { process, value }),
-        5 => (0..PROCESS_COUNT, 0_u8..4, any::<u8>(), any::<bool>(), any::<bool>())
-            .prop_map(|(process, replay, value, wake, stale)| StoreContractOp::Signal { process, replay, value, wake, stale }),
-        2 => (0..PROCESS_COUNT, any::<u8>())
-            .prop_map(|(process, reason)| StoreContractOp::CancelRequest { process, reason }),
-        3 => (0..PROCESS_COUNT, 0_u8..4)
-            .prop_map(|(process, disposition)| StoreContractOp::Terminal { process, disposition }),
-        2 => (0..PROCESS_COUNT, 0..SESSION_COUNT)
-            .prop_map(|(process, session)| StoreContractOp::AddObserver { process, session }),
-        2 => (0..PROCESS_COUNT, 0..SESSION_COUNT)
-            .prop_map(|(process, session)| StoreContractOp::RemoveObserver { process, session }),
-        2 => (0..PROCESS_COUNT, prop::option::of(0..SESSION_COUNT))
-            .prop_map(|(process, session)| StoreContractOp::Retarget { process, session }),
-        2 => (0..PROCESS_COUNT, 0_u8..3)
-            .prop_map(|(process, owner)| StoreContractOp::ClaimLease { process, owner }),
-        2 => (0..PROCESS_COUNT, any::<bool>())
-            .prop_map(|(process, stale)| StoreContractOp::ReleaseLease { process, stale }),
-        2 => Just(StoreContractOp::ClaimWake),
-        2 => any::<bool>().prop_map(|stale| StoreContractOp::MarkWake { stale }),
-        2 => any::<bool>().prop_map(|stale| StoreContractOp::DiscardWake { stale }),
-        2 => any::<bool>().prop_map(|stale| StoreContractOp::DeferWake { stale }),
-        3 => (0..PROCESS_COUNT)
-            .prop_map(|process| StoreContractOp::EnqueueWake { process }),
-        3 => (any::<u8>(), any::<bool>(), any::<bool>())
-            .prop_map(|(selection, highest_in_group, stale)| StoreContractOp::ConsumeWake { selection, highest_in_group, stale }),
-        3 => any::<bool>().prop_map(|watermark| StoreContractOp::Prune { watermark }),
-        2 => any::<bool>().prop_map(|caught_up| StoreContractOp::CompactTombstones { caught_up }),
-    ]
 }
 
 async fn replay_case(
@@ -1754,7 +1672,7 @@ async fn assert_enqueued_wake_high_water_safety(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = LeaseOwnerIdentity::opaque("law-high-water-owner", "law-high-water-incarnation");
     let lease = runtime
-        .try_claim_session_execution_lease(session, &owner, 60_000)
+        .try_claim_session_execution_lease(session, &owner, "wake-high-water-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -1870,7 +1788,7 @@ async fn assert_enqueued_wake_high_water_safety(
         "law-high-water-earlier-incarnation",
     );
     let lease = runtime
-        .try_claim_session_execution_lease(session, &owner, 60_000)
+        .try_claim_session_execution_lease(session, &owner, "wake-high-water-executor-2", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -1972,7 +1890,7 @@ async fn assert_prune_reregister_wake_fence(
     );
     let lease = handles
         .runtime
-        .try_claim_session_execution_lease(session, &owner, 60_000)
+        .try_claim_session_execution_lease(session, &owner, "wake-fence-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -2365,7 +2283,7 @@ async fn consume_wake(
     ))) else { return Ok(false); };
     let owner = LeaseOwnerIdentity::opaque("property-consumer", "property-consumer-incarnation");
     let Some(lease) = runtime
-        .try_claim_session_execution_lease(session, &owner, 60_000)
+        .try_claim_session_execution_lease(session, &owner, "consume-wake-executor", 60_000)
         .await
         .map_err(|error| error.to_string())?
         .acquired()

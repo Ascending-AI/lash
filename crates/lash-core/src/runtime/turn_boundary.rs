@@ -792,7 +792,12 @@ mod tests {
         .expect("admit turn-boundary test session");
         let owner = lease_owner("turn-boundary-test");
         let lease = store
-            .try_claim_session_execution_lease(&state.session_id, &owner, 60_000)
+            .try_claim_session_execution_lease(
+                &state.session_id,
+                &owner,
+                "leased-boundary-executor",
+                60_000,
+            )
             .await
             .expect("claim test session execution lease")
             .acquired()
@@ -1361,7 +1366,12 @@ mod tests {
 
         let peer_owner = lease_owner("fig905-peer");
         let peer_lease = store
-            .try_claim_session_execution_lease("session-1", &peer_owner, 60_000)
+            .try_claim_session_execution_lease(
+                "session-1",
+                &peer_owner,
+                "recovered-final-commit-drops-only-the-peer-superseded-queue-row-executor",
+                60_000,
+            )
             .await
             .expect("claim peer lease")
             .acquired()
@@ -1384,7 +1394,12 @@ mod tests {
 
         let recovery_owner = lease_owner("fig905-recovery");
         let recovery_lease = store
-            .try_claim_session_execution_lease("session-1", &recovery_owner, 60_000)
+            .try_claim_session_execution_lease(
+                "session-1",
+                &recovery_owner,
+                "recovered-final-commit-drops-only-the-peer-superseded-queue-row-executor-2",
+                60_000,
+            )
             .await
             .expect("claim recovery lease")
             .acquired()
@@ -1453,7 +1468,7 @@ mod tests {
             },
         };
         let store = RecordingStore::default();
-        let (mut queue_pipeline, _lease) =
+        let (mut queue_pipeline, queue_lease) =
             leased_boundary(&store, state_with_graph(graph.clone())).await;
         let queue_state = queue_pipeline.export_state_for_assembly();
         let queue_err = queue_pipeline
@@ -1484,6 +1499,10 @@ mod tests {
             StoreError::UnsettledQueuedWorkClaim { ref claim_id, .. }
                 if claim_id == "queue-claim"
         ));
+        store
+            .release_session_execution_lease(&queue_lease.completion())
+            .await
+            .expect("release queue-case execution lease");
 
         let (mut input_pipeline, _lease) = leased_boundary(&store, state_with_graph(graph)).await;
         let input_state = input_pipeline.export_state_for_assembly();

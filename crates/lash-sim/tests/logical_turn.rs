@@ -203,7 +203,10 @@ fn standard_core_with_attachment_policy(
             )
             .with_attachment_source_policy(attachment_source_policy),
         )
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-test",
+            "logical-turn-test-boot",
+        ))
         .expect("build logical-turn sim core")
 }
 
@@ -301,7 +304,10 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
         .trace_sink(trace.clone())
         .disable_queued_work_driver()
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-test",
+            "logical-turn-test-boot",
+        ))
         .expect("build logical-turn sim core");
     let session = core
         .session("logical-turn-sim")
@@ -764,7 +770,10 @@ finish { baton: baton }
         .model(model())
         .trace_sink(trace.clone())
         .disable_queued_work_driver()
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-test",
+            "logical-turn-test-boot",
+        ))
         .expect("build RLM seed sim core");
     let session = core
         .session("logical-turn-rlm-seed")

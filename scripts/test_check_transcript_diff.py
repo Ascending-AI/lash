@@ -48,7 +48,10 @@ diff --git a/crates/demo/tests/transcript.rs b/crates/demo/tests/transcript.rs
 class TranscriptDiffTests(unittest.TestCase):
     def test_enforcement_fails_an_unacknowledged_durable_change(self) -> None:
         completed = mock.Mock(stdout=DURABLE_DIFF)
-        with mock.patch.object(MODULE.subprocess, "run", return_value=completed):
+        with (
+            mock.patch.object(MODULE.subprocess, "run", return_value=completed),
+            mock.patch.dict(MODULE.os.environ, {"GITHUB_EVENT_PATH": ""}),
+        ):
             exit_code = MODULE.main(["--enforce", "base...head"])
 
         self.assertEqual(exit_code, 1)

@@ -234,7 +234,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                 InlineEffectHost::default().allow_process_lifetime_completion_keys(),
             ))
             .process_registry(Arc::clone(&process_registry))
-            .build()
+            .build(session_owner.clone())
             .map_err(|err| err.to_string())?,
         AgentServiceDurability::Restate => {
             #[cfg(feature = "restate")]
@@ -258,7 +258,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                             .expect("process deployment configured for Restate")
                             .process_work_driver(),
                     )
-                    .build()
+                    .build(session_owner.clone())
                     .map_err(|err| err.to_string())?
             }
             #[cfg(not(feature = "restate"))]
@@ -300,7 +300,6 @@ async fn async_main() -> anyhow_like::Result<()> {
         core,
         turn_work_driver,
         Arc::clone(&shared_db),
-        session_owner,
         model,
         Some(model_variant),
         durability,
@@ -311,7 +310,6 @@ async fn async_main() -> anyhow_like::Result<()> {
         core,
         turn_work_driver,
         app_db,
-        session_owner,
         model,
         Some(model_variant),
         durability,

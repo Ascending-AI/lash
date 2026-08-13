@@ -295,7 +295,12 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .expect("create skewed-clock session store");
     let owner = LeaseOwnerIdentity::opaque("clock-contract-owner", "clock-contract-owner:i");
     let lease = store
-        .try_claim_session_execution_lease(&session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            &session_id,
+            &owner,
+            "queued-work-and-pending-input-lease-decisions-follow-the-postgres-clock-executor",
+            60_000,
+        )
         .await
         .expect("claim session lease")
         .acquired()
@@ -620,7 +625,12 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
         .expect("create the session store");
     let owner = LeaseOwnerIdentity::opaque("diagnostic-read-holder", "boot-1");
     let held = store
-        .try_claim_session_execution_lease(&session_id, &owner, 60_000)
+        .try_claim_session_execution_lease(
+            &session_id,
+            &owner,
+            "diagnostic-lease-read-neither-locks-the-row-nor-waits-for-a-holder-executor",
+            60_000,
+        )
         .await
         .expect("claim the lane")
         .acquired()

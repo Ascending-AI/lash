@@ -59,6 +59,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
         .with_store(store.clone() as Arc<dyn RuntimePersistence>)
         .with_plugin_factories(vec![Arc::new(
@@ -106,6 +107,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
         .with_store(store as Arc<dyn RuntimePersistence>)
         .with_session_id("beta")

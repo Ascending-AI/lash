@@ -15,6 +15,7 @@ mod worker_capacity;
 use queued_work::{InlineQueuedWorkRunConfig, InlineQueuedWorkRunHandle};
 #[derive(Clone)]
 pub struct LashCore {
+    pub(crate) session_execution_owner: lash_core::LeaseOwnerIdentity,
     pub(crate) env: RuntimeEnvironment,
     pub(crate) tool_registry: Arc<lash_core::ToolRegistry>,
     pub(crate) policy: SessionPolicy,
@@ -317,7 +318,6 @@ impl LashCore {
             session_id: session_id.into(),
             spec: SessionSpec::inherit(),
             parent_session_id: None,
-            session_execution_owner: None,
             store: None,
             provider: None,
             active_plugins: Vec::new(),
@@ -473,7 +473,8 @@ impl LashCore {
         let drivers = self.work_driver.drivers().await;
         env.process_work_driver = drivers.process.clone();
         env.queued_work_driver = drivers.queued.clone();
-        let runtime = LashRuntime::resume(parked.inner, &env).await?;
+        let runtime =
+            LashRuntime::resume(parked.inner, &env, self.session_execution_owner.clone()).await?;
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
         Ok(LashSession {
@@ -861,6 +862,7 @@ impl LashCore {
             runtime_host,
             Arc::clone(store_factory),
             process_registry,
+            self.session_execution_owner.clone(),
         )
         .with_session_policy(self.policy.clone())
         .with_process_execution_concurrency(self.process_execution_concurrency)?;
@@ -1168,7 +1170,14 @@ impl LashCoreBuilder {
         self
     }
 
-    pub fn build(mut self) -> Result<LashCore> {
+    /// Build a core under the host's stable worker/process lease identity.
+    ///
+    /// The owner id is stable for the worker or process and never scoped to a
+    /// turn. The incarnation id changes once per process boot.
+    pub fn build(
+        mut self,
+        session_execution_owner: lash_core::LeaseOwnerIdentity,
+    ) -> Result<LashCore> {
         let process_execution_concurrency = self
             .process_execution_concurrency
             .unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
@@ -1273,6 +1282,7 @@ impl LashCoreBuilder {
             self.trigger_store.as_ref(),
             process_execution_concurrency,
             worker_slot_supplier.clone(),
+            session_execution_owner.clone(),
         )?;
 
         let live_replay_clock = Arc::clone(&core.clock);
@@ -1304,6 +1314,7 @@ impl LashCoreBuilder {
         let env = env_builder.build();
         let queued_work_driver = Self::resolve_queued_work_driver(
             &self.queued_work_source,
+            session_execution_owner.clone(),
             env.clone(),
             policy.clone(),
             protocol_factory.clone(),
@@ -1336,6 +1347,7 @@ impl LashCoreBuilder {
         };
 
         Ok(LashCore {
+            session_execution_owner,
             env,
             tool_registry,
             policy,
@@ -1373,6 +1385,7 @@ impl LashCoreBuilder {
         trigger_store: Option<&Arc<dyn lash_core::TriggerStore>>,
         process_execution_concurrency: usize,
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
+        session_execution_owner: lash_core::LeaseOwnerIdentity,
     ) -> Result<ProcessWorkDriverSetup> {
         let (process_registry, process_change_hub) = match process_work_source {
             ProcessWorkSource::None => return Ok(ProcessWorkDriverSetup::None),
@@ -1401,6 +1414,7 @@ impl LashCoreBuilder {
             runtime_host,
             Arc::clone(store_factory),
             process_registry,
+            session_execution_owner,
         )
         .with_session_policy(policy.clone())
         .with_trigger_store(trigger_store.cloned().unwrap_or_else(|| {
@@ -1423,6 +1437,7 @@ impl LashCoreBuilder {
     #[allow(clippy::too_many_arguments)]
     fn resolve_queued_work_driver(
         queued_work_source: &QueuedWorkSource,
+        session_execution_owner: lash_core::LeaseOwnerIdentity,
         env: RuntimeEnvironment,
         policy: SessionPolicy,
         protocol_factory: Option<Arc<dyn PluginFactory>>,
@@ -1440,15 +1455,16 @@ impl LashCoreBuilder {
             },
             QueuedWorkSource::LazyDefault => match store_factory {
                 Some(store_factory) => QueuedWorkDriverSetup::LazyDefault {
-                    config: Arc::new(InlineQueuedWorkRunConfig::new(
+                    config: Arc::new(InlineQueuedWorkRunConfig {
+                        session_execution_owner,
                         env,
                         policy,
                         protocol_factory,
                         plugin_factories,
-                        Arc::clone(store_factory),
+                        store_factory: Arc::clone(store_factory),
                         live_replay_store,
                         process_lifecycle_available,
-                    )),
+                    }),
                     slot_supplier: worker_slot_supplier,
                     execution_concurrency: queued_work_execution_concurrency,
                 },
@@ -1553,7 +1569,7 @@ impl AdvancedLashCoreBuilder {
         self
     }
 
-    pub fn build(self) -> Result<LashCore> {
-        self.builder.build()
+    pub fn build(self, session_execution_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
+        self.builder.build(session_execution_owner)
     }
 }

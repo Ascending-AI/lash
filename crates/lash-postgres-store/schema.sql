@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 49.
+-- lash-postgres-store schema, component version 50.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -148,10 +148,12 @@ CREATE TABLE IF NOT EXISTS lash_session_execution_leases (
     session_id TEXT PRIMARY KEY,
     lease_owner_id TEXT,
     lease_owner_incarnation_id TEXT,
+    lease_executor_id TEXT,
     lease_owner_liveness_json TEXT,
     lease_token TEXT,
     lease_fencing_token BIGINT NOT NULL DEFAULT 0,
     lease_claimed_at_ms BIGINT NOT NULL DEFAULT 0,
+    lease_term_ms BIGINT NOT NULL DEFAULT 0,
     lease_expires_at_ms BIGINT NOT NULL DEFAULT 0
 );
 
@@ -462,7 +464,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 49)
+VALUES ('lash-postgres-store', 50)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

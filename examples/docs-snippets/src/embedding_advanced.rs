@@ -32,7 +32,7 @@ async fn inmemory_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:inmemory-core
     Ok(())
 }
@@ -70,7 +70,7 @@ async fn sqlite_core(
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:sqlite-core
     Ok(())
 }
@@ -177,7 +177,7 @@ async fn process_registry_core(
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:process-registry-core
     Ok(())
 }
@@ -223,7 +223,7 @@ async fn subagents_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .plugin(Arc::new(subagents) as Arc<dyn PluginFactory>)
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:subagents-core
     Ok(())
 }
@@ -308,7 +308,7 @@ fn configured_mcp_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .plugin(std::sync::Arc::new(mcp))
-        .build()
+        .build(crate::example_process_owner())
 }
 // docs:end:mcp-core
 
@@ -365,7 +365,7 @@ async fn durable_stores_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .turn_budget(lash::TurnBudget::bounded(50))
-        .build()?;
+        .build(crate::example_process_owner())?;
     // docs:end:durable-stores-core
     Ok(())
 }
