@@ -820,7 +820,11 @@ async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegist
                 lash_core::ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "fig1293"}),
                 },
-                lash_core::RecoveryDisposition::Rerunnable,
+                // The control target is a fixture-owned external process. It
+                // must not enter the durable worker worklist, whose racing
+                // `first_started` events would make the signal sequence depend
+                // on scheduler timing instead of the law's literal journal.
+                lash_core::RecoveryDisposition::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -1145,7 +1149,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     )
     .await
     .expect("inline FIG-1293 tier turn timed out");
-    assert_fig1293_literal_outputs(&inline_turn, 5);
+    assert_fig1293_literal_outputs(&inline_turn, 2);
     assert_eq!(inline_model_calls.load(Ordering::SeqCst), 3);
 
     let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
@@ -1189,7 +1193,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     )
     .await
     .expect("PostgreSQL FIG-1293 redrive timed out");
-    assert_fig1293_literal_outputs(&postgres_turn, 3);
+    assert_fig1293_literal_outputs(&postgres_turn, 2);
     assert_eq!(postgres_model_calls.load(Ordering::SeqCst), 3);
 
     let envelope_json: Vec<String> = sqlx::query_scalar(
@@ -1422,13 +1426,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     )
     .await
     .expect("FIG-1293 child-boundary redrive timed out");
-    assert_fig1293_literal_outputs(
-        &redriven,
-        match crash_after {
-            CrashAfter::SpawnAgentStart => 3,
-            CrashAfter::FirstProtocolBatchChild => 4,
-        },
-    );
+    assert_fig1293_literal_outputs(&redriven, 2);
     assert_eq!(
         model_calls.load(Ordering::SeqCst),
         3,
