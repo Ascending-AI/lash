@@ -3,6 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
+mod validation;
+
+pub(crate) use validation::PersistedRoots;
+
 use super::{
     Record, RuntimeError, Value, add_values, coerce_string, record_with_capacity,
     resolve_existing_list_assignment_index,
@@ -240,104 +244,15 @@ impl Heap {
         Ok(heap)
     }
 
-    pub(crate) fn validate_wire_graph(
-        &self,
-        roots: &[Value],
-        require_acyclic: bool,
-    ) -> Result<(), String> {
-        #[derive(Clone, Copy)]
-        enum Visit {
-            Enter(HeapId),
-            Leave(HeapId),
-        }
-
-        let mut state = BTreeMap::<HeapId, u8>::new();
-        let mut stack = Vec::new();
-        for root in roots {
-            collect_value_refs(root, &mut stack);
-        }
-        let mut visits = stack.into_iter().map(Visit::Enter).collect::<Vec<_>>();
-        while let Some(visit) = visits.pop() {
-            match visit {
-                Visit::Enter(id) => match state.get(&id) {
-                    Some(1) if require_acyclic => {
-                        return Err("heap object graph must be acyclic".to_string());
-                    }
-                    Some(1) => continue,
-                    Some(2) => continue,
-                    _ => {
-                        state.insert(id, 1);
-                        visits.push(Visit::Leave(id));
-                        let object = self
-                            .get(id)
-                            .map_err(|_| format!("dangling heap reference {}", id.get()))?;
-                        let mut children = Vec::new();
-                        for value in object.values() {
-                            collect_value_refs(value, &mut children);
-                        }
-                        visits.extend(children.into_iter().rev().map(Visit::Enter));
-                    }
-                },
-                Visit::Leave(id) => {
-                    state.insert(id, 2);
-                }
-            }
-        }
-        if state.len() != self.id_to_slot.len() {
-            return Err("heap wire must not contain unreachable objects".to_string());
-        }
-        Ok(())
-    }
-
-    pub(crate) fn validate_isolated_roots<'a>(
-        &self,
-        roots: impl IntoIterator<Item = (&'a str, &'a Value)>,
-    ) -> Result<(), String> {
-        let mut owner = BTreeMap::<HeapId, &str>::new();
-        for (name, root) in roots {
-            let mut pending = Vec::new();
-            collect_value_refs(root, &mut pending);
-            let mut seen = BTreeSet::new();
-            while let Some(id) = pending.pop() {
-                if !seen.insert(id) {
-                    continue;
-                }
-                if let Some(previous) = owner.insert(id, name)
-                    && previous != name
-                {
-                    return Err(format!(
-                        "heap roots `{previous}` and `{name}` must not share object {}",
-                        id.get()
-                    ));
-                }
-                let object = self
-                    .get(id)
-                    .map_err(|_| format!("dangling heap reference {}", id.get()))?;
-                for value in object.values() {
-                    collect_value_refs(value, &mut pending);
-                }
-            }
-        }
-        Ok(())
-    }
-
+    /// Checks that every reference a value holds names a live object.
+    ///
+    /// Reference discovery goes through the one value enumerator, and object
+    /// members through `HeapObject::child_refs`, so no validator spells its own
+    /// traversal.
     pub(crate) fn validate_resolvable_refs(&self, value: &Value) -> Result<(), String> {
-        match value {
-            Value::Ref(id) => {
-                self.get(*id)
-                    .map_err(|_| format!("dangling heap reference {}", id.get()))?;
-            }
-            Value::Tuple(values) | Value::List(values) => {
-                for value in values.iter() {
-                    self.validate_resolvable_refs(value)?;
-                }
-            }
-            Value::Record(record) => {
-                for value in record.values() {
-                    self.validate_resolvable_refs(value)?;
-                }
-            }
-            _ => {}
+        for id in value_refs(value) {
+            self.get(id)
+                .map_err(|_| format!("dangling heap reference {}", id.get()))?;
         }
         Ok(())
     }

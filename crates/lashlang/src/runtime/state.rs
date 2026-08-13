@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use super::{
     ContinuationError, HEAP_SIZE_SCHEDULE_VERSION, Heap, HeapId, HeapObject, HeapRestoreWire,
-    ImageValue, ProjectedValue, Record, ResourceHandle, RuntimeError, Value, record_with_capacity,
+    ImageValue, PersistedRoots, ProjectedValue, Record, ResourceHandle, RuntimeError, Value,
+    record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -431,15 +432,18 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
         let runtime_globals = snapshot.runtime_globals.clone();
         let root_values = runtime_globals.values().cloned().collect::<Vec<_>>();
         heap.collect(root_values.iter());
-        // The decoder refuses roots that share an object; deep isolation makes
-        // that unreachable, so the writer checks it too. A violation then fails
-        // here, at the encode that introduced it, rather than in another process
-        // at a later cold restore.
-        debug_assert!(
-            heap.validate_isolated_roots(runtime_globals.iter()).is_ok(),
-            "snapshot roots must not share heap objects: {:?}",
-            heap.validate_isolated_roots(runtime_globals.iter())
-        );
+        // The writer checks the same forest invariant the reader enforces, in
+        // release builds too. A violation then fails here, at the encode that
+        // introduced it, rather than in another process at a later cold
+        // restore — and it can never be written to durable storage at all.
+        let mut forest_roots = PersistedRoots::default();
+        forest_roots.durable_all(runtime_globals.iter());
+        heap.validate_persisted_forest(&forest_roots)
+            .map_err(|reason| ContinuationError::UnserializableValue {
+                location: format!("snapshot heap: {reason}"),
+                variant: "shared heap object",
+            })?;
+        drop(forest_roots);
         let mut roots = runtime_globals.iter().collect::<Vec<_>>();
         roots.sort_unstable_by_key(|(name, _)| *name);
         Ok(Self {
@@ -512,13 +516,11 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     &runtime_globals.values().cloned().collect::<Vec<_>>(),
                 )
                 .map_err(SnapshotDecodeError::InvalidEncoding)?;
-                heap.validate_wire_graph(
-                    &runtime_globals.values().cloned().collect::<Vec<_>>(),
-                    true,
-                )
-                .map_err(SnapshotDecodeError::InvalidEncoding)?;
-                heap.validate_isolated_roots(runtime_globals.iter())
+                let mut forest_roots = PersistedRoots::default();
+                forest_roots.durable_all(runtime_globals.iter());
+                heap.validate_persisted_forest(&forest_roots)
                     .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                drop(forest_roots);
                 let globals = runtime_globals
                     .iter()
                     .map(|(name, value)| {

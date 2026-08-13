@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::super::{ExecutionBound, HeapObject, HeapRestoreWire};
+use super::super::{ExecutionBound, HeapObject, HeapRestoreWire, PersistedRoots};
 use super::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -601,17 +601,40 @@ mod continuation_serde {
     }
 }
 
-fn validate_continuation(continuation: &VmContinuation) -> Result<(), ContinuationError> {
-    let mut heap_roots = continuation.operand_stack.clone();
-    heap_roots.extend(continuation.last_value.iter().cloned());
-    heap_roots.extend(continuation.slots.iter().flatten().cloned());
-    heap_roots.extend(continuation.globals.values().cloned());
-    for iterator in &continuation.iterator_stack {
-        heap_roots.extend(iterator.restore_value.iter().cloned());
-        if let VmIteratorCursor::List { values, .. } = &iterator.cursor {
-            heap_roots.extend(values.iter().cloned());
+/// Splits a continuation's roots into the ones that own what they name and the
+/// ones that only borrow it.
+///
+/// Slots, globals and a parked loop binding all survive the boundary: whatever
+/// they name is theirs, and two of them naming one object is the aliasing this
+/// round exists to make unrepresentable. The operand stack, the last-value
+/// register and an iterator's captured cursor are execution scratch — the VM
+/// legitimately holds a value on the stack and in the slot it was just stored
+/// into, and a cursor holds the elements it is handing out one at a time — so
+/// they borrow without owning.
+fn continuation_forest_roots(continuation: &VmContinuation) -> PersistedRoots<'_> {
+    let mut roots = PersistedRoots::default();
+    for (index, value) in continuation.slots.iter().enumerate() {
+        if let Some(value) = value {
+            roots.durable(format!("slot {index}"), value);
         }
     }
+    for (name, value) in continuation.globals.iter() {
+        roots.durable(format!("global `{name}`"), value);
+    }
+    for (depth, iterator) in continuation.iterator_stack.iter().enumerate() {
+        if let Some(value) = iterator.restore_value.as_ref() {
+            roots.durable(format!("iterator {depth} restore value"), value);
+        }
+        if let VmIteratorCursor::List { values, .. } = &iterator.cursor {
+            roots.transient_all(values.iter());
+        }
+    }
+    roots.transient_all(continuation.operand_stack.iter());
+    roots.transient_all(continuation.last_value.iter());
+    roots
+}
+
+fn validate_continuation(continuation: &VmContinuation) -> Result<(), ContinuationError> {
     validate_values(&continuation.operand_stack, "operand stack")?;
     validate_heap_references(&continuation.heap.heap, &continuation.operand_stack)?;
     validate_optional_value(continuation.last_value.as_ref(), "last value")?;
@@ -669,9 +692,9 @@ fn validate_continuation(continuation: &VmContinuation) -> Result<(), Continuati
     continuation
         .heap
         .heap
-        .validate_wire_graph(&heap_roots, false)
-        .map_err(|_| ContinuationError::UnserializableValue {
-            location: "continuation heap".to_string(),
+        .validate_persisted_forest(&continuation_forest_roots(continuation))
+        .map_err(|reason| ContinuationError::UnserializableValue {
+            location: format!("continuation heap: {reason}"),
             variant: "invalid heap object graph",
         })?;
     Ok(())
@@ -1067,51 +1090,51 @@ mod tests {
     }
 
     #[test]
-    fn continuation_heap_round_trip_is_canonical_and_cycle_safe() {
-        let mut heap = Heap::default();
-        let Value::Ref(root) = heap
+    fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
+        // A cyclic object used to validate "by identity" and resume. Under the
+        // forest invariant it cannot be expressed: the object holds itself, so
+        // it has an owner no root can account for.
+        let mut cyclic = Heap::default();
+        let Value::Ref(root) = cyclic
             .allocate(HeapObject::List(Vec::new()))
             .expect("allocate cyclic root")
         else {
             unreachable!()
         };
-        heap.replace_object(
-            root,
-            HeapObject::List(vec![Value::Number(-0.0), Value::Ref(root)]),
-        )
-        .expect("close cycle");
-        let continuation = VmContinuation {
-            instruction_pointer: 0,
-            operand_stack: vec![Value::Ref(root)],
-            last_value: None,
-            slots: Vec::new(),
-            projected_slots: Vec::new(),
-            globals: Record::new(),
-            iterator_stack: Vec::new(),
-            occurrence_counters: Default::default(),
-            mode: ExecutionMode::Process,
-            profile: None,
-            pending_error_span: None,
-            instructions_executed: 0,
-            active_execution_elapsed: std::time::Duration::ZERO,
-            heap: VmHeapContinuation::new(heap),
-        };
-        validate_continuation(&continuation).expect("cycle should validate by identity");
-        let bytes = serde_json::to_vec(&continuation).expect("serialize cyclic heap");
-        let restored: VmContinuation = serde_json::from_slice(&bytes).expect("restore cyclic heap");
-        assert_eq!(
-            serde_json::to_vec(&restored).expect("redump cyclic heap"),
-            bytes
+        cyclic
+            .replace_object(root, HeapObject::List(vec![Value::Ref(root)]))
+            .expect("close cycle");
+        let mut continuation = empty_continuation(cyclic);
+        continuation.slots = vec![Some(Value::Ref(root))];
+        continuation.projected_slots = vec![false];
+        let error = validate_continuation(&continuation)
+            .expect_err("a cyclic continuation must be rejected");
+        assert!(
+            error.to_string().contains("must have one owner"),
+            "unexpected rejection: {error}"
         );
-        assert!(matches!(
-            restored.heap.heap.export(&Value::Ref(root)),
-            Err(RuntimeError::CyclicHostValue { .. })
-        ));
-        let HeapObject::List(values) = restored.heap.heap.get(root).expect("restored root") else {
+
+        // The acyclic case still round-trips byte-for-byte, negative zero and
+        // all.
+        let mut heap = Heap::default();
+        let Value::Ref(id) = heap
+            .allocate(HeapObject::List(vec![Value::Number(-0.0)]))
+            .expect("allocate root")
+        else {
+            unreachable!()
+        };
+        let mut continuation = empty_continuation(heap);
+        continuation.slots = vec![Some(Value::Ref(id))];
+        continuation.projected_slots = vec![false];
+        validate_continuation(&continuation).expect("an owned tree validates");
+        let bytes = serde_json::to_vec(&continuation).expect("serialize heap");
+        let restored: VmContinuation = serde_json::from_slice(&bytes).expect("restore heap");
+        assert_eq!(serde_json::to_vec(&restored).expect("redump heap"), bytes);
+        let HeapObject::List(values) = restored.heap.heap.get(id).expect("restored root") else {
             panic!("root should remain a list")
         };
         let Value::Number(number) = values[0] else {
-            panic!("first cycle member should be a number")
+            panic!("first member should be a number")
         };
         assert_eq!(number.to_bits(), (-0.0_f64).to_bits());
     }

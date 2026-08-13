@@ -536,7 +536,7 @@
             Snapshot::from_canonical_bytes(&named_bytes(&shared))
                 .expect_err("shared roots must be rejected")
                 .to_string()
-                .contains("must not share object")
+                .contains("must have one owner")
         );
 
         let cyclic_object = super::super::heap::HeapObject::List(vec![Value::Ref(id)]);
@@ -555,11 +555,83 @@
             1,
             cyclic_object.logical_bytes(),
         );
+        // A rooted self-cycle is refused as a second owner: the root holds the
+        // object and so does the object itself.
         assert!(
             Snapshot::from_canonical_bytes(&named_bytes(&cycle))
                 .expect_err("cycles must be rejected")
                 .to_string()
+                .contains("must have one owner")
+        );
+
+        // A cycle no root names has one owner per object and still must not
+        // decode: nothing outside the cycle holds it up.
+        let second = HeapId::from_counter(2);
+        let ring_first = super::super::heap::HeapObject::List(vec![Value::Ref(second)]);
+        let ring_second = super::super::heap::HeapObject::List(vec![Value::Ref(id)]);
+        let ring = canonical_heap_with(
+            Vec::new(),
+            vec![
+                CanonicalHeapEntry {
+                    id,
+                    object: CanonicalHeapObject::List {
+                        items: vec![CanonicalValue::Ref { value: second }],
+                    },
+                },
+                CanonicalHeapEntry {
+                    id: second,
+                    object: CanonicalHeapObject::List {
+                        items: vec![CanonicalValue::Ref { value: id }],
+                    },
+                },
+            ],
+            3,
+            2,
+            ring_first.logical_bytes() + ring_second.logical_bytes(),
+        );
+        assert!(
+            Snapshot::from_canonical_bytes(&named_bytes(&ring))
+                .expect_err("an unrooted cycle must be rejected")
+                .to_string()
                 .contains("acyclic")
+        );
+
+        // A repeated reference inside one root is a DAG, not a tree, and is
+        // refused even though only one root names it.
+        let diamond_child = super::super::heap::HeapObject::List(Vec::new());
+        let diamond_root = super::super::heap::HeapObject::List(vec![
+            Value::Ref(second),
+            Value::Ref(second),
+        ]);
+        let diamond = canonical_heap_with(
+            vec![CanonicalBinding {
+                name: "root".to_string(),
+                value: CanonicalValue::Ref { value: id },
+            }],
+            vec![
+                CanonicalHeapEntry {
+                    id,
+                    object: CanonicalHeapObject::List {
+                        items: vec![
+                            CanonicalValue::Ref { value: second },
+                            CanonicalValue::Ref { value: second },
+                        ],
+                    },
+                },
+                CanonicalHeapEntry {
+                    id: second,
+                    object: CanonicalHeapObject::List { items: Vec::new() },
+                },
+            ],
+            3,
+            2,
+            diamond_root.logical_bytes() + diamond_child.logical_bytes(),
+        );
+        assert!(
+            Snapshot::from_canonical_bytes(&named_bytes(&diamond))
+                .expect_err("a within-root diamond must be rejected")
+                .to_string()
+                .contains("must have one owner")
         );
 
         let unreachable = canonical_heap_with(

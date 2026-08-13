@@ -43,15 +43,30 @@ isolation must not reintroduce. Isolation is staged: IDs are reserved and
 objects built before anything is charged or committed, so a copy that would
 cross the memory bound leaves the heap byte-identical.
 
-Sharing between roots is therefore unreachable by construction. Two independent
-checks keep it that way rather than trusting the argument:
+Sharing between roots is therefore unreachable by construction. One validator
+enforces it rather than trusting the argument, in release builds, at every
+durable boundary — snapshot decode and encode, continuation decode, resume and
+encode:
 
-- the decoder refuses a snapshot whose roots share an object, and refuses a heap
-  object whose member is an inline compound rather than a scalar or a reference;
-  a reference can never hide below the member level in an accepted wire; and
-- the encoder asserts the same root-isolation property in debug builds, so a
-  violation fails at the write that introduced it rather than at a later cold
-  restore in another process.
+- every reachable object has at most one *ownership edge*, where an ownership
+  edge is a reference held by a durable root or by an object member;
+- the ownership edges must not form a cycle, and every object must be reachable
+  from some root; and
+- a heap object member is a scalar or a reference, never an inline compound, so
+  a reference can never hide below the member level.
+
+Durable roots are the ones whose value survives the boundary: slots, globals,
+and a parked loop binding waiting to be restored into its slot. A continuation
+also carries transient roots — the operand stack, the last-value register, and
+an iterator's captured cursor — which may hold duplicate references, because a
+VM legitimately holds a value on the stack and in the slot it was just stored
+into, and a cursor holds the elements it is handing out. Those handles confer no
+ownership, so they can never create a second owner. Every insertion into a
+durable store copies, so a transient duplicate can never become a durable one.
+
+Applying the validator to the encoders as well means a violation fails at the
+write that introduced it rather than at a later cold restore in another process,
+and cannot reach durable storage at all.
 
 One recursive enumerator answers child discovery for allocation bookkeeping,
 reverse parent edges, mark, sweep, wire validation and root traversal, so no
@@ -75,5 +90,6 @@ reference-preserving; the decision lives in the compiler.
   pre-heap tree language, including across a snapshot boundary.
 - Container insertion costs a copy of the inserted value's graph. In-place
   appends stay O(1) because the accumulator owns its object outright.
-- Sharing is not merely discouraged: it is not representable in a persisted
-  state, so the wire needs no way to express it.
+- Sharing is not merely discouraged: a persisted state that expresses it is
+  refused at both ends, so nothing downstream has to decide how shared ownership
+  would restore.
