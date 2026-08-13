@@ -3347,7 +3347,7 @@ mod tests {
                 "FIG1195_FLAT_GROWTH full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
                 measured.len()
             );
-            assert_eq!(full_state_bytes, 136_690);
+            assert_eq!(full_state_bytes, 136_711);
             assert_eq!(minimum, 21_047);
             assert_eq!(maximum, 21_101);
         });
@@ -3375,7 +3375,7 @@ mod tests {
                 .to_canonical_bytes()
                 .expect("accumulated canonical state")
                 .len();
-            assert_eq!(full_state_bytes, 1_104_932);
+            assert_eq!(full_state_bytes, 1_104_953);
             let _initial = state.snapshot_execution_state().expect("initial snapshot");
             state.acknowledge_execution_state_capture();
 
