@@ -1,5 +1,57 @@
 use super::*;
+use crate::ast::{AssignTarget, Expr, FunctionExpr, Program};
 use crate::runtime::HEAP_SIZE_SCHEDULE_VERSION;
+use crate::runtime::entry_points::compile_program_internal;
+
+#[test]
+fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
+    let program = compile_program_internal(&Program::block(vec![
+        Expr::Assign {
+            target: AssignTarget::variable("captured".into()),
+            expr: Box::new(Expr::Number(1.0)),
+        },
+        Expr::Assign {
+            target: AssignTarget::variable("f".into()),
+            expr: Box::new(Expr::Function(Box::new(FunctionExpr {
+                name: None,
+                params: Vec::new(),
+                captures: vec!["captured".into()],
+                body: Box::new(Expr::Variable("captured".into())),
+            }))),
+        },
+    ]));
+
+    for captures in [Vec::new(), vec![Value::Null, Value::Bool(true)]] {
+        let mut heap = Heap::default();
+        let closure = heap
+            .allocate(HeapObject::Closure {
+                function: 0,
+                captures,
+            })
+            .expect("allocate malformed snapshot closure");
+        let mut runtime_globals = Record::new();
+        runtime_globals.insert("f".to_string(), closure);
+        let snapshot = Snapshot {
+            globals: Record::new(),
+            runtime_globals,
+            heap,
+        };
+        let bytes = snapshot
+            .to_canonical_bytes()
+            .expect("program-independent snapshot encoding accepts closure metadata");
+        let decoded = Snapshot::from_canonical_bytes(&bytes)
+            .expect("program-independent snapshot decoding accepts closure metadata");
+        let state = State::from_snapshot(decoded);
+        assert!(matches!(
+            state.validate_program(&program),
+            Err(RuntimeError::ClosureCaptureCountMismatch {
+                index: 0,
+                expected: 1,
+                ..
+            })
+        ));
+    }
+}
 
 #[test]
 fn canonical_encoding_is_deterministic_for_map_order_and_nan_payload() {

@@ -49,6 +49,13 @@ pub enum RuntimeError {
     /// Closure metadata did not match the compiled function table.
     #[error("closure function index {index} is not present in the compiled program")]
     UnknownFunction { index: u32 },
+    /// A closure's captures do not match its compiled function definition.
+    #[error("closure function {index} requires {expected} capture(s), found {actual}")]
+    ClosureCaptureCountMismatch {
+        index: u32,
+        expected: usize,
+        actual: usize,
+    },
     /// Function values cannot cross host-facing value boundaries.
     #[error("function values cannot cross a lashlang host boundary")]
     FunctionValueAtHostBoundary,
@@ -429,6 +436,11 @@ mod tests {
                 actual: 2,
             },
             RuntimeError::UnknownFunction { index: 7 },
+            RuntimeError::ClosureCaptureCountMismatch {
+                index: 7,
+                expected: 1,
+                actual: 2,
+            },
             RuntimeError::FunctionValueAtHostBoundary,
             RuntimeError::EffectInBuiltinCallback,
             RuntimeError::InstructionBudgetExceeded { limit: 10 },
@@ -661,6 +673,9 @@ mod tests {
                 RuntimeError::FunctionArgumentCount { .. } => "function takes 1 arg(s), got 2",
                 RuntimeError::UnknownFunction { .. } => {
                     "closure function index 7 is not present in the compiled program"
+                }
+                RuntimeError::ClosureCaptureCountMismatch { .. } => {
+                    "closure function 7 requires 1 capture(s), found 2"
                 }
                 RuntimeError::FunctionValueAtHostBoundary => {
                     "function values cannot cross a lashlang host boundary"

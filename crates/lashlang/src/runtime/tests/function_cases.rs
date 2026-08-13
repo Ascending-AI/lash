@@ -317,6 +317,226 @@ async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
     );
 }
 
+fn assert_resume_rejects_program_counter(program: &CompiledProgram, continuation: VmContinuation) {
+    assert!(matches!(
+        Vm::resume_from(continuation, program, &Host),
+        Err(ContinuationError::InstructionPointerOutsideCodeRange { .. })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn resume_rejects_cross_function_active_and_return_instruction_pointers() {
+    let program = compile_program_internal(&Program::block(vec![
+        assign(
+            "leaf",
+            function(
+                None,
+                &["n"],
+                &[],
+                Expr::Block(vec![Expr::Print(Box::new(variable("n"))), variable("n")]),
+            ),
+        ),
+        assign(
+            "caller",
+            function(
+                None,
+                &["n"],
+                &["leaf"],
+                call(variable("leaf"), vec![variable("n")]),
+            ),
+        ),
+        assign("sibling", function(None, &["n"], &[], variable("n"))),
+        Expr::Finish(Box::new(call(variable("caller"), vec![Expr::Number(1.0)]))),
+    ]));
+    let host = Host;
+    let mut vm = continuation_test_vm(&program, &host);
+    vm.suspend_after_effects(1);
+    assert_eq!(
+        vm.run_for_mode().await.expect("suspend inside leaf"),
+        ExecutionOutcome::Continued
+    );
+    let nested = vm.suspend().expect("capture nested call");
+    assert_eq!(nested.frame_stack.len(), 2);
+    let leaf = nested.active_function.expect("leaf is active") as usize;
+    let caller = nested.frame_stack[1]
+        .function
+        .expect("caller frame records its function") as usize;
+    let sibling = (0..program.chunk.functions.len())
+        .find(|index| *index != leaf && *index != caller)
+        .expect("sibling function");
+    let function_end = |index: usize| {
+        program
+            .chunk
+            .functions
+            .get(index + 1)
+            .map_or(program.chunk.code.len(), |function| function.entry_ip)
+    };
+
+    let mut active_function_to_root = nested.clone();
+    active_function_to_root.instruction_pointer = 0;
+    assert_resume_rejects_program_counter(&program, active_function_to_root);
+
+    let mut active_sibling = nested.clone();
+    active_sibling.instruction_pointer = program.chunk.functions[sibling].entry_ip;
+    assert_resume_rejects_program_counter(&program, active_sibling);
+
+    let mut active_exact_end = nested.clone();
+    active_exact_end.instruction_pointer = function_end(leaf);
+    assert_resume_rejects_program_counter(&program, active_exact_end);
+
+    let mut root_to_function = nested.clone();
+    root_to_function.frame_stack.clear();
+    root_to_function.active_function = None;
+    root_to_function.instruction_pointer = program.chunk.functions[leaf].entry_ip;
+    root_to_function.slots = nested.frame_stack[0].slots.clone();
+    root_to_function.projected_slots = nested.frame_stack[0].projected_slots.clone();
+    root_to_function.globals = nested.frame_stack[0].globals.clone();
+    root_to_function.iterator_stack = nested.frame_stack[0].iterator_stack.clone();
+    assert_resume_rejects_program_counter(&program, root_to_function);
+
+    let mut root_exact_end = nested.clone();
+    root_exact_end.frame_stack.clear();
+    root_exact_end.active_function = None;
+    root_exact_end.instruction_pointer = program.chunk.root_code_len;
+    root_exact_end.slots = nested.frame_stack[0].slots.clone();
+    root_exact_end.projected_slots = nested.frame_stack[0].projected_slots.clone();
+    root_exact_end.globals = nested.frame_stack[0].globals.clone();
+    root_exact_end.iterator_stack = nested.frame_stack[0].iterator_stack.clone();
+    assert_resume_rejects_program_counter(&program, root_exact_end);
+
+    let mut return_root_to_function = nested.clone();
+    return_root_to_function.frame_stack[0].return_instruction_pointer =
+        program.chunk.functions[leaf].entry_ip;
+    assert_resume_rejects_program_counter(&program, return_root_to_function);
+
+    let mut return_root_exact_end = nested.clone();
+    return_root_exact_end.frame_stack[0].return_instruction_pointer = program.chunk.root_code_len;
+    assert_resume_rejects_program_counter(&program, return_root_exact_end);
+
+    let mut return_function_to_root = nested.clone();
+    return_function_to_root.frame_stack[1].return_instruction_pointer = 0;
+    assert_resume_rejects_program_counter(&program, return_function_to_root);
+
+    let mut return_sibling = nested.clone();
+    return_sibling.frame_stack[1].return_instruction_pointer =
+        program.chunk.functions[sibling].entry_ip;
+    assert_resume_rejects_program_counter(&program, return_sibling);
+
+    let mut return_exact_end = nested.clone();
+    return_exact_end.frame_stack[1].return_instruction_pointer = function_end(caller);
+    assert_resume_rejects_program_counter(&program, return_exact_end);
+
+    let mut non_call_return = nested;
+    non_call_return.frame_stack[0].return_instruction_pointer = (1..program.chunk.root_code_len)
+        .find(|return_ip| {
+            !matches!(
+                program.chunk.code[return_ip - 1],
+                Instruction::Call { .. } | Instruction::Map
+            )
+        })
+        .expect("root has a non-call return site");
+    assert!(matches!(
+        Vm::resume_from(non_call_return, &program, &host),
+        Err(ContinuationError::InvalidReturnSite { .. })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn caller_and_callee_iterators_round_trip_and_corrupt_frames_fail_closed() {
+    let program = compile_program_internal(&Program::block(vec![
+        assign(
+            "callee",
+            function(
+                None,
+                &["values"],
+                &[],
+                Expr::Block(vec![
+                    Expr::For {
+                        binding: "inner".into(),
+                        iterable: Box::new(variable("values")),
+                        body: Box::new(Expr::Print(Box::new(variable("inner")))),
+                    },
+                    variable("values"),
+                ]),
+            ),
+        ),
+        assign(
+            "caller",
+            function(
+                None,
+                &["values"],
+                &["callee"],
+                Expr::Block(vec![
+                    Expr::For {
+                        binding: "outer".into(),
+                        iterable: Box::new(variable("values")),
+                        body: Box::new(call(variable("callee"), vec![variable("values")])),
+                    },
+                    variable("values"),
+                ]),
+            ),
+        ),
+        Expr::Finish(Box::new(call(
+            variable("caller"),
+            vec![Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])],
+        ))),
+    ]));
+    let host = Host;
+    let mut vm = continuation_test_vm(&program, &host);
+    vm.suspend_after_effects(1);
+    assert_eq!(
+        vm.run_for_mode().await.expect("suspend in nested loop"),
+        ExecutionOutcome::Continued
+    );
+    let continuation = vm.suspend().expect("capture both iterators");
+    assert_eq!(continuation.iterator_stack.len(), 1);
+    let caller_frame = continuation
+        .frame_stack
+        .iter()
+        .position(|frame| !frame.iterator_stack.is_empty())
+        .expect("caller iterator is parked");
+    assert_eq!(
+        round_trip_and_resume(&program, continuation.clone()).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Number(1.0), Value::Number(2.0)].into()
+        ))
+    );
+
+    let mut invalid_binding = continuation.clone();
+    invalid_binding.frame_stack[caller_frame].iterator_stack[0].binding_slot =
+        invalid_binding.frame_stack[caller_frame].slots.len();
+    let invalid_binding_bytes =
+        serde_json::to_vec(&invalid_binding).expect("serialize corrupt frame binding");
+    assert!(
+        serde_json::from_slice::<VmContinuation>(&invalid_binding_bytes)
+            .expect_err("decode must reject corrupt frame binding")
+            .to_string()
+            .contains("binds slot")
+    );
+    assert!(matches!(
+        Vm::resume_from(invalid_binding, &program, &host),
+        Err(ContinuationError::FrameIteratorBindingOutOfBounds { .. })
+    ));
+
+    let mut zero_step = continuation;
+    zero_step.frame_stack[caller_frame].iterator_stack[0].cursor = VmIteratorCursor::Range {
+        next: 0,
+        end: 2,
+        step: 0,
+    };
+    let zero_step_bytes = serde_json::to_vec(&zero_step).expect("serialize zero-step frame");
+    assert!(
+        serde_json::from_slice::<VmContinuation>(&zero_step_bytes)
+            .expect_err("decode must reject zero-step frame")
+            .to_string()
+            .contains("zero range step")
+    );
+    assert!(matches!(
+        Vm::resume_from(zero_step, &program, &host),
+        Err(ContinuationError::FrameZeroRangeStep { .. })
+    ));
+}
+
 struct FunctionBoundsHost {
     bounds: ExecutionBounds,
     collect_every_allocation: bool,

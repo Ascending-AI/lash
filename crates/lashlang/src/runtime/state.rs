@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use super::{
-    ContinuationError, Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, PersistedRoots,
-    ProjectedValue, Record, ResourceHandle, RuntimeError, Value, record_with_capacity,
+    CompiledProgram, ContinuationError, Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue,
+    PersistedRoots, ProjectedValue, Record, ResourceHandle, RuntimeError, Value,
+    record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -188,6 +189,10 @@ impl State {
             runtime_globals: snapshot.runtime_globals,
             heap: snapshot.heap,
         }
+    }
+
+    pub(crate) fn validate_program(&self, program: &CompiledProgram) -> Result<(), RuntimeError> {
+        self.heap.validate_closures(&program.chunk.functions)
     }
 
     pub(super) fn take_runtime(&mut self) -> (Record, Heap) {

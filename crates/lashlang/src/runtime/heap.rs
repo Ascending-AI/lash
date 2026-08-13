@@ -8,7 +8,7 @@ mod validation;
 pub(crate) use validation::PersistedRoots;
 
 use super::{
-    Record, RuntimeError, Value, add_values, coerce_string, record_with_capacity,
+    CompiledFunction, Record, RuntimeError, Value, add_values, coerce_string, record_with_capacity,
     resolve_existing_list_assignment_index,
 };
 
@@ -181,6 +181,28 @@ impl Default for Heap {
 }
 
 impl Heap {
+    pub(crate) fn validate_closures(
+        &self,
+        functions: &[CompiledFunction],
+    ) -> Result<(), RuntimeError> {
+        for (_, object) in self.objects_in_id_order() {
+            let HeapObject::Closure { function, captures } = object else {
+                continue;
+            };
+            let compiled = functions
+                .get(*function as usize)
+                .ok_or(RuntimeError::UnknownFunction { index: *function })?;
+            if captures.len() != compiled.capture_count {
+                return Err(RuntimeError::ClosureCaptureCountMismatch {
+                    index: *function,
+                    expected: compiled.capture_count,
+                    actual: captures.len(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn with_limit(logical_byte_limit: u64) -> Self {
         Self {
             logical_byte_limit,

@@ -192,6 +192,7 @@ pub(crate) async fn execute_compiled_internal<H: ExecutionHost>(
     state: &mut State,
     host: &H,
 ) -> Result<ExecutionOutcome, RuntimeError> {
+    state.validate_program(program)?;
     let projected = host.projected_bindings();
     if let Some(mut scratch) = host.take_scratch() {
         let result =

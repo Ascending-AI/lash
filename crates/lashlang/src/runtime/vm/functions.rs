@@ -68,7 +68,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 actual: args.len(),
             });
         }
-        debug_assert_eq!(captures.len(), function.capture_count);
+        if captures.len() != function.capture_count {
+            return Err(RuntimeError::ClosureCaptureCountMismatch {
+                index: function_index as u32,
+                expected: function.capture_count,
+                actual: captures.len(),
+            });
+        }
 
         let mut slots = SlotState {
             values: vec![None; function.slot_names.len()],
