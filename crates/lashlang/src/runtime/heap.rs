@@ -910,6 +910,49 @@ impl Heap {
         Ok(Value::Ref(*id))
     }
 
+    /// Appends copies of `source`'s members to the list `target` names.
+    ///
+    /// `acc = acc + other` builds a new list in the language, but under
+    /// exclusive ownership nothing else can observe `acc`'s object, so the new
+    /// list can be the old one extended. That turns a per-iteration cost
+    /// proportional to the accumulator into one proportional to what is being
+    /// appended. The members are copied, not moved: `other` is a binding of its
+    /// own and keeps what it holds.
+    pub(crate) fn extend_list(
+        &mut self,
+        target: &Value,
+        source: &Value,
+    ) -> Result<Value, RuntimeError> {
+        let Value::Ref(id) = target else {
+            return Err(RuntimeError::PushUnsupported);
+        };
+        let members = match source {
+            Value::Ref(source_id) => {
+                let HeapObject::List(values) = self.get(*source_id)? else {
+                    return Err(RuntimeError::PushUnsupported);
+                };
+                values.clone()
+            }
+            Value::List(values) => values.iter().cloned().collect::<Vec<_>>(),
+            _ => return Err(RuntimeError::PushUnsupported),
+        };
+        for member in members {
+            let copy = self.isolate_value(&member)?;
+            self.push_list(&Value::Ref(*id), copy)?;
+        }
+        Ok(Value::Ref(*id))
+    }
+
+    /// Whether this value is a list, whether it is held in the heap or still a
+    /// tree.
+    pub(crate) fn is_list(&self, value: &Value) -> bool {
+        match value {
+            Value::List(_) => true,
+            Value::Ref(id) => matches!(self.get(*id), Ok(HeapObject::List(_))),
+            _ => false,
+        }
+    }
+
     pub(crate) fn add_assign_index_number(
         &mut self,
         target: &Value,

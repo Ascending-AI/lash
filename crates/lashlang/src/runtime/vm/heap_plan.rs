@@ -41,14 +41,14 @@ pub(super) enum SlotExport {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct InstructionHeapPlan {
     pub(super) stack: StackExport,
-    pub(super) slots: [Option<(usize, SlotExport)>; 2],
+    pub(super) slots: [Option<(usize, SlotExport)>; 1],
 }
 
 impl InstructionHeapPlan {
     const fn stack(stack: StackExport) -> Self {
         Self {
             stack,
-            slots: [None, None],
+            slots: [None],
         }
     }
 
@@ -65,11 +65,6 @@ impl InstructionHeapPlan {
 
     const fn with_mutable_slot(mut self, slot: usize) -> Self {
         self.slots[0] = Some((slot, SlotExport::Mutate));
-        self
-    }
-
-    const fn and_read_slot(mut self, slot: usize) -> Self {
-        self.slots[1] = Some((slot, SlotExport::Read));
         self
     }
 }
@@ -162,13 +157,14 @@ pub(super) fn instruction_heap_plan(
             InstructionHeapPlan::stack(Top(1 + chunk.assign_paths[path].dynamic_index_count))
                 .with_mutable_slot(slot)
         }
-        I::AddAssign(slot) => InstructionHeapPlan::stack(Top(1)).with_mutable_slot(slot),
+        // A compound assignment extends its accumulator in place when both
+        // sides are lists, so neither the operand nor the slot is exported up
+        // front; the fallback path materializes what it needs.
+        I::AddAssign(_) => InstructionHeapPlan::heap_native(),
         I::AddAssignNumber { slot, .. } => {
             InstructionHeapPlan::stack(Top(0)).with_mutable_slot(slot)
         }
-        I::AddAssignSlot { slot, right } => InstructionHeapPlan::stack(Top(0))
-            .with_mutable_slot(slot)
-            .and_read_slot(right),
+        I::AddAssignSlot { .. } => InstructionHeapPlan::heap_native(),
 
         // Everything else exports the whole stack. Intrinsics read a count the
         // plan cannot see, effects hand values to the host, and an opcode added

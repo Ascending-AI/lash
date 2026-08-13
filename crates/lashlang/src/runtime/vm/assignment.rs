@@ -49,8 +49,29 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     #[inline(always)]
     fn add_assign_value(&mut self, slot: usize, right: Value) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
         self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+        // A list accumulator grows in place. Every other holder of its old
+        // value already owns a separate copy, so extending the object it names
+        // is unobservable — and it costs what is being appended rather than
+        // what has been accumulated.
+        let extend_target = match self.slots.get(slot) {
+            Some(Value::Ref(id))
+                if matches!(self.heap.get(*id), Ok(HeapObject::List(_)))
+                    && self.heap.is_list(&right) =>
+            {
+                Some(Value::Ref(*id))
+            }
+            _ => None,
+        };
+        if let Some(target) = extend_target {
+            let value = self.heap.extend_list(&target, &right)?;
+            self.record_assignment(slot);
+            self.last_value = Some(value);
+            return Ok(());
+        }
+        self.materialize_mutable_slot(slot)?;
+        let right = self.heap.export_for_instruction(&right)?;
+        let slot_name = &self.chunk.slot_names[slot];
         let value = {
             let left = self
                 .slots
@@ -117,11 +138,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     #[inline(always)]
     fn add_assign_slot(&mut self, slot: usize, right: usize) -> Result<(), RuntimeError> {
-        let right = self.load_slot(right)?;
-        if let Value::Number(right) = right {
-            return self.add_assign_number(slot, *right);
+        // The number fast path needs both sides to already be numbers: neither
+        // slot is exported for this opcode, so a heap-backed accumulator has to
+        // go the long way round rather than be asked for its numeric value.
+        if let (Some(Value::Number(_)), Value::Number(right)) =
+            (self.slots.get(slot), self.load_slot(right)?)
+        {
+            let right = *right;
+            return self.add_assign_number(slot, right);
         }
-        let right = right.clone();
+        let right = self.load_slot(right)?.clone();
         self.add_assign_value(slot, right)
     }
 

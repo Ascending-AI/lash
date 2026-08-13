@@ -476,9 +476,9 @@ impl Compiler {
                     return;
                 }
                 // A general concat copies the right operand's members into the
-                // accumulator, so the operand is isolated first.
+                // accumulator. The copy happens per member at the insertion
+                // itself, so the operand does not need isolating as a whole.
                 self.compile_expr(right);
-                self.code.push(Instruction::DeepCopy);
                 self.code.push(Instruction::AddAssign(slot));
                 self.set_const_slot(slot, None);
                 self.push_null_if(leave_value);

@@ -379,6 +379,64 @@ def budget_result(
     }
 
 
+def evaluate_ratio_budgets(
+    perf_results: list[dict[str, Any]], budgets: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Guard how a measurement scales, not just how big it is.
+
+    An absolute ceiling on one scenario cannot tell a linear cost from a
+    quadratic one; two scenarios that differ in exactly one axis can. Each entry
+    names a numerator and a denominator scenario and bounds their ratio in one
+    mode.
+    """
+    results: list[dict[str, Any]] = []
+    ratios = budgets.get("lashlang", {}).get("perf_ratios", {})
+    if not isinstance(ratios, dict):
+        return results
+    for name, spec in ratios.items():
+        if not isinstance(spec, dict):
+            continue
+        mode = spec.get("mode", "compiled_execute")
+        metric = spec.get("metric", "ns_per_iter")
+        budget = spec.get("max")
+        values: dict[str, float] = {}
+        for row in perf_results:
+            if row.get("mode_arg") != mode:
+                continue
+            scenario = str(row.get("scenario_arg", ""))
+            value = row.get(metric)
+            if scenario in (spec.get("numerator"), spec.get("denominator")) and isinstance(
+                value, int | float
+            ):
+                values[scenario] = float(value)
+        numerator = values.get(str(spec.get("numerator")))
+        denominator = values.get(str(spec.get("denominator")))
+        if numerator is None or denominator is None or denominator <= 0:
+            results.append(
+                budget_result(
+                    section="perf_ratio",
+                    scenario=name,
+                    mode=mode,
+                    metric=f"{metric}_ratio",
+                    actual=None,
+                    budget=budget if isinstance(budget, int | float) else None,
+                    reason="missing ratio measurement",
+                )
+            )
+            continue
+        results.append(
+            budget_result(
+                section="perf_ratio",
+                scenario=name,
+                mode=mode,
+                metric=f"{metric}_ratio",
+                actual=numerator / denominator,
+                budget=float(budget) if isinstance(budget, int | float) else None,
+            )
+        )
+    return results
+
+
 def evaluate_lashlang_budgets(report: dict[str, Any], budgets: dict[str, Any]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     perf_results = report.get("perf_results", [])
@@ -431,6 +489,8 @@ def evaluate_lashlang_budgets(report: dict[str, Any], budgets: dict[str, Any]) -
                     reason=None if actual is not None else f"missing {metric}",
                 )
             )
+
+    results.extend(evaluate_ratio_budgets(perf_results, budgets))
 
     for row in profile_results:
         scenario = str(row.get("scenario_arg", "unknown"))

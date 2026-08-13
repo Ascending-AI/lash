@@ -48,6 +48,11 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
       147
     ]
   },
+  "heap_deep_chain_mutation_32": {
+    "leaf": [
+      149
+    ]
+  },
   "heap_list_iteration": {
     "seen": 2000,
     "total": 1999000
@@ -55,6 +60,15 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
   "heap_nested_loop": {
     "checksum": 35990,
     "rows": 60
+  },
+  "heap_shallow_chain_mutation": {
+    "leaf": [
+      149
+    ]
+  },
+  "heap_variable_concat": {
+    "head": 1,
+    "total": 600
   },
   "image_host_environment": {
     "descriptor_has_id": true,

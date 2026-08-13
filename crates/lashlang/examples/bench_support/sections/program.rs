@@ -695,6 +695,43 @@ for n in range(0, 150) {
 finish { counter: tree.level.counters["c"], first: tree.level.rows[0] }
 "#
         }
+        Scenario::HeapVariableConcat => {
+            // `acc = acc + other` where the right operand is a bare variable.
+            // Every other scenario uses the optimized single-item form, so this
+            // is the only guard on the general concat's per-iteration cost.
+            r#"
+other = [1, 2]
+acc = []
+for n in range(0, 300) {
+  acc = acc + other
+}
+finish { total: len(acc), head: acc[0] }
+"#
+        }
+        Scenario::HeapShallowChainMutation => {
+            // The shallow half of the depth pair: same write count, six levels
+            // of nesting.
+            r#"
+tree = { next: { next: { next: { next: { next: { next: { leaf: [0] } } } } } } }
+for n in range(0, 150) {
+  tree.next.next.next.next.next.next.leaf = [n]
+}
+finish { leaf: tree.next.next.next.next.next.next.leaf }
+"#
+        }
+        Scenario::HeapDeepChainMutation32 => {
+            // The deep half: the identical program at twenty-four levels, so
+            // the two scenarios differ only in ancestor depth and their ratio
+            // is the scaling guard. The depths stay inside the 2 MiB stack
+            // budget a debug test thread gets.
+            r#"
+tree = { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { leaf: [0] } } } } } } } } } } } } } } } } } } } } } } } } }
+for n in range(0, 150) {
+  tree.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.leaf = [n]
+}
+finish { leaf: tree.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.leaf }
+"#
+        }
         Scenario::HeapComprehensionBuild => {
             // A comprehension accumulating over a long source list. Appending to
             // the accumulator must not rebuild it once per element.
