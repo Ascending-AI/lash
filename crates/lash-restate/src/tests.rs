@@ -5200,6 +5200,7 @@ struct ReplayableRecordingContext {
     events: Arc<RecordingContext>,
     process_worker: Mutex<Option<DurableProcessWorker>>,
     defer_process_workflows: AtomicBool,
+    replay_process_workflow_starts_from_journal: AtomicBool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -5627,6 +5628,11 @@ impl ReplayableRecordingContext {
     fn defer_process_workflows(&self) {
         self.defer_process_workflows.store(true, Ordering::SeqCst);
     }
+
+    fn replay_process_workflow_starts_from_journal(&self) {
+        self.replay_process_workflow_starts_from_journal
+            .store(true, Ordering::SeqCst);
+    }
 }
 
 #[derive(Default)]
@@ -5841,6 +5847,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         let worker = self.process_worker.lock_recover().clone();
         let context = Arc::clone(self);
         Box::pin(async move {
+            if context.replaying.load(Ordering::SeqCst)
+                && context
+                    .replay_process_workflow_starts_from_journal
+                    .load(Ordering::SeqCst)
+            {
+                return Ok(format!("invocation-{}", registration.id));
+            }
             if context.defer_process_workflows.load(Ordering::SeqCst) {
                 return Ok(format!("invocation-{}", registration.id));
             }
@@ -6772,6 +6785,88 @@ fn replay_test_input(turn_id: &str) -> lash_core::TurnInput {
     input
 }
 
+struct Fig1293EchoTools;
+
+fn fig1293_echo_tool() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:fig1293_echo",
+        "fig1293_echo",
+        "Return the supplied literal value.",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "value": {} },
+            "required": ["value"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({
+            "type": "object",
+            "properties": { "echo": {} },
+            "required": ["echo"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Fig1293EchoTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![fig1293_echo_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "fig1293_echo").then(|| Arc::new(fig1293_echo_tool().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        lash_core::ToolResult::ok(serde_json::json!({
+            "echo": call.args.get("value").cloned().unwrap_or_default(),
+        }))
+    }
+}
+
+fn fig1293_migrated_tool_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
+    let echo: Arc<dyn lash_core::ToolProvider> = Arc::new(Fig1293EchoTools);
+    vec![
+        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
+        Arc::new(lash_tools::shell::StandardShellPluginFactory::new()),
+        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+        Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
+            lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                lash_subagents::StaticCapability::new(
+                    "default",
+                    lash_core::facade_support::SessionSpec::inherit(),
+                ),
+            )),
+        ))),
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "fig1293-echo",
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(echo),
+        )),
+    ]
+}
+
+async fn fig1293_seed_control_target(registry: &Arc<dyn ProcessRegistry>, session_id: &str) {
+    registry
+        .register_process_with_observers(
+            ProcessRegistration::new(
+                "fig1293-control-target",
+                ProcessInput::External {
+                    metadata: serde_json::json!({"fixture": "fig1293"}),
+                },
+                lash_core::RecoveryDisposition::Rerunnable,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.stdin".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[session_id.to_string()],
+        )
+        .await
+        .expect("register FIG-1293 control target");
+}
+
 struct RestateParentEndIntentProvider {
     calls: Arc<AtomicUsize>,
 }
@@ -7075,6 +7170,334 @@ async fn run_restate_replay_turn_with_parent_end_fault(
         )
         .await
         .expect("run replay test turn with ParentEnd fault")
+}
+
+#[tokio::test]
+async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "fig1293-restate-migrated-tools";
+    let turn_id = "fig1293-restate-migrated-turn";
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let model_calls = Arc::clone(&model_calls);
+            move |_| {
+                let model_calls = Arc::clone(&model_calls);
+                async move {
+                    Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
+                        0 => lash_core::LlmResponse {
+                            parts: vec![
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-shell-start".to_string(),
+                                    tool_name: "start_command".to_string(),
+                                    input_json: serde_json::json!({"cmd": "printf tracked"})
+                                        .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-shell-detach".to_string(),
+                                    tool_name: "start_command".to_string(),
+                                    input_json: serde_json::json!({"cmd": "true", "detach": true})
+                                        .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-shell-write".to_string(),
+                                    tool_name: "write_stdin".to_string(),
+                                    input_json: serde_json::json!({
+                                        "process_id": "fig1293-control-target",
+                                        "chars": "fig1293\n",
+                                        "close_stdin": false,
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-process-cancel".to_string(),
+                                    tool_name: "cancel_process".to_string(),
+                                    input_json: serde_json::json!({
+                                        "process_id": "fig1293-control-target",
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-spawn-agent".to_string(),
+                                    tool_name: "spawn_agent".to_string(),
+                                    input_json: serde_json::json!({
+                                        "capability": "default",
+                                        "task": "Return the literal child result.",
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-batch".to_string(),
+                                    tool_name: "batch".to_string(),
+                                    input_json: serde_json::json!({
+                                        "tool_calls": [
+                                            {"tool": "fig1293_echo", "parameters": {"value": "alpha"}},
+                                            {"tool": "fig1293_echo", "parameters": {"value": "beta"}},
+                                        ]
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                            ],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        1 => lash_core::LlmResponse {
+                            full_text: "child literal".to_string(),
+                            parts: vec![lash_core::LlmOutputPart::Text {
+                                text: "child literal".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        2 => lash_core::LlmResponse {
+                            full_text: "migrated tools complete".to_string(),
+                            parts: vec![lash_core::LlmOutputPart::Text {
+                                text: "migrated tools complete".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        index => panic!("unexpected FIG-1293 model call {index}"),
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    host.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
+    let store = Arc::new(
+        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+            .await
+            .expect("open FIG-1293 session store"),
+    );
+    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
+    let policy = replay_test_policy(session_id);
+    let initial_state = replay_test_state(session_id, &policy);
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let process_registry = process_registry();
+    fig1293_seed_control_target(&process_registry, session_id).await;
+    let plugin_factories = fig1293_migrated_tool_factories();
+    context.install_process_worker(DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(
+                plugin_factories.clone(),
+            )),
+            host.clone(),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            Arc::clone(&process_registry),
+        ),
+    ));
+
+    let mut first = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy.clone(),
+        initial_state.clone(),
+        host.clone(),
+        Arc::clone(&runtime_store),
+        plugin_factories.clone(),
+        Some(Arc::clone(&process_registry)),
+    )
+    .await;
+    first.set_turn_phase_probe(Arc::new(PanicAtToolIntentParentEnd));
+    let first_context = Arc::clone(&context);
+    let crashed = tokio::spawn(async move {
+        run_restate_replay_turn(&mut first, first_context, session_id, turn_id).await
+    })
+    .await
+    .expect_err("FIG-1293 first turn must crash after its ToolBatch commit");
+    assert!(crashed.is_panic());
+
+    let before = context.recorded_runtime_effect_envelopes();
+    let attempt_names = before
+        .iter()
+        .filter_map(|(_, envelope)| match &envelope.command {
+            RuntimeEffectCommand::ToolAttempt { call, .. } => Some(call.tool_name.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        attempt_names,
+        vec![
+            "start_command".to_string(),
+            "start_command".to_string(),
+            "write_stdin".to_string(),
+            "cancel_process".to_string(),
+            "fig1293_echo".to_string(),
+            "fig1293_echo".to_string(),
+        ],
+        "leaf tools and batch children are attempts; batch, spawn_agent, and the shell process body are not"
+    );
+    let outer_batch = before
+        .iter()
+        .find(|(_, envelope)| {
+            envelope.invocation.caused_by.is_none()
+                && matches!(
+                    &envelope.command,
+                    RuntimeEffectCommand::ToolBatch { batch }
+                        if batch.calls.iter().any(|child| child.call.tool_name == "spawn_agent")
+                )
+        })
+        .expect("outer FIG-1293 Restate tool-batch frame");
+    let outer_causal_ref = outer_batch
+        .1
+        .invocation
+        .causal_ref()
+        .expect("outer FIG-1293 Restate batch causal ref");
+    let outer_recorded: RecordedRuntimeEffect = serde_json::from_slice(
+        context
+            .records
+            .lock_recover()
+            .get(outer_batch.0.as_str())
+            .expect("outer FIG-1293 Restate recorded outcome"),
+    )
+    .expect("decode outer FIG-1293 Restate outcome");
+    let outer_outcome_json = serde_json::to_string(&outer_recorded.outcome)
+        .expect("encode outer FIG-1293 Restate outcome");
+    assert!(
+        !outer_outcome_json.contains(r#""status":"refused""#),
+        "every migrated Restate public intent must execute: {outer_outcome_json}",
+    );
+    for kind in ["start_process", "signal_process", "cancel_process"] {
+        assert!(
+            outer_outcome_json.contains(&format!(r#""kind":"{kind}""#)),
+            "missing executed Restate {kind} outcome: {outer_outcome_json}",
+        );
+    }
+    let direct_orchestration_children = before
+        .iter()
+        .map(|(_, envelope)| envelope)
+        .filter(|envelope| {
+            let is_spawn_command = match &envelope.command {
+                RuntimeEffectCommand::Process { command } => match command.as_ref() {
+                    ProcessCommand::Start { registration, .. } => {
+                        registration.id == "process:subagent:fig1293-spawn-agent"
+                    }
+                    ProcessCommand::Await { process_id } => {
+                        process_id == "process:subagent:fig1293-spawn-agent"
+                    }
+                    _ => false,
+                },
+                _ => false,
+            };
+            let is_nested_batch = matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolBatch { batch }
+                    if batch.calls.iter().any(|child| child.call.tool_name == "fig1293_echo")
+            );
+            (is_spawn_command || is_nested_batch)
+                && envelope.invocation.caused_by.as_ref() == Some(&outer_causal_ref)
+        })
+        .count();
+    assert_eq!(
+        direct_orchestration_children, 1,
+        "the recorded protocol batch must be a direct child; Restate process service-call frames are asserted by the PostgreSQL envelope law and the endpoint E2E",
+    );
+
+    context.replay_process_workflow_starts_from_journal();
+    context.start_replay_allowing_journal_extension();
+    let mut replay = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy,
+        initial_state,
+        host,
+        runtime_store,
+        plugin_factories,
+        Some(process_registry),
+    )
+    .await;
+    let turn =
+        run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
+    assert!(matches!(
+        turn.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(_)
+    ));
+    assert_eq!(model_calls.load(Ordering::SeqCst), 3);
+    let outputs = turn
+        .tool_calls
+        .iter()
+        .map(|record| (record.tool.clone(), record.output.value_for_projection()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outputs,
+        vec![
+            (
+                "start_command".to_string(),
+                serde_json::json!({
+                    "__handle__": "process",
+                    "done": false,
+                    "id": "tool-intent:v1:sha256:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
+                    "process_id": "tool-intent:v1:sha256:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
+                    "running": true,
+                    "status": "running",
+                }),
+            ),
+            (
+                "start_command".to_string(),
+                serde_json::json!({
+                    "__handle__": "process",
+                    "done": true,
+                    "id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac",
+                    "process_id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac",
+                    "running": false,
+                    "status": "detached",
+                }),
+            ),
+            (
+                "write_stdin".to_string(),
+                serde_json::json!({
+                    "process_id": "fig1293-control-target",
+                    "status": "signalled",
+                }),
+            ),
+            (
+                "cancel_process".to_string(),
+                serde_json::json!({
+                    "process_id": "fig1293-control-target",
+                    "status": "cancelled",
+                }),
+            ),
+            (
+                "spawn_agent".to_string(),
+                serde_json::json!("child literal")
+            ),
+            (
+                "batch".to_string(),
+                serde_json::json!({
+                    "results": [
+                        {
+                            "duration_ms": 0,
+                            "index": 0,
+                            "result": {"echo": "alpha"},
+                            "success": true,
+                            "tool": "fig1293_echo",
+                        },
+                        {
+                            "duration_ms": 0,
+                            "index": 1,
+                            "result": {"echo": "beta"},
+                            "success": true,
+                            "tool": "fig1293_echo",
+                        },
+                    ]
+                }),
+            ),
+        ]
+    );
 }
 
 #[tokio::test]

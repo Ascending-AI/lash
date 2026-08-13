@@ -36,11 +36,12 @@ artifacts are the backend truth for this judged runbook.
 5. **Retention never guesses.** Trigger mutation receipts survive process pruning. Delivery rows
    are deleted only after their process tombstone proves pruning, and an outstanding delivery
    prevents tombstone compaction.
-6. **The Restate tool rail fails closed inside atomic attempts.** In the agent workbench,
-   `shell.start` (tracked or detached), `shell.write`, `spawn_agent`, and `processes.cancel`
-   return typed ordinal-tier refusals; drive those operations from explicit process steps or use
-   the host rail exercised by this runbook. `processes.list` remains available, and PostgreSQL's
-   key-addressed effect tier retains all process commands.
+6. **Migrated tools have one full-tier contract.** In the agent workbench, `shell.start`
+   (tracked or detached), `shell.write`, `spawn_agent`, `processes.cancel`, and protocol-standard
+   `batch` must succeed through their leaf-intent or process-replay shape on Restate exactly as
+   they do on in-memory and PostgreSQL. Any FIG-1127 ordinal-tier refusal from those public tools
+   is a regression. The legacy journal-capable `ToolContext` routes remain fenced until their
+   aggregate removal.
 7. **Parent teardown is a typed durable plan, not terminal-state cleanup.** A terminal parent may
    retain multiple ordered `ParentEnd` commands. Each command must record a literal
    `ToolIntentParentEndOutcome`; a crash after the child side effect, between commands, or before
@@ -73,6 +74,30 @@ literal `Cancelled` outcomes exactly once.
 identities or outcomes are derived from observed production values, the pending plan clears
 before every action is durably represented, or any redrive appends a second
 `process.cancel_requested` event.
+
+## FIG-1293 migrated-tool atomicity judgment
+
+Run these rows against the agent workbench's Restate tier before Phase 0. Use a fresh session for
+each row and save the rendered transcript, `/api/state`, Restate invocation/journal inspection,
+and `trace.jsonl` extract under a row-named artifact directory. Submit the named tool call, wait
+until its turn is active and its first durable child command is visible, then replace **only** the
+workbench worker with `just agent-workbench-restart <port>` while preserving the same run/data
+directories and Restate container. Never use Restate Admin kill as a substitute. After recovery,
+reconcile DOM, API/durable messages, trace executions, and the literal outcome below.
+
+| Row | Public call and literal oracle | Required Restate journal shape after worker replacement |
+|---|---|---|
+| `shell-start-detach` | Invoke tracked `shell.start` once and detached `shell.start` once. Each result contains its exact pre-recorded `process_id`; the tracked row is `running`, the detached row is `detached`. | Each call has one recorded `StartProcess` intent with `on_parent_end=Abandon`; redrive retains one process id and one start command, with no `ToolAttempt`-nested process command and no FIG-1127 refusal. |
+| `shell-write` | Start a stdin-reading tracked shell, call `shell.write` with literal `chars="fig1293\n"`, and require `{"process_id":<started-id>,"status":"signalled"}`. | One `SignalProcess` command with signal `stdin` and payload `{"chars":"fig1293\n","close_stdin":false}`; the process observes the input once after recovery. |
+| `processes-cancel` | Start a long-lived tracked shell, call `processes.cancel` for its exact id, and require `{"process_id":<started-id>,"status":"cancelled"}`. | One `CancelProcess` command and one `process.cancel_requested` event for the exact id; redrive emits neither a duplicate event nor an ordinal-tier refusal. |
+| `spawn-agent` | Call `spawn_agent` with a schema requiring `{"answer":"str"}` and require one matching child result. | The orchestration body has no enclosing `ToolAttempt`; its one start and one await are direct process-replay children for the same prepared child id, and recovery creates one child session/result. |
+| `protocol-batch` | Call protocol-standard `batch` with two literal side-effect-free child calls and require the ordered two-element literal result vector. | The batch body has no enclosing `ToolAttempt`; only the two children have attempt frames, and recovery retains their order and exactly one result per child. |
+
+**Pass only if:** all five rows recover to their literal outcomes, the three-layer counts and ids
+agree, each Restate journal has the required shape, no old ordinal-tier refusal appears, and the
+replacement PID differs while the Restate container id and session id remain unchanged. Any
+timeout, duplicate command/result/event, missing frame relationship, or layer mismatch is an
+Abort/RCA under `RULES.md`.
 
 ## Phase 0 — Boot and establish durable geometry
 
