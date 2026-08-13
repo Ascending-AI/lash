@@ -59,6 +59,7 @@ struct Lowerer {
     next_binding: usize,
     next_function: usize,
     loop_depth: usize,
+    allow_uninitialized_declaration_capture: bool,
 }
 
 impl Lowerer {
@@ -83,18 +84,98 @@ impl Lowerer {
         }
         self.predeclare(statements, root)?;
 
-        let mut output = Vec::new();
+        struct PendingFunction {
+            internal: String,
+            captures: Vec<String>,
+            assignment: LashExpr,
+        }
+
+        let local_function_internals = statements
+            .iter()
+            .filter_map(|statement| match statement {
+                Stmt::Function { name, .. } => {
+                    Some(self.binding(name).map(|binding| binding.internal.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let mut available = self
+            .scopes
+            .iter()
+            .flat_map(|scope| scope.bindings.values())
+            .filter(|binding| {
+                binding.initialized && !local_function_internals.contains(&binding.internal)
+            })
+            .map(|binding| binding.internal.clone())
+            .collect::<BTreeSet<_>>();
+        let mut pending = Vec::with_capacity(local_function_internals.len());
+        let previous_capture_mode = self.allow_uninitialized_declaration_capture;
+        self.allow_uninitialized_declaration_capture = true;
         for statement in statements {
             if let Stmt::Function { name, function } = statement {
                 let binding = self.binding(name)?.clone();
                 let function = self.lower_function(function, Some(binding.internal.clone()))?;
-                output.push(LashExpr::Assign {
-                    target: AssignTarget::variable(binding.internal.into()),
-                    expr: Box::new(function),
+                let LashExpr::Function(definition) = &function else {
+                    unreachable!("function lowering returns a function expression")
+                };
+                let captures = definition
+                    .captures
+                    .iter()
+                    .map(|capture| capture.as_str().to_string())
+                    .collect();
+                pending.push(PendingFunction {
+                    internal: binding.internal.clone(),
+                    captures,
+                    assignment: LashExpr::Assign {
+                        target: AssignTarget::variable(binding.internal.into()),
+                        expr: Box::new(function),
+                    },
                 });
-            } else {
-                output.extend(self.lower_stmt(statement)?);
             }
+        }
+        self.allow_uninitialized_declaration_capture = previous_capture_mode;
+
+        let flush_ready = |pending: &mut Vec<PendingFunction>,
+                           available: &mut BTreeSet<String>,
+                           output: &mut Vec<LashExpr>| {
+            loop {
+                let Some(index) = pending.iter().position(|function| {
+                    function
+                        .captures
+                        .iter()
+                        .all(|capture| available.contains(capture))
+                }) else {
+                    break;
+                };
+                let function = pending.remove(index);
+                available.insert(function.internal);
+                output.push(function.assignment);
+            }
+        };
+        let mut output = Vec::new();
+        for statement in statements {
+            flush_ready(&mut pending, &mut available, &mut output);
+            match statement {
+                Stmt::Function { .. } => {}
+                Stmt::Var { declarations, .. } => {
+                    output.extend(self.lower_stmt(statement)?);
+                    for declaration in declarations {
+                        available.insert(self.binding(&declaration.name)?.internal.clone());
+                    }
+                }
+                _ => output.extend(self.lower_stmt(statement)?),
+            }
+        }
+        flush_ready(&mut pending, &mut available, &mut output);
+        if let Some(function) = pending.first() {
+            return Err(Diagnostic::new(
+                DiagnosticCode::TemporalDeadZone,
+                format!(
+                    "function `{}` captures a binding that is unavailable at declaration time",
+                    function.internal
+                ),
+                None,
+            ));
         }
         if !root {
             self.scopes.pop();
@@ -199,7 +280,7 @@ impl Lowerer {
             ));
         }
         if current_function != binding.owner_function {
-            if !binding.initialized {
+            if !binding.initialized && !self.allow_uninitialized_declaration_capture {
                 return Err(Diagnostic::new(
                     DiagnosticCode::TemporalDeadZone,
                     format!(

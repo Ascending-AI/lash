@@ -105,6 +105,14 @@ fn hoisted_function_bodies_can_capture_later_const_bindings() {
         finished("function f() { return k; } const k = 3; finish(f());"),
         Value::Number(3.0)
     );
+    assert_eq!(
+        finished("const value = f(); function f() { return 4; } finish(value);"),
+        Value::Number(4.0)
+    );
+    assert_eq!(
+        finished("function f() { return g(); } function g() { return 5; } finish(f());"),
+        Value::Number(5.0)
+    );
 }
 
 #[test]
