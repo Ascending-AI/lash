@@ -81,8 +81,9 @@ Click one empty board cell. Poll until the response stream closes, the board ret
 `X to move`, and both the rendered transcript and messages API contain the completed user
 turn plus its terminal assistant row.
 
-Click **Pin current turn**. Poll for the rendered `Pinned … messages as a retained turn.`
-status. Save:
+After the turn completes and the control is enabled, click **Pin current turn**. The
+control is disabled while the chat is busy or no chat is active. Poll for the rendered
+`Pinned … messages as a retained turn.` status. Save:
 
 - the exact messages response as `02-pinned-messages.json`;
 - the exact board response as `02-pinned-board.json`;

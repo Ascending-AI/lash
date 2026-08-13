@@ -58,6 +58,8 @@ and work registry are.
   `PUT /api/triggers/{subscription_key}/enabled` with `{ "enabled": false|true }`,
   `DELETE /api/triggers/{subscription_key}`, `GET /api/accounts/{slug}/inbox`,
   `GET /api/work`, and `GET /api/work/{process_id}/await`.
+- The account compose form posts mail to `/api/accounts/{slug}/messages` as
+  `{"title":"<title>","text":"<text>"}`; both `title` and `text` are required.
 - Before judged execution, the deterministic companion should be green:
   `cargo test -p agent-workbench button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn`.
 

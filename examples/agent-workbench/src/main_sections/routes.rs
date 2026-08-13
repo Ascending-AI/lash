@@ -759,8 +759,8 @@ async fn inject_message(
         .mail_world
         .deliver(
             &slug,
-            request.title.as_deref().unwrap_or_default(),
-            request.text.as_deref().unwrap_or_default(),
+            &request.title,
+            &request.text,
         )
         .map_err(AppError::not_found)?;
     let message = delivered.message;

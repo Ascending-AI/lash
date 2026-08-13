@@ -75,6 +75,9 @@ receipts, the rotated id, and the typed retirement response — never on model p
   `POST /api/button-trigger?session_id=<S>`, `GET /api/work?session_id=<S>`,
   `GET /api/work/{process_id}/await`, `POST /api/turn/cancel?session_id=<S>`, and
   `DELETE /api/session?session_id=<S>`.
+- The button-trigger request body is exactly `{"button":"Red"}` or
+  `{"button":"Blue"}`; the `button` value is case-sensitive, so lowercase `red` or
+  `blue` returns HTTP 422.
 - Durable truth on the default SQLite stack:
   `<data-dir>/lash-sessions/durable-core.db`. The live id has a `session_meta` row; the
   retired id has a `deleted_sessions` row and no live session metadata. Save query

@@ -242,6 +242,8 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       gameStatusEl.parentElement.classList.toggle('done', done);
       gameStatusEl.textContent = boardStatus(board);
       resetBoardBtn.disabled = busy || !activeChat;
+      pinBranchBtn.disabled = busy || !activeChat;
+      forkBranchBtn.disabled = busy || !activeChat || !branchPoints.length;
       gameHintEl.textContent = done
         ? `${terminalHint(board)} Reset the board to start another round.`
         : busy
