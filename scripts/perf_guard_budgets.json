@@ -2,20 +2,1648 @@
   "runtime_stack": {
     "deep_turn_composition": {
       "budget_bytes": 2097152,
-      "headroom_percent": 25,
-      "measured_minimum_passing_bytes": 811008
+      "headroom_percent": 100,
+      "measured_minimum_passing_bytes": 1048576
+    }
+  },
+  "runtime": {
+    "scenarios": {
+      "checkpoint_state_hot_paths": {
+        "total_alloc_bytes_max": 165629000,
+        "steady_state_turn_alloc_bytes_max": 10452000,
+        "total_ms_max": 185.375,
+        "phases": {
+          "checkpoint_state.initial_capture": 5.96,
+          "checkpoint_state.dirty_binding_update": 0.754,
+          "checkpoint_state.incremental_capture": 21.998,
+          "checkpoint_state.measure_budget": 4.15,
+          "checkpoint_state.component_commit": 52.844,
+          "checkpoint_state.component_load": 16.326,
+          "checkpoint_state.execution_restore": 86.592
+        }
+      },
+      "deep_turn_composition": {
+        "total_alloc_bytes_max": 243329000,
+        "steady_state_turn_alloc_bytes_max": 16649000,
+        "total_ms_max": 1242.768,
+        "phases": {
+          "before_turn_hooks": 11.904,
+          "committed_turn": 13.87,
+          "context_transform": 3.972,
+          "effect_loop": 913.968,
+          "plugin_hook.context_transform.rlm_protocol": 1.68,
+          "post_commit_delivery": 17.9,
+          "prepared_turn": 103.332,
+          "process.await_handle": 198.698,
+          "process.start_child": 19.506,
+          "prompt_build": 24.01,
+          "rlm_lashlang.compile_link": 11.906,
+          "rlm_lashlang.execute": 211.516,
+          "rlm_lashlang.print_project": 0.25,
+          "rlm_lashlang.rehydrate_projected_globals": 3.758,
+          "rlm_lashlang.resolve_projected_bindings": 6.22,
+          "rlm_lashlang.store_module_artifact": 0.25,
+          "rlm_process.await_handle": 198.894,
+          "rlm_process.build_context": 0.652,
+          "rlm_process.compile": 0.41,
+          "rlm_process.execute": 181.652,
+          "rlm_process.load_artifact": 0.25,
+          "rlm_process.prepare_start": 0.25,
+          "rlm_process.resolve_environment": 2.174,
+          "rlm_process.shutdown": 0.778,
+          "rlm_process.start": 20.206,
+          "turn_cancel.start_gate": 2.398
+        }
+      },
+      "direct_llm_client": {
+        "total_alloc_bytes_max": 553000,
+        "steady_state_turn_alloc_bytes_max": 39000,
+        "total_ms_max": 3.824,
+        "phases": {
+          "direct_llm_client.complete": 1.814
+        }
+      },
+      "embed_rlm": {
+        "total_alloc_bytes_max": 51323000,
+        "steady_state_turn_alloc_bytes_max": 4181000,
+        "total_ms_max": 384.844,
+        "phases": {}
+      },
+      "embed_standard": {
+        "total_alloc_bytes_max": 17052000,
+        "steady_state_turn_alloc_bytes_max": 1377000,
+        "total_ms_max": 114.874,
+        "phases": {}
+      },
+      "ingress_claim_projection": {
+        "total_alloc_bytes_max": 186530000,
+        "steady_state_turn_alloc_bytes_max": 14956000,
+        "total_ms_max": 622.085,
+        "phases": {
+          "before_turn_hooks": 15.442,
+          "committed_turn": 15.294,
+          "context_transform": 9.774,
+          "effect_loop": 394.462,
+          "plugin_hook.context_transform.rlm_protocol": 7.646,
+          "post_commit_delivery": 18.654,
+          "prepared_turn": 75.44,
+          "prompt_build": 5.728,
+          "rlm_lashlang.compile_link": 5.894,
+          "rlm_lashlang.execute": 7.024,
+          "rlm_lashlang.print_project": 2.392,
+          "rlm_lashlang.rehydrate_projected_globals": 6.106,
+          "rlm_lashlang.resolve_projected_bindings": 8.798,
+          "turn_cancel.start_gate": 2.346,
+          "turn_input_ingress.enqueue_to_claim_to_projection": 396.048
+        }
+      },
+      "live_replay_pressure": {
+        "total_alloc_bytes_max": 2381000,
+        "steady_state_turn_alloc_bytes_max": 193000,
+        "total_ms_max": 35.531,
+        "phases": {
+          "live_replay.append": 28.142,
+          "live_replay.current_cursor_parse": 0.822,
+          "live_replay.gap_handling": 0.754,
+          "live_replay.replay_after_cursor": 0.838,
+          "live_replay.subscribe_buffered": 1.262,
+          "live_replay.trim_by_capacity": 2.844
+        }
+      },
+      "openai_compat_stream": {
+        "total_alloc_bytes_max": 142362000,
+        "steady_state_turn_alloc_bytes_max": 11223000,
+        "total_ms_max": 443.28,
+        "phases": {
+          "before_turn_hooks": 4.426,
+          "committed_turn": 5.798,
+          "context_transform": 3.642,
+          "effect_loop": 229.974,
+          "plugin_hook.context_transform.rolling_history": 1.66,
+          "post_commit_delivery": 4.95,
+          "prepared_turn": 39.642,
+          "prompt_build": 3.304,
+          "turn_cancel.start_gate": 3.268
+        }
+      },
+      "openai_responses_sse_parse": {
+        "total_alloc_bytes_max": 69643000,
+        "steady_state_turn_alloc_bytes_max": 4935000,
+        "total_ms_max": 41.625,
+        "phases": {
+          "openai_responses_sse_parse.parse_payload": 30.16,
+          "openai_responses_sse_parse.project_parts": 0.95
+        }
+      },
+      "process_list_stress": {
+        "run_turn_alloc_bytes_max": 270544000,
+        "steady_state_turn_alloc_bytes_max": 22542000,
+        "run_turn_ms_max": 2696.358,
+        "phases": {
+          "process_list_stress.env_spec_hash": 4.764,
+          "process_list_stress.list_all": 774.914,
+          "process_list_stress.list_global": 810.952,
+          "process_list_stress.list_live": 1019.548,
+          "process_list_stress.render_all_json": 507.184,
+          "process_list_stress.render_live_json": 268.39,
+          "process_list_stress.signal_append": 18.58,
+          "process_list_stress.wait_roundtrip": 14.488
+        }
+      },
+      "queued_work_claim_stress": {
+        "total_alloc_bytes_max": 13833000,
+        "steady_state_turn_alloc_bytes_max": 611000,
+        "total_ms_max": 44.025,
+        "phases": {
+          "queued_work.abandon_join_claim": 0.962,
+          "queued_work.claim_exclusive_turn_work": 1.184,
+          "queued_work.claim_join_turn_work": 4.726,
+          "queued_work.claim_session_command": 1.194,
+          "queued_work.claim_session_lease": 0.922,
+          "queued_work.complete_exclusive_turn_work": 1.716,
+          "queued_work.complete_join_turn_work": 3.286,
+          "queued_work.complete_session_command": 2.24,
+          "queued_work.enqueue_mixed_batch": 4.134,
+          "queued_work.list_pending": 0.86,
+          "queued_work.reclaim_by_batch_ids": 2.442
+        }
+      },
+      "rlm": {
+        "total_alloc_bytes_max": 121882000,
+        "steady_state_turn_alloc_bytes_max": 9356000,
+        "total_ms_max": 506.07,
+        "phases": {
+          "before_turn_hooks": 31.992,
+          "committed_turn": 10.45,
+          "context_transform": 7.426,
+          "effect_loop": 255.364,
+          "plugin_hook.context_transform.rlm_protocol": 3.862,
+          "post_commit_delivery": 7.066,
+          "prepared_turn": 37.858,
+          "prompt_build": 5.07,
+          "rlm_lashlang.compile_link": 3.042,
+          "rlm_lashlang.execute": 2.352,
+          "rlm_lashlang.rehydrate_projected_globals": 1.944,
+          "rlm_lashlang.resolve_projected_bindings": 3.27,
+          "turn_cancel.start_gate": 2.758
+        }
+      },
+      "rlm_async_tool_completion": {
+        "total_alloc_bytes_max": 136583000,
+        "steady_state_turn_alloc_bytes_max": 10596000,
+        "total_ms_max": 368.166,
+        "phases": {
+          "before_turn_hooks": 5.856,
+          "committed_turn": 2.928,
+          "context_transform": 5.094,
+          "effect_loop": 218.306,
+          "plugin_hook.context_transform.rlm_protocol": 3.18,
+          "post_commit_delivery": 4.27,
+          "prepared_turn": 34.064,
+          "prompt_build": 12.714,
+          "rlm_lashlang.compile_link": 3.014,
+          "rlm_lashlang.execute": 40.806,
+          "rlm_lashlang.rehydrate_projected_globals": 1.936,
+          "rlm_lashlang.resolve_projected_bindings": 2.372,
+          "turn_cancel.start_gate": 2.05
+        }
+      },
+      "rlm_globals": {
+        "total_alloc_bytes_max": 149652000,
+        "steady_state_turn_alloc_bytes_max": 11028000,
+        "total_ms_max": 530.808,
+        "phases": {
+          "before_turn_hooks": 4.88,
+          "committed_turn": 8.208,
+          "context_transform": 4.252,
+          "effect_loop": 320.164,
+          "plugin_hook.context_transform.rlm_protocol": 1.696,
+          "post_commit_delivery": 11.43,
+          "prepared_turn": 30.26,
+          "prompt_build": 3.97,
+          "rlm_lashlang.compile_link": 3.078,
+          "rlm_lashlang.execute": 10.842,
+          "rlm_lashlang.rehydrate_projected_globals": 4.3,
+          "rlm_lashlang.resolve_projected_bindings": 9.41,
+          "turn_cancel.start_gate": 2.51
+        }
+      },
+      "rlm_large_print": {
+        "total_alloc_bytes_max": 645178000,
+        "steady_state_turn_alloc_bytes_max": 54370000,
+        "total_ms_max": 657.999,
+        "phases": {
+          "before_turn_hooks": 11.63,
+          "committed_turn": 9.404,
+          "context_transform": 6.912,
+          "effect_loop": 397.904,
+          "plugin_hook.context_transform.rlm_protocol": 4.986,
+          "post_commit_delivery": 9.022,
+          "prepared_turn": 112.71,
+          "prompt_build": 3.762,
+          "rlm_lashlang.compile_link": 4.184,
+          "rlm_lashlang.execute": 64.764,
+          "rlm_lashlang.print_project": 4.054,
+          "rlm_lashlang.rehydrate_projected_globals": 14.772,
+          "rlm_lashlang.resolve_projected_bindings": 2.678,
+          "turn_cancel.start_gate": 2.32
+        }
+      },
+      "rlm_large_tool_catalog": {
+        "total_alloc_bytes_max": 1215717000,
+        "steady_state_turn_alloc_bytes_max": 92089000,
+        "total_ms_max": 3569.37,
+        "phases": {
+          "before_turn_hooks": 5.572,
+          "committed_turn": 12.27,
+          "context_transform": 3.784,
+          "effect_loop": 2152.658,
+          "plugin_hook.context_transform.rlm_protocol": 1.682,
+          "post_commit_delivery": 5.124,
+          "prepared_turn": 38.488,
+          "prompt_build": 10.618,
+          "rlm_lashlang.compile_link": 7.462,
+          "rlm_lashlang.execute": 2.398,
+          "rlm_lashlang.rehydrate_projected_globals": 1.814,
+          "rlm_lashlang.resolve_projected_bindings": 3.274,
+          "turn_cancel.start_gate": 2.332
+        }
+      },
+      "rlm_llm_query": {
+        "total_alloc_bytes_max": 137679000,
+        "steady_state_turn_alloc_bytes_max": 10663000,
+        "total_ms_max": 415.388,
+        "phases": {
+          "before_turn_hooks": 4.352,
+          "committed_turn": 7.538,
+          "context_transform": 4.334,
+          "effect_loop": 274.396,
+          "plugin_hook.context_transform.rlm_protocol": 2.406,
+          "post_commit_delivery": 4.944,
+          "prepared_turn": 33.836,
+          "prompt_build": 6.63,
+          "rlm_lashlang.compile_link": 4.536,
+          "rlm_lashlang.execute": 61.058,
+          "rlm_lashlang.rehydrate_projected_globals": 2.174,
+          "rlm_lashlang.resolve_projected_bindings": 3.834,
+          "turn_cancel.start_gate": 2.592
+        }
+      },
+      "rlm_oblique_stack_mix": {
+        "total_alloc_bytes_max": 1870027000,
+        "steady_state_turn_alloc_bytes_max": 159092000,
+        "total_ms_max": 4176.246,
+        "phases": {
+          "before_turn_hooks": 14.628,
+          "committed_turn": 18.244,
+          "context_transform": 3.976,
+          "effect_loop": 4429.29,
+          "plugin_hook.context_transform.rlm_protocol": 1.678,
+          "post_commit_delivery": 16.284,
+          "prepared_turn": 360.704,
+          "process.await_handle": 1787.342,
+          "process.start_child": 355.606,
+          "prompt_build": 6.446,
+          "rlm_lashlang.compile_link": 5.072,
+          "rlm_lashlang.execute": 3119.652,
+          "rlm_lashlang.print_project": 10.602,
+          "rlm_lashlang.rehydrate_projected_globals": 27.27,
+          "rlm_lashlang.resolve_projected_bindings": 3.108,
+          "rlm_lashlang.store_module_artifact": 0.25,
+          "rlm_process.await_handle": 1798.17,
+          "rlm_process.build_context": 15.714,
+          "rlm_process.compile": 3.634,
+          "rlm_process.execute": 1607.122,
+          "rlm_process.load_artifact": 2.494,
+          "rlm_process.prepare_start": 10.406,
+          "rlm_process.resolve_environment": 83.682,
+          "rlm_process.shutdown": 12.26,
+          "rlm_process.start": 357.864,
+          "turn_cancel.start_gate": 2.336
+        }
+      },
+      "rlm_process_async_tool_completion": {
+        "total_alloc_bytes_max": 273946000,
+        "steady_state_turn_alloc_bytes_max": 22080000,
+        "total_ms_max": 646.499,
+        "phases": {
+          "before_turn_hooks": 3.926,
+          "committed_turn": 10.824,
+          "context_transform": 3.734,
+          "effect_loop": 593.67,
+          "plugin_hook.context_transform.rlm_protocol": 1.708,
+          "post_commit_delivery": 5.862,
+          "prepared_turn": 35.256,
+          "process.await_handle": 177.778,
+          "process.start_child": 240.494,
+          "prompt_build": 3.57,
+          "rlm_lashlang.compile_link": 5.876,
+          "rlm_lashlang.execute": 440.038,
+          "rlm_lashlang.rehydrate_projected_globals": 2.102,
+          "rlm_lashlang.resolve_projected_bindings": 2.528,
+          "rlm_lashlang.store_module_artifact": 0.25,
+          "rlm_process.await_handle": 182.076,
+          "rlm_process.build_context": 26.544,
+          "rlm_process.compile": 7.49,
+          "rlm_process.execute": 51.226,
+          "rlm_process.load_artifact": 5.714,
+          "rlm_process.prepare_start": 9.094,
+          "rlm_process.resolve_environment": 77.348,
+          "rlm_process.shutdown": 11.532,
+          "rlm_process.start": 244.974,
+          "turn_cancel.start_gate": 2.226
+        }
+      },
+      "rlm_process_handles": {
+        "total_alloc_bytes_max": 368661000,
+        "steady_state_turn_alloc_bytes_max": 30102000,
+        "total_ms_max": 831.291,
+        "phases": {
+          "before_turn_hooks": 3.97,
+          "committed_turn": 8.024,
+          "context_transform": 6.272,
+          "effect_loop": 857.076,
+          "plugin_hook.context_transform.rlm_protocol": 1.656,
+          "post_commit_delivery": 6.736,
+          "prepared_turn": 36.864,
+          "process.await_handle": 178.538,
+          "process.start_child": 420.866,
+          "prompt_build": 7.438,
+          "rlm_lashlang.compile_link": 4.58,
+          "rlm_lashlang.execute": 671.546,
+          "rlm_lashlang.rehydrate_projected_globals": 3.366,
+          "rlm_lashlang.resolve_projected_bindings": 3.24,
+          "rlm_lashlang.store_module_artifact": 0.25,
+          "rlm_process.await_handle": 183.652,
+          "rlm_process.build_context": 96.16,
+          "rlm_process.compile": 7.96,
+          "rlm_process.execute": 96.73,
+          "rlm_process.load_artifact": 10.948,
+          "rlm_process.prepare_start": 28.644,
+          "rlm_process.resolve_environment": 143.088,
+          "rlm_process.shutdown": 32.694,
+          "rlm_process.start": 425.886,
+          "turn_cancel.start_gate": 2.178
+        }
+      },
+      "rlm_streamed_paired_lashlang": {
+        "total_alloc_bytes_max": 126817000,
+        "steady_state_turn_alloc_bytes_max": 9784000,
+        "total_ms_max": 440.478,
+        "phases": {
+          "before_turn_hooks": 6.878,
+          "committed_turn": 33.938,
+          "context_transform": 8.662,
+          "effect_loop": 201.214,
+          "plugin_hook.context_transform.rlm_protocol": 5.882,
+          "post_commit_delivery": 7.162,
+          "prepared_turn": 46.138,
+          "prompt_build": 4.066,
+          "rlm_lashlang.compile_link": 2.992,
+          "rlm_lashlang.execute": 2.366,
+          "rlm_lashlang.rehydrate_projected_globals": 5.472,
+          "rlm_lashlang.resolve_projected_bindings": 2.652,
+          "turn_cancel.start_gate": 10.23
+        }
+      },
+      "rlm_subagent_spawn": {
+        "total_alloc_bytes_max": 500729000,
+        "steady_state_turn_alloc_bytes_max": 41226000,
+        "total_ms_max": 1534.032,
+        "phases": {
+          "before_turn_hooks": 4.558,
+          "committed_turn": 15.144,
+          "context_transform": 3.616,
+          "effect_loop": 1697.84,
+          "plugin_hook.context_transform.rlm_protocol": 1.636,
+          "post_commit_delivery": 10.744,
+          "prepared_turn": 39.094,
+          "process.await_handle": 1276.194,
+          "process.start_child": 243.032,
+          "prompt_build": 3.864,
+          "rlm_lashlang.compile_link": 3.542,
+          "rlm_lashlang.execute": 1504.322,
+          "rlm_lashlang.rehydrate_projected_globals": 1.978,
+          "rlm_lashlang.resolve_projected_bindings": 2.92,
+          "rlm_lashlang.store_module_artifact": 0.25,
+          "rlm_process.await_handle": 1278.99,
+          "rlm_process.build_context": 7.488,
+          "rlm_process.compile": 1.788,
+          "rlm_process.execute": 1063.872,
+          "rlm_process.load_artifact": 2.444,
+          "rlm_process.prepare_start": 2.86,
+          "rlm_process.resolve_environment": 27.216,
+          "rlm_process.shutdown": 8.576,
+          "rlm_process.start": 244.706,
+          "turn_cancel.start_gate": 2.354
+        }
+      },
+      "rlm_tool_calls": {
+        "total_alloc_bytes_max": 149458000,
+        "steady_state_turn_alloc_bytes_max": 11694000,
+        "total_ms_max": 346.032,
+        "phases": {
+          "before_turn_hooks": 3.84,
+          "committed_turn": 10.002,
+          "context_transform": 3.562,
+          "effect_loop": 207.53,
+          "plugin_hook.context_transform.rlm_protocol": 1.626,
+          "post_commit_delivery": 7.208,
+          "prepared_turn": 45.756,
+          "prompt_build": 3.302,
+          "rlm_lashlang.compile_link": 3.378,
+          "rlm_lashlang.execute": 44.788,
+          "rlm_lashlang.rehydrate_projected_globals": 2.254,
+          "rlm_lashlang.resolve_projected_bindings": 2.59,
+          "turn_cancel.start_gate": 2.12
+        }
+      },
+      "rlm_trigger_mail_pipeline": {
+        "total_alloc_bytes_max": 234524000,
+        "steady_state_turn_alloc_bytes_max": 18470000,
+        "total_ms_max": 680.127,
+        "phases": {
+          "before_turn_hooks": 9.57,
+          "committed_turn": 11.536,
+          "context_transform": 4.302,
+          "effect_loop": 423.628,
+          "plugin_hook.context_transform.rlm_protocol": 2.086,
+          "post_commit_delivery": 13.676,
+          "prepared_turn": 85.13,
+          "prompt_build": 4.722,
+          "rlm_lashlang.compile_link": 5.826,
+          "rlm_lashlang.execute": 154.022,
+          "rlm_lashlang.rehydrate_projected_globals": 3.266,
+          "rlm_lashlang.resolve_projected_bindings": 5.374,
+          "rlm_lashlang.store_module_artifact": 0.25,
+          "rlm_process.build_context": 15.008,
+          "rlm_process.compile": 1.576,
+          "rlm_process.execute": 17.908,
+          "rlm_process.load_artifact": 2.718,
+          "rlm_process.resolve_environment": 53.58,
+          "rlm_process.shutdown": 3.722,
+          "trigger.occurrence_to_delivery": 119.93,
+          "turn_cancel.start_gate": 2.484
+        }
+      },
+      "scoped_effect_controller": {
+        "total_alloc_bytes_max": 76832000,
+        "steady_state_turn_alloc_bytes_max": 5621000,
+        "total_ms_max": 600.375,
+        "phases": {
+          "before_turn_hooks": 10.836,
+          "committed_turn": 8.874,
+          "context_transform": 3.748,
+          "effect_loop": 187.574,
+          "plugin_hook.context_transform.rolling_history": 1.64,
+          "post_commit_delivery": 4.844,
+          "prepared_turn": 48.686,
+          "prompt_build": 6.476,
+          "turn_cancel.start_gate": 2.4
+        }
+      },
+      "sqlite_store_reopen": {
+        "total_alloc_bytes_max": 147720000,
+        "steady_state_turn_alloc_bytes_max": 6153000,
+        "total_ms_max": 3538.362,
+        "phases": {
+          "before_turn_hooks": 5.3,
+          "committed_turn": 3.046,
+          "context_transform": 5.306,
+          "effect_loop": 702.116,
+          "plugin_hook.context_transform.rolling_history": 1.924,
+          "post_commit_delivery": 45.848,
+          "prepared_turn": 279.66,
+          "prompt_build": 5.544,
+          "sqlite_store_reopen.runtime_reopen": 1554.57,
+          "turn_cancel.start_gate": 136.928
+        }
+      },
+      "standard": {
+        "total_alloc_bytes_max": 76696000,
+        "steady_state_turn_alloc_bytes_max": 5610000,
+        "total_ms_max": 632.367,
+        "phases": {
+          "before_turn_hooks": 11.738,
+          "committed_turn": 40.386,
+          "context_transform": 12.376,
+          "effect_loop": 174.866,
+          "plugin_hook.context_transform.rolling_history": 9.944,
+          "post_commit_delivery": 6.274,
+          "prepared_turn": 53.554,
+          "prompt_build": 26.962,
+          "turn_cancel.start_gate": 2.518
+        }
+      },
+      "standard_async_tool_completion": {
+        "total_alloc_bytes_max": 78761000,
+        "steady_state_turn_alloc_bytes_max": 5690000,
+        "total_ms_max": 341.883,
+        "phases": {
+          "before_turn_hooks": 4.378,
+          "committed_turn": 14.536,
+          "context_transform": 3.936,
+          "effect_loop": 110.264,
+          "plugin_hook.context_transform.rolling_history": 1.936,
+          "post_commit_delivery": 3.874,
+          "prepared_turn": 18.08,
+          "prompt_build": 2.666,
+          "turn_cancel.start_gate": 2.15
+        }
+      },
+      "standard_shell_output": {
+        "total_alloc_bytes_max": 79684000,
+        "steady_state_turn_alloc_bytes_max": 5743000,
+        "total_ms_max": 405.115,
+        "phases": {
+          "before_turn_hooks": 8.584,
+          "committed_turn": 3.304,
+          "context_transform": 4.074,
+          "effect_loop": 264.806,
+          "plugin_hook.context_transform.rolling_history": 1.728,
+          "post_commit_delivery": 4.22,
+          "prepared_turn": 45.244,
+          "prompt_build": 2.732,
+          "turn_cancel.start_gate": 2.166
+        }
+      },
+      "standard_tool_calls": {
+        "total_alloc_bytes_max": 81332000,
+        "steady_state_turn_alloc_bytes_max": 5689000,
+        "total_ms_max": 240.849,
+        "phases": {
+          "before_turn_hooks": 3.448,
+          "committed_turn": 3.86,
+          "context_transform": 3.444,
+          "effect_loop": 62.266,
+          "plugin_hook.context_transform.rolling_history": 1.618,
+          "post_commit_delivery": 3.566,
+          "prepared_turn": 22.25,
+          "prompt_build": 2.53,
+          "turn_cancel.start_gate": 2.092
+        }
+      },
+      "store_hardening_hot_paths": {
+        "total_alloc_bytes_max": 112802000,
+        "steady_state_turn_alloc_bytes_max": 9397000,
+        "total_ms_max": 10918.108,
+        "phases": {
+          "store_hardening.identity.process_registration": 23.56,
+          "store_hardening.identity.trigger_occurrence": 1.492,
+          "store_hardening.identity.usage_delta": 6.066,
+          "store_hardening.memory.append_receipt_replay": 5.564,
+          "store_hardening.memory.append_receipt_usage_fresh": 6.886,
+          "store_hardening.memory.attachment_adopt": 4.276,
+          "store_hardening.memory.attachment_intent": 1.184,
+          "store_hardening.memory.claim_queued_work": 1.274,
+          "store_hardening.memory.claim_session_lease": 1.7,
+          "store_hardening.memory.complete_queued_work": 8.352,
+          "store_hardening.memory.prune_terminal_processes": 13.596,
+          "store_hardening.postgres.append_receipt_replay": 164.178,
+          "store_hardening.postgres.append_receipt_usage_fresh": 598.53,
+          "store_hardening.postgres.attachment_adopt": 562.03,
+          "store_hardening.postgres.attachment_intent": 267.278,
+          "store_hardening.postgres.claim_queued_work": 331.066,
+          "store_hardening.postgres.claim_session_lease": 338.176,
+          "store_hardening.postgres.complete_queued_work": 430.174,
+          "store_hardening.postgres.open_enforce": 1101.004,
+          "store_hardening.postgres.open_preverified": 163.84,
+          "store_hardening.postgres.prune_terminal_processes": 988.28,
+          "store_hardening.sqlite.append_receipt_replay": 63.49,
+          "store_hardening.sqlite.append_receipt_usage_fresh": 74.794,
+          "store_hardening.sqlite.attachment_adopt": 77.18,
+          "store_hardening.sqlite.attachment_intent": 116.042,
+          "store_hardening.sqlite.claim_queued_work": 66.818,
+          "store_hardening.sqlite.claim_session_lease": 66.9,
+          "store_hardening.sqlite.complete_queued_work": 58.074,
+          "store_hardening.sqlite.prune_terminal_processes": 119.068
+        }
+      },
+      "store_reopen": {
+        "total_alloc_bytes_max": 133502000,
+        "steady_state_turn_alloc_bytes_max": 5959000,
+        "total_ms_max": 880.104,
+        "phases": {
+          "before_turn_hooks": 4.268,
+          "committed_turn": 13.01,
+          "context_transform": 6.45,
+          "effect_loop": 160.812,
+          "plugin_hook.context_transform.rolling_history": 4.56,
+          "post_commit_delivery": 6.498,
+          "prepared_turn": 65.008,
+          "prompt_build": 7.938,
+          "store_reopen.persisted_load": 8.604,
+          "store_reopen.runtime_hydration": 437.646,
+          "store_reopen.store_factory_create": 0.25,
+          "turn_cancel.start_gate": 4.55
+        }
+      },
+      "tool_discovery_search": {
+        "total_alloc_bytes_max": 631530000,
+        "steady_state_turn_alloc_bytes_max": 46459000,
+        "total_ms_max": 3621.198,
+        "phases": {
+          "before_turn_hooks": 6.136,
+          "committed_turn": 8.3,
+          "context_transform": 23.2,
+          "effect_loop": 822.078,
+          "plugin_hook.context_transform.rolling_history": 5.308,
+          "post_commit_delivery": 4.008,
+          "prepared_turn": 23.712,
+          "prompt_build": 5.662,
+          "turn_cancel.start_gate": 2.32
+        }
+      },
+      "trace_jsonl_extended": {
+        "total_alloc_bytes_max": 125258000,
+        "steady_state_turn_alloc_bytes_max": 9569000,
+        "total_ms_max": 551.116,
+        "phases": {
+          "before_turn_hooks": 5.256,
+          "committed_turn": 6.534,
+          "context_transform": 4.008,
+          "effect_loop": 333.204,
+          "plugin_hook.context_transform.rlm_protocol": 1.684,
+          "post_commit_delivery": 11.34,
+          "prepared_turn": 45.612,
+          "prompt_build": 7.726,
+          "rlm_lashlang.compile_link": 5.706,
+          "rlm_lashlang.execute": 4.434,
+          "rlm_lashlang.rehydrate_projected_globals": 1.762,
+          "rlm_lashlang.resolve_projected_bindings": 3.096,
+          "trace_jsonl.inspect_files": 1.244,
+          "turn_cancel.start_gate": 8.358
+        }
+      },
+      "trace_jsonl_standard": {
+        "total_alloc_bytes_max": 80074000,
+        "steady_state_turn_alloc_bytes_max": 5858000,
+        "total_ms_max": 594.217,
+        "phases": {
+          "before_turn_hooks": 7.518,
+          "committed_turn": 23.344,
+          "context_transform": 4.436,
+          "effect_loop": 233.922,
+          "plugin_hook.context_transform.rolling_history": 2.092,
+          "post_commit_delivery": 4.626,
+          "prepared_turn": 28.512,
+          "prompt_build": 7.118,
+          "trace_jsonl.inspect_files": 4.72,
+          "turn_cancel.start_gate": 2.36
+        }
+      },
+      "turn_cancel_round_trip": {
+        "total_alloc_bytes_max": 71241000,
+        "steady_state_turn_alloc_bytes_max": 5155000,
+        "total_ms_max": 450.278,
+        "phases": {
+          "before_turn_hooks": 4.29,
+          "committed_turn": 12.76,
+          "context_transform": 6.802,
+          "effect_loop": 107.216,
+          "plugin_hook.context_transform.rolling_history": 1.682,
+          "post_commit_delivery": 4.152,
+          "prepared_turn": 32.982,
+          "prompt_build": 11.4,
+          "turn_cancel.request_to_token_to_seal": 113.948,
+          "turn_cancel.start_gate": 5.304
+        }
+      },
+      "turn_checkpoint": {
+        "total_alloc_bytes_max": 15224000,
+        "steady_state_turn_alloc_bytes_max": 1256000,
+        "total_ms_max": 84.378,
+        "phases": {
+          "rlm_exec_checkpoint": 34.432,
+          "standard_llm_checkpoint": 22.902,
+          "standard_parallel_tools_checkpoint": 48.52
+        }
+      },
+      "turn_input_ingress_interrupt": {
+        "total_alloc_bytes_max": 101560000,
+        "steady_state_turn_alloc_bytes_max": 8858000,
+        "total_ms_max": 42.387,
+        "phases": {
+          "turn_input_ingress.abandon_active_claim": 0.932,
+          "turn_input_ingress.abandon_next_claim": 5.166,
+          "turn_input_ingress.claim_active_initial": 1.146,
+          "turn_input_ingress.claim_next_turn_inputs": 1.786,
+          "turn_input_ingress.claim_session_lease": 1.062,
+          "turn_input_ingress.complete_active_and_defer": 10.998,
+          "turn_input_ingress.complete_next_turn_inputs": 2.492,
+          "turn_input_ingress.enqueue_active": 5.496,
+          "turn_input_ingress.enqueue_next": 1.942,
+          "turn_input_ingress.list_pending": 0.914,
+          "turn_input_ingress.reclaim_active_inputs": 1.608,
+          "turn_input_ingress.reclaim_next_turn_inputs": 1.834
+        }
+      },
+      "turn_start_gate": {
+        "total_alloc_bytes_max": 76832000,
+        "steady_state_turn_alloc_bytes_max": 5622000,
+        "total_ms_max": 585.285,
+        "phases": {
+          "before_turn_hooks": 12.158,
+          "committed_turn": 21.296,
+          "context_transform": 4.38,
+          "effect_loop": 187.596,
+          "plugin_hook.context_transform.rolling_history": 1.804,
+          "post_commit_delivery": 9.416,
+          "prepared_turn": 57.29,
+          "prompt_build": 14.642,
+          "turn_cancel.start_gate": 2.706
+        }
+      }
     }
   },
   "lashlang": {
     "perf": {
-      "default": {
-        "allocated_bytes_per_iter_max": 2200000,
-        "allocations_per_iter_max": 12000
+      "baseline": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 400935,
+          "allocations_per_iter_max": 3752
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 400936,
+          "allocations_per_iter_max": 3752
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 257544,
+          "allocations_per_iter_max": 2992
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 65271,
+          "allocations_per_iter_max": 260
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 72712,
+          "allocations_per_iter_max": 401
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 13497,
+          "allocations_per_iter_max": 109
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 314,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 67,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 153,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 416478,
+          "allocations_per_iter_max": 3953
+        }
+      },
+      "language_host_environment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 1188605,
+          "allocations_per_iter_max": 9938
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 1188605,
+          "allocations_per_iter_max": 9938
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 747422,
+          "allocations_per_iter_max": 7927
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 182788,
+          "allocations_per_iter_max": 767
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 190229,
+          "allocations_per_iter_max": 908
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 34617,
+          "allocations_per_iter_max": 275
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 509,
+          "allocations_per_iter_max": 6
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 181,
+          "allocations_per_iter_max": 2
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 424,
+          "allocations_per_iter_max": 4
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 1230029,
+          "allocations_per_iter_max": 10491
+        }
+      },
+      "async_await": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 153873,
+          "allocations_per_iter_max": 1637
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 153868,
+          "allocations_per_iter_max": 1637
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 101431,
+          "allocations_per_iter_max": 1213
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 33559,
+          "allocations_per_iter_max": 222
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 41000,
+          "allocations_per_iter_max": 363
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 6332,
+          "allocations_per_iter_max": 52
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 251,
+          "allocations_per_iter_max": 3
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 25,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 65,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 159344,
+          "allocations_per_iter_max": 1704
+        }
+      },
+      "direct_unwrap": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 161177,
+          "allocations_per_iter_max": 1843
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 161168,
+          "allocations_per_iter_max": 1843
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 110924,
+          "allocations_per_iter_max": 1431
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 18006,
+          "allocations_per_iter_max": 181
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 25447,
+          "allocations_per_iter_max": 322
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 11367,
+          "allocations_per_iter_max": 76
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 255,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 30,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 74,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 167338,
+          "allocations_per_iter_max": 1919
+        }
+      },
+      "general_fanout": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 168122,
+          "allocations_per_iter_max": 1733
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 168122,
+          "allocations_per_iter_max": 1733
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 113738,
+          "allocations_per_iter_max": 1352
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 27447,
+          "allocations_per_iter_max": 167
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 34887,
+          "allocations_per_iter_max": 308
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 6862,
+          "allocations_per_iter_max": 57
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 256,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 31,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 73,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 174745,
+          "allocations_per_iter_max": 1812
+        }
+      },
+      "loop_control": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 242322,
+          "allocations_per_iter_max": 5247
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 242331,
+          "allocations_per_iter_max": 5247
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 146212,
+          "allocations_per_iter_max": 1900
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 53621,
+          "allocations_per_iter_max": 2997
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 61062,
+          "allocations_per_iter_max": 3139
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 8173,
+          "allocations_per_iter_max": 74
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 269,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 37,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 92,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 250706,
+          "allocations_per_iter_max": 5361
+        }
+      },
+      "indexed_assignment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 301466,
+          "allocations_per_iter_max": 2832
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 301475,
+          "allocations_per_iter_max": 2832
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 212689,
+          "allocations_per_iter_max": 2428
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 37316,
+          "allocations_per_iter_max": 123
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 44757,
+          "allocations_per_iter_max": 264
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 10106,
+          "allocations_per_iter_max": 84
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 295,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 52,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 122,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 312875,
+          "allocations_per_iter_max": 2976
+        }
+      },
+      "projected_values": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 262732,
+          "allocations_per_iter_max": 2413
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 262732,
+          "allocations_per_iter_max": 2413
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 160368,
+          "allocations_per_iter_max": 1962
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 45174,
+          "allocations_per_iter_max": 158
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 52614,
+          "allocations_per_iter_max": 299
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 9923,
+          "allocations_per_iter_max": 81
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 274,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 45,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 104,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 272386,
+          "allocations_per_iter_max": 2545
+        }
+      },
+      "large_data": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 2144772,
+          "allocations_per_iter_max": 13310
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 2144768,
+          "allocations_per_iter_max": 13310
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 228249,
+          "allocations_per_iter_max": 2668
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 1817958,
+          "allocations_per_iter_max": 10255
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 1825399,
+          "allocations_per_iter_max": 10397
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 11336,
+          "allocations_per_iter_max": 96
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 302,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 78,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 149,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 2157676,
+          "allocations_per_iter_max": 13480
+        }
+      },
+      "cache_pressure": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 504128,
+          "allocations_per_iter_max": 4280
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 504136,
+          "allocations_per_iter_max": 4280
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 332505,
+          "allocations_per_iter_max": 3575
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 55160,
+          "allocations_per_iter_max": 127
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 62601,
+          "allocations_per_iter_max": 268
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 17653,
+          "allocations_per_iter_max": 136
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 344,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 102,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 199,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 527102,
+          "allocations_per_iter_max": 4566
+        }
+      },
+      "projected_operations": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 319285,
+          "allocations_per_iter_max": 2486
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 319268,
+          "allocations_per_iter_max": 2486
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 193425,
+          "allocations_per_iter_max": 2061
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 67659,
+          "allocations_per_iter_max": 169
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 75100,
+          "allocations_per_iter_max": 311
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 10673,
+          "allocations_per_iter_max": 82
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 287,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 59,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 117,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 329611,
+          "allocations_per_iter_max": 2628
+        }
+      },
+      "type_system_stress": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 961651,
+          "allocations_per_iter_max": 4538
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 961652,
+          "allocations_per_iter_max": 4538
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 212490,
+          "allocations_per_iter_max": 2433
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 681317,
+          "allocations_per_iter_max": 1669
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 688757,
+          "allocations_per_iter_max": 1811
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 11526,
+          "allocations_per_iter_max": 95
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 295,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 67,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 131,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 974205,
+          "allocations_per_iter_max": 4692
+        }
+      },
+      "wrapped_error_paths": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 204217,
+          "allocations_per_iter_max": 2375
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 204211,
+          "allocations_per_iter_max": 2375
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 134139,
+          "allocations_per_iter_max": 1829
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 35498,
+          "allocations_per_iter_max": 245
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 42939,
+          "allocations_per_iter_max": 387
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 15553,
+          "allocations_per_iter_max": 110
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 264,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 36,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 85,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 212505,
+          "allocations_per_iter_max": 2482
+        }
+      },
+      "tool_control_host_environment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 261356,
+          "allocations_per_iter_max": 2712
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 261362,
+          "allocations_per_iter_max": 2712
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 163432,
+          "allocations_per_iter_max": 2019
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 53559,
+          "allocations_per_iter_max": 360
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 61000,
+          "allocations_per_iter_max": 502
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 13308,
+          "allocations_per_iter_max": 85
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 276,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 37,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 101,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 270059,
+          "allocations_per_iter_max": 2820
+        }
+      },
+      "snapshot_projected_state": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 184503,
+          "allocations_per_iter_max": 1848
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 184490,
+          "allocations_per_iter_max": 1848
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 124224,
+          "allocations_per_iter_max": 1551
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 28615,
+          "allocations_per_iter_max": 109
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 59959,
+          "allocations_per_iter_max": 578
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 8187,
+          "allocations_per_iter_max": 68
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 260,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 36,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 80,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 192238,
+          "allocations_per_iter_max": 1945
+        }
+      },
+      "continue_as_seed_host_environment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 229096,
+          "allocations_per_iter_max": 2352
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 229087,
+          "allocations_per_iter_max": 2352
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 147657,
+          "allocations_per_iter_max": 1800
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 40924,
+          "allocations_per_iter_max": 252
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 48365,
+          "allocations_per_iter_max": 394
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 15918,
+          "allocations_per_iter_max": 102
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 269,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 40,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 93,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 237513,
+          "allocations_per_iter_max": 2454
+        }
+      },
+      "trigger_registry_host_environment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 367280,
+          "allocations_per_iter_max": 3965
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 367279,
+          "allocations_per_iter_max": 3965
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 254177,
+          "allocations_per_iter_max": 3207
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 42917,
+          "allocations_per_iter_max": 322
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 50358,
+          "allocations_per_iter_max": 463
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 23397,
+          "allocations_per_iter_max": 181
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 313,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 62,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 148,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 381082,
+          "allocations_per_iter_max": 4126
+        }
+      },
+      "syntax_text_host_environment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 192770,
+          "allocations_per_iter_max": 1793
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 192776,
+          "allocations_per_iter_max": 1793
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 126999,
+          "allocations_per_iter_max": 1464
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 23612,
+          "allocations_per_iter_max": 90
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 31053,
+          "allocations_per_iter_max": 231
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 8000,
+          "allocations_per_iter_max": 57
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 261,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 39,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 84,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 200764,
+          "allocations_per_iter_max": 1883
+        }
+      },
+      "integer_range_host_environment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 329703,
+          "allocations_per_iter_max": 2997
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 329576,
+          "allocations_per_iter_max": 2997
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 223145,
+          "allocations_per_iter_max": 2501
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 38505,
+          "allocations_per_iter_max": 120
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 45945,
+          "allocations_per_iter_max": 262
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 12717,
+          "allocations_per_iter_max": 92
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 299,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 68,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 134,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 344327,
+          "allocations_per_iter_max": 3183
+        }
+      },
+      "fanout_expression_host_environment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 252221,
+          "allocations_per_iter_max": 2543
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 252224,
+          "allocations_per_iter_max": 2543
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 154483,
+          "allocations_per_iter_max": 1943
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 47247,
+          "allocations_per_iter_max": 265
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 54688,
+          "allocations_per_iter_max": 406
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 14284,
+          "allocations_per_iter_max": 97
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 272,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 42,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 99,
+          "allocations_per_iter_max": 2
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 262023,
+          "allocations_per_iter_max": 2670
+        }
+      },
+      "image_host_environment": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 174915,
+          "allocations_per_iter_max": 1701
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 174945,
+          "allocations_per_iter_max": 1701
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 113793,
+          "allocations_per_iter_max": 1419
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 30641,
+          "allocations_per_iter_max": 93
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 41131,
+          "allocations_per_iter_max": 293
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 7795,
+          "allocations_per_iter_max": 58
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 256,
+          "allocations_per_iter_max": 4
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 31,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 74,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 182033,
+          "allocations_per_iter_max": 1784
+        }
       }
     },
     "profile": {
       "default": {
-        "instructions_per_iter_max": 12000
+        "instructions_per_iter_max": 10280
       }
     }
   }

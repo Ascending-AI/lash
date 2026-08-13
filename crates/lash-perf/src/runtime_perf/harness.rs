@@ -1201,6 +1201,9 @@ pub(crate) fn rlm_perf_projected_bindings(
 
 pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize) -> String {
     match scenario {
+        RuntimePerfScenario::CheckpointStateHotPaths => {
+            unreachable!("checkpoint-state hot paths use their dedicated measurement")
+        }
         RuntimePerfScenario::Standard | RuntimePerfScenario::EmbedStandard => format!(
             "Turn {} of a longer runtime benchmark conversation. Inspect the state and reply with exactly: {}",
             turn_index + 1,

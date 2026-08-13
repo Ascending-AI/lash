@@ -104,6 +104,103 @@ pub(crate) async fn execute_code_with_bounds(
     Ok((state, response))
 }
 
+/// Feature-gated fixture that lets the repository's performance harness drive
+/// the production RLM execution-state capture without exposing executor
+/// internals as public protocol API.
+#[cfg(feature = "testing")]
+pub struct RlmCheckpointPerfFixture {
+    state: Option<RlmExecutionState>,
+    binding_count: usize,
+    payload_bytes: usize,
+}
+
+#[cfg(feature = "testing")]
+impl RlmCheckpointPerfFixture {
+    pub fn new(binding_count: usize, payload_bytes: usize) -> Result<Self, SessionError> {
+        let mut state = RlmExecutionState::new()?;
+        let mut snapshot = state.rlm.snapshot();
+        for index in 0..binding_count {
+            snapshot.globals.insert(
+                format!("mid_{index}"),
+                json_to_flow_value(serde_json::json!([format!(
+                    "binding-{index}-{}",
+                    "x".repeat(payload_bytes)
+                )])),
+            );
+        }
+        state.rlm = FlowState::from_snapshot(snapshot);
+        Ok(Self {
+            state: Some(state),
+            binding_count,
+            payload_bytes,
+        })
+    }
+
+    pub fn capture(&mut self) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+        self.state
+            .as_mut()
+            .expect("RLM checkpoint perf fixture state present")
+            .snapshot_execution_state()
+    }
+
+    pub fn acknowledge_capture(&mut self) {
+        self.state
+            .as_mut()
+            .expect("RLM checkpoint perf fixture state present")
+            .acknowledge_execution_state_capture();
+    }
+
+    pub async fn assign_one(&mut self, index: usize, turn: usize) -> Result<(), SessionError> {
+        let binding = index % self.binding_count.max(1);
+        let state = self
+            .state
+            .take()
+            .expect("RLM checkpoint perf fixture state present");
+        let code = format!(
+            "mid_{binding} = push(mid_{binding}, \"turn-{turn}-{}\")",
+            "y".repeat(self.payload_bytes / 8)
+        );
+        let (state, response) = execute_code_with_bounds(
+            state,
+            lash_core::testing::code_execution_context(),
+            ExecRequest {
+                language: "lashlang".to_string(),
+                code,
+                accept_finish: false,
+            },
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(crate::ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+        )
+        .await?;
+        self.state = Some(state);
+        if let Some(error) = response.error {
+            return Err(SessionError::Protocol(format!(
+                "RLM checkpoint perf assignment failed: {error}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn absorb_dirty_assignments(&mut self) {
+        self.state
+            .as_mut()
+            .expect("RLM checkpoint perf fixture state present")
+            .absorb_pending_assignments_for_perf();
+    }
+
+    pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
+        let mut restored = RlmExecutionState::new()?;
+        restored
+            .restore_execution_state(state)
+            .map_err(|error| SessionError::Protocol(error.to_string()))
+    }
+}
+
 fn clean_model_code(code: &str) -> String {
     code.lines()
         .filter(|line| {

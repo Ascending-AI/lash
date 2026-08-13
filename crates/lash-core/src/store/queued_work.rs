@@ -360,10 +360,9 @@ pub fn select_turn_work_claim_indices(
         return Ok((0..selected).collect());
     }
 
-    let mut selected = 1;
-    let mut rendered_tokens = first_tokens;
+    let mut compatible_prefix_len = 1;
     for candidate in &candidates[1..] {
-        if selected >= policy.max_rows
+        if compatible_prefix_len >= policy.max_rows
             || candidate.work_class != QueuedWorkClass::TurnWork
             || !candidate.kind.is_batchable()
             || candidate.delivery_policy != first.delivery_policy
@@ -372,12 +371,29 @@ pub fn select_turn_work_claim_indices(
         {
             break;
         }
-        let candidate_tokens = rendered_token_upper_bound(&candidates[..=selected]);
-        if candidate_tokens > available_tokens {
-            break;
+        compatible_prefix_len += 1;
+    }
+
+    let mut selected = 1;
+    let mut rendered_tokens = first_tokens;
+    if compatible_prefix_len > 1 {
+        // The whole-prefix shortcut is sound only because the rendered bound is monotone
+        // non-decreasing as candidates are appended; `rendered_bound_is_monotonic_over_prefixes`
+        // exercises that renderer invariant across varied deterministic inputs.
+        let compatible_tokens = rendered_token_upper_bound(&candidates[..compatible_prefix_len]);
+        if compatible_tokens <= available_tokens {
+            selected = compatible_prefix_len;
+            rendered_tokens = compatible_tokens;
+        } else {
+            for prefix_len in 2..compatible_prefix_len {
+                let candidate_tokens = rendered_token_upper_bound(&candidates[..prefix_len]);
+                if candidate_tokens > available_tokens {
+                    break;
+                }
+                selected = prefix_len;
+                rendered_tokens = candidate_tokens;
+            }
         }
-        selected += 1;
-        rendered_tokens = candidate_tokens;
     }
     let selected = record_turn_claim_decision(
         candidates,
@@ -621,6 +637,11 @@ pub fn derive_batch_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::{
+        collection::vec,
+        prelude::*,
+        test_runner::{Config, RngSeed, TestRunner},
+    };
 
     #[test]
     fn claim_id_dialects_preserve_existing_spelling() {
@@ -651,6 +672,102 @@ mod tests {
             turn_causes: Vec::new(),
             input_texts: vec!["wake".to_string()],
         }
+    }
+
+    fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
+        let merge_key = prop_oneof![
+            Just(None),
+            Just(Some("wake".to_string())),
+            Just(Some("other".to_string())),
+        ];
+        let kind = prop_oneof![
+            Just(QueuedWorkKind::Turn),
+            Just(QueuedWorkKind::Control),
+            Just(QueuedWorkKind::Cancel),
+        ];
+        let work_class = prop_oneof![
+            Just(QueuedWorkClass::TurnWork),
+            Just(QueuedWorkClass::SessionCommand),
+        ];
+        let delivery_policy = prop_oneof![
+            Just(DeliveryPolicy::EarliestSafeBoundary),
+            Just(DeliveryPolicy::AfterCurrentTurnCommit),
+        ];
+        let authority = prop_oneof![
+            Just(QueuedWorkAuthority::default()),
+            Just(QueuedWorkAuthority::new("principal-a")),
+            Just(QueuedWorkAuthority::new("principal-b").with_elevation("root")),
+        ];
+        let input_texts = vec(0usize..=256, 0..=3).prop_map(|lengths| {
+            lengths
+                .into_iter()
+                .enumerate()
+                .map(|(index, length)| ((b'a' + index as u8) as char).to_string().repeat(length))
+                .collect::<Vec<_>>()
+        });
+        let turn_causes = vec((0usize..=128, 0u8..3), 0..=4).prop_map(|causes| {
+            causes
+                .into_iter()
+                .enumerate()
+                .map(|(index, (text_len, origin_kind))| TurnCause {
+                    id: format!("cause-{index}"),
+                    event_type: format!("event-{origin_kind}"),
+                    origin: match origin_kind {
+                        0 => crate::MessageOrigin::Plugin {
+                            plugin_id: format!("plugin-{index}"),
+                            transient: index % 2 == 0,
+                        },
+                        1 => crate::MessageOrigin::Process {
+                            process_id: format!("process-{index}"),
+                            event_type: "wake".to_string(),
+                            sequence: index as u64,
+                            wake_id: Some(format!("wake-{index}")),
+                            caused_by: None,
+                        },
+                        _ => crate::MessageOrigin::TurnInput {
+                            turn_id: format!("turn-{index}"),
+                            input_id: (index % 2 == 0).then(|| format!("input-{index}")),
+                        },
+                    },
+                    text: "x".repeat(text_len),
+                })
+                .collect::<Vec<_>>()
+        });
+
+        (
+            any::<u64>(),
+            merge_key,
+            kind,
+            work_class,
+            delivery_policy,
+            authority,
+            input_texts,
+            turn_causes,
+        )
+            .prop_map(
+                |(
+                    enqueue_seq,
+                    merge_key,
+                    kind,
+                    work_class,
+                    delivery_policy,
+                    authority,
+                    input_texts,
+                    turn_causes,
+                )| ClaimCandidate {
+                    enqueue_seq,
+                    claim_fencing_token: 0,
+                    prior_claim_id: None,
+                    work_class,
+                    delivery_policy,
+                    kind,
+                    authority,
+                    merge_key,
+                    enqueued_at_ms: 900,
+                    turn_causes,
+                    input_texts,
+                },
+            )
     }
 
     #[test]
@@ -825,6 +942,55 @@ mod tests {
             .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn compatible_prefix_fallback_matches_incremental_selection() {
+        let candidates = vec![
+            candidate(1, Some("wake")),
+            candidate(2, Some("wake")),
+            candidate(3, Some("wake")),
+        ];
+        // This fixed fixture renders to 71 bytes for two rows and 101 for three. A 101-token
+        // context with a 30-token reserve therefore leaves exactly 71: two fit, three do not.
+        let claim_policy = policy(101, 30);
+        assert_eq!(
+            select_turn_work_claim_indices(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                claim_policy,
+                1_000,
+            )
+            .unwrap(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn rendered_bound_is_monotonic_over_prefixes() {
+        const SEED: u64 = 0x5eed_f101_4004_0002;
+        let mut runner = TestRunner::new(Config {
+            cases: 512,
+            failure_persistence: None,
+            rng_seed: RngSeed::Fixed(SEED),
+            ..Config::default()
+        });
+
+        runner
+            .run(&vec(rendered_candidate_strategy(), 1..=8), |candidates| {
+                for prefix_len in 1..candidates.len() {
+                    let prefix_bound =
+                        rendered_token_upper_bound(&candidates[..prefix_len]);
+                    let extended_bound =
+                        rendered_token_upper_bound(&candidates[..=prefix_len]);
+                    prop_assert!(
+                        prefix_bound <= extended_bound,
+                        "seed={SEED:#x}, prefix_len={prefix_len}, prefix_bound={prefix_bound}, extended_bound={extended_bound}, candidates={candidates:#?}"
+                    );
+                }
+                Ok(())
+            })
+            .expect("rendered token bound must be monotonic over prefixes");
     }
 
     #[test]
