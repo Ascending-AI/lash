@@ -138,15 +138,12 @@ impl Lowerer {
         let flush_ready = |pending: &mut Vec<PendingFunction>,
                            available: &mut BTreeSet<String>,
                            output: &mut Vec<LashExpr>| {
-            loop {
-                let Some(index) = pending.iter().position(|function| {
-                    function
-                        .captures
-                        .iter()
-                        .all(|capture| available.contains(capture))
-                }) else {
-                    break;
-                };
+            while let Some(index) = pending.iter().position(|function| {
+                function
+                    .captures
+                    .iter()
+                    .all(|capture| available.contains(capture))
+            }) {
                 let function = pending.remove(index);
                 available.insert(function.internal);
                 output.push(function.assignment);
@@ -687,25 +684,25 @@ impl Lowerer {
     }
 
     fn lower_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<LashExpr, Diagnostic> {
-        if let Expr::Ident(name) = callee {
-            if !self.has_binding(name) {
-                return match (name.as_str(), args) {
-                    ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
-                    ("print", [value]) => Ok(LashExpr::Print(Box::new(self.lower_expr(value)?))),
-                    ("finish" | "print", _) => Err(Diagnostic::new(
-                        DiagnosticCode::UnsupportedExpression,
-                        format!("{name} expects one argument"),
-                        None,
-                    )),
-                    _ => Ok(LashExpr::Call {
-                        function: Box::new(self.lower_expr(callee)?),
-                        args: args
-                            .iter()
-                            .map(|arg| self.lower_expr(arg))
-                            .collect::<Result<_, _>>()?,
-                    }),
-                };
-            }
+        if let Expr::Ident(name) = callee
+            && !self.has_binding(name)
+        {
+            return match (name.as_str(), args) {
+                ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
+                ("print", [value]) => Ok(LashExpr::Print(Box::new(self.lower_expr(value)?))),
+                ("finish" | "print", _) => Err(Diagnostic::new(
+                    DiagnosticCode::UnsupportedExpression,
+                    format!("{name} expects one argument"),
+                    None,
+                )),
+                _ => Ok(LashExpr::Call {
+                    function: Box::new(self.lower_expr(callee)?),
+                    args: args
+                        .iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<_, _>>()?,
+                }),
+            };
         }
         if let Expr::Member {
             object,
