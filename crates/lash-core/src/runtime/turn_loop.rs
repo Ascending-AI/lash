@@ -11,7 +11,12 @@ use crate::facade_support::{
 use lash_sansio::core_support::*;
 use std::pin::Pin;
 
-/// Typed outcome of a host-selected queued-work drain before turn execution.
+/// Why an exact host-selected queued-work set was refused before turn execution.
+///
+/// Missing durable rows are not a refusal: they idempotently satisfy their
+/// requested IDs. Refusal means at least one still-present row could not be
+/// executed under the requested atomic composition, or the execution lane was
+/// unavailable; no selected turn was started.
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectedQueuedWorkDrainRefusalCause {
@@ -20,23 +25,28 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
     ExecutionLaneBusy,
 }
 
-/// How one requested batch ID satisfied a selected queued-work drain.
+/// How one distinct requested batch ID satisfied a successful selected drain.
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectedQueuedWorkBatchSatisfaction {
-    /// This drain claimed and executed the durable row.
+    /// This invocation claimed and executed the durable row.
     ClaimedNow { batch_id: String },
     /// No durable row remained, so the idempotent request was already done.
     AlreadySatisfied { batch_id: String },
 }
 
-/// Successful result of a host-selected queued-work drain.
+/// Successful result of an exact, host-selected queued-work drain.
+///
+/// Each distinct requested ID is either executed now or already absent from
+/// durable storage. A present ID that cannot join the exact claim produces a
+/// refusal instead of this type, before any selected turn executes.
 #[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct SelectedQueuedWorkDrainOutcome<T> {
-    /// Executed turn, absent when every requested ID was already satisfied.
+    /// Executed turn, absent only for a fully satisfied drain that produced no
+    /// selected turn (including an empty selection).
     pub turn: Option<T>,
-    /// One typed satisfaction entry per requested ID, in request order.
+    /// One entry per distinct requested ID, ordered by first occurrence.
     pub satisfied: Vec<SelectedQueuedWorkBatchSatisfaction>,
 }
 
@@ -45,24 +55,35 @@ impl<T> SelectedQueuedWorkDrainOutcome<T> {
         Self { turn, satisfied }
     }
 
-    /// Whether this successful drain needed no new turn.
+    /// Reports whether this was a fully satisfied drain that needed no new turn.
+    ///
+    /// Because refusals are returned as errors, `true` never means that
+    /// selected work was busy or unclaimable. It means every distinct requested
+    /// ID was satisfied without a selected turn, or the selection was empty.
     pub fn is_none(&self) -> bool {
         self.turn.is_none()
     }
 
-    /// Whether this successful drain executed a newly claimed turn.
+    /// Reports whether this successful drain executed a newly claimed turn.
+    ///
+    /// `false` has the same fully-satisfied meaning as [`Self::is_none`].
     pub fn is_some(&self) -> bool {
         self.turn.is_some()
     }
 
-    /// Return the executed turn or panic with `message`.
+    /// Returns the executed turn or panics with `message` after a successful
+    /// drain that was fully satisfied without running a selected turn.
     #[track_caller]
     pub fn expect(self, message: &str) -> T {
         self.turn.expect(message)
     }
 }
 
-/// Typed outcome of a host-selected queued-work drain before turn execution.
+/// Error from an exact host-selected queued-work drain.
+///
+/// [`Self::Refused`] is a pre-execution atomicity result: absent rows count as
+/// idempotently satisfied, while present rows that cannot form the requested
+/// composition leave the selection unexecuted.
 #[doc(hidden)]
 #[derive(Debug, thiserror::Error)]
 pub enum SelectedQueuedWorkDrainError {

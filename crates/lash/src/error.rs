@@ -1,9 +1,17 @@
 use crate::support::*;
 
 /// Why a host-selected queued-work drain was refused before executing a turn.
+///
+/// Requested IDs with no remaining durable row are idempotently satisfied and
+/// do not cause refusal. Each cause here means at least one still-present row
+/// could not be executed under the requested atomic composition; no selected
+/// turn was started.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectedQueuedWorkDrainRefusalCause {
-    /// The requested rows do not form one claimable queue composition.
+    /// The requested present rows do not form one claimable queue composition.
+    ///
+    /// This includes physical queue gaps and mismatched batching gates. The
+    /// attempted selected composition remains unexecuted.
     UnclaimableTogether {
         /// Requested batch IDs that the store could not claim with the rest.
         unclaimed_batch_ids: Vec<String>,
@@ -16,7 +24,8 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
         /// Complete interrupted composition, in durable enqueue order.
         required_batch_ids: Vec<String>,
     },
-    /// Another host currently owns the session's execution lane.
+    /// Another host currently owns the session's execution lane while at least
+    /// one requested row remains present.
     ExecutionLaneBusy,
 }
 

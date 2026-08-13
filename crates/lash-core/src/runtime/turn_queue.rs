@@ -78,10 +78,19 @@ pub enum QueuedWorkKind {
 }
 
 impl QueuedWorkKind {
+    /// Reports whether rows of this kind may join an adjacent compatible turn claim.
+    ///
+    /// Only [`Self::Turn`] is batchable. Control and cancellation rows remain
+    /// single-row claims even when they carry the same merge key as neighboring
+    /// work.
     pub fn is_batchable(self) -> bool {
         matches!(self, Self::Turn)
     }
 
+    /// Returns the stable snake-case value persisted by queued-work stores.
+    ///
+    /// Store implementations must preserve these spellings so rows remain
+    /// readable across runtime restarts and backend implementations.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Turn => "turn",
@@ -90,6 +99,11 @@ impl QueuedWorkKind {
         }
     }
 
+    /// Parses a persisted queued-work kind without guessing at unknown values.
+    ///
+    /// The accepted values are exactly `"turn"`, `"control"`, and `"cancel"`;
+    /// an unrecognized value returns `None` so a store can reject incompatible
+    /// durable data instead of assigning unsafe batching semantics.
     pub fn from_wire_str(value: &str) -> Option<Self> {
         match value {
             "turn" => Some(Self::Turn),
@@ -116,6 +130,10 @@ pub struct QueuedWorkAuthority {
 }
 
 impl QueuedWorkAuthority {
+    /// Stamps queued work with an opaque principal and no elevation override.
+    ///
+    /// Lash compares the complete authority value when forming a batch, so
+    /// work created for a different principal cannot share the resulting turn.
     pub fn new(principal: impl Into<String>) -> Self {
         Self {
             principal: Some(principal.into()),
@@ -123,6 +141,10 @@ impl QueuedWorkAuthority {
         }
     }
 
+    /// Adds or replaces the opaque elevation override used by the work.
+    ///
+    /// Elevation participates in the same equality gate as the principal;
+    /// rows with different overrides are never coalesced into one turn.
     pub fn with_elevation(mut self, elevation: impl Into<String>) -> Self {
         self.elevation = Some(elevation.into());
         self
@@ -142,11 +164,24 @@ pub struct QueuedWorkBatchingConfig {
 }
 
 impl QueuedWorkBatchingConfig {
+    /// Default upper bound on rows coalesced into one fresh turn claim.
+    ///
+    /// Hosts may replace this efficiency bound with [`Self::with_max_rows`].
+    /// Interrupted-claim redrive preserves the predecessor composition even
+    /// when it contains more rows than this fresh-claim default.
     pub const DEFAULT_MAX_ROWS: usize = 64;
+    /// Default age at which the oldest compatible row is claimed alone instead
+    /// of being coalesced with later ready rows.
+    ///
+    /// Hosts may replace this latency bound with
+    /// [`Self::with_max_pending_age`].
     pub const DEFAULT_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(30);
 
     /// Construct batching policy with an explicit non-zero model-action
     /// reserve and defaulted row-count and pending-age bounds.
+    ///
+    /// These bounds apply to fresh claims. Redriving an interrupted claim keeps
+    /// its already-journaled composition intact.
     ///
     /// # Panics
     ///
@@ -163,6 +198,10 @@ impl QueuedWorkBatchingConfig {
         }
     }
 
+    /// Sets the maximum number of compatible rows coalesced into one fresh
+    /// claim. Redriving an interrupted claim may exceed this bound to preserve
+    /// its already-journaled composition.
+    ///
     /// # Panics
     ///
     /// Panics when `max_rows` is zero.
@@ -174,6 +213,9 @@ impl QueuedWorkBatchingConfig {
         self
     }
 
+    /// Sets the age at which Lash claims the oldest compatible row alone
+    /// instead of coalescing it with later ready rows.
+    ///
     /// # Panics
     ///
     /// Panics when `max_pending_age` is zero.
@@ -186,14 +228,28 @@ impl QueuedWorkBatchingConfig {
         self
     }
 
+    /// Returns the context capacity reserved for the model action after Lash
+    /// renders the queued-work prefix.
+    ///
+    /// Fresh coalescing stops before it would consume this reserve. A single
+    /// row may use the reserve only when it still fits the model context; a row
+    /// larger than the entire context is refused and left pending.
     pub const fn action_token_reserve(self) -> usize {
         self.action_token_reserve.get()
     }
 
+    /// Returns the maximum number of compatible rows in one fresh claim.
+    ///
+    /// This does not split an interrupted claim whose complete composition
+    /// must be redriven atomically.
     pub const fn max_rows(self) -> usize {
         self.max_rows.get()
     }
 
+    /// Returns the age at which the oldest compatible row is claimed alone.
+    ///
+    /// This is a batching-latency bound, not a queue expiry: reaching it does
+    /// not discard the row.
     pub const fn max_pending_age(self) -> std::time::Duration {
         self.max_pending_age
     }

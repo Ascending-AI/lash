@@ -31,7 +31,12 @@ pub struct SelectedQueuedWorkClaimOutcome {
 }
 
 impl SelectedQueuedWorkClaimOutcome {
-    /// Build an exact-claim resolution from its two disjoint outcomes.
+    /// Builds an exact-claim resolution from newly acquired rows and requested
+    /// IDs whose durable rows were already gone.
+    ///
+    /// Store implementations must not classify a present but unclaimable row
+    /// as already satisfied. The runtime turns that case into a selected-drain
+    /// refusal rather than reporting idempotent success.
     pub fn new(claim: Option<QueuedWorkClaim>, already_satisfied_batch_ids: Vec<String>) -> Self {
         Self {
             claim,
@@ -39,22 +44,33 @@ impl SelectedQueuedWorkClaimOutcome {
         }
     }
 
-    /// Whether this resolution acquired no new durable rows.
+    /// Reports whether this store resolution acquired no new durable rows.
+    ///
+    /// At this layer, `true` does not by itself prove that the complete drain
+    /// was satisfied: callers must also distinguish IDs in
+    /// [`Self::already_satisfied_batch_ids`] from present IDs that could not be
+    /// claimed. The facade's selected-drain outcome carries the stronger
+    /// successful, fully-satisfied meaning.
     pub fn is_none(&self) -> bool {
         self.claim.is_none()
     }
 
-    /// Transform the newly acquired claim, if any.
+    /// Transforms only newly acquired rows, preserving `None` when no claim was
+    /// created; this projection discards the already-satisfied ID evidence.
     pub fn map<U>(self, f: impl FnOnce(QueuedWorkClaim) -> U) -> Option<U> {
         self.claim.map(f)
     }
 
-    /// Return the newly acquired claim or construct an error.
+    /// Returns the newly acquired claim or constructs an error when no rows
+    /// were acquired; this projection discards the already-satisfied ID
+    /// evidence.
     pub fn ok_or_else<E>(self, f: impl FnOnce() -> E) -> Result<QueuedWorkClaim, E> {
         self.claim.ok_or_else(f)
     }
 
-    /// Return the newly acquired claim or panic with `message`.
+    /// Returns the newly acquired claim or panics with `message` when no rows
+    /// were acquired; this projection discards the already-satisfied ID
+    /// evidence.
     #[track_caller]
     pub fn expect(self, message: &str) -> QueuedWorkClaim {
         self.claim.expect(message)
