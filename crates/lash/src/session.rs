@@ -526,7 +526,6 @@ impl LashSession {
             cancel: CancellationToken::new(),
             cancel_origin_hint: lash_core::TurnCancelOriginHint::default(),
             cancels: self.turn_cancels.clone(),
-            batch_ids: Vec::new(),
             drain_id: None,
         }
     }

@@ -73,7 +73,7 @@ enum InMemoryQueuedWorkClaimKind {
     LeadingSessionCommand,
     TurnWork {
         boundary: crate::QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     },
 }
 
@@ -442,9 +442,28 @@ impl InMemorySessionStore {
         kind: InMemoryQueuedWorkClaimKind,
         now: u64,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
+        let mut queued = self.queued_work.lock_recover();
+        Self::claim_ready_queued_work_for_state(
+            &mut queued,
+            session_id,
+            session_execution_lease,
+            owner,
+            kind,
+            now,
+        )
+    }
+
+    fn claim_ready_queued_work_for_state(
+        queued: &mut [InMemoryQueuedBatch],
+        session_id: &str,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        owner: &crate::LeaseOwnerIdentity,
+        kind: InMemoryQueuedWorkClaimKind,
+        now: u64,
+    ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
         let max_batches = match kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => 1,
-            InMemoryQueuedWorkClaimKind::TurnWork { max_batches, .. } => max_batches,
+            InMemoryQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
         if max_batches == 0 {
             return Ok(None);
@@ -454,7 +473,6 @@ impl InMemorySessionStore {
         // pinned generation differs from ours; same-generation self-steal is
         // therefore unrepresentable (ADR 0029).
         let generation = session_execution_lease.fencing_token;
-        let mut queued = self.queued_work.lock_recover();
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         let claim_available = |entry: &InMemoryQueuedBatch| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
@@ -476,36 +494,39 @@ impl InMemorySessionStore {
             .iter()
             .map(|index| {
                 let batch = &queued[*index].batch;
-                Ok(crate::store::queued_work::ClaimCandidate {
-                    enqueue_seq: batch.enqueue_seq,
-                    claim_fencing_token: queued[*index].claim_fencing_token,
-                    work_class: Self::queued_batch_work_class(batch)?,
-                    delivery_policy: batch.delivery_policy,
-                    slot_policy: batch.slot_policy,
-                    merge_key: batch.merge_key.clone(),
-                })
+                Self::queued_batch_work_class(batch)?;
+                Ok(crate::store::queued_work::ClaimCandidate::from_batch(
+                    batch,
+                    queued[*index].claim_fencing_token,
+                    queued[*index].claim_id.clone(),
+                ))
             })
             .collect::<Result<Vec<_>, crate::store::StoreError>>()?;
-        let selected_len = match kind {
+        let selected_indices: Vec<usize> = match kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
-                crate::store::queued_work::select_leading_session_command(&candidates)
+                let selected_len =
+                    crate::store::queued_work::select_leading_session_command(&candidates);
+                claimable_indices
+                    .iter()
+                    .copied()
+                    .take(selected_len)
+                    .collect()
             }
-            InMemoryQueuedWorkClaimKind::TurnWork {
-                boundary,
-                max_batches,
-            } => crate::store::queued_work::select_turn_work_claim_prefix(
-                &candidates,
-                boundary,
-                max_batches,
-            ),
+            InMemoryQueuedWorkClaimKind::TurnWork { boundary, policy } => {
+                crate::store::queued_work::select_turn_work_claim_indices(
+                    &candidates,
+                    boundary,
+                    policy,
+                    now,
+                )?
+                .into_iter()
+                .map(|candidate_index| claimable_indices[candidate_index])
+                .collect()
+            }
         };
-        if selected_len == 0 {
+        if selected_indices.is_empty() {
             return Ok(None);
         }
-        let selected_indices = claimable_indices
-            .into_iter()
-            .take(selected_len)
-            .collect::<Vec<_>>();
         let next_fencing_tokens = selected_indices
             .iter()
             .map(|index| {
@@ -517,6 +538,7 @@ impl InMemorySessionStore {
             .collect::<Result<Vec<_>, _>>()?;
         let first_index = selected_indices[0];
         let first = queued[first_index].batch.clone();
+        let abandon_restore_claim_id = queued[first_index].claim_id.clone();
         let fencing_token = next_fencing_tokens[0];
         let claim_id = crate::store::queued_work::derive_claim_id(
             crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
@@ -544,7 +566,10 @@ impl InMemorySessionStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            data: crate::QueuedWorkClaimData { batches },
+            data: crate::QueuedWorkClaimData {
+                batches,
+                abandon_restore_claim_id,
+            },
         }))
     }
 
@@ -580,6 +605,27 @@ impl InMemorySessionStore {
         mode: crate::TurnInputClaimMode,
         now: u64,
     ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        Self::claim_pending_turn_inputs_for_state(
+            &mut pending,
+            session_id,
+            session_execution_lease,
+            owner,
+            max_inputs,
+            mode,
+            now,
+        )
+    }
+
+    fn claim_pending_turn_inputs_for_state(
+        pending: &mut [InMemoryPendingTurnInput],
+        session_id: &str,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        owner: &crate::LeaseOwnerIdentity,
+        max_inputs: usize,
+        mode: crate::TurnInputClaimMode,
+        now: u64,
+    ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
         if max_inputs == 0 {
             return Ok(None);
         }
@@ -588,7 +634,6 @@ impl InMemorySessionStore {
         // rows pinned to any other generation (or unheld) are claimable
         // (ADR 0029).
         let generation = session_execution_lease.fencing_token;
-        let mut pending = self.pending_turn_inputs.lock_recover();
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
         let claim_available = |entry: &InMemoryPendingTurnInput| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation

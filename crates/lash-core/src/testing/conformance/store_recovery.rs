@@ -46,7 +46,6 @@ fn queued_work(session_id: &str, source: &str) -> crate::QueuedWorkBatchDraft {
     crate::QueuedWorkBatchDraft::new(
         session_id,
         crate::DeliveryPolicy::EarliestSafeBoundary,
-        crate::SlotPolicy::Exclusive,
         vec![crate::QueuedWorkPayload::agent_frame_task(
             format!("frame:{source}"),
             source,
@@ -80,6 +79,7 @@ async fn seed_and_claim(
             &lease_owner,
             crate::QueuedWorkClaimBoundary::Idle,
             &[batch.batch_id],
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim store-recovery queued work")
@@ -153,6 +153,7 @@ async fn assert_no_parallel_reclaim(
                 claim_owner,
                 crate::QueuedWorkClaimBoundary::Idle,
                 batch_ids,
+                crate::testing::queued_work_claim_policy(64),
             )
             .await
             .expect("probe a second pre-settlement reclaim")
@@ -195,6 +196,7 @@ where
             &successor_owner,
             crate::QueuedWorkClaimBoundary::Idle,
             &batch_ids,
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("recover expired claim")
@@ -265,6 +267,7 @@ where
             &successor_owner,
             crate::QueuedWorkClaimBoundary::Idle,
             &batch_ids,
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("recover checkpoint-associated claim")

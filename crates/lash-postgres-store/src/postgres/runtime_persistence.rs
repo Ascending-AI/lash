@@ -43,25 +43,64 @@ const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = $1
        )";
 
 fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> String {
-    let delivery_gate = match boundary {
-        QueuedWorkClaimBoundary::Idle => "",
-        QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
-            "WHERE head_delivery_policy = 'earliest_safe_boundary'"
-        }
-    };
-    format!(
-        "queued_work_head_candidate AS (
-            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy
+    if boundary == QueuedWorkClaimBoundary::Idle {
+        return format!(
+            "queued_work_head_candidate AS (
+            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
             FROM (
                 SELECT enqueue_seq AS head_enqueue_seq,
                        batch_id AS head_batch_id,
-                       delivery_policy AS head_delivery_policy
+                       delivery_policy AS head_delivery_policy,
+                       claim_id AS head_claim_id
                 FROM lash_queued_work_batches
                 WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
                 ORDER BY enqueue_seq ASC
                 LIMIT 1
             ) AS unfiltered_head
-            {delivery_gate}
+         )"
+        );
+    }
+    format!(
+        "queued_work_unfiltered_head AS (
+            SELECT enqueue_seq AS head_enqueue_seq,
+                   batch_id AS head_batch_id,
+                   delivery_policy AS head_delivery_policy,
+                   claim_id AS head_claim_id
+            FROM lash_queued_work_batches
+            WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+            ORDER BY enqueue_seq ASC
+            LIMIT 1
+         ),
+         queued_work_head_candidate AS (
+            SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
+            FROM (
+                SELECT candidate.enqueue_seq AS head_enqueue_seq,
+                       candidate.batch_id AS head_batch_id,
+                       candidate.delivery_policy AS head_delivery_policy,
+                       candidate.claim_id AS head_claim_id
+                FROM lash_queued_work_batches AS candidate
+                CROSS JOIN queued_work_unfiltered_head AS unfiltered
+                WHERE candidate.session_id = $1
+                  AND candidate.available_at_ms <= FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)
+                  AND (
+                       candidate.claim_token IS NULL
+                       OR candidate.claim_session_lease_generation <> $2
+                  )
+                  AND (
+                       (
+                            candidate.enqueue_seq = unfiltered.head_enqueue_seq
+                            AND unfiltered.head_delivery_policy = 'earliest_safe_boundary'
+                       )
+                       OR (
+                            unfiltered.head_delivery_policy <> 'earliest_safe_boundary'
+                            AND unfiltered.head_claim_id IS NOT NULL
+                            AND candidate.claim_id IS DISTINCT FROM unfiltered.head_claim_id
+                       )
+                  )
+                ORDER BY candidate.enqueue_seq ASC
+                LIMIT 1
+            ) AS boundary_head
+            WHERE head_delivery_policy = 'earliest_safe_boundary'
          )"
     )
 }
@@ -71,14 +110,19 @@ fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) 
     format!(
         "WITH {head_candidate}
          SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                 claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
          FROM lash_queued_work_batches
          CROSS JOIN queued_work_head_candidate
          WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+           AND enqueue_seq >= head_enqueue_seq
+           AND (head_claim_id IS NULL OR lash_queued_work_batches.claim_id = head_claim_id)
          ORDER BY enqueue_seq ASC
-         LIMIT $3
+         LIMIT COALESCE((
+             SELECT CASE WHEN head_claim_id IS NULL THEN $3 ELSE 9223372036854775807 END
+             FROM queued_work_head_candidate
+         ), 0)
          FOR UPDATE OF lash_queued_work_batches SKIP LOCKED"
     )
 }
@@ -233,18 +277,19 @@ async fn enqueue_queued_work_with_outcome_tx(
     );
     sqlx::query(
         "INSERT INTO lash_queued_work_batches (
-            enqueue_seq, batch_id, session_id, source_key, delivery_policy, slot_policy,
-            merge_key_json, available_at_ms, enqueued_at_ms
+            enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
+            authority_json, merge_key, available_at_ms, enqueued_at_ms
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(enqueue_seq)
     .bind(&batch_id)
     .bind(&batch.session_id)
     .bind(&batch.source_key)
     .bind(batch.delivery_policy.as_str())
-    .bind(batch.slot_policy.as_str())
-    .bind(encode_json(&batch.merge_key)?)
+    .bind(batch.kind.as_str())
+    .bind(encode_json(&batch.authority)?)
+    .bind(&batch.merge_key)
     .bind(sql_available_at_ms)
     .bind(now as i64)
     .execute(&mut **tx)
@@ -1447,21 +1492,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let candidates = selected
             .iter()
             .zip(selected_batches.iter())
-            .map(|(row, batch)| {
-                Ok(ClaimCandidate {
-                    enqueue_seq: row.enqueue_seq,
-                    claim_fencing_token: row.claim_fencing_token,
-                    work_class: batch.work_class().ok_or_else(|| {
-                        StoreError::Backend(format!(
-                            "queued-work batch `{}` has mixed or empty payload classes",
-                            batch.batch_id
-                        ))
-                    })?,
-                    delivery_policy: row.delivery_policy,
-                    slot_policy: row.slot_policy,
-                    merge_key: row.merge_key.clone(),
-                })
-            })
+            .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
         let selected_len = select_leading_session_command(&candidates);
         if selected_len == 0 {
@@ -1525,9 +1556,10 @@ impl QueuedWorkStore for PostgresSessionStore {
             lease_token: lease.lease_token,
             fencing_token: lease.fencing_token,
             session_lease_generation: lease.session_lease_generation,
-            data: lash_core::runtime::QueuedWorkClaimData {
-                batches: selected_batches,
-            },
+            data: lash_core::store_backend_support::queued_work_claim_data(
+                selected_batches,
+                candidates[0].prior_claim_id.clone(),
+            ),
         }))
     }
 
@@ -1537,9 +1569,9 @@ impl QueuedWorkStore for PostgresSessionStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        if max_batches == 0 {
+        if policy.max_rows == 0 {
             return Ok(None);
         }
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
@@ -1549,7 +1581,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
             .bind(session_id)
             .bind(sql_session_lease_generation(generation)?)
-            .bind(claim_scan_limit(max_batches))
+            .bind(claim_scan_limit(policy.max_rows))
             .fetch_all(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1567,23 +1599,9 @@ impl QueuedWorkStore for PostgresSessionStore {
         let candidates = selected
             .iter()
             .zip(selected_batches.iter())
-            .map(|(row, batch)| {
-                Ok(ClaimCandidate {
-                    enqueue_seq: row.enqueue_seq,
-                    claim_fencing_token: row.claim_fencing_token,
-                    work_class: batch.work_class().ok_or_else(|| {
-                        StoreError::Backend(format!(
-                            "queued-work batch `{}` has mixed or empty payload classes",
-                            batch.batch_id
-                        ))
-                    })?,
-                    delivery_policy: row.delivery_policy,
-                    slot_policy: row.slot_policy,
-                    merge_key: row.merge_key.clone(),
-                })
-            })
+            .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, max_batches);
+        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
         if selected_len == 0 {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
@@ -1645,9 +1663,10 @@ impl QueuedWorkStore for PostgresSessionStore {
             lease_token: lease.lease_token,
             fencing_token: lease.fencing_token,
             session_lease_generation: lease.session_lease_generation,
-            data: lash_core::runtime::QueuedWorkClaimData {
-                batches: selected_batches,
-            },
+            data: lash_core::store_backend_support::queued_work_claim_data(
+                selected_batches,
+                candidates[0].prior_claim_id.clone(),
+            ),
         }))
     }
 
@@ -1659,7 +1678,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: QueuedWorkClaimPolicy,
     ) -> Result<(Option<lash_core::TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         #[cfg(test)]
         self.checkpoint_probe_count
@@ -1671,7 +1690,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             turn_id,
             checkpoint,
             max_inputs,
-            max_batches,
+            policy.max_rows,
         )
         .await?
         {
@@ -1708,7 +1727,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             session_execution_lease,
             owner,
             QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-            max_batches,
+            policy,
         )
         .await?;
         match queued {
@@ -1730,64 +1749,214 @@ impl QueuedWorkStore for PostgresSessionStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+        policy: QueuedWorkClaimPolicy,
+    ) -> Result<lash_core::SelectedQueuedWorkClaimOutcome, StoreError> {
         if batch_ids.is_empty() {
-            return Ok(None);
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                Vec::new(),
+            ));
         }
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
         let generation = session_execution_lease.fencing_token;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        let mut selected = Vec::new();
-        let mut selected_batches = Vec::new();
-        for batch_id in batch_ids {
-            let row = sqlx::query(
+        let requested_ids = batch_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let present_ids = sqlx::query_scalar::<_, String>(
+            "SELECT batch_id
+             FROM lash_queued_work_batches
+             WHERE session_id = $1 AND batch_id = ANY($2)",
+        )
+        .bind(session_id)
+        .bind(batch_ids)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        let already_satisfied_batch_ids = batch_ids
+            .iter()
+            .filter(|batch_id| !present_ids.contains(batch_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if present_ids.is_empty() {
+            tx.rollback().await.map_err(store_sqlx_error)?;
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
+        }
+        let requested_rows = sqlx::query(
                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                        slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                        work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                         claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                        claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
                  FROM lash_queued_work_batches
-                 WHERE session_id = $1 AND batch_id = $2 AND available_at_ms <= $3
-                   AND (claim_token IS NULL OR claim_session_lease_generation <> $4)
-                 FOR UPDATE",
+                 WHERE session_id = $1 AND available_at_ms <= $2
+                   AND (claim_token IS NULL OR claim_session_lease_generation <> $3)
+                   AND batch_id = ANY($4)
+                 ORDER BY enqueue_seq ASC",
             )
             .bind(session_id)
-            .bind(batch_id)
             .bind(now as i64)
             .bind(sql_session_lease_generation(generation)?)
-            .fetch_optional(&mut *tx)
+            .bind(batch_ids)
+            .fetch_all(&mut *tx)
             .await
-            .map_err(store_sqlx_error)?;
-            let Some(row) = row else {
-                tx.rollback().await.map_err(store_sqlx_error)?;
-                return Ok(None);
-            };
-            let row = queued_batch_row(row)?;
-            let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
-            if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
-                tx.rollback().await.map_err(store_sqlx_error)?;
-                return Ok(None);
-            }
-            selected.push(row);
-            selected_batches.push(batch);
+            .map_err(store_sqlx_error)?
+            .into_iter()
+            .map(queued_batch_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        if requested_rows.len() != present_ids.len() {
+            tx.rollback().await.map_err(store_sqlx_error)?;
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
+        let involved_claim_ids = requested_rows
+            .iter()
+            .filter_map(|row| row.claim_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut validation_rows = requested_rows.clone();
+        if !involved_claim_ids.is_empty() {
+            validation_rows.extend(
+                sqlx::query(
+                    "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
+                            work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                            claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
+                            claim_owner_liveness_json, claim_token,
+                            claim_session_lease_generation, claim_id
+                     FROM lash_queued_work_batches
+                     WHERE session_id = $1 AND available_at_ms <= $2
+                       AND (claim_token IS NULL OR claim_session_lease_generation <> $3)
+                       AND claim_id = ANY($4)
+                     ORDER BY enqueue_seq ASC",
+                )
+                .bind(session_id)
+                .bind(now as i64)
+                .bind(sql_session_lease_generation(generation)?)
+                .bind(&involved_claim_ids)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .into_iter()
+                .map(queued_batch_row)
+                .collect::<Result<Vec<_>, _>>()?,
+            );
+            validation_rows.sort_by_key(|row| row.enqueue_seq);
+            validation_rows.dedup_by(|left, right| left.batch_id == right.batch_id);
+        }
+        let validation_batch_claims = validation_rows
+            .iter()
+            .map(|row| (row.batch_id.clone(), row.claim_id.clone()))
+            .collect::<Vec<_>>();
+        let interrupted_positions =
+            lash_core::store::queued_work::select_interrupted_exact_claim_indices(
+                &validation_batch_claims,
+                batch_ids,
+            )
+            .map_err(|required_batch_ids| {
+                StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }
+            })?;
+        let (mut selected, mut selected_batches) =
+            if let Some(interrupted_positions) = interrupted_positions {
+                let selected = interrupted_positions
+                    .into_iter()
+                    .map(|position| validation_rows[position].clone())
+                    .collect::<Vec<_>>();
+                let mut selected_batches = Vec::with_capacity(selected.len());
+                for row in &selected {
+                    selected_batches.push(queued_work_batch_from_row(&mut tx, row.clone()).await?);
+                }
+                (selected, selected_batches)
+            } else {
+                let mut requested_batches = std::collections::BTreeMap::new();
+                for row in &requested_rows {
+                    let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
+                    if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
+                        tx.rollback().await.map_err(store_sqlx_error)?;
+                        return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                            None,
+                            already_satisfied_batch_ids,
+                        ));
+                    }
+                    requested_batches.insert(row.batch_id.clone(), batch);
+                }
+                let span_rows = sqlx::query(
+                    "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
+                            work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                            claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
+                            claim_owner_liveness_json, claim_token,
+                            claim_session_lease_generation, claim_id
+                     FROM lash_queued_work_batches
+                     WHERE session_id = $1 AND available_at_ms <= $2
+                       AND (claim_token IS NULL OR claim_session_lease_generation <> $3)
+                       AND enqueue_seq BETWEEN $4 AND $5
+                     ORDER BY enqueue_seq ASC",
+                )
+                .bind(session_id)
+                .bind(now as i64)
+                .bind(sql_session_lease_generation(generation)?)
+                .bind(requested_rows[0].enqueue_seq as i64)
+                .bind(
+                    requested_rows
+                        .last()
+                        .expect("requested rows exist")
+                        .enqueue_seq as i64,
+                )
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .into_iter()
+                .map(queued_batch_row)
+                .collect::<Result<Vec<_>, _>>()?;
+                let Some(first_position) = span_rows
+                    .iter()
+                    .position(|row| requested_ids.contains(&row.batch_id))
+                else {
+                    tx.rollback().await.map_err(store_sqlx_error)?;
+                    return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                        None,
+                        already_satisfied_batch_ids,
+                    ));
+                };
+                let selected = span_rows[first_position..]
+                    .iter()
+                    .take_while(|row| requested_ids.contains(&row.batch_id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let selected_batches = selected
+                    .iter()
+                    .map(|row| {
+                        requested_batches
+                            .get(&row.batch_id)
+                            .expect("contiguous exact row was validated")
+                            .clone()
+                    })
+                    .collect::<Vec<_>>();
+                (selected, selected_batches)
+            };
         let candidates = selected
             .iter()
-            .map(|row| ClaimCandidate {
-                enqueue_seq: row.enqueue_seq,
-                claim_fencing_token: row.claim_fencing_token,
-                work_class: lash_core::store::QueuedWorkClass::TurnWork,
-                delivery_policy: row.delivery_policy,
-                slot_policy: row.slot_policy,
-                merge_key: row.merge_key.clone(),
-            })
-            .collect::<Vec<_>>();
-        if select_turn_work_claim_prefix(&candidates, boundary, candidates.len())
-            != candidates.len()
-        {
+            .zip(selected_batches.iter())
+            .map(|(row, batch)| claim_candidate_from_row(row, batch))
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
+        if selected_len == 0 {
             tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(None);
+            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
+        selected.truncate(selected_len);
+        selected_batches.truncate(selected_len);
         let lease =
             WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation)?;
         let sql_fencing_tokens = sql_claim_fencing_tokens(
@@ -1822,27 +1991,34 @@ impl QueuedWorkStore for PostgresSessionStore {
             .rows_affected();
             if changed != 1 {
                 tx.rollback().await.map_err(store_sqlx_error)?;
-                return Ok(None);
+                return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
             }
         }
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Some(QueuedWorkClaim {
-            session_id: session_id.to_string(),
-            claim_id: lease.claim_id,
-            owner: owner.clone(),
-            lease_token: lease.lease_token,
-            fencing_token: lease.fencing_token,
-            session_lease_generation: lease.session_lease_generation,
-            data: lash_core::runtime::QueuedWorkClaimData {
-                batches: selected_batches,
-            },
-        }))
+        Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+            Some(QueuedWorkClaim {
+                session_id: session_id.to_string(),
+                claim_id: lease.claim_id,
+                owner: owner.clone(),
+                lease_token: lease.lease_token,
+                fencing_token: lease.fencing_token,
+                session_lease_generation: lease.session_lease_generation,
+                data: lash_core::store_backend_support::queued_work_claim_data(
+                    selected_batches,
+                    candidates[0].prior_claim_id.clone(),
+                ),
+            }),
+            already_satisfied_batch_ids,
+        ))
     }
 
     async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {
         sqlx::query(
             "UPDATE lash_queued_work_batches
-             SET claim_id = NULL,
+             SET claim_id = $4,
                  claim_owner_id = NULL,
                  claim_owner_incarnation_id = NULL,
                  claim_owner_liveness_json = NULL,
@@ -1853,6 +2029,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         .bind(&claim.session_id)
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
+        .bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))
         .execute(&self.pool)
         .await
         .map_err(store_sqlx_error)?;
@@ -1867,20 +2044,29 @@ impl QueuedWorkStore for PostgresSessionStore {
             return Ok(());
         }
         let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-            "UPDATE lash_queued_work_batches
-             SET claim_id = NULL,
+            "UPDATE lash_queued_work_batches AS batch
+             SET claim_id = abandoned.restore_claim_id,
                  claim_owner_id = NULL,
                  claim_owner_incarnation_id = NULL,
                  claim_owner_liveness_json = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0
-             WHERE (session_id, claim_id, claim_token) IN ",
+             FROM (",
         );
         query.push_tuples(claims, |mut row, claim| {
             row.push_bind(&claim.session_id)
                 .push_bind(&claim.claim_id)
-                .push_bind(&claim.lease_token);
+                .push_bind(&claim.lease_token)
+                .push_bind(
+                    lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim),
+                );
         });
+        query.push(
+            ") AS abandoned(session_id, claim_id, claim_token, restore_claim_id)
+             WHERE batch.session_id = abandoned.session_id
+               AND batch.claim_id = abandoned.claim_id
+               AND batch.claim_token = abandoned.claim_token",
+        );
         query
             .build()
             .execute(&self.pool)
@@ -1898,9 +2084,9 @@ impl QueuedWorkStore for PostgresSessionStore {
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let row = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
              FROM lash_queued_work_batches
              WHERE session_id = $1
                AND batch_id = $2
@@ -1938,9 +2124,9 @@ impl QueuedWorkStore for PostgresSessionStore {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         let rows = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
              FROM lash_queued_work_batches
              WHERE session_id = $1
              ORDER BY enqueue_seq ASC",
@@ -1965,9 +2151,9 @@ impl QueuedWorkStore for PostgresSessionStore {
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    slot_policy, merge_key_json, available_at_ms, enqueued_at_ms,
+                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
              FROM lash_queued_work_batches
              WHERE session_id = $1
                AND (claim_token IS NULL OR NOT EXISTS (
@@ -2571,9 +2757,9 @@ async fn claim_ready_queued_work_postgres_tx(
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
-    max_batches: usize,
+    policy: QueuedWorkClaimPolicy,
 ) -> Result<ClaimTransactionOutcome<Option<QueuedWorkClaim>>, StoreError> {
-    if max_batches == 0 {
+    if policy.max_rows == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
     }
     let generation = session_execution_lease.fencing_token;
@@ -2581,7 +2767,7 @@ async fn claim_ready_queued_work_postgres_tx(
     let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
         .bind(session_id)
         .bind(sql_session_lease_generation(generation)?)
-        .bind(claim_scan_limit(max_batches))
+        .bind(claim_scan_limit(policy.max_rows))
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -2599,23 +2785,9 @@ async fn claim_ready_queued_work_postgres_tx(
     let candidates = selected
         .iter()
         .zip(selected_batches.iter())
-        .map(|(row, batch)| {
-            Ok(ClaimCandidate {
-                enqueue_seq: row.enqueue_seq,
-                claim_fencing_token: row.claim_fencing_token,
-                work_class: batch.work_class().ok_or_else(|| {
-                    StoreError::Backend(format!(
-                        "queued-work batch `{}` has mixed or empty payload classes",
-                        batch.batch_id
-                    ))
-                })?,
-                delivery_policy: row.delivery_policy,
-                slot_policy: row.slot_policy,
-                merge_key: row.merge_key.clone(),
-            })
-        })
+        .map(|(row, batch)| claim_candidate_from_row(row, batch))
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, max_batches);
+    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
     if selected_len == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
     }
@@ -2674,9 +2846,10 @@ async fn claim_ready_queued_work_postgres_tx(
         lease_token: lease.lease_token,
         fencing_token: lease.fencing_token,
         session_lease_generation: lease.session_lease_generation,
-        data: lash_core::runtime::QueuedWorkClaimData {
-            batches: selected_batches,
-        },
+        data: lash_core::store_backend_support::queued_work_claim_data(
+            selected_batches,
+            candidates[0].prior_claim_id.clone(),
+        ),
     })))
 }
 

@@ -7,9 +7,9 @@ use anyhow::Context;
 use lash::usage::SessionUsageReport;
 use lash_core::llm::types::{LlmResponse, LlmUsage};
 use lash_core::runtime::{
-    DeliveryPolicy, MergeKey, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkCompletion,
+    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkCompletion,
     QueuedWorkPayload, RuntimeScope, RuntimeSubject, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-    SessionCommand, SlotPolicy,
+    SessionCommand,
 };
 use lash_core::sansio::{
     ChatContextProjector, CompletedToolCall, PendingToolCall, ProtocolDriverHandle,

@@ -268,6 +268,7 @@ mod wake_delivery_identity_tests {
                 "replay",
             ),
             process_caused_by: None,
+            authority: crate::QueuedWorkAuthority::default(),
             input: "wake".to_string(),
             created_at_ms: 10,
         };
@@ -294,6 +295,7 @@ mod wake_delivery_identity_tests {
                     "replay",
                 ),
                 process_caused_by: None,
+                authority: crate::QueuedWorkAuthority::default(),
                 input: "wake".to_string(),
                 created_at_ms: 10,
             };

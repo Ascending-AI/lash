@@ -5,7 +5,6 @@ fn queued_work_test_draft(
     lash::persistence::QueuedWorkBatchDraft::new(
         session_id,
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-        lash::persistence::SlotPolicy::Exclusive,
         vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
             "workbench-queued-work-test-frame",
             source_key,
@@ -24,9 +23,9 @@ fn workbench_process_wake_draft(
     lash::persistence::QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-        lash::persistence::SlotPolicy::Exclusive,
         vec![lash::persistence::QueuedWorkPayload::process_wake(wake)],
     )
+    .with_merge_key(lash::persistence::PROCESS_WAKE_MERGE_KEY)
     .with_source_key(source_key)
     .with_process_wake_source(process_id, sequence)
 }
@@ -165,6 +164,118 @@ fn workbench_lists_and_controls_individual_queued_batches() {
 }
 
 #[test]
+fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
+    run_async_test_on_stack_budget("workbench-selected-drain-refusal", || async {
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-selected-drain-refusal-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create selected-drain refusal dir");
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        );
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
+            &data_dir,
+            16,
+            lash::testing::TestProvider::builder()
+                .kind("workbench-selected-drain-refusal-test")
+                .complete(|_| async {
+                    Ok(text_response(
+                        "<lashlang>\nfinish \"processed selected row\"\n</lashlang>",
+                    ))
+                })
+                .build()
+                .into_handle(),
+            in_memory_trigger_store(),
+            Arc::clone(&store_factory),
+            Some(inert_queued_work_driver()),
+            32_768,
+        )
+        .await;
+        let session_id = state.current_session_id();
+        let session = state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .expect("open selected-drain refusal session");
+        let store = store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: lash::persistence::SessionRelation::Root,
+                policy: session.policy_snapshot(),
+            })
+            .await
+            .expect("open selected-drain refusal store");
+        for (source_key, merge_key) in [
+            ("workbench-selected-a1", "a"),
+            ("workbench-selected-b1", "b"),
+            ("workbench-selected-a2", "a"),
+        ] {
+            store
+                .enqueue_queued_work(
+                    queued_work_test_draft(&session_id, source_key).with_merge_key(merge_key),
+                )
+                .await
+                .expect("enqueue selected-drain refusal row");
+        }
+
+        let error = session
+            .queued_turn()
+            .batch_ids(["recording-qwb-1", "recording-qwb-3"])
+            .run()
+            .await
+            .expect_err("a key break refuses the original selected set");
+        match error {
+            lash::EmbedError::SelectedQueuedWorkDrainRefused { cause } => match cause {
+                lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                    unclaimed_batch_ids,
+                } => assert_eq!(unclaimed_batch_ids, vec!["recording-qwb-3".to_string()]),
+                lash::SelectedQueuedWorkDrainRefusalCause::
+                    InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!(
+                    "key-break example did not create interrupted composition {required_batch_ids:?}"
+                ),
+                lash::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
+                    panic!("key-break example does not hold the execution lane")
+                }
+            },
+            other => panic!("expected typed unclaimable-together refusal, got {other:?}"),
+        }
+
+        let output = session
+            .queued_turn()
+            .batch_ids(["recording-qwb-1"])
+            .run()
+            .await
+            .expect("re-select the claimable prefix")
+            .expect("the re-selected row executes");
+        assert_eq!(
+            output
+                .activities
+                .iter()
+                .find_map(|activity| match &activity.event {
+                    lash::TurnEvent::QueuedWorkStarted { batch_ids, .. } => {
+                        Some(batch_ids.clone())
+                    }
+                    _ => None,
+                }),
+            Some(vec!["recording-qwb-1".to_string()])
+        );
+        assert_eq!(
+            session
+                .queued_work()
+                .await
+                .expect("list after selected-drain re-selection")
+                .iter()
+                .map(|batch| batch.batch_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["recording-qwb-2", "recording-qwb-3"]
+        );
+        let _ = std::fs::remove_dir_all(data_dir);
+    });
+}
+
+#[test]
 fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery() {
     run_async_test_on_stack_budget("workbench-targeted-wake-drain", || async {
         let data_dir = std::env::temp_dir().join(format!(
@@ -175,7 +286,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
         );
-        let state = recoverable_chat_test_state_with_dependencies(
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
             &data_dir,
             16,
             lash::testing::TestProvider::builder()
@@ -190,6 +301,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            32_768,
         )
         .await;
         let session_id = state.current_session_id();
@@ -304,7 +416,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             drain_id: Some("workbench-targeted-later-drain".to_string()),
         };
         let later_output = later_request
-            .queued_turn(&session)
+            .selected_queued_turn(&session)
             .run()
             .await
             .expect("run only later workbench batch")
@@ -554,7 +666,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         };
         assert!(
             stale_selection
-                .queued_turn(&session)
+                .selected_queued_turn(&session)
                 .run()
                 .await
                 .expect("a selection naming an already-drained batch is a no-op, not an error")
@@ -584,7 +696,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         };
         assert!(
             earlier_request
-                .queued_turn(&session)
+                .selected_queued_turn(&session)
                 .run()
                 .await
                 .expect("run earlier workbench batch after later")
@@ -694,7 +806,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
         );
-        let state = recoverable_chat_test_state_with_dependencies(
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
             &data_dir,
             16,
             lash::testing::TestProvider::builder()
@@ -705,6 +817,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            32_768,
         )
         .await;
         let session_id = state.current_session_id();
@@ -859,6 +972,87 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             rendered_agent_rows, committed_agent_replies,
             "the rendered agent row must be the committed transcript copy"
         );
+        let _ = std::fs::remove_dir_all(data_dir);
+    });
+}
+
+#[test]
+fn selected_drain_reports_claimed_and_already_satisfied_batches() {
+    run_async_test_on_stack_budget("workbench-selected-drain-outcome", || async {
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-selected-drain-outcome-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create selected-drain outcome dir");
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
+            &data_dir,
+            16,
+            lash::testing::TestProvider::builder()
+                .kind("workbench-selected-drain-outcome-test")
+                .complete(|_| async {
+                    Ok(text_response(
+                        "<lashlang>\nfinish \"processed selected row\"\n</lashlang>",
+                    ))
+                })
+                .build()
+                .into_handle(),
+            in_memory_trigger_store(),
+            Arc::clone(&store_factory),
+            Some(inert_queued_work_driver()),
+            32_768,
+        )
+        .await;
+        let session_id = state.current_session_id();
+        let session = state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .expect("open selected-drain outcome session");
+        let store = store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: lash::persistence::SessionRelation::Root,
+                policy: session.policy_snapshot(),
+            })
+            .await
+            .expect("open selected-drain outcome store");
+        let batch = store
+            .enqueue_queued_work(queued_work_test_draft(
+                &session_id,
+                "workbench-selected-drain-outcome",
+            ))
+            .await
+            .expect("enqueue selected-drain outcome row");
+
+        let claimed = session
+            .queued_turn()
+            .batch_ids([batch.batch_id.clone()])
+            .run()
+            .await
+            .expect("run selected-drain outcome row");
+        let claimed_satisfaction = vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+            batch_id: batch.batch_id.clone(),
+        }];
+        assert!(claimed.turn.is_some());
+        assert!(claimed.is_some());
+        assert_eq!(claimed.satisfied, claimed_satisfaction);
+
+        let replay = session
+            .queued_turn()
+            .batch_ids([batch.batch_id.clone()])
+            .run()
+            .await
+            .expect("replay selected-drain outcome row");
+        let replay_satisfaction =
+            vec![lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                batch_id: batch.batch_id,
+            }];
+        assert!(replay.turn.is_none());
+        assert!(replay.is_none());
+        assert_eq!(replay.satisfied, replay_satisfaction);
         let _ = std::fs::remove_dir_all(data_dir);
     });
 }

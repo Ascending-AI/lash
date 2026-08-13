@@ -34,7 +34,6 @@ async fn run_once_queued_work_claim_stress(
                 QueuedWorkBatchDraft::new(
                     other_session_id,
                     DeliveryPolicy::EarliestSafeBoundary,
-                    SlotPolicy::Exclusive,
                     vec![QueuedWorkPayload::session_command(
                         SessionCommand::RefreshToolCatalog {
                             reason: format!("other queued work {index}"),
@@ -123,7 +122,7 @@ async fn run_once_queued_work_claim_stress(
                         &lease.fence(),
                         &owner,
                         QueuedWorkClaimBoundary::Idle,
-                        QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                        lash_core::testing::queued_work_claim_policy(QUEUED_WORK_JOIN_BATCHES_PER_TURN),
                     )
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("queued-work stress expected join claim"))
@@ -164,6 +163,7 @@ async fn run_once_queued_work_claim_stress(
                         &owner,
                         QueuedWorkClaimBoundary::Idle,
                         &join_batch_ids,
+                        lash_core::testing::queued_work_claim_policy(64),
                     )
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("queued-work stress expected exact reclaim"))
@@ -202,7 +202,7 @@ async fn run_once_queued_work_claim_stress(
                         &lease.fence(),
                         &owner,
                         QueuedWorkClaimBoundary::Idle,
-                        QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                        lash_core::testing::queued_work_claim_policy(QUEUED_WORK_JOIN_BATCHES_PER_TURN),
                     )
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("queued-work stress expected exclusive claim"))
@@ -377,13 +377,13 @@ async fn enqueue_queued_work_stress_turn(
             QueuedWorkBatchDraft::new(
                 session_id,
                 DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
                 vec![QueuedWorkPayload::session_command(
                     SessionCommand::RefreshToolCatalog {
                         reason: format!("queued-work-stress-{turn_index}"),
                     },
                 )],
             )
+            .with_kind(lash_core::QueuedWorkKind::Control)
             .with_source_key(format!("command:{turn_index}")),
         )
         .await?;
@@ -394,9 +394,8 @@ async fn enqueue_queued_work_stress_turn(
             &format!("queued work stress turn {turn_index} batch {batch_index}"),
             (turn_index * QUEUED_WORK_JOIN_BATCHES_PER_TURN + batch_index + 1) as u64,
         );
-        let mut draft = lash_core::runtime::process_wake_batch_draft(wake);
-        draft.slot_policy = SlotPolicy::Join;
-        draft.merge_key = MergeKey::Group("runtime-perf-queued-work-stress".to_string());
+        let draft = lash_core::runtime::process_wake_batch_draft(wake)
+            .with_merge_key("runtime-perf-queued-work-stress");
         store
             .enqueue_queued_work(draft)
             .await?;
@@ -436,6 +435,7 @@ fn queued_work_stress_wake(
             replay: None,
         },
         process_caused_by: None,
+        authority: lash_core::QueuedWorkAuthority::default(),
         input: input.to_string(),
         created_at_ms: sequence,
     }

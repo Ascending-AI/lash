@@ -64,6 +64,7 @@ mod tests {
                 data_dir.join("attachments"),
             )))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .process_env_store(Arc::new(sync_await({
                 let path = data_dir.join("process-env.db");
                 async move {
@@ -1236,6 +1237,7 @@ finish initial
                 )),
                 process_env_store,
                 lash::CommitBudget::bounded(1024 * 1024, 512),
+                lash::QueuedWorkBatchingConfig::new(1),
             ))
             .build()
             .expect("build core");
@@ -1858,6 +1860,7 @@ finish initial
                 data_dir.join("attachments"),
             )))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .process_env_store(process_env_store)
             .trigger_store(Arc::clone(&trigger_store))
             .trace_sink(Arc::clone(&trace_sink))
@@ -2191,6 +2194,7 @@ finish initial
                 attachment_store,
                 process_env_store,
                 lash::CommitBudget::bounded(1024 * 1024, 512),
+                lash::QueuedWorkBatchingConfig::new(1),
             ))
             .build()
             .expect("build core")

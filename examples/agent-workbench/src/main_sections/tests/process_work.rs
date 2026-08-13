@@ -385,10 +385,15 @@ mod process_work_tests {
             subscription_incarnation: Some("incarnation-blue".to_string()),
         };
         let provenance = ProcessProvenance::session(scope.clone()).with_caused_by(Some(cause));
-        let ProcessOriginator::Session { session_id } = &provenance.originator else {
+        let ProcessOriginator::Session {
+            session_id,
+            agent_frame_id,
+        } = &provenance.originator
+        else {
             panic!("session work must retain a session originator");
         };
         assert_eq!(session_id, "session-finance");
+        assert_eq!(agent_frame_id.as_deref(), Some("frame-review"));
         let Some(CausalRef::TriggerOccurrence {
             occurrence_id,
             subscription_id,
@@ -478,6 +483,7 @@ mod process_work_tests {
         assert_eq!(record.input.engine_specific_kind(), Some("report-export"));
         assert_eq!(record.provenance.originator, ProcessOriginator::Session {
             session_id: "session-finance".to_string(),
+            agent_frame_id: Some("frame-review".to_string()),
         });
         assert_eq!(
             record.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),

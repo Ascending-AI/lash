@@ -144,6 +144,130 @@ pub async fn wake_delivery_crash_matrix(
     .await
     .expect("re-drive wake outbox");
     assert_eq!(second.enqueued, 0);
+
+    // Production authority and host delivery policy are stamped at process
+    // registration/event append and forwarded by the real delivery driver.
+    // A synthetic queue draft would miss precisely the seam this guards.
+    let authority_target_session_id = "wake-authority-target";
+    let authority_target = factory
+        .create_store(&crate::SessionStoreCreateRequest {
+            session_id: authority_target_session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy {
+                session_id: Some(authority_target_session_id.to_string()),
+                ..request.policy.clone()
+            },
+        })
+        .await
+        .expect("create authority wake target");
+    let mut authority_wakes = Vec::new();
+    for (process_id, frame_id) in [
+        ("wake-authority-sender-a", "elevated-agent-frame-a"),
+        ("wake-authority-sender-b", "elevated-agent-frame-b"),
+    ] {
+        registry
+            .register_process(
+                process_registry::registration(process_id)
+                    .with_process_provenance(crate::ProcessProvenance::session(
+                        crate::SessionScope::for_agent_frame("originating-session", frame_id),
+                    ))
+                    .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                    .with_wake_session_id(Some(authority_target_session_id.to_string())),
+            )
+            .await
+            .expect("register authority wake producer");
+        authority_wakes.push(
+            registry
+                .append_event(
+                    process_id,
+                    crate::ProcessEventAppendRequest::new(
+                        "producer.wake",
+                        serde_json::json!({"wake_input": "authorized resume"}),
+                    ),
+                )
+                .await
+                .expect("append authority wake")
+                .wake_delivery
+                .expect("authority wake outbox row"),
+        );
+    }
+    assert_eq!(
+        authority_wakes[0].authority,
+        crate::QueuedWorkAuthority::new("originating-session")
+            .with_elevation("elevated-agent-frame-a")
+    );
+    assert_eq!(
+        authority_wakes[1].authority,
+        crate::QueuedWorkAuthority::new("originating-session")
+            .with_elevation("elevated-agent-frame-b")
+    );
+    let authority_report = crate::WakeDeliveryDriver::drive_pending_once_with_delivery_policy(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        None,
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        crate::DeliveryPolicy::AfterCurrentTurnCommit,
+        32,
+    )
+    .await
+    .expect("deliver authority wake through production driver");
+    assert_eq!(authority_report.enqueued, 2);
+    let authority_rows = authority_target
+        .list_queued_work(authority_target_session_id)
+        .await
+        .expect("list delivered authority wake");
+    assert_eq!(authority_rows.len(), 2);
+    assert_eq!(
+        authority_rows[0].authority,
+        crate::QueuedWorkAuthority::new("originating-session")
+            .with_elevation("elevated-agent-frame-a")
+    );
+    assert_eq!(
+        authority_rows[0].delivery_policy,
+        crate::DeliveryPolicy::AfterCurrentTurnCommit
+    );
+    assert_eq!(
+        authority_rows[0].merge_key.as_deref(),
+        Some(crate::PROCESS_WAKE_MERGE_KEY)
+    );
+    assert_eq!(
+        authority_rows[1].merge_key.as_deref(),
+        Some(crate::PROCESS_WAKE_MERGE_KEY)
+    );
+    let authority_owner = crate::LeaseOwnerIdentity::opaque(
+        "wake-authority-owner",
+        "wake-authority-owner:incarnation",
+    );
+    let authority_lease = authority_target
+        .try_claim_session_execution_lease(authority_target_session_id, &authority_owner, 60_000)
+        .await
+        .expect("claim authority target execution lease")
+        .acquired()
+        .expect("authority target lease is free");
+    let authority_claim = authority_target
+        .claim_ready_queued_work(
+            authority_target_session_id,
+            &authority_lease.fence(),
+            &authority_owner,
+            crate::QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(10),
+        )
+        .await
+        .expect("claim authority-separated wakes")
+        .expect("first authority wake is ready");
+    assert_eq!(
+        authority_claim.batches.len(),
+        1,
+        "production wakes that differ only in elevation must not batch"
+    );
+    assert_eq!(
+        authority_claim.batches[0].authority.elevation.as_deref(),
+        Some("elevated-agent-frame-a")
+    );
+    authority_target
+        .release_session_execution_lease(&authority_lease.completion())
+        .await
+        .expect("release authority target execution lease");
     let after = serde_json::to_vec(
         &registry
             .get_process(process_id)
@@ -214,18 +338,13 @@ pub async fn wake_delivery_crash_matrix(
                 .sequence,
         );
     }
-    let coalesce_policy = crate::WakeTurnPolicy::coalesce(
-        crate::DeliveryPolicy::EarliestSafeBoundary,
-        crate::WakeCoalescingKey::Group("conformance-wakes".to_string()),
-    );
     let mut coalesced_enqueued = 0;
     for _ in 0..2 {
-        coalesced_enqueued += crate::WakeDeliveryDriver::drive_pending_once_with_policy(
+        coalesced_enqueued += crate::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
             Arc::clone(&factory),
             None,
             Arc::clone(&clock) as Arc<dyn crate::Clock>,
-            &coalesce_policy,
             32,
         )
         .await
@@ -268,8 +387,8 @@ pub async fn wake_delivery_crash_matrix(
         .collect::<Vec<_>>();
     assert_eq!(coalesced_receiver_rows.len(), 2);
     assert!(coalesced_receiver_rows.iter().all(|batch| {
-        batch.slot_policy == crate::SlotPolicy::Join
-            && batch.merge_key == crate::MergeKey::Group("conformance-wakes".to_string())
+        batch.kind == crate::QueuedWorkKind::Turn
+            && batch.merge_key.as_deref() == Some(crate::PROCESS_WAKE_MERGE_KEY)
     }));
 
     let retarget_process_id = "wake-retarget-in-flight";
@@ -773,6 +892,7 @@ async fn settle_queued_batch(
             &owner,
             crate::QueuedWorkClaimBoundary::Idle,
             &[batch_id.to_string()],
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim target wake batch")
@@ -1038,6 +1158,7 @@ async fn mixed_era_floor_and_ordering(
                 format!("wake:mixed-era:{sequence}"),
             ),
             process_caused_by: None,
+            authority: crate::QueuedWorkAuthority::default(),
             input: format!("old dense wake {sequence}"),
             created_at_ms: sequence,
         };
@@ -1064,6 +1185,7 @@ async fn mixed_era_floor_and_ordering(
                     "wake:mixed-era:3",
                 ),
                 process_caused_by: None,
+                authority: crate::QueuedWorkAuthority::default(),
                 input: "old dense wake 3".to_string(),
                 created_at_ms: 3,
             },
@@ -1096,6 +1218,7 @@ async fn mixed_era_floor_and_ordering(
                     "wake:mixed-era:2",
                 ),
                 process_caused_by: None,
+                authority: crate::QueuedWorkAuthority::default(),
                 input: "old dense wake 2".to_string(),
                 created_at_ms: 2,
             },
@@ -1189,6 +1312,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
             "wake:store-rewind:10",
         ),
         process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
         input: "receiver state surviving a sender-store rewind".to_string(),
         created_at_ms: 10,
     };

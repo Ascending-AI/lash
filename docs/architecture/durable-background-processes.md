@@ -231,9 +231,9 @@ PostgreSQL tables. The operations runbook reset consequently clears
 `lash_process_wake_deliveries`, `lash_wake_allocation_floors`, and
 `lash_wake_redelivery_fences`.
 
-Figments coordination is one Lash revision. SQLite durable-core schema 33 includes
+Figments coordination is one Lash revision. SQLite durable-core schema 35 includes
 the keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover. PostgreSQL schema 46 includes those cutovers,
+immutable graph-generation cutover. PostgreSQL schema 47 includes those cutovers,
 the indexed recovery worklist, and the session-metadata payload cutover.
 Process-registry schema 23 and trigger schema 5 carry the v3 process-environment
 reference cutover; effect schema 8 is unchanged.
@@ -287,12 +287,18 @@ unhealthy.
 
 Process policy is factory-scoped and deliberately small:
 
-- `WakeTurnPolicy::new(delivery, mode)` controls how durable wakes become queued
-  turns. `WakeTurnMode::EachWake { slot }` preserves one wake per claim even
-  when the slot is joinable. `WakeTurnMode::Coalesce { key }` requires a
-  `WakeCoalescingKey` and merges matching adjacent wakes. The default is
-  `EarliestSafeBoundary / EachWake { Exclusive }`, preserving prior behavior.
-  This does not change producer-side event-identity deduplication.
+- Every queued-work producer independently stamps an optional `merge_key`.
+  Missing means never merge; keys are not inferred from event provenance.
+  Process wakes use the constant `PROCESS_WAKE_MERGE_KEY` and batch by default.
+  Adjacent candidates must also match work class, delivery policy, authority
+  principal, and elevation; control and cancellation work never batch. Claims
+  are bounded by exact model-facing rendered content, the active model context
+  window, a required host-selected action-token reserve, and host row/age caps
+  (64 rows and 30 seconds by default). A single item larger than the remaining
+  post-reserve budget is attempted alone if it still fits the model context;
+  an item larger than the context fails the claim without consuming the row.
+  There is no quiet-window timer. Producer-side event-identity deduplication is
+  unchanged.
 - `ProcessStartOptions::initial_observers` and
   `SessionCreateRequest::observed_processes` create only the observer edges the
   host names. Durable session creation commits observer intent before

@@ -47,6 +47,27 @@ pub mod triggers;
 
 #[doc(hidden)]
 pub mod store_backend_support {
+    /// Construct queued-work claim data with the predecessor identity that an
+    /// abandoning store must restore. Store implementors pass `None` for fresh
+    /// work and the interrupted `claim_id` for a redrive.
+    pub fn queued_work_claim_data(
+        batches: Vec<crate::runtime::QueuedWorkBatch>,
+        abandon_restore_claim_id: Option<String>,
+    ) -> crate::runtime::QueuedWorkClaimData {
+        crate::runtime::QueuedWorkClaimData {
+            batches,
+            abandon_restore_claim_id,
+        }
+    }
+
+    /// Return the interrupted predecessor identity an abandoning queued-work
+    /// store must restore, or `None` when the claim originated as fresh work.
+    pub fn queued_work_abandon_restore_claim_id(
+        claim: &crate::runtime::QueuedWorkClaim,
+    ) -> Option<&str> {
+        claim.abandon_restore_claim_id.as_deref()
+    }
+
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
         SessionExecutionLeaseFenceFacts, SessionExecutionLeaseRefusalFacts,
@@ -57,6 +78,10 @@ pub mod store_backend_support {
 
 #[doc(hidden)]
 pub mod facade_support {
+    pub use crate::runtime::turn_loop::{
+        SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainError,
+        SelectedQueuedWorkDrainOutcome, SelectedQueuedWorkDrainRefusalCause,
+    };
     /// Build the core-level tool-registry projection through the same plugin
     /// composition path used for runtime sessions.
     pub fn build_core_tool_registry(
@@ -191,7 +216,6 @@ pub mod facade_support {
     pub use crate::runtime::InlineRuntimeEffectController;
     pub use crate::runtime::LashRuntime;
     pub use crate::runtime::LiveReplayGap;
-    pub use crate::runtime::MergeKey;
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;
@@ -223,8 +247,12 @@ pub mod facade_support {
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
     pub use crate::runtime::QUEUED_WORK_SLOW_WAKE_THRESHOLD;
+    pub use crate::runtime::QueuedWorkAuthority;
+    pub use crate::runtime::QueuedWorkBatchingConfig;
+    pub use crate::runtime::QueuedWorkClaimPolicy;
     pub use crate::runtime::QueuedWorkDriver;
     pub use crate::runtime::QueuedWorkExecutionConcurrencyError;
+    pub use crate::runtime::QueuedWorkKind;
     pub use crate::runtime::QueuedWorkRunError;
     pub use crate::runtime::QueuedWorkRunHandle;
     pub use crate::runtime::QueuedWorkRunProgress;
@@ -266,11 +294,8 @@ pub mod facade_support {
     pub use crate::runtime::UnavailableProcessService;
     pub use crate::runtime::UsageReportRow;
     pub use crate::runtime::UsageTotals;
-    pub use crate::runtime::WakeCoalescingKey;
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
-    pub use crate::runtime::WakeTurnMode;
-    pub use crate::runtime::WakeTurnPolicy;
     #[doc(hidden)]
     pub use crate::runtime::await_event_coordinator;
     pub use crate::runtime::current_epoch_ms;
@@ -798,12 +823,12 @@ pub use runtime::{
     AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock, DeliveryPolicy, EffectHost,
     EffectJournalRetirement, ExecutionScope, ForkPoint, ForkSessionRequest, ForkSessionResult,
     InputItem, LiveReplayGapReason, LiveReplayResult, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeResult, LiveReplaySubscription, ObserverInheritance, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
-    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessCancelSummary, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessContinuationStore, ProcessEngine, ProcessEngineRunContext,
+    LiveReplaySubscribeResult, LiveReplaySubscription, ObserverInheritance, PROCESS_WAKE_MERGE_KEY,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
+    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
+    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessAwaitOutput,
+    ProcessCancelSummary, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
+    ProcessCompletionOutcome, ProcessContinuationStore, ProcessEngine, ProcessEngineRunContext,
     ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendRequest,
     ProcessEventAppendResult, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
@@ -817,11 +842,12 @@ pub use runtime::{
     ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
     ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
-    ProtocolTurnExtensionHandle, RecoveryDisposition, Resolution, ResolveOutcome, RuntimeError,
-    RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController, SegmentHandover, SegmentProgress,
-    SessionCursor, SessionCursorError, SessionId, SessionObservationEvent,
+    ProtocolTurnExtensionHandle, QueuedWorkAuthority, QueuedWorkBatchingConfig,
+    QueuedWorkClaimPolicy, QueuedWorkKind, RecoveryDisposition, Resolution, ResolveOutcome,
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController, SegmentHandover,
+    SegmentProgress, SessionCursor, SessionCursorError, SessionId, SessionObservationEvent,
     SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
-    SessionRevision, SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
+    SessionRevision, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
     TokenLedgerEntry, ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelOriginHint,
     TurnContext, TurnEvent, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
     TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
@@ -838,8 +864,8 @@ pub(crate) use runtime::{
     materialize_process_event_semantics, persist_process_execution_env,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
     process_event_invocation, process_registration_fingerprint, process_wake_batch_draft,
-    process_wake_batch_draft_with_policy, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, require_event_replay,
+    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
+    require_event_replay,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,
@@ -875,12 +901,12 @@ pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use session_model::{SessionPolicy, TurnBudget};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseClaimNonce, LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SessionAdmission,
-    SessionBinding, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseDisplacement, SessionExecutionLeaseRenewalInstallMismatch,
-    SessionExecutionLeaseStore, SessionMeta, StoreError, StoreMaintenance, TurnInputStore,
-    VacuumReport,
+    LeaseClaimNonce, LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence,
+    SelectedQueuedWorkClaimOutcome, SessionAdmission, SessionBinding, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
+    SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
+    StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 pub use store::{
     CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, HydratedCheckpointComponent,
@@ -1027,7 +1053,9 @@ mod tests {
             "require_event_replay",
         ] {
             assert!(
-                !runtime_exports.contains(removed),
+                !runtime_exports
+                    .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+                    .any(|export| export == removed),
                 "runtime root export leaked {removed}"
             );
         }

@@ -26,7 +26,9 @@ Queued payloads have two runtime classes derived from their existing payload var
 - `SessionCommand`: session mutations such as `RefreshToolCatalog`.
 - `TurnWork`: turn-producing non-user work, currently `ProcessWake`.
 
-Core owns scheduling across those classes. A queued drain consumes ready leading `SessionCommand` batches in enqueue order before it claims the next ready `TurnWork` group. Selected batch-id drains follow the same rule: earlier ready session commands are completed first, and the selected ids must still be the next runnable turn-work group. Session commands never become prompt text.
+Core owns scheduling across those classes. A queued drain consumes ready leading `SessionCommand` batches in enqueue order before it claims the next ready `TurnWork` group. Selected batch-id drains follow the same ordering rule, but their public contract is idempotent: they ensure that every requested ID is done. An ID with no remaining durable row—because a leading session-command drain consumed it, an earlier attempt settled it, or it never existed—is reported as `AlreadySatisfied` and is excluded from the turn-work claim. A row acquired by this drain is reported as `ClaimedNow`. This distinction is carried in `SelectedQueuedWorkDrainOutcome::satisfied`, so a host may observe it without treating already-satisfied IDs as errors.
+
+Rows that remain present are still validated as one exact composition. A present row that cannot join the selected claim is refused as `UnclaimableTogether`; a partial interrupted predecessor composition is refused as `InterruptedBatchRequiresFullComposition`; and a present selection whose session execution lane is held is refused as `ExecutionLaneBusy`. An absent ID never widens the operation into an ordinary drain, and unrelated queued rows remain untouched. Session commands never become prompt text.
 
 The CLI projects durable ingress into separate user-visible surfaces:
 

@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::runtime::{DeliveryPolicy, QueuedWorkPayload, RuntimeSessionState, SlotPolicy};
+use lash_core::runtime::{DeliveryPolicy, QueuedWorkPayload, RuntimeSessionState};
 use lash_sansio::sync::MutexExt;
 
 #[tokio::test]
@@ -16,7 +16,6 @@ async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "other-session",
         DeliveryPolicy::AfterCurrentTurnCommit,
-        SlotPolicy::Exclusive,
         vec![QueuedWorkPayload::agent_frame_task(
             "follow-frame",
             "follow-on task",
@@ -95,7 +94,6 @@ async fn perf_store_pins_durable_claim_id_dialects() {
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             session_id,
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
             vec![QueuedWorkPayload::agent_frame_task("frame", "task", None)],
         ))
         .await
@@ -120,7 +118,7 @@ async fn perf_store_pins_durable_claim_id_dialects() {
             &lease.fence(),
             &owner,
             lash_core::runtime::QueuedWorkClaimBoundary::Idle,
-            1,
+            lash_core::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim perf queued work")
@@ -149,4 +147,12 @@ async fn perf_store_pins_durable_claim_id_dialects() {
             .as_deref(),
         Some(input_claim.claim_id.as_str())
     );
+}
+
+#[tokio::test]
+async fn perf_store_exact_claim_preserves_physical_order_and_key_breaks() {
+    lash_core::testing::conformance::queued_work_exact_claim_preserves_physical_order_and_key_breaks(
+        Arc::new(RuntimePerfStore::default()),
+    )
+    .await;
 }

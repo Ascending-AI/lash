@@ -1934,7 +1934,6 @@ async fn enqueue_session_command(
         crate::QueuedWorkBatchDraft::new(
             session_id.to_string(),
             crate::DeliveryPolicy::EarliestSafeBoundary,
-            crate::SlotPolicy::Exclusive,
             vec![crate::QueuedWorkPayload::session_command(
                 crate::SessionCommand::RefreshToolCatalog {
                     reason: reason.to_string(),
@@ -3493,11 +3492,11 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
 
     let store = Arc::new(RecordingStore::default());
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_lease_timings(
-                crate::LeaseTimings::from_ttl(lease_ttl).expect("valid lease timings"),
-            );
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid lease timings"));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -4205,9 +4204,11 @@ async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
     let store = Arc::new(RecordingStore::with_clock(store_clock));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store;
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock);
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -4398,9 +4399,11 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
     let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
     let borrowed_append_error = Arc::new(std::sync::Mutex::new(None));
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock);
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -4538,9 +4541,11 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
     let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
     let borrowed_append_error = Arc::new(std::sync::Mutex::new(None));
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock);
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -4785,9 +4790,11 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
     let store = Arc::new(RecordingStore::with_clock(store_clock));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock);
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6108,9 +6115,11 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
         })
         .build();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock);
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6151,9 +6160,11 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
     }]);
     let successor_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let successor_host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let successor_config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(successor_host_clock);
+    let successor_config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(successor_host_clock);
     let mut successor_runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -6287,10 +6298,12 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
         })
         .build();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock)
-            .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid timings"));
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock)
+    .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid timings"));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6427,9 +6440,11 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
             }
         })
         .build();
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid timings"));
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid timings"));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6538,9 +6553,11 @@ async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry() {
         }),
     }]);
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock);
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6588,9 +6605,11 @@ async fn prepared_checkpoint_continues_after_advisory_lease_expiry() {
         }),
     }]);
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock);
+    let mut config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6801,6 +6820,125 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
             }),
         "durable wake must not enter history as provider system text"
     );
+}
+
+#[tokio::test]
+async fn selected_queued_wake_reserve_refuses_the_complete_projected_request_with_retained_history()
+{
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let captured_provider_calls = Arc::clone(&provider_calls);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let provider_calls = Arc::clone(&captured_provider_calls);
+            async move {
+                let call = provider_calls.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(
+                    call, 0,
+                    "the refused queued turn must not reach the provider"
+                );
+                Ok(LlmResponse {
+                    full_text: "retained answer".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "retained answer".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    runtime.host.core.durability.queued_work_batching = crate::QueuedWorkBatchingConfig::new(100);
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            model: Some(
+                crate::ModelSpec::builder("mock-model")
+                    .context_window_tokens(1_000)
+                    .build()
+                    .expect("valid constrained model"),
+            ),
+            ..Default::default()
+        })
+        .await
+        .expect("constrain context window");
+
+    runtime
+        .run_turn_assembled(
+            TurnInput::text("r".repeat(900)),
+            CancellationToken::new(),
+            named_turn_scope("root", "seed-retained-history"),
+        )
+        .await
+        .expect("seed retained history without queued work");
+
+    let registry = runtime
+        .host
+        .process_registry
+        .as_ref()
+        .expect("process registry")
+        .clone();
+    registry
+        .register_process(
+            crate::ProcessRegistration::new(
+                "reserve-proc",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::session(crate::SessionScope::new("root")),
+            )
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some("root".to_string())),
+        )
+        .await
+        .expect("register wake process");
+    let wake = append_process_wake_to_queue(
+        registry.as_ref(),
+        store.as_ref(),
+        "reserve-proc",
+        crate::ProcessEventAppendRequest::new(
+            "process.wake",
+            json!({"text": "short wake", "value": {"status": "done"}}),
+        ),
+    )
+    .await;
+
+    let batch_id = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list wake for selected drain")
+        .into_iter()
+        .next()
+        .expect("queued wake")
+        .batch_id;
+
+    let err = runtime
+        .stream_selected_queued_work(
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "full-projection-reserve"),
+            ),
+            &[batch_id],
+        )
+        .await
+        .expect_err("retained history plus wake and reserve must be refused");
+    let super::super::turn_loop::SelectedQueuedWorkDrainError::Runtime(err) = err else {
+        panic!("projected-request refusal must remain a runtime error");
+    };
+    assert_eq!(err.code, crate::RuntimeErrorCode::QueuedWork);
+    assert!(err.message.contains("complete projected request"));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list refused wake");
+    assert_eq!(pending.len(), 1);
+    assert!(matches!(
+        &pending[0].items[0].payload,
+        crate::QueuedWorkPayload::ProcessWake { wake: pending_wake }
+            if pending_wake.wake_id == wake.wake_id
+    ));
 }
 
 #[tokio::test]

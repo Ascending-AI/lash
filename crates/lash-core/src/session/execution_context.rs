@@ -66,8 +66,8 @@ pub(super) struct RuntimeExecutionProcessEventContext {
     pub store: Option<Arc<dyn crate::RuntimePersistence>>,
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     pub queued_work_driver: Option<crate::QueuedWorkDriver>,
+    pub process_wake_delivery_policy: crate::DeliveryPolicy,
     pub clock: Arc<dyn crate::Clock>,
-    pub wake_turn_policy: crate::WakeTurnPolicy,
 }
 
 /// Trace-sink handle threaded into tool execution so per-tool trace events are
@@ -381,8 +381,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
-        wake_turn_policy: crate::WakeTurnPolicy,
     ) -> Self {
         self.process_event_context = Some(RuntimeExecutionProcessEventContext {
             process_id: process_id.into(),
@@ -392,8 +392,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             store,
             session_store_factory,
             queued_work_driver,
+            process_wake_delivery_policy,
             clock,
-            wake_turn_policy,
         });
         self
     }
@@ -556,8 +556,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             result.wake_delivery,
             Some(self.session_graph_service()),
             context.queued_work_driver.as_ref(),
+            context.process_wake_delivery_policy,
             Arc::clone(&context.clock),
-            &context.wake_turn_policy,
         )
         .await?;
         Ok(result.event)
@@ -907,7 +907,7 @@ fn resolve_trigger_owner_scope(
             "bare host authority cannot own user trigger subscriptions; use an explicit host binding"
                 .to_string(),
         )),
-        Some(crate::ProcessOriginator::Session { session_id }) => {
+        Some(crate::ProcessOriginator::Session { session_id, .. }) => {
             Ok(crate::TriggerOwnerScope::session(session_id.clone()))
         }
         None => Ok(crate::TriggerOwnerScope::session(root_session_id)),

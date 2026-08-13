@@ -1064,7 +1064,7 @@ async fn cancel_work(
         )));
     }
     let session_id = match &process.originator {
-        lash::process::ProcessOriginator::Session { session_id } => session_id.clone(),
+        lash::process::ProcessOriginator::Session { session_id, .. } => session_id.clone(),
         lash::process::ProcessOriginator::Host { .. } => state.current_session_id(),
     };
     let operation_id = format!("workbench-process-cancel-{}", uuid::Uuid::new_v4());

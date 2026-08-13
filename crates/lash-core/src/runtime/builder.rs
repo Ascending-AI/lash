@@ -37,7 +37,10 @@ struct EmbeddedRuntimeDriverBindings {
 
 impl EmbeddedRuntimeBuilder {
     /// Construct an embedded runtime builder with an explicit commit budget.
-    pub fn new(commit_budget: crate::CommitBudget) -> Self {
+    pub fn new(
+        commit_budget: crate::CommitBudget,
+        queued_work_batching: crate::QueuedWorkBatchingConfig,
+    ) -> Self {
         Self {
             session_id: None,
             policy: None,
@@ -47,7 +50,7 @@ impl EmbeddedRuntimeBuilder {
             // `RuntimeHostConfig` has no `Default`; start from an explicitly
             // named in-memory core. Callers that need durable stores override
             // it with `with_runtime_host`.
-            core: RuntimeHostConfig::in_memory(commit_budget),
+            core: RuntimeHostConfig::in_memory(commit_budget, queued_work_batching),
             session_store_factory: None,
             trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::default())),
             store: None,
@@ -206,11 +209,6 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub fn with_wake_turn_policy(mut self, policy: crate::WakeTurnPolicy) -> Self {
-        self.core.control.wake_turn_policy = policy;
-        self
-    }
-
     pub fn with_process_tool_visibility_filter(
         mut self,
         filter: Arc<dyn crate::ProcessToolVisibilityFilter>,
@@ -344,7 +342,10 @@ impl LashRuntime {
     /// using `commit_budget`. A later
     /// [`with_runtime_host`](EmbeddedRuntimeBuilder::with_runtime_host) call
     /// replaces that host config wholesale, including its commit budget.
-    pub fn builder(commit_budget: crate::CommitBudget) -> EmbeddedRuntimeBuilder {
-        EmbeddedRuntimeBuilder::new(commit_budget)
+    pub fn builder(
+        commit_budget: crate::CommitBudget,
+        queued_work_batching: crate::QueuedWorkBatchingConfig,
+    ) -> EmbeddedRuntimeBuilder {
+        EmbeddedRuntimeBuilder::new(commit_budget, queued_work_batching)
     }
 }

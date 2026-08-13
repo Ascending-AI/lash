@@ -14,7 +14,7 @@ use lash_core::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, StoreError, ToolAttemptLaunch, ToolCallOutput,
-    ToolCallRecord, ToolId, facade_support::MergeKey,
+    ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
 
@@ -513,6 +513,7 @@ impl RuntimeBoundaryHarness {
                     replay: Some(RuntimeReplay { key: replay_key }),
                 },
                 process_caused_by: None,
+                authority: lash_core::QueuedWorkAuthority::default(),
                 wake: lash_core::facade_support::ProcessWake {
                     input: format!("wake for {session}"),
                 },
@@ -562,10 +563,7 @@ impl RuntimeBoundaryHarness {
             .delivered_process_wake_source_keys
             .contains(&source_key);
         let batch = store
-            .enqueue_queued_work(
-                lash_core::runtime::process_wake_batch_draft(wake.clone())
-                    .with_merge_key(MergeKey::Never),
-            )
+            .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake.clone()))
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("enqueue wake failed: {err}")))?;
         let claim = if duplicate {
@@ -578,11 +576,13 @@ impl RuntimeBoundaryHarness {
                     &owner,
                     QueuedWorkClaimBoundary::Idle,
                     std::slice::from_ref(&batch.batch_id),
+                    lash_core::testing::queued_work_claim_policy(1),
                 )
                 .await
                 .map_err(|err| {
                     RuntimeBoundaryError::new(format!("claim queued wake failed: {err}"))
                 })?
+                .claim
         };
         store
             .release_session_execution_lease(&lease.completion())
@@ -859,6 +859,7 @@ impl RuntimeBoundaryHarness {
             LeaseOwnerIdentity::opaque("sim-silent-owner", format!("sim-silent-owner:{session}"));
         let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
         );
         runtime_host.process_engines = lash_core::facade_support::ProcessEngineRegistry::new()
             .with_engine(Arc::new(LifecycleSuccessEngine));
@@ -993,9 +994,7 @@ impl RuntimeBoundaryHarness {
         let source_key =
             lash_core::facade_support::process_wake_source_key(&wake.process_id, wake.sequence);
         let batch = store
-            .enqueue_queued_work(
-                lash_core::runtime::process_wake_batch_draft(wake).with_merge_key(MergeKey::Never),
-            )
+            .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake))
             .await
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!("enqueue worker-owned work failed: {err}"))
@@ -1007,6 +1006,7 @@ impl RuntimeBoundaryHarness {
                 owner,
                 QueuedWorkClaimBoundary::Idle,
                 std::slice::from_ref(&batch.batch_id),
+                lash_core::testing::queued_work_claim_policy(1),
             )
             .await
             .map_err(|err| {
@@ -1046,6 +1046,7 @@ impl RuntimeBoundaryHarness {
                 owner,
                 QueuedWorkClaimBoundary::Idle,
                 std::slice::from_ref(&work.batch_id),
+                lash_core::testing::queued_work_claim_policy(1),
             )
             .await
             .map_err(|err| {
@@ -1438,6 +1439,7 @@ fn worker_failover_work(
                 }),
             },
             process_caused_by: None,
+            authority: lash_core::QueuedWorkAuthority::default(),
             wake: lash_core::facade_support::ProcessWake {
                 input: format!("worker-owned work for {session}"),
             },

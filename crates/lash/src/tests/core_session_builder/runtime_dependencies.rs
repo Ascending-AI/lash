@@ -7,6 +7,7 @@
 fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
     LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .provider(mock_provider())
         .model(mock_model_spec())
 }
@@ -36,6 +37,28 @@ fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     }))
     .expect_err("serialized host commit budget must include the node limit");
     assert!(error.to_string().contains("nodes"), "{error}");
+}
+
+#[test]
+fn queued_work_action_reserve_is_required() {
+    let error = expect_build_error(
+        LashCore::standard_builder(crate::TurnBudget::Unbounded)
+            .provider(mock_provider())
+            .model(mock_model_spec())
+            .effect_host(Arc::new(
+                lash_core::facade_support::InlineEffectHost::default(),
+            ))
+            .attachment_store(Arc::new(
+                lash_core::facade_support::InMemoryAttachmentStore::new(),
+            ))
+            .process_env_store(Arc::new(
+                lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
+            ))
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .build(),
+        "builder must reject a missing queued-work action reserve",
+    );
+    assert!(matches!(error, EmbedError::MissingQueuedWorkBatching));
 }
 
 fn durable_session_store_factory(dir: &std::path::Path) -> Arc<dyn lash_core::SessionStoreFactory> {
@@ -97,7 +120,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
         .store_factory(store_factory)
         .process_registry(Arc::new(registry))
         .advanced()
-        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(lash_core::CommitBudget::bounded(1024 * 1024, 512)).with_clock(clock))
+        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(lash_core::CommitBudget::bounded(1024 * 1024, 512), lash_core::QueuedWorkBatchingConfig::new(1)).with_clock(clock))
         .build()
         .expect("build core with SQLite process registry");
     let registry = core.process_registry().expect("built process registry");

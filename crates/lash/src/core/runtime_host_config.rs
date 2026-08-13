@@ -23,11 +23,16 @@ impl LashCoreBuilder {
             .commit_budget
             .take()
             .ok_or(EmbedError::MissingCommitBudget)?;
+        let queued_work_batching = self
+            .queued_work_batching
+            .take()
+            .ok_or(EmbedError::MissingQueuedWorkBatching)?;
         let core = RuntimeHostConfig::new(
             effect_host,
             attachment_store,
             process_env_store,
             commit_budget,
+            queued_work_batching,
         );
         Ok(self.apply_core_overrides(core))
     }
@@ -47,6 +52,12 @@ impl LashCoreBuilder {
         }
         if let Some(commit_budget) = self.commit_budget.take() {
             core.durability.commit_budget = commit_budget;
+        }
+        if let Some(queued_work_batching) = self.queued_work_batching.take() {
+            core.durability.queued_work_batching = queued_work_batching;
+        }
+        if let Some(process_wake_delivery_policy) = self.process_wake_delivery_policy.take() {
+            core.control.process_wake_delivery_policy = process_wake_delivery_policy;
         }
         if let Some(prompt) = self.prompt.take() {
             core.prompt.prompt = prompt;
@@ -68,9 +79,6 @@ impl LashCoreBuilder {
         }
         if let Some(clock) = self.clock.take() {
             core.clock = clock;
-        }
-        if let Some(wake_turn_policy) = self.wake_turn_policy.take() {
-            core.control.wake_turn_policy = wake_turn_policy;
         }
         if let Some(filter) = self.process_tool_visibility_filter.take() {
             core.control.process_tool_visibility_filter = Some(filter);

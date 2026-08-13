@@ -233,6 +233,7 @@ fn process_test_core(
     .runtime_host_config({
         let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
         );
         config.durability.process_env_store = process_env_store;
         config
@@ -907,6 +908,7 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
         match &observed.originator {
             lash_core::ProcessOriginator::Session {
                 session_id: originator_session_id,
+                ..
             } => {
                 assert_eq!(originator_session_id, session_id)
             }
@@ -1081,6 +1083,7 @@ fn process_test_core_with_sink(
     .runtime_host_config({
         let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
         );
         config.durability.process_env_store = process_env_store;
         config
@@ -1258,6 +1261,7 @@ fn recovery_process_worker(
             Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
             lash_core::facade_support::RuntimeHostConfig::in_memory(
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,

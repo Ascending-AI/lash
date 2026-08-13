@@ -28,7 +28,13 @@ impl From<lash_core::ProcessOriginator> for RemoteProcessOriginator {
     fn from(value: lash_core::ProcessOriginator) -> Self {
         match value {
             lash_core::ProcessOriginator::Host { scope } => Self::Host { scope },
-            lash_core::ProcessOriginator::Session { session_id } => Self::Session { session_id },
+            lash_core::ProcessOriginator::Session {
+                session_id,
+                agent_frame_id,
+            } => Self::Session {
+                session_id,
+                agent_frame_id,
+            },
         }
     }
 }
@@ -37,7 +43,13 @@ impl From<RemoteProcessOriginator> for lash_core::ProcessOriginator {
     fn from(value: RemoteProcessOriginator) -> Self {
         match value {
             RemoteProcessOriginator::Host { scope } => Self::Host { scope },
-            RemoteProcessOriginator::Session { session_id } => Self::Session { session_id },
+            RemoteProcessOriginator::Session {
+                session_id,
+                agent_frame_id,
+            } => Self::Session {
+                session_id,
+                agent_frame_id,
+            },
         }
     }
 }

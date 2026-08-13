@@ -19,9 +19,9 @@
     "verdict": "not-serialized-struct",
     "reason": "Reserved compatibility column; current writes always bind NULL and reads ignore its value."
   },
-  "lash_queued_work_batches.merge_key_json": {
+  "lash_queued_work_batches.authority_json": {
     "verdict": "deliberately-excluded",
-    "reason": "QueuedWorkMergeKey belongs to the shared queue protocol and lacks a JsonSchema durability contract; enroll with that protocol as a unit."
+    "reason": "QueuedWorkAuthority belongs to the shared queue protocol and lacks a JsonSchema durability contract; enroll with that protocol as a unit."
   },
   "lash_queued_work_batches.claim_owner_liveness_json": {
     "verdict": "not-serialized-struct",

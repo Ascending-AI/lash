@@ -535,7 +535,6 @@ impl RuntimeQueueIngress {
             Self::RefreshToolCatalog { reason } => QueuedWorkBatchDraft::new(
                 session_id,
                 DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
                 vec![QueuedWorkPayload::session_command(
                     SessionCommand::RefreshToolCatalog {
                         reason: (*reason).to_string(),
@@ -559,6 +558,7 @@ impl RuntimeQueueIngress {
                     replay: None,
                 },
                 process_caused_by: None,
+                authority: crate::QueuedWorkAuthority::default(),
                 input: (*text).to_string(),
                 created_at_ms: 1,
             }),

@@ -98,6 +98,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
             ))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))

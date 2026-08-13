@@ -852,6 +852,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(
             crate::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))

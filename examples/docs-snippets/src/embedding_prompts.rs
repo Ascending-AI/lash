@@ -81,6 +81,7 @@ async fn lazy_projection(provider: ProviderHandle, model: lash::ModelSpec) -> an
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
 
     // `my_docs_projection` implements `lashlang::ProjectedHostDescriptor`.
@@ -127,6 +128,7 @@ async fn prompt_template(provider: ProviderHandle) -> anyhow::Result<()> {
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .prompt_template(template)
         .prompt_contribution(PromptContribution::guidance(
             "App",
@@ -330,6 +332,7 @@ async fn tone_session(
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
 
     let session = core

@@ -32,6 +32,7 @@ async fn jsonl_trace_core(provider: ProviderHandle, model: String) -> anyhow::Re
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .trace_sink(trace_sink)
         .trace_level(TraceLevel::Extended)
         .build()?;
@@ -66,6 +67,7 @@ async fn lashlang_execution_jsonl(
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
     // docs:end:lashlang-execution-jsonl
     Ok(())
@@ -102,6 +104,7 @@ async fn lashlang_graph_store(provider: ProviderHandle, model: ModelSpec) -> any
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
 
     let graph = lashlang_graphs.graph("process:process-id");
@@ -147,6 +150,7 @@ async fn otel_trace_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::
         ))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .trace_sink(sink)
         .trace_level(TraceLevel::Extended)
         .build()?;

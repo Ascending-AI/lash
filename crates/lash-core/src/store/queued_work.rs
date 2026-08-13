@@ -3,7 +3,7 @@
 //! The SQL backends (sqlite, postgres) load candidate batch rows ordered by
 //! `enqueue_seq` and pre-filtered to ready batches that are not held by a
 //! live claim, then apply the same pure state machine: a delivery-policy
-//! boundary gate, slot-policy/merge-key prefix grouping, and fencing-token /
+//! boundary gate, compatibility/merge-key prefix grouping, and fencing-token /
 //! lease derivation. That state machine lives here so the backends own only
 //! their SQL reads and writes while the claim contract has a single
 //! implementation, exercised against every backend by the shared
@@ -12,7 +12,70 @@
 use sha2::{Digest, Sha256};
 
 use super::LeaseOwnerIdentity;
-use crate::{DeliveryPolicy, MergeKey, QueuedWorkClaimBoundary, SlotPolicy, StoreError};
+use crate::{
+    DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimBoundary,
+    QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkPayload, StoreError, TurnCause,
+};
+
+/// Result of resolving a host-selected queued-work set against durable rows.
+///
+/// IDs with no remaining row are already satisfied. Any returned claim covers
+/// only rows acquired by this call; present rows that could not join that claim
+/// remain visible to the runtime as a selected-drain refusal.
+#[derive(Clone, Debug)]
+pub struct SelectedQueuedWorkClaimOutcome {
+    /// Newly acquired rows, if the present selection was claimable.
+    pub claim: Option<QueuedWorkClaim>,
+    /// Requested IDs for which no durable queue row remained.
+    pub already_satisfied_batch_ids: Vec<String>,
+}
+
+impl SelectedQueuedWorkClaimOutcome {
+    /// Builds an exact-claim resolution from newly acquired rows and requested
+    /// IDs whose durable rows were already gone.
+    ///
+    /// Store implementations must not classify a present but unclaimable row
+    /// as already satisfied. The runtime turns that case into a selected-drain
+    /// refusal rather than reporting idempotent success.
+    pub fn new(claim: Option<QueuedWorkClaim>, already_satisfied_batch_ids: Vec<String>) -> Self {
+        Self {
+            claim,
+            already_satisfied_batch_ids,
+        }
+    }
+
+    /// Reports whether this store resolution acquired no new durable rows.
+    ///
+    /// At this layer, `true` does not by itself prove that the complete drain
+    /// was satisfied: callers must also distinguish IDs in
+    /// [`Self::already_satisfied_batch_ids`] from present IDs that could not be
+    /// claimed. The facade's selected-drain outcome carries the stronger
+    /// successful, fully-satisfied meaning.
+    pub fn is_none(&self) -> bool {
+        self.claim.is_none()
+    }
+
+    /// Transforms only newly acquired rows, preserving `None` when no claim was
+    /// created; this projection discards the already-satisfied ID evidence.
+    pub fn map<U>(self, f: impl FnOnce(QueuedWorkClaim) -> U) -> Option<U> {
+        self.claim.map(f)
+    }
+
+    /// Returns the newly acquired claim or constructs an error when no rows
+    /// were acquired; this projection discards the already-satisfied ID
+    /// evidence.
+    pub fn ok_or_else<E>(self, f: impl FnOnce() -> E) -> Result<QueuedWorkClaim, E> {
+        self.claim.ok_or_else(f)
+    }
+
+    /// Returns the newly acquired claim or panics with `message` when no rows
+    /// were acquired; this projection discards the already-satisfied ID
+    /// evidence.
+    #[track_caller]
+    pub fn expect(self, message: &str) -> QueuedWorkClaim {
+        self.claim.expect(message)
+    }
+}
 
 /// Whether a durable queued-work row carries a session command or turn work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -59,10 +122,51 @@ pub fn derive_claim_id(dialect: ClaimIdDialect, enqueue_seq: u64, fencing_token:
 pub struct ClaimCandidate {
     pub enqueue_seq: u64,
     pub claim_fencing_token: u64,
+    /// Durable claim identity left by an interrupted predecessor generation.
+    /// Matching identities describe the exact batch composition that already
+    /// escaped into that generation's journaled command.
+    pub prior_claim_id: Option<String>,
     pub work_class: QueuedWorkClass,
     pub delivery_policy: DeliveryPolicy,
-    pub slot_policy: SlotPolicy,
-    pub merge_key: MergeKey,
+    pub kind: QueuedWorkKind,
+    pub authority: QueuedWorkAuthority,
+    pub merge_key: Option<String>,
+    pub enqueued_at_ms: u64,
+    turn_causes: Vec<TurnCause>,
+    input_texts: Vec<String>,
+}
+
+impl ClaimCandidate {
+    pub fn from_batch(
+        batch: &QueuedWorkBatch,
+        claim_fencing_token: u64,
+        prior_claim_id: Option<String>,
+    ) -> Self {
+        let mut turn_causes = Vec::new();
+        let mut input_texts = Vec::new();
+        for item in &batch.items {
+            match &item.payload {
+                QueuedWorkPayload::ProcessWake { wake } => {
+                    turn_causes.push(crate::process_wake_turn_cause(wake));
+                }
+                QueuedWorkPayload::AgentFrameTask { task, .. } => input_texts.push(task.clone()),
+                QueuedWorkPayload::SessionCommand { .. } => {}
+            }
+        }
+        Self {
+            enqueue_seq: batch.enqueue_seq,
+            claim_fencing_token,
+            prior_claim_id,
+            work_class: batch.work_class().unwrap_or(QueuedWorkClass::TurnWork),
+            delivery_policy: batch.delivery_policy,
+            kind: batch.kind,
+            authority: batch.authority.clone(),
+            merge_key: batch.merge_key.clone(),
+            enqueued_at_ms: batch.enqueued_at_ms,
+            turn_causes,
+            input_texts,
+        }
+    }
 }
 
 /// How many candidate rows a backend should scan when selecting up to
@@ -92,81 +196,332 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
     }
 }
 
-/// Select the prefix of turn-work `candidates` that a single claim may take.
+/// Select the turn-work `candidates` that a single claim may take.
 ///
-/// Returns the number of leading candidates to claim (`0` means no claim):
+/// Fresh claims return a leading prefix. Interrupted claims return every
+/// candidate carrying the head row's prior claim identity, including rows
+/// separated by newly ready unrelated work.
 ///
 /// * The queue head must be [`QueuedWorkClass::TurnWork`]. Earlier ready
 ///   session commands are never skipped or materialized as turn input.
 /// * An [`QueuedWorkClaimBoundary::ActiveTurnCheckpoint`] boundary only
 ///   admits work whose head batch is
 ///   [`DeliveryPolicy::EarliestSafeBoundary`].
-/// * An [`SlotPolicy::Exclusive`] head claims exactly one batch.
-/// * A [`SlotPolicy::Join`] head extends through immediately following
-///   `Join` batches with the same delivery policy and merge key, up to
-///   `max_batches`.
-pub fn select_turn_work_claim_prefix(
+/// * An absent merge key, or a control/cancel kind, claims exactly one batch.
+/// * A batchable head extends through immediately following rows with the same
+///   delivery policy, merge key, and authority/elevation, within the host's
+///   row, age, and rendered-token bounds.
+pub fn select_turn_work_claim_indices(
     candidates: &[ClaimCandidate],
     boundary: QueuedWorkClaimBoundary,
-    max_batches: usize,
-) -> usize {
-    if max_batches == 0 {
-        return record_turn_claim_decision(candidates, boundary, max_batches, 0, "zero_limit");
+    policy: QueuedWorkClaimPolicy,
+    now_epoch_ms: u64,
+) -> Result<Vec<usize>, StoreError> {
+    if policy.max_rows == 0 {
+        record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            0,
+            0,
+            "zero_limit",
+        );
+        return Ok(Vec::new());
     }
     let Some(first) = candidates.first() else {
-        return record_turn_claim_decision(candidates, boundary, max_batches, 0, "empty");
+        record_turn_claim_decision(candidates, boundary, policy, now_epoch_ms, 0, 0, "empty");
+        return Ok(Vec::new());
     };
     if first.work_class != QueuedWorkClass::TurnWork {
-        return record_turn_claim_decision(candidates, boundary, max_batches, 0, "command_at_head");
+        record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            0,
+            0,
+            "command_at_head",
+        );
+        return Ok(Vec::new());
     }
     if boundary == QueuedWorkClaimBoundary::ActiveTurnCheckpoint
         && first.delivery_policy != DeliveryPolicy::EarliestSafeBoundary
     {
-        return record_turn_claim_decision(
+        if let Some(withheld_claim_id) = first.prior_claim_id.as_deref() {
+            let remaining_indices = candidates
+                .iter()
+                .enumerate()
+                .filter_map(|(index, candidate)| {
+                    (candidate.prior_claim_id.as_deref() != Some(withheld_claim_id))
+                        .then_some(index)
+                })
+                .collect::<Vec<_>>();
+            let remaining = remaining_indices
+                .iter()
+                .map(|index| candidates[*index].clone())
+                .collect::<Vec<_>>();
+            let selected =
+                select_turn_work_claim_indices(&remaining, boundary, policy, now_epoch_ms)?;
+            if !selected.is_empty() {
+                return Ok(selected
+                    .into_iter()
+                    .map(|index| remaining_indices[index])
+                    .collect());
+            }
+        }
+        record_turn_claim_decision(
             candidates,
             boundary,
-            max_batches,
+            policy,
+            now_epoch_ms,
+            0,
             0,
             "delivery_boundary_blocked",
         );
+        return Ok(Vec::new());
     }
-    if first.slot_policy != SlotPolicy::Join || first.merge_key == MergeKey::Never {
-        return record_turn_claim_decision(candidates, boundary, max_batches, 1, "single_wake");
+    if let Some(prior_claim_id) = first.prior_claim_id.as_deref() {
+        let selected = candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(index, candidate)| {
+                (candidate.prior_claim_id.as_deref() == Some(prior_claim_id)).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let rendered_tokens = selected.iter().fold(0usize, |total, index| {
+            total.saturating_add(rendered_token_upper_bound(std::slice::from_ref(
+                &candidates[*index],
+            )))
+        });
+        record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            selected.len(),
+            rendered_tokens,
+            "interrupted_claim_redrive",
+        );
+        return Ok(selected);
     }
+
+    if policy.action_token_reserve >= policy.max_context_tokens {
+        return Err(StoreError::QueuedWorkActionReserveExhaustsContext {
+            max_context_tokens: policy.max_context_tokens,
+            action_token_reserve: policy.action_token_reserve,
+        });
+    }
+    let available_tokens = policy
+        .max_context_tokens
+        .saturating_sub(policy.action_token_reserve);
+    let first_tokens = rendered_token_upper_bound(&candidates[..1]);
+    if first_tokens > policy.max_context_tokens {
+        return Err(StoreError::QueuedWorkRowExceedsContextWindow {
+            batch_enqueue_seq: first.enqueue_seq,
+            rendered_tokens: first_tokens,
+            max_context_tokens: policy.max_context_tokens,
+        });
+    }
+    if !first.kind.is_batchable() || first.merge_key.is_none() {
+        let selected = record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            1,
+            first_tokens,
+            "single_row",
+        );
+        return Ok((0..selected).collect());
+    }
+    if first_tokens > available_tokens {
+        let selected = record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            1,
+            first_tokens,
+            "oversized_for_reserve_attempt_alone",
+        );
+        return Ok((0..selected).collect());
+    }
+    if now_epoch_ms.saturating_sub(first.enqueued_at_ms) >= policy.max_pending_age_ms {
+        let selected = record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            1,
+            first_tokens,
+            "max_pending_age_reached",
+        );
+        return Ok((0..selected).collect());
+    }
+
     let mut selected = 1;
+    let mut rendered_tokens = first_tokens;
     for candidate in &candidates[1..] {
-        if selected >= max_batches
+        if selected >= policy.max_rows
             || candidate.work_class != QueuedWorkClass::TurnWork
-            || candidate.slot_policy != SlotPolicy::Join
+            || !candidate.kind.is_batchable()
             || candidate.delivery_policy != first.delivery_policy
             || candidate.merge_key != first.merge_key
+            || candidate.authority != first.authority
         {
             break;
         }
+        let candidate_tokens = rendered_token_upper_bound(&candidates[..=selected]);
+        if candidate_tokens > available_tokens {
+            break;
+        }
         selected += 1;
+        rendered_tokens = candidate_tokens;
     }
-    record_turn_claim_decision(
+    let selected = record_turn_claim_decision(
         candidates,
         boundary,
-        max_batches,
+        policy,
+        now_epoch_ms,
         selected,
+        rendered_tokens,
         "coalesced_prefix",
-    )
+    );
+    Ok((0..selected).collect())
+}
+
+/// Select the number of rows from a physically contiguous candidate set.
+///
+/// SQL automatic claims pre-filter interrupted rows by the head claim ID, and
+/// exact-ID claims construct a contiguous candidate slice. In-memory automatic
+/// claims use [`select_turn_work_claim_indices`] directly so identity gaps are
+/// retained.
+pub fn select_turn_work_claim_prefix(
+    candidates: &[ClaimCandidate],
+    boundary: QueuedWorkClaimBoundary,
+    policy: QueuedWorkClaimPolicy,
+    now_epoch_ms: u64,
+) -> Result<usize, StoreError> {
+    let selected = select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms)?;
+    Ok(selected
+        .iter()
+        .copied()
+        .enumerate()
+        .take_while(|(prefix_index, selected_index)| prefix_index == selected_index)
+        .count())
+}
+
+/// Resolve an exact-ID selection against interrupted predecessor identities.
+///
+/// `candidate_batch_claims` must contain every requested ready row plus every
+/// member of each interrupted claim touched by the request, in durable enqueue
+/// order. Every touched interrupted identity is validated before one is
+/// selected. If any identity is only partially covered, the physically earliest
+/// incomplete claim's literal composition is returned without selecting rows.
+/// When every touched identity is complete, one selected drain reclaims exactly
+/// the physically earliest interrupted composition; later complete identities
+/// remain queued for a later drain.
+#[doc(hidden)]
+pub fn select_interrupted_exact_claim_indices(
+    candidate_batch_claims: &[(String, Option<String>)],
+    requested_batch_ids: &[String],
+) -> Result<Option<Vec<usize>>, Vec<String>> {
+    let requested = requested_batch_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut involved_claim_ids = Vec::new();
+    for (batch_id, prior_claim_id) in candidate_batch_claims {
+        let Some(prior_claim_id) = prior_claim_id.as_deref() else {
+            continue;
+        };
+        if requested.contains(batch_id.as_str()) && !involved_claim_ids.contains(&prior_claim_id) {
+            involved_claim_ids.push(prior_claim_id);
+        }
+    }
+    let Some(earliest_claim_id) = involved_claim_ids.first().copied() else {
+        return Ok(None);
+    };
+
+    for prior_claim_id in involved_claim_ids {
+        let required_batch_ids = candidate_batch_claims
+            .iter()
+            .filter(|(_, candidate_claim_id)| candidate_claim_id.as_deref() == Some(prior_claim_id))
+            .map(|(batch_id, _)| batch_id.clone())
+            .collect::<Vec<_>>();
+        if !required_batch_ids
+            .iter()
+            .all(|batch_id| requested.contains(batch_id.as_str()))
+        {
+            return Err(required_batch_ids);
+        }
+    }
+
+    Ok(Some(
+        candidate_batch_claims
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (_, candidate_claim_id))| {
+                (candidate_claim_id.as_deref() == Some(earliest_claim_id)).then_some(index)
+            })
+            .collect(),
+    ))
+}
+
+/// Conservative upper bound for the exact model-visible queued-work render.
+///
+/// Process wakes use the shared turn-events renderer. Agent-frame task text is
+/// appended exactly as turn input. One UTF-8 byte is charged as one token: this
+/// deliberately overestimates ordinary model tokenizers while remaining safe
+/// without moving tokenizer selection from the host/provider boundary into
+/// core.
+fn rendered_token_upper_bound(candidates: &[ClaimCandidate]) -> usize {
+    let causes = candidates
+        .iter()
+        .flat_map(|candidate| candidate.turn_causes.iter().cloned())
+        .collect::<Vec<_>>();
+    let mut rendered_bytes =
+        crate::render_turn_causes_prompt(&causes).map_or(0, |rendered| rendered.len());
+    let input_items = candidates
+        .iter()
+        .flat_map(|candidate| candidate.input_texts.iter())
+        .map(|text| crate::InputItem::text(text.clone()))
+        .collect::<Vec<_>>();
+    if !input_items.is_empty() {
+        let input = crate::TurnInput::items(input_items);
+        let input_bytes = serde_json::to_vec(&input).map_or(usize::MAX, |rendered| rendered.len());
+        rendered_bytes = rendered_bytes.saturating_add(input_bytes);
+    }
+    rendered_bytes
 }
 
 fn record_turn_claim_decision(
     candidates: &[ClaimCandidate],
     boundary: QueuedWorkClaimBoundary,
-    max_batches: usize,
+    policy: QueuedWorkClaimPolicy,
+    now_epoch_ms: u64,
     selected: usize,
+    rendered_tokens: usize,
     outcome: &'static str,
 ) -> usize {
+    let oldest_pending_age_ms = candidates
+        .first()
+        .map(|candidate| now_epoch_ms.saturating_sub(candidate.enqueued_at_ms));
+    let pending_age_bound_reached =
+        oldest_pending_age_ms.is_some_and(|age| age >= policy.max_pending_age_ms);
     tracing::info!(
-        target: "lash::wake_turn_policy",
+        target: "lash::queued_work_batching",
         ?boundary,
-        max_batches,
+        max_rows = policy.max_rows,
+        max_context_tokens = policy.max_context_tokens,
+        action_token_reserve = policy.action_token_reserve,
+        max_pending_age_ms = policy.max_pending_age_ms,
+        ?oldest_pending_age_ms,
+        pending_age_bound_reached,
         candidates = ?candidates,
         selected,
+        rendered_tokens,
         outcome,
         "wake turn claim decision"
     );
@@ -282,202 +637,276 @@ mod tests {
         }
     }
 
-    fn candidate(
-        enqueue_seq: u64,
-        work_class: QueuedWorkClass,
-        delivery_policy: DeliveryPolicy,
-        slot_policy: SlotPolicy,
-        merge_key: MergeKey,
-    ) -> ClaimCandidate {
+    fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
         ClaimCandidate {
             enqueue_seq,
             claim_fencing_token: 0,
-            work_class,
-            delivery_policy,
-            slot_policy,
-            merge_key,
+            prior_claim_id: None,
+            work_class: QueuedWorkClass::TurnWork,
+            delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
+            kind: QueuedWorkKind::Turn,
+            authority: QueuedWorkAuthority::new("principal"),
+            merge_key: merge_key.map(str::to_string),
+            enqueued_at_ms: 900,
+            turn_causes: Vec::new(),
+            input_texts: vec!["wake".to_string()],
         }
     }
 
     #[test]
-    fn exclusive_head_claims_exactly_one() {
+    fn exact_selection_requires_the_literal_interrupted_composition() {
         let candidates = vec![
-            candidate(
-                1,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-                MergeKey::Never,
-            ),
-            candidate(
-                2,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-                MergeKey::Never,
-            ),
+            ("w1".to_string(), Some("claim-a".to_string())),
+            ("fresh".to_string(), None),
+            ("w2".to_string(), Some("claim-a".to_string())),
         ];
         assert_eq!(
-            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 8),
-            1
+            select_interrupted_exact_claim_indices(&candidates, &["w1".to_string()]),
+            Err(vec!["w1".to_string(), "w2".to_string()])
+        );
+        assert_eq!(
+            select_interrupted_exact_claim_indices(
+                &candidates,
+                &["w1".to_string(), "w2".to_string()],
+            ),
+            Ok(Some(vec![0, 2]))
+        );
+
+        let two_claims = vec![
+            ("a1".to_string(), Some("claim-a".to_string())),
+            ("a2".to_string(), Some("claim-a".to_string())),
+            ("b1".to_string(), Some("claim-b".to_string())),
+            ("b2".to_string(), Some("claim-b".to_string())),
+        ];
+        assert_eq!(
+            select_interrupted_exact_claim_indices(
+                &two_claims,
+                &["a1".to_string(), "a2".to_string(), "b1".to_string()],
+            ),
+            Err(vec!["b1".to_string(), "b2".to_string()])
+        );
+        assert_eq!(
+            select_interrupted_exact_claim_indices(
+                &two_claims,
+                &[
+                    "a1".to_string(),
+                    "a2".to_string(),
+                    "b1".to_string(),
+                    "b2".to_string(),
+                ],
+            ),
+            Ok(Some(vec![0, 1]))
         );
     }
 
+    fn policy(max_context_tokens: usize, action_token_reserve: usize) -> QueuedWorkClaimPolicy {
+        QueuedWorkClaimPolicy {
+            max_context_tokens,
+            action_token_reserve,
+            max_rows: 64,
+            max_pending_age_ms: 1_000,
+        }
+    }
+
     #[test]
-    fn join_head_groups_matching_prefix_up_to_max() {
-        let join = |seq| {
-            candidate(
-                seq,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-                MergeKey::PayloadDefault,
+    fn absent_merge_key_never_merges() {
+        let candidates = vec![candidate(1, None), candidate(2, None)];
+        assert_eq!(
+            select_turn_work_claim_prefix(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                policy(1_000, 100),
+                1_000,
             )
-        };
-        let candidates = vec![join(1), join(2), join(3), join(4)];
-        assert_eq!(
-            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 3),
-            3
-        );
-    }
-
-    #[test]
-    fn join_slot_with_never_merge_key_claims_each_wake_separately() {
-        let candidates = vec![
-            candidate(
-                1,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-                MergeKey::Never,
-            ),
-            candidate(
-                2,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-                MergeKey::Never,
-            ),
-        ];
-        assert_eq!(
-            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 8),
+            .unwrap(),
             1
         );
     }
 
     #[test]
-    fn exclusive_slot_with_group_key_still_claims_one() {
-        let candidates = vec![
-            candidate(
-                1,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-                MergeKey::Group("inert-under-exclusive".to_string()),
-            ),
-            candidate(
-                2,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-                MergeKey::Group("inert-under-exclusive".to_string()),
-            ),
-        ];
+    fn matching_key_groups_prefix_up_to_row_bound() {
+        let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
+        let mut claim_policy = policy(1_000, 100);
+        claim_policy.max_rows = 1;
         assert_eq!(
-            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 8),
+            select_turn_work_claim_prefix(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                claim_policy,
+                1_000,
+            )
+            .unwrap(),
             1
         );
     }
 
     #[test]
-    fn join_group_breaks_on_policy_or_merge_key_mismatch() {
-        let candidates = vec![
-            candidate(
-                1,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-                MergeKey::Group("a".to_string()),
-            ),
-            candidate(
-                2,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-                MergeKey::Group("b".to_string()),
-            ),
-        ];
+    fn authority_and_elevation_are_independent_compatibility_gates() {
+        let first = candidate(1, Some("wake"));
+        let mut different_principal = candidate(2, Some("wake"));
+        different_principal.authority = QueuedWorkAuthority::new("other");
+        let mut different_elevation = candidate(2, Some("wake"));
+        different_elevation.authority =
+            QueuedWorkAuthority::new("principal").with_elevation("root");
+        for candidates in [
+            vec![first.clone(), different_principal],
+            vec![first.clone(), different_elevation],
+        ] {
+            assert_eq!(
+                select_turn_work_claim_prefix(
+                    &candidates,
+                    QueuedWorkClaimBoundary::Idle,
+                    policy(1_000, 100),
+                    1_000
+                )
+                .unwrap(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn control_and_cancel_kinds_never_batch() {
+        for kind in [QueuedWorkKind::Control, QueuedWorkKind::Cancel] {
+            let mut first = candidate(1, Some("wake"));
+            first.kind = kind;
+            let candidates = vec![first, candidate(2, Some("wake"))];
+            assert_eq!(
+                select_turn_work_claim_prefix(
+                    &candidates,
+                    QueuedWorkClaimBoundary::Idle,
+                    policy(1_000, 100),
+                    1_000
+                )
+                .unwrap(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn merge_key_delivery_and_work_class_mismatches_break_prefix() {
+        let first = candidate(1, Some("a"));
+        let mut different_delivery = candidate(2, Some("a"));
+        different_delivery.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
+        let mut command = candidate(2, Some("a"));
+        command.work_class = QueuedWorkClass::SessionCommand;
+        for candidates in [
+            vec![first.clone(), candidate(2, Some("b"))],
+            vec![first.clone(), different_delivery],
+            vec![first.clone(), command],
+        ] {
+            assert_eq!(
+                select_turn_work_claim_prefix(
+                    &candidates,
+                    QueuedWorkClaimBoundary::Idle,
+                    policy(1_000, 100),
+                    1_000
+                )
+                .unwrap(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_reserve_bounds_batch() {
+        let mut first = candidate(1, Some("wake"));
+        first.input_texts = vec!["a".repeat(400)];
+        let mut second = candidate(2, Some("wake"));
+        second.input_texts = vec!["b".repeat(400)];
         assert_eq!(
-            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 8),
+            select_turn_work_claim_prefix(
+                &[first, second],
+                QueuedWorkClaimBoundary::Idle,
+                policy(1_000, 300),
+                1_000
+            )
+            .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn oversized_for_reserve_but_fitting_context_is_attempted_alone() {
+        let mut first = candidate(1, Some("wake"));
+        first.input_texts = vec!["a".repeat(800)];
+        assert_eq!(
+            select_turn_work_claim_prefix(
+                &[first],
+                QueuedWorkClaimBoundary::Idle,
+                policy(1_000, 300),
+                1_000
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn row_that_cannot_fit_context_fails_loudly() {
+        let mut first = candidate(7, Some("wake"));
+        first.input_texts = vec!["a".repeat(1_001)];
+        assert!(matches!(
+            select_turn_work_claim_prefix(
+                &[first],
+                QueuedWorkClaimBoundary::Idle,
+                policy(1_000, 300),
+                1_000
+            ),
+            Err(StoreError::QueuedWorkRowExceedsContextWindow {
+                batch_enqueue_seq: 7,
+                ..
+            })
+        ));
     }
 
     #[test]
     fn active_turn_checkpoint_boundary_gates_on_delivery_policy() {
-        let candidates = vec![candidate(
-            1,
-            QueuedWorkClass::TurnWork,
-            DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
-            MergeKey::Never,
-        )];
+        let mut first = candidate(1, None);
+        first.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
         assert_eq!(
             select_turn_work_claim_prefix(
-                &candidates,
+                &[first],
                 QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                8
-            ),
+                policy(1_000, 100),
+                1_000,
+            )
+            .unwrap(),
             0
         );
     }
 
     #[test]
     fn leading_session_command_blocks_turn_work_claim() {
-        let candidates = vec![
-            candidate(
-                1,
-                QueuedWorkClass::SessionCommand,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-                MergeKey::Never,
-            ),
-            candidate(
-                2,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-                MergeKey::Never,
-            ),
-        ];
+        let mut command = candidate(1, None);
+        command.work_class = QueuedWorkClass::SessionCommand;
+        command.kind = QueuedWorkKind::Control;
+        let candidates = vec![command, candidate(2, None)];
         assert_eq!(select_leading_session_command(&candidates), 1);
         assert_eq!(
-            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 8),
+            select_turn_work_claim_prefix(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                policy(1_000, 100),
+                1_000
+            )
+            .unwrap(),
             0
         );
     }
 
     #[test]
-    fn later_session_command_does_not_join_turn_work_claim() {
-        let candidates = vec![
-            candidate(
-                1,
-                QueuedWorkClass::TurnWork,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-                MergeKey::PayloadDefault,
-            ),
-            candidate(
-                2,
-                QueuedWorkClass::SessionCommand,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-                MergeKey::PayloadDefault,
-            ),
-        ];
-        assert_eq!(select_leading_session_command(&candidates), 0);
+    fn overdue_head_is_claimed_alone_at_claim_time() {
+        let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
         assert_eq!(
-            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 8),
+            select_turn_work_claim_prefix(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                policy(1_000, 100),
+                2_000
+            )
+            .unwrap(),
             1
         );
     }
@@ -487,10 +916,15 @@ mod tests {
         let head = ClaimCandidate {
             enqueue_seq: 7,
             claim_fencing_token: 2,
+            prior_claim_id: None,
             work_class: QueuedWorkClass::TurnWork,
             delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
-            slot_policy: SlotPolicy::Exclusive,
-            merge_key: MergeKey::Never,
+            kind: QueuedWorkKind::Turn,
+            authority: QueuedWorkAuthority::default(),
+            merge_key: None,
+            enqueued_at_ms: 0,
+            turn_causes: Vec::new(),
+            input_texts: Vec::new(),
         };
         let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
         let lease = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5)

@@ -28,12 +28,13 @@ use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
     ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity, PendingTurnInputDraft,
     PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
-    ProtocolEvent, RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
-    SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
-    TokenLedgerEntry, TokenUsage, ToolState, TriggerOwnerScope, TurnInput, TurnInputApplication,
-    TurnInputClaim, TurnInputIngress, TurnInputState, facade_support::InMemorySessionStore,
-    facade_support::InMemorySessionStoreFactory, facade_support::MergeKey,
+    ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit, RuntimePersistence,
+    RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta,
+    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
+    TriggerOwnerScope, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress,
+    TurnInputState, facade_support::InMemorySessionStore,
+    facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -41,6 +42,8 @@ use sqlx::{Connection, PgConnection, PgPool};
 
 #[path = "cross_backend_store_differential/checkpoint_cases.rs"]
 mod checkpoint_cases;
+#[path = "cross_backend_store_differential/coalesced_batch_oracles.rs"]
+mod coalesced_batch_oracles;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
 mod generated_surface;
 #[path = "cross_backend_store_differential/observations.rs"]
@@ -820,6 +823,7 @@ type QueuedWorkBatchRow = (
     String,
     String,
     String,
+    Option<String>,
     i64,
     Option<String>,
     Option<String>,
@@ -1209,8 +1213,8 @@ async fn read_sqlite_durable_state(
     let queued_work_batches = {
         let mut statement = connection
             .prepare(
-                "SELECT enqueue_seq, batch_id, source_key, delivery_policy, slot_policy,
-                        merge_key_json, available_at_ms, claim_id, claim_owner_id,
+                "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
+                        authority_json, merge_key, available_at_ms, claim_id, claim_owner_id,
                         claim_owner_incarnation_id, claim_owner_liveness_json, claim_token,
                         claim_fencing_token, claim_session_lease_generation
                  FROM queued_work_batches
@@ -1235,6 +1239,7 @@ async fn read_sqlite_durable_state(
                     row.get(11)?,
                     row.get(12)?,
                     row.get(13)?,
+                    row.get(14)?,
                 ))
             })
             .expect("read SQLite queued-work batches")
@@ -1372,6 +1377,7 @@ impl BackendRunner {
             .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))
@@ -1539,13 +1545,13 @@ impl BackendRunner {
                     QueuedWorkBatchDraft::new(
                         &self.session_id,
                         DeliveryPolicy::EarliestSafeBoundary,
-                        SlotPolicy::Exclusive,
                         vec![QueuedWorkPayload::session_command(
                             lash_core::facade_support::SessionCommand::RefreshToolCatalog {
                                 reason: "cross-backend delete observability".to_string(),
                             },
                         )],
                     )
+                    .with_kind(QueuedWorkKind::Control)
                     .with_source_key("cross-backend-delete-observability"),
                 )
                 .await
@@ -1556,7 +1562,6 @@ impl BackendRunner {
                     QueuedWorkBatchDraft::new(
                         &self.session_id,
                         DeliveryPolicy::AfterCurrentTurnCommit,
-                        SlotPolicy::Join,
                         vec![QueuedWorkPayload::agent_frame_task(
                             "differential-frame",
                             "exercise queued-work claim state",
@@ -1565,9 +1570,7 @@ impl BackendRunner {
                     )
                     .with_source_key("cross-backend-claim-observability")
                     .with_available_at_ms(777)
-                    .with_merge_key(MergeKey::Group(
-                        "cross-backend-claim-observability".to_string(),
-                    )),
+                    .with_merge_key("cross-backend-claim-observability"),
                 )
                 .await
                 .map(|_| None),
@@ -1630,7 +1633,7 @@ impl BackendRunner {
                         &lease.fence(),
                         &owner,
                         QueuedWorkClaimBoundary::Idle,
-                        1,
+                        lash_core::testing::queued_work_claim_policy(1),
                     )
                     .await?
                     .ok_or_else(|| {
@@ -2122,8 +2125,26 @@ async fn runners_for_case(
     postgres_database_url: &str,
     run_nonce: &str,
 ) -> Vec<BackendRunner> {
+    runners_for_case_with_clock(
+        case,
+        sqlite_root,
+        postgres,
+        postgres_database_url,
+        run_nonce,
+        Arc::new(DifferentialClock),
+    )
+    .await
+}
+
+async fn runners_for_case_with_clock(
+    case: CaseName,
+    sqlite_root: &Path,
+    postgres: &PostgresStorage,
+    postgres_database_url: &str,
+    run_nonce: &str,
+    clock: Arc<dyn Clock>,
+) -> Vec<BackendRunner> {
     let session_id = format!("fig-778-{run_nonce}-{}", case.as_str());
-    let clock = Arc::new(DifferentialClock) as Arc<dyn Clock>;
     let create_request = SessionStoreCreateRequest {
         session_id: session_id.clone(),
         relation: SessionRelation::Root,

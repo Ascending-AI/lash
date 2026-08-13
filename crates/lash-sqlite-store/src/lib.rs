@@ -52,9 +52,10 @@ use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use lash_core::runtime::{
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkPayload,
-    prepare_process_event_append, prepare_process_registration,
+    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
+    QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
+    QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, prepare_process_event_append,
+    prepare_process_registration,
 };
 use lash_core::store::queued_work::{
     ClaimCandidate, WorkClaimLease, claim_scan_limit, derive_batch_id,
@@ -75,9 +76,8 @@ use lash_core::{
     ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta,
-    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
-    TurnInputStore, VacuumReport, facade_support::MergeKey, facade_support::ProcessStartPlan,
-    facade_support::registry_transitions,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore,
+    VacuumReport, facade_support::ProcessStartPlan, facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};

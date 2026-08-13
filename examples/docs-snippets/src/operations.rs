@@ -44,6 +44,7 @@ fn configure_lease_timings(
         .process_env_store(process_env_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .lease_timings(lease_timings) // omit to keep the 30s ttl / 10s renew default
         .build()?;
     // docs:end:lease-timings

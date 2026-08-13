@@ -35,7 +35,7 @@ pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{load_persisted_session_state, refresh_persisted_session_state};
-pub use queued_work::QueuedWorkClass;
+pub use queued_work::{QueuedWorkClass, SelectedQueuedWorkClaimOutcome};
 pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
     RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
@@ -1382,13 +1382,16 @@ pub trait QueuedWorkStore: Send + Sync {
     /// batch is classified as [`QueuedWorkClass::TurnWork`].
     /// Earlier ready session commands are not skipped and are never
     /// materialized as turn input.
+    /// When the head belongs to an interrupted predecessor-generation claim,
+    /// the successor reclaims exactly the rows carrying that durable claim id;
+    /// later compatible rows wait for a subsequent claim.
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
 
     /// Claim both ingress families admitted at an active-turn checkpoint.
@@ -1405,7 +1408,7 @@ pub trait QueuedWorkStore: Send + Sync {
         turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<
         (
             Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>,
@@ -1424,6 +1427,10 @@ pub trait QueuedWorkStore: Send + Sync {
     /// This selection is intentionally allowed to bypass earlier unrelated
     /// ready work. The logical-turn driver uses it to reclaim an atomic outbox
     /// handoff immediately, preserving foreground frame-chain ordering.
+    /// Requested ids are interpreted in durable `enqueue_seq` order. A claim
+    /// returns their maximal physically contiguous prefix that satisfies the
+    /// ordinary key/boundary/budget law; an unrequested physical row is a
+    /// barrier, and requested rows after it remain queued.
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,
@@ -1431,7 +1438,8 @@ pub trait QueuedWorkStore: Send + Sync {
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: &[String],
-    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError>;
 
     /// Release a held queued-work claim without completing it.
     async fn abandon_queued_work_claim(

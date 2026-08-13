@@ -17,6 +17,8 @@ const REALTIME_SCAFFOLDING_LEASE_TTL_MS: u64 = 50;
 const REALTIME_LEASE_STALL_ALLOWANCE: std::time::Duration = std::time::Duration::from_secs(5);
 const REALTIME_LEASE_OBSERVATION_ATTEMPTS: usize = 3;
 const REALTIME_LEASE_EXPIRY_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+const REALTIME_DELAYED_QUEUE_ROW_GAP_MS: u64 = 500;
+const REALTIME_DELAYED_QUEUE_ROW_CROSSING_MARGIN_MS: u64 = 50;
 
 /// How runtime-persistence conformance drives session-lease expiry.
 #[derive(Clone)]
@@ -60,6 +62,32 @@ impl RuntimePersistenceLeaseTiming {
                 .await;
             }
             Self::Controlled(advance) => advance(CONTROLLED_LEASE_TTL_MS),
+        }
+    }
+
+    fn delayed_queue_row_available_at_ms(&self) -> u64 {
+        match self {
+            Self::Realtime => {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock is after Unix epoch")
+                    .as_millis() as u64
+                    + REALTIME_DELAYED_QUEUE_ROW_GAP_MS
+            }
+            Self::Controlled(_) => 4_102_444_800_000,
+        }
+    }
+
+    async fn cross_delayed_queue_row_boundary(&self) {
+        match self {
+            Self::Realtime => {
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    REALTIME_DELAYED_QUEUE_ROW_GAP_MS
+                        + REALTIME_DELAYED_QUEUE_ROW_CROSSING_MARGIN_MS,
+                ))
+                .await
+            }
+            Self::Controlled(advance) => advance(4_102_444_800_000),
         }
     }
 }
@@ -350,7 +378,6 @@ pub async fn runtime_persistence_clock_expiry(
             session_id,
             "clock expiry queued work",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue clock-expiry queued work");
@@ -374,6 +401,7 @@ pub async fn runtime_persistence_clock_expiry(
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim clock-expiry queued work")
@@ -400,6 +428,7 @@ pub async fn runtime_persistence_clock_expiry(
             &successor,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("reclaim clock-expiry queued work")
@@ -506,6 +535,7 @@ where
     queued_work_source_keys_are_idempotent_and_list_ordered(make("queued-work-source-keys")).await;
     concurrent_queue_and_turn_input_claims_have_one_owner(make("concurrent-queue-input")).await;
     checkpoint_work_claims_both_families_once(make("checkpoint-work")).await;
+    checkpoint_budget_refusal_preserves_active_turn_input(make("checkpoint-budget-refusal")).await;
     queued_work_cancel_removes_only_unclaimed_batches(make("queued-work-cancel")).await;
     queued_work_exact_claim_uses_selected_batch_ids(make("root")).await;
     queued_work_classes_gate_command_and_turn_claims(make("root")).await;
@@ -526,7 +556,20 @@ where
     ))
     .await;
     queued_work_join_groups_by_delivery_policy_and_merge_key(make("queued-join")).await;
-    wake_turn_policy_controls_coalescing(make("wake-policy-merge")).await;
+    queued_work_redrive_preserves_interrupted_batch_composition(make("redrive-composition")).await;
+    queued_work_redrive_selects_claim_identity_across_ready_gap(
+        make("redrive-ready-gap"),
+        lease_timing,
+    )
+    .await;
+    queued_work_redrive_obeys_delivery_boundary_before_identity(make("redrive-boundary")).await;
+    queued_work_redrive_ignores_successor_row_limit(make("redrive-row-limit")).await;
+    queued_work_selected_multi_identity_validation_and_abandon_restore(make(
+        "selected-multi-identity",
+    ))
+    .await;
+    queued_work_exact_claim_preserves_physical_order_and_key_breaks(make("physical-order")).await;
+    process_wakes_batch_by_default(make("wake-default-batch")).await;
     queued_work_completion_is_lease_guarded(make("root")).await;
     queued_wake_delivery_is_source_key_idempotent_and_claimed_once(make("root")).await;
     queue_completion_and_turn_commit_stamp_are_atomic(make("root")).await;
@@ -1575,7 +1618,6 @@ async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePersis
         .push(QueuedWorkBatchDraft::new(
             "different-session",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
             vec![QueuedWorkPayload::agent_frame_task(
                 "atomic-frame",
                 "must roll back",
@@ -2074,7 +2116,6 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
             session_id,
             "checkpoint queued work",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue checkpoint queued work");
@@ -2093,7 +2134,7 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
             &turn_id,
             crate::CheckpointKind::AfterWork,
             10,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim both checkpoint work families");
@@ -2112,7 +2153,7 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
             &turn_id,
             crate::CheckpointKind::AfterWork,
             10,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("same-generation checkpoint re-claim");
@@ -2120,6 +2161,74 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
         second.0.is_none() && second.1.is_none(),
         "checkpoint claims must be granted exactly once per lease generation"
     );
+}
+
+/// A checkpoint claim spans pending inputs and queued work atomically. If the
+/// queued head cannot fit the context window, the active-turn input must remain
+/// pending and visible rather than being left accepted under a discarded claim.
+async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn RuntimePersistence>) {
+    let session_id = "checkpoint-budget-atomicity";
+    let turn_id = crate::TurnId::from("checkpoint-budget-atomicity:turn");
+    let owner = lease_owner("checkpoint-budget-atomicity-owner");
+    let input = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            session_id,
+            turn_id.as_str(),
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "input that must survive a queue budget refusal",
+        ))
+        .await
+        .expect("enqueue active-turn input for atomic checkpoint claim");
+    let oversized_text = "oversized queued work".repeat(64);
+    store
+        .enqueue_queued_work(queued_draft(
+            session_id,
+            &oversized_text,
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue oversized checkpoint queued work");
+    let lease = store
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("claim checkpoint atomicity session lease")
+        .acquired()
+        .expect("checkpoint atomicity session lease acquired");
+    let error = store
+        .claim_checkpoint_work(
+            session_id,
+            &lease.fence(),
+            &owner,
+            &turn_id,
+            crate::CheckpointKind::AfterWork,
+            10,
+            crate::QueuedWorkClaimPolicy {
+                max_context_tokens: 64,
+                action_token_reserve: 1,
+                max_rows: 10,
+                max_pending_age_ms: 30_000,
+            },
+        )
+        .await
+        .expect_err("oversized queued row must refuse the combined checkpoint claim");
+    assert!(matches!(
+        error,
+        StoreError::QueuedWorkRowExceedsContextWindow { .. }
+    ));
+
+    let pending = store
+        .list_pending_turn_inputs(session_id)
+        .await
+        .expect("list active input after checkpoint budget refusal");
+    assert_eq!(
+        pending
+            .iter()
+            .map(|row| row.input_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![input.input_id.as_str()],
+        "the input claim must roll back with the refused queued-work claim"
+    );
+    assert_eq!(pending[0].state, crate::TurnInputState::PendingActive);
 }
 
 /// Prove checkpoint admission probes stay read-only for empty queues and for
@@ -2147,7 +2256,7 @@ pub async fn checkpoint_claim_probe_transaction_counts(
             &turn_id,
             crate::CheckpointKind::AfterWork,
             64,
-            64,
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("probe quiescent checkpoint");
@@ -2159,7 +2268,6 @@ pub async fn checkpoint_claim_probe_transaction_counts(
             session_id,
             "deferred checkpoint head",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue deferred checkpoint head");
@@ -2171,7 +2279,7 @@ pub async fn checkpoint_claim_probe_transaction_counts(
             &turn_id,
             crate::CheckpointKind::AfterWork,
             64,
-            64,
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("probe deferred checkpoint head");
@@ -2191,7 +2299,7 @@ pub async fn checkpoint_claim_probe_transaction_counts(
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            64,
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim deferred work at idle boundary")
@@ -2214,7 +2322,6 @@ pub async fn checkpoint_claim_probe_transaction_counts(
             session_id,
             "pending checkpoint work",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue counter work");
@@ -2226,7 +2333,7 @@ pub async fn checkpoint_claim_probe_transaction_counts(
             &turn_id,
             crate::CheckpointKind::AfterWork,
             64,
-            64,
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim pending checkpoint work");
@@ -2239,7 +2346,6 @@ pub fn queued_process_wake_draft(
     session_id: &str,
     text: &str,
     delivery_policy: DeliveryPolicy,
-    slot_policy: SlotPolicy,
 ) -> QueuedWorkBatchDraft {
     let wake = ProcessWakeDelivery {
         wake_id: format!("wake:{session_id}:{text}"),
@@ -2258,13 +2364,13 @@ pub fn queued_process_wake_draft(
             replay: None,
         },
         process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
         input: text.to_string(),
         created_at_ms: 1,
     };
     QueuedWorkBatchDraft::new(
         session_id,
         delivery_policy,
-        slot_policy,
         vec![QueuedWorkPayload::process_wake(wake)],
     )
     .with_source_key(crate::process_wake_source_key(
@@ -2278,12 +2384,10 @@ fn queued_draft(
     session_id: &str,
     text: &str,
     delivery_policy: DeliveryPolicy,
-    slot_policy: SlotPolicy,
 ) -> QueuedWorkBatchDraft {
     QueuedWorkBatchDraft::new(
         session_id,
         delivery_policy,
-        slot_policy,
         vec![QueuedWorkPayload::agent_frame_task(
             format!("frame:{text}"),
             text,
@@ -2296,13 +2400,13 @@ fn queued_session_command_draft(session_id: &str, reason: &str) -> QueuedWorkBat
     QueuedWorkBatchDraft::new(
         session_id,
         DeliveryPolicy::EarliestSafeBoundary,
-        SlotPolicy::Exclusive,
         vec![QueuedWorkPayload::session_command(
             crate::SessionCommand::RefreshToolCatalog {
                 reason: reason.to_string(),
             },
         )],
     )
+    .with_kind(crate::QueuedWorkKind::Control)
 }
 
 fn queued_batch_text(batch: &QueuedWorkBatch) -> Option<&str> {
@@ -2984,7 +3088,6 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
             "root",
             "fenced queue",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue fenced queue work");
@@ -2994,7 +3097,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
             &commit_lease.fence(),
             &lease_owner("queue-owner"),
             QueuedWorkClaimBoundary::Idle,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect_err("queued-work claims require a live session lease");
@@ -3009,7 +3112,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
             &queue_lease.fence(),
             &lease_owner("queue-owner"),
             QueuedWorkClaimBoundary::Idle,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim fenced queue work")
@@ -3396,7 +3499,7 @@ async fn claim_queued_work_under_short_lease(
                 &lease.fence(),
                 owner,
                 QueuedWorkClaimBoundary::Idle,
-                10,
+                crate::testing::queued_work_claim_policy(10),
             )
             .await
         {
@@ -3897,13 +4000,8 @@ async fn queued_work_source_keys_are_idempotent_and_list_ordered(
 ) {
     let first = store
         .enqueue_queued_work(
-            queued_draft(
-                "root",
-                "first",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_source_key("source:first"),
+            queued_draft("root", "first", DeliveryPolicy::EarliestSafeBoundary)
+                .with_source_key("source:first"),
         )
         .await
         .expect("enqueue first batch");
@@ -3913,7 +4011,6 @@ async fn queued_work_source_keys_are_idempotent_and_list_ordered(
                 "root",
                 "different replay payload",
                 DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
             )
             .with_source_key("source:first"),
         )
@@ -3924,7 +4021,6 @@ async fn queued_work_source_keys_are_idempotent_and_list_ordered(
             "root",
             "second",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue second batch");
@@ -3933,7 +4029,6 @@ async fn queued_work_source_keys_are_idempotent_and_list_ordered(
             "other",
             "other session",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue other session");
@@ -3969,7 +4064,6 @@ async fn concurrent_queue_and_turn_input_claims_have_one_owner(store: Arc<dyn Ru
             session_id,
             "single-owner queue batch",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue queue batch for claim race");
@@ -3998,7 +4092,7 @@ async fn concurrent_queue_and_turn_input_claims_have_one_owner(store: Arc<dyn Ru
                 &left_fence,
                 &lease_owner("queue-left"),
                 QueuedWorkClaimBoundary::Idle,
-                1,
+                crate::testing::queued_work_claim_policy(1),
             )
             .await
     });
@@ -4010,7 +4104,7 @@ async fn concurrent_queue_and_turn_input_claims_have_one_owner(store: Arc<dyn Ru
                 &right_fence,
                 &lease_owner("queue-right"),
                 QueuedWorkClaimBoundary::Idle,
-                1,
+                crate::testing::queued_work_claim_policy(1),
             )
             .await
     });
@@ -4094,7 +4188,6 @@ async fn queued_work_cancel_removes_only_unclaimed_batches(store: Arc<dyn Runtim
             "root",
             "cancel me",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue cancellable batch");
@@ -4119,7 +4212,6 @@ async fn queued_work_cancel_removes_only_unclaimed_batches(store: Arc<dyn Runtim
             "root",
             "claimed",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue claimed batch");
@@ -4130,7 +4222,7 @@ async fn queued_work_cancel_removes_only_unclaimed_batches(store: Arc<dyn Runtim
             &session_lease.fence(),
             &lease_owner("owner"),
             QueuedWorkClaimBoundary::Idle,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim batch")
@@ -4194,7 +4286,6 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
             "root",
             "first",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue first batch");
@@ -4203,7 +4294,6 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
             "root",
             "second",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue second batch");
@@ -4218,26 +4308,38 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
                 &lease_owner("owner"),
                 QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
                 std::slice::from_ref(&second.batch_id),
+                crate::testing::queued_work_claim_policy(64),
             )
             .await
             .expect("boundary-gated exact claim")
             .is_none(),
         "exact selection must preserve the delivery boundary gate"
     );
-    assert!(
-        store
-            .claim_ready_queued_work_by_batch_ids(
-                "root",
-                &selected_session_lease.fence(),
-                &lease_owner("owner"),
-                QueuedWorkClaimBoundary::Idle,
-                &[first.batch_id.clone(), second.batch_id.clone()],
-            )
-            .await
-            .expect("slot-policy-gated exact claim")
-            .is_none(),
-        "exact selection must not combine exclusive batches into one claim"
+    let exclusive_prefix = store
+        .claim_ready_queued_work_by_batch_ids(
+            "root",
+            &selected_session_lease.fence(),
+            &lease_owner("owner"),
+            QueuedWorkClaimBoundary::Idle,
+            &[first.batch_id.clone(), second.batch_id.clone()],
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim exclusive exact prefix")
+        .expect("the first exclusive exact batch is claimable");
+    assert_eq!(
+        exclusive_prefix
+            .batches
+            .iter()
+            .map(|batch| batch.enqueue_seq)
+            .collect::<Vec<_>>(),
+        vec![1],
+        "exact selection must take only the maximal valid physical prefix"
     );
+    store
+        .abandon_queued_work_claim(&exclusive_prefix)
+        .await
+        .expect("abandon exclusive exact-prefix probe");
     let selected = store
         .claim_ready_queued_work_by_batch_ids(
             "root",
@@ -4245,6 +4347,7 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
             &lease_owner("owner"),
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&second.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim out-of-order exact batch")
@@ -4275,6 +4378,26 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
 
     let accepted_session_lease =
         claim_session_execution_lease_for_test(&store, "root", "owner").await;
+    let already_settled = store
+        .claim_ready_queued_work_by_batch_ids(
+            "root",
+            &accepted_session_lease.fence(),
+            &lease_owner("owner"),
+            QueuedWorkClaimBoundary::Idle,
+            std::slice::from_ref(&second.batch_id),
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("resolve already-settled exact batch");
+    assert!(
+        already_settled.claim.is_none(),
+        "an already-settled selected ID must not acquire another claim"
+    );
+    assert_eq!(
+        already_settled.already_satisfied_batch_ids,
+        vec![second.batch_id.clone()],
+        "an already-settled selected ID is idempotently satisfied"
+    );
     let claim = store
         .claim_ready_queued_work_by_batch_ids(
             "root",
@@ -4282,6 +4405,7 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
             &lease_owner("owner"),
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&first.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim first exact batch")
@@ -4306,6 +4430,86 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
     release_session_execution_lease_for_test(&store, &accepted_session_lease).await;
 }
 
+#[doc(hidden)]
+pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let a1 = store
+        .enqueue_queued_work(
+            queued_draft(
+                "exact-key-break",
+                "a1",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_source_key("exact-a1")
+            .with_merge_key("a"),
+        )
+        .await
+        .expect("enqueue exact A1");
+    let _b1 = store
+        .enqueue_queued_work(
+            queued_draft(
+                "exact-key-break",
+                "b1",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_source_key("exact-b1")
+            .with_merge_key("b"),
+        )
+        .await
+        .expect("enqueue exact B1");
+    let a2 = store
+        .enqueue_queued_work(
+            queued_draft(
+                "exact-key-break",
+                "a2",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_source_key("exact-a2")
+            .with_merge_key("a"),
+        )
+        .await
+        .expect("enqueue exact A2");
+
+    let owner = lease_owner("exact-key-break-owner");
+    let lease =
+        claim_session_execution_lease_for_test(&store, "exact-key-break", &owner.owner_id).await;
+    let claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            "exact-key-break",
+            &lease.fence(),
+            &owner,
+            QueuedWorkClaimBoundary::Idle,
+            &[a2.batch_id, a1.batch_id],
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim reversed exact A rows")
+        .expect("physical prefix contains exact A1");
+
+    assert_eq!(
+        claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("exact-a1"), 1)],
+        "an exact claim must preserve enqueue order and stop at the physical B key break"
+    );
+    assert_eq!(
+        store
+            .list_pending_queued_work("exact-key-break")
+            .await
+            .expect("list exact-key-break remainder")
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("exact-b1"), 2), (Some("exact-a2"), 3)],
+        "the key-break row and later requested row must remain queued in physical order"
+    );
+    release_session_execution_lease_for_test(&store, &lease).await;
+}
+
 async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn RuntimePersistence>) {
     let command = store
         .enqueue_queued_work(queued_session_command_draft("root", "refresh before turn"))
@@ -4316,7 +4520,6 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
             "root",
             "user turn",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue turn");
@@ -4330,7 +4533,7 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
                 &rejected_turn_lease.fence(),
                 &lease_owner("turn-owner"),
                 QueuedWorkClaimBoundary::Idle,
-                10,
+                crate::testing::queued_work_claim_policy(10),
             )
             .await
             .expect("turn claim with leading command")
@@ -4379,11 +4582,17 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
             &selected_turn_lease.fence(),
             &lease_owner("turn-owner"),
             QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&turn.batch_id),
+            &[command.batch_id.clone(), turn.batch_id.clone()],
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
-        .expect("claim selected turn after command")
-        .expect("selected turn claim exists");
+        .expect("resolve mixed command and turn selection after command completion");
+    assert_eq!(
+        selected_turn.already_satisfied_batch_ids,
+        vec![command.batch_id.clone()],
+        "the leading command consumed before the selected turn is already satisfied"
+    );
+    let selected_turn = selected_turn.expect("selected turn claim exists");
     release_session_execution_lease_for_test(&store, &selected_turn_lease).await;
     assert_eq!(selected_turn.batches[0].batch_id, turn.batch_id);
 
@@ -4392,7 +4601,6 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
             "turn-first",
             "first turn",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue first turn");
@@ -4420,7 +4628,7 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
             &rejected_command_lease.fence(),
             &lease_owner("command-owner"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim turn before later command")
@@ -4454,7 +4662,6 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
             "root",
             "after current commit",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue after-commit work");
@@ -4463,7 +4670,6 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
             "root",
             "earliest",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue earliest work");
@@ -4479,7 +4685,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
                 &session_lease.fence(),
                 &lease_owner("owner-a"),
                 QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                10,
+                crate::testing::queued_work_claim_policy(10),
             )
             .await
             .expect("checkpoint claim")
@@ -4493,7 +4699,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
             &session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("idle claim")
@@ -4509,7 +4715,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
             &session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("checkpoint claim after head is leased")
@@ -4528,7 +4734,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
             &session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("reclaim abandoned work")
@@ -4588,7 +4794,6 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
             "root",
             "generation work",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue generation work");
@@ -4603,7 +4808,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
             &lease_a.fence(),
             &lease_owner("gen-owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("first-generation claim")
@@ -4617,7 +4822,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
                 &lease_a.fence(),
                 &lease_owner("gen-owner-a"),
                 QueuedWorkClaimBoundary::Idle,
-                10,
+                crate::testing::queued_work_claim_policy(10),
             )
             .await
             .expect("same-generation re-claim")
@@ -4639,7 +4844,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
             &lease_b.fence(),
             &lease_owner("gen-owner-b"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("next-generation reclaim")
@@ -4725,7 +4930,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
             &taker_lease.fence(),
             &taker,
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("post-takeover claim")
@@ -4782,7 +4987,6 @@ async fn claim_both_generation_fenced_lanes(
             session_id,
             "lease-less liveness work",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue generation-fenced queued work");
@@ -4805,7 +5009,7 @@ async fn claim_both_generation_fenced_lanes(
             &lease.fence(),
             owner,
             QueuedWorkClaimBoundary::Idle,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim generation-fenced queued work")
@@ -4944,7 +5148,6 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
                     queue_session,
                     &format!("bounded queue {index}"),
                     DeliveryPolicy::EarliestSafeBoundary,
-                    SlotPolicy::Exclusive,
                 ))
                 .await
                 .expect("enqueue bounded-scan queued work"),
@@ -4963,7 +5166,7 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
                 &queue_lease.fence(),
                 &queue_owner,
                 QueuedWorkClaimBoundary::Idle,
-                1,
+                crate::testing::queued_work_claim_policy(1),
             )
             .await
             .expect("claim bounded-scan queued work")
@@ -5042,13 +5245,8 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
 ) {
     store
         .enqueue_queued_work(
-            queued_draft(
-                "root",
-                "not ready",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-            )
-            .with_available_at_ms(4_102_444_800_000),
+            queued_draft("root", "not ready", DeliveryPolicy::EarliestSafeBoundary)
+                .with_available_at_ms(4_102_444_800_000),
         )
         .await
         .expect("enqueue unavailable work");
@@ -5057,19 +5255,13 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             "root",
             "exclusive",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue exclusive work");
     let joined = store
         .enqueue_queued_work(
-            queued_draft(
-                "root",
-                "joined",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("root".to_string())),
+            queued_draft("root", "joined", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("root"),
         )
         .await
         .expect("enqueue joined work");
@@ -5078,7 +5270,6 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             "other",
             "other session",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue other session work");
@@ -5094,7 +5285,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             &root_session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim root")
@@ -5114,7 +5305,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             &root_session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim joined")
@@ -5129,7 +5320,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             &other_session_lease.fence(),
             &lease_owner("owner-c"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim other")
@@ -5145,7 +5336,6 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             "reclaim",
             "superseded claim",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue reclaim work");
@@ -5157,7 +5347,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             &first_generation_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim under the first generation")
@@ -5171,7 +5361,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             &reclaim_session_lease.fence(),
             &lease_owner("owner-b"),
             QueuedWorkClaimBoundary::Idle,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("reclaim under a new generation")
@@ -5185,37 +5375,22 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
 
     let limited_first = store
         .enqueue_queued_work(
-            queued_draft(
-                "limited",
-                "one",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("limited".to_string())),
+            queued_draft("limited", "one", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("limited"),
         )
         .await
         .expect("enqueue limited one");
     let limited_second = store
         .enqueue_queued_work(
-            queued_draft(
-                "limited",
-                "two",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("limited".to_string())),
+            queued_draft("limited", "two", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("limited"),
         )
         .await
         .expect("enqueue limited two");
     let limited_third = store
         .enqueue_queued_work(
-            queued_draft(
-                "limited",
-                "three",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("limited".to_string())),
+            queued_draft("limited", "three", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("limited"),
         )
         .await
         .expect("enqueue limited three");
@@ -5229,7 +5404,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             &limited_session_lease.fence(),
             &lease_owner("owner"),
             QueuedWorkClaimBoundary::Idle,
-            2,
+            crate::testing::queued_work_claim_policy(2),
         )
         .await
         .expect("limited claim")
@@ -5252,7 +5427,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
             &limited_session_lease.fence(),
             &lease_owner("owner"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("remaining claim")
@@ -5266,37 +5441,22 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
 ) {
     let first = store
         .enqueue_queued_work(
-            queued_draft(
-                "root",
-                "group a one",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("a".to_string())),
+            queued_draft("root", "group a one", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("a"),
         )
         .await
         .expect("enqueue group a one");
     let second = store
         .enqueue_queued_work(
-            queued_draft(
-                "root",
-                "group a two",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("a".to_string())),
+            queued_draft("root", "group a two", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("a"),
         )
         .await
         .expect("enqueue group a two");
     let different_merge = store
         .enqueue_queued_work(
-            queued_draft(
-                "root",
-                "group b",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("b".to_string())),
+            queued_draft("root", "group b", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("b"),
         )
         .await
         .expect("enqueue group b");
@@ -5306,9 +5466,8 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
                 "root",
                 "after commit",
                 DeliveryPolicy::AfterCurrentTurnCommit,
-                SlotPolicy::Join,
             )
-            .with_merge_key(MergeKey::Group("a".to_string())),
+            .with_merge_key("a"),
         )
         .await
         .expect("enqueue after-commit");
@@ -5323,7 +5482,7 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
             &session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim first group")
@@ -5343,7 +5502,7 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
             &session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim second group")
@@ -5355,7 +5514,7 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
             &session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim third group")
@@ -5364,129 +5523,678 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     assert_eq!(third_claim.batches[0].batch_id, different_delivery.batch_id);
 }
 
-async fn wake_turn_policy_controls_coalescing(store: Arc<dyn RuntimePersistence>) {
-    let default_policy = crate::WakeTurnPolicy::default();
-    assert_eq!(
-        default_policy,
-        crate::WakeTurnPolicy::each_wake(
-            DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
-        ),
-        "the host policy default must preserve the pre-configuration behavior"
-    );
-    for process_id in ["exclusive-a", "exclusive-b"] {
+async fn queued_work_redrive_preserves_interrupted_batch_composition(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    for (source_key, label) in [("redrive-w1", "w1"), ("redrive-w2", "w2")] {
         store
-            .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
-                policy_test_wake("wake-policy-exclusive", process_id, 1),
-                &default_policy,
-            ))
-            .await
-            .expect("enqueue default-policy wake");
-    }
-    let exclusive_lease =
-        claim_session_execution_lease_for_test(&store, "wake-policy-exclusive", "exclusive-owner")
-            .await;
-    let first_exclusive = store
-        .claim_ready_queued_work(
-            "wake-policy-exclusive",
-            &exclusive_lease.fence(),
-            &lease_owner("exclusive-owner"),
-            QueuedWorkClaimBoundary::Idle,
-            10,
-        )
-        .await
-        .expect("claim first default-policy wake")
-        .expect("first default-policy wake exists");
-    let second_exclusive = store
-        .claim_ready_queued_work(
-            "wake-policy-exclusive",
-            &exclusive_lease.fence(),
-            &lease_owner("exclusive-owner"),
-            QueuedWorkClaimBoundary::Idle,
-            10,
-        )
-        .await
-        .expect("claim second default-policy wake")
-        .expect("second default-policy wake exists");
-    release_session_execution_lease_for_test(&store, &exclusive_lease).await;
-    assert_eq!(first_exclusive.batches.len(), 1);
-    assert_eq!(
-        second_exclusive.batches.len(),
-        1,
-        "exclusive wakes must remain separate turns by default"
-    );
-
-    let join_each_policy =
-        crate::WakeTurnPolicy::each_wake(DeliveryPolicy::EarliestSafeBoundary, SlotPolicy::Join);
-    for process_id in ["join-each-a", "join-each-b"] {
-        store
-            .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
-                policy_test_wake("wake-policy-join-each", process_id, 1),
-                &join_each_policy,
-            ))
-            .await
-            .expect("enqueue join-each wake");
-    }
-    let join_each_lease =
-        claim_session_execution_lease_for_test(&store, "wake-policy-join-each", "join-each-owner")
-            .await;
-    for claim_number in 1..=2 {
-        let claim = store
-            .claim_ready_queued_work(
-                "wake-policy-join-each",
-                &join_each_lease.fence(),
-                &lease_owner("join-each-owner"),
-                QueuedWorkClaimBoundary::Idle,
-                10,
+            .enqueue_queued_work(
+                queued_draft(
+                    "interrupted-batch-redrive",
+                    label,
+                    DeliveryPolicy::EarliestSafeBoundary,
+                )
+                .with_source_key(source_key)
+                .with_merge_key("redrive-key"),
             )
             .await
-            .expect("claim join-each wake")
-            .expect("join-each wake exists");
-        assert_eq!(
-            claim.batches.len(),
-            1,
-            "each-wake mode with a join slot must not merge claim {claim_number}"
+            .expect("enqueue original redrive row");
+    }
+
+    let first_owner = lease_owner("redrive-owner-a");
+    let first_lease = claim_session_execution_lease_for_test(
+        &store,
+        "interrupted-batch-redrive",
+        &first_owner.owner_id,
+    )
+    .await;
+    let first_claim = store
+        .claim_ready_queued_work(
+            "interrupted-batch-redrive",
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim original redrive batch")
+        .expect("original redrive batch exists");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)]
+    );
+
+    // Model an interruption after the claimed composition has escaped to a
+    // journaled command, but before the queue completion commits. Releasing the
+    // session lease makes the intact predecessor claim reclaimable without
+    // abandoning or settling it.
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+    store
+        .enqueue_queued_work(
+            queued_draft(
+                "interrupted-batch-redrive",
+                "w3",
+                DeliveryPolicy::EarliestSafeBoundary,
+            )
+            .with_source_key("redrive-w3")
+            .with_merge_key("redrive-key"),
+        )
+        .await
+        .expect("enqueue post-interruption compatible row");
+
+    let successor_owner = lease_owner("redrive-owner-b");
+    let successor_lease = claim_session_execution_lease_for_test(
+        &store,
+        "interrupted-batch-redrive",
+        &successor_owner.owner_id,
+    )
+    .await;
+    let redriven = store
+        .claim_ready_queued_work(
+            "interrupted-batch-redrive",
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("redrive interrupted claim")
+        .expect("interrupted claim remains reclaimable");
+    assert_eq!(
+        redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)],
+        "redrive must retain the literal predecessor batch composition"
+    );
+    assert_ne!(first_claim.claim_id, redriven.claim_id);
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+
+    let third_owner = lease_owner("redrive-owner-c");
+    let third_lease = claim_session_execution_lease_for_test(
+        &store,
+        "interrupted-batch-redrive",
+        &third_owner.owner_id,
+    )
+    .await;
+    let twice_redriven = store
+        .claim_ready_queued_work(
+            "interrupted-batch-redrive",
+            &third_lease.fence(),
+            &third_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("redrive second interrupted generation")
+        .expect("second interrupted generation remains reclaimable");
+    assert_eq!(
+        twice_redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)],
+        "a third generation must recover the second generation's literal composition"
+    );
+    assert_ne!(redriven.claim_id, twice_redriven.claim_id);
+
+    let subsequent = store
+        .claim_ready_queued_work(
+            "interrupted-batch-redrive",
+            &third_lease.fence(),
+            &third_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim post-interruption row")
+        .expect("post-interruption row remains separately claimable");
+    assert_eq!(
+        subsequent
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("redrive-w3"), 3)],
+        "new compatible work must wait for a separate successor claim"
+    );
+    release_session_execution_lease_for_test(&store, &third_lease).await;
+}
+
+#[doc(hidden)]
+pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
+    store: Arc<dyn RuntimePersistence>,
+    lease_timing: &RuntimePersistenceLeaseTiming,
+) {
+    let session_id = "interrupted-batch-ready-gap";
+    store
+        .enqueue_queued_work(
+            queued_draft(session_id, "w1", DeliveryPolicy::EarliestSafeBoundary)
+                .with_source_key("gap-w1")
+                .with_merge_key("gap-key"),
+        )
+        .await
+        .expect("enqueue ready gap W1");
+    store
+        .enqueue_queued_work(
+            queued_draft(session_id, "w2", DeliveryPolicy::EarliestSafeBoundary)
+                .with_source_key("gap-w2")
+                .with_merge_key("gap-key")
+                .with_available_at_ms(lease_timing.delayed_queue_row_available_at_ms()),
+        )
+        .await
+        .expect("enqueue delayed gap W2");
+    store
+        .enqueue_queued_work(
+            queued_draft(session_id, "w3", DeliveryPolicy::EarliestSafeBoundary)
+                .with_source_key("gap-w3")
+                .with_merge_key("gap-key"),
+        )
+        .await
+        .expect("enqueue ready gap W3");
+
+    let first_owner = lease_owner("gap-owner-a");
+    let first_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &first_owner.owner_id).await;
+    let first_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim ready rows across delayed gap")
+        .expect("ready W1 and W3 form the original claim");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gap-w1"), 1), (Some("gap-w3"), 3)]
+    );
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+    lease_timing.cross_delayed_queue_row_boundary().await;
+
+    let successor = lease_owner("gap-owner-b");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor.owner_id).await;
+    let redriven = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("redrive ready-gap claim")
+        .expect("interrupted identity remains reclaimable across gap");
+    assert_eq!(
+        redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gap-w1"), 1), (Some("gap-w3"), 3)]
+    );
+    let delayed = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim newly ready gap row")
+        .expect("W2 remains a separate claim");
+    assert_eq!(
+        delayed
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gap-w2"), 2)]
+    );
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+}
+
+async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "interrupted-batch-delivery-gate";
+    for (source_key, label) in [("gate-w1", "w1"), ("gate-w2", "w2")] {
+        store
+            .enqueue_queued_work(
+                queued_draft(session_id, label, DeliveryPolicy::AfterCurrentTurnCommit)
+                    .with_source_key(source_key)
+                    .with_merge_key("gate-key"),
+            )
+            .await
+            .expect("enqueue delivery-gated redrive row");
+    }
+    let first_owner = lease_owner("gate-owner-a");
+    let first_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &first_owner.owner_id).await;
+    let first_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim delivery-gated work while idle")
+        .expect("idle boundary admits after-commit work");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
+    );
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+
+    let successor = lease_owner("gate-owner-b");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor.owner_id).await;
+    assert!(
+        store
+            .claim_ready_queued_work(
+                session_id,
+                &successor_lease.fence(),
+                &successor,
+                QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+                crate::testing::queued_work_claim_policy(64),
+            )
+            .await
+            .expect("apply active checkpoint gate before identity redrive")
+            .is_none(),
+        "the active checkpoint boundary must produce a literal empty claim"
+    );
+    for (source_key, label) in [("gate-fresh-w1", "fresh-w1"), ("gate-fresh-w2", "fresh-w2")] {
+        store
+            .enqueue_queued_work(
+                queued_draft(session_id, label, DeliveryPolicy::EarliestSafeBoundary)
+                    .with_source_key(source_key)
+                    .with_merge_key("gate-fresh-key"),
+            )
+            .await
+            .expect("enqueue fresh checkpoint-deliverable work");
+    }
+    let fresh_checkpoint_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim fresh work while idle-only predecessor remains withheld")
+        .expect("fresh checkpoint-deliverable work remains claimable");
+    assert_eq!(
+        fresh_checkpoint_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gate-fresh-w1"), 3), (Some("gate-fresh-w2"), 4),]
+    );
+    store
+        .abandon_queued_work_claim(&fresh_checkpoint_claim)
+        .await
+        .expect("return fresh checkpoint claim before idle redrive");
+    let after_boundary = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("redrive after delivery boundary clears")
+        .expect("original composition remains intact");
+    assert_eq!(
+        after_boundary
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
+    );
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+}
+
+async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn RuntimePersistence>) {
+    let session_id = "interrupted-batch-row-limit";
+    for (source_key, label) in [
+        ("limit-w1", "w1"),
+        ("limit-w2", "w2"),
+        ("limit-w3", "w3"),
+        ("limit-w4", "w4"),
+        ("limit-w5", "w5"),
+    ] {
+        store
+            .enqueue_queued_work(
+                queued_draft(session_id, label, DeliveryPolicy::EarliestSafeBoundary)
+                    .with_source_key(source_key)
+                    .with_merge_key("limit-key"),
+            )
+            .await
+            .expect("enqueue row-limit redrive row");
+    }
+    let first_owner = lease_owner("limit-owner-a");
+    let first_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &first_owner.owner_id).await;
+    let first_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim five-row predecessor")
+        .expect("five-row predecessor exists");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("limit-w1"), 1),
+            (Some("limit-w2"), 2),
+            (Some("limit-w3"), 3),
+            (Some("limit-w4"), 4),
+            (Some("limit-w5"), 5),
+        ]
+    );
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+
+    let successor = lease_owner("limit-owner-b");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor.owner_id).await;
+    let redriven = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("redrive under smaller successor row limit")
+        .expect("predecessor composition ignores successor row limit");
+    assert_eq!(
+        redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("limit-w1"), 1),
+            (Some("limit-w2"), 2),
+            (Some("limit-w3"), 3),
+            (Some("limit-w4"), 4),
+            (Some("limit-w5"), 5),
+        ]
+    );
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+
+    let selected_owner = lease_owner("limit-owner-c");
+    let selected_lease = claim_session_execution_lease_for_test(
+        &store,
+        "interrupted-batch-row-limit",
+        &selected_owner.owner_id,
+    )
+    .await;
+    let selected_redrive = store
+        .claim_ready_queued_work_by_batch_ids(
+            "interrupted-batch-row-limit",
+            &selected_lease.fence(),
+            &selected_owner,
+            QueuedWorkClaimBoundary::Idle,
+            &redriven
+                .batches
+                .iter()
+                .map(|batch| batch.batch_id.clone())
+                .collect::<Vec<_>>(),
+            crate::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("selected redrive under smaller successor row limit")
+        .expect("selected predecessor composition ignores successor row limit");
+    assert_eq!(
+        selected_redrive
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("limit-w1"), 1),
+            (Some("limit-w2"), 2),
+            (Some("limit-w3"), 3),
+            (Some("limit-w4"), 4),
+            (Some("limit-w5"), 5),
+        ]
+    );
+    release_session_execution_lease_for_test(&store, &selected_lease).await;
+}
+
+async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "selected-multi-identity";
+    let mut batches = Vec::new();
+    for (source_key, label) in [
+        ("selected-claim-a1", "a1"),
+        ("selected-claim-a2", "a2"),
+        ("selected-claim-b1", "b1"),
+        ("selected-claim-b2", "b2"),
+    ] {
+        batches.push(
+            store
+                .enqueue_queued_work(
+                    queued_draft(session_id, label, DeliveryPolicy::EarliestSafeBoundary)
+                        .with_source_key(source_key)
+                        .with_merge_key("selected-multi-identity-key"),
+                )
+                .await
+                .expect("enqueue selected multi-identity row"),
         );
     }
-    release_session_execution_lease_for_test(&store, &join_each_lease).await;
-
-    let merge_policy = crate::WakeTurnPolicy::coalesce(
-        DeliveryPolicy::EarliestSafeBoundary,
-        crate::WakeCoalescingKey::Group("process-wakes".to_string()),
+    let predecessor_owner = lease_owner("selected-multi-predecessor");
+    let predecessor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &predecessor_owner.owner_id)
+            .await;
+    let claim_a = store
+        .claim_ready_queued_work(
+            session_id,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("claim predecessor A")
+        .expect("predecessor A exists");
+    assert_eq!(
+        claim_a
+            .batches
+            .iter()
+            .map(|batch| batch.source_key.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("selected-claim-a1"), Some("selected-claim-a2")]
     );
+    let claim_b = store
+        .claim_ready_queued_work(
+            session_id,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("claim predecessor B")
+        .expect("predecessor B exists");
+    assert_eq!(
+        claim_b
+            .batches
+            .iter()
+            .map(|batch| batch.source_key.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("selected-claim-b1"), Some("selected-claim-b2")]
+    );
+    release_session_execution_lease_for_test(&store, &predecessor_lease).await;
+
+    let successor_owner = lease_owner("selected-multi-successor");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor_owner.owner_id).await;
+    let mixed = store
+        .claim_ready_queued_work_by_batch_ids(
+            session_id,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            &[
+                batches[0].batch_id.clone(),
+                batches[1].batch_id.clone(),
+                batches[2].batch_id.clone(),
+            ],
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await;
+    assert!(
+        matches!(
+            &mixed,
+            Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                required_batch_ids,
+            }) if required_batch_ids == &vec![
+                batches[2].batch_id.clone(),
+                batches[3].batch_id.clone(),
+            ]
+        ),
+        "full A plus partial B must name B's literal complete composition: {mixed:?}"
+    );
+
+    let successor_claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            session_id,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            &batches
+                .iter()
+                .map(|batch| batch.batch_id.clone())
+                .collect::<Vec<_>>(),
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("select two complete interrupted identities")
+        .expect("the physically earliest identity is reclaimed");
+    assert_eq!(
+        successor_claim
+            .batches
+            .iter()
+            .map(|batch| batch.source_key.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("selected-claim-a1"), Some("selected-claim-a2")]
+    );
+    assert_eq!(
+        successor_claim.abandon_restore_claim_id.as_deref(),
+        Some(claim_a.claim_id.as_str())
+    );
+    store
+        .abandon_queued_work_claim(&successor_claim)
+        .await
+        .expect("abandon successor A claim");
+
+    for (selected, required) in [
+        (
+            &batches[0],
+            vec![batches[0].batch_id.clone(), batches[1].batch_id.clone()],
+        ),
+        (
+            &batches[2],
+            vec![batches[2].batch_id.clone(), batches[3].batch_id.clone()],
+        ),
+    ] {
+        let partial = store
+            .claim_ready_queued_work_by_batch_ids(
+                session_id,
+                &successor_lease.fence(),
+                &successor_owner,
+                QueuedWorkClaimBoundary::Idle,
+                std::slice::from_ref(&selected.batch_id),
+                crate::testing::queued_work_claim_policy(64),
+            )
+            .await;
+        assert!(
+            matches!(
+                &partial,
+                Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                    required_batch_ids,
+                }) if required_batch_ids == &required
+            ),
+            "abandon must restore both predecessor identities: {partial:?}"
+        );
+    }
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+}
+
+async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) {
     let merged_wakes = [
-        policy_test_wake("wake-policy-merge", "merge-same-process", 1),
-        policy_test_wake("wake-policy-merge", "merge-same-process", 2),
+        policy_test_wake("wake-default-batch", "process-a", 1),
+        policy_test_wake("wake-default-batch", "process-b", 1),
     ];
     for wake in &merged_wakes {
         store
-            .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
-                wake.clone(),
-                &merge_policy,
-            ))
+            .enqueue_queued_work(crate::process_wake_batch_draft(wake.clone()))
             .await
-            .expect("enqueue merge-policy wake");
+            .expect("enqueue default-key wake");
     }
     let merge_lease =
-        claim_session_execution_lease_for_test(&store, "wake-policy-merge", "merge-owner").await;
+        claim_session_execution_lease_for_test(&store, "wake-default-batch", "merge-owner").await;
     let merged = store
         .claim_ready_queued_work(
-            "wake-policy-merge",
+            "wake-default-batch",
             &merge_lease.fence(),
             &lease_owner("merge-owner"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
-        .expect("claim merge-policy wakes")
-        .expect("merge-policy wakes exist");
+        .expect("claim default-key wakes")
+        .expect("default-key wakes exist");
     assert_eq!(
         merged.batches.len(),
         2,
-        "merge-enabled wake policy must coalesce two sequences from one process"
+        "the constant wake merge key must batch compatible wakes across processes"
+    );
+    assert!(
+        merged
+            .batches
+            .iter()
+            .all(|batch| { batch.merge_key.as_deref() == Some(crate::PROCESS_WAKE_MERGE_KEY) })
     );
     let state = RuntimeSessionState {
-        session_id: "wake-policy-merge".to_string(),
+        session_id: "wake-default-batch".to_string(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     store
@@ -5499,7 +6207,7 @@ async fn wake_turn_policy_controls_coalescing(store: Arc<dyn RuntimePersistence>
         .expect("settle every batch in merged wake claim");
     assert!(
         store
-            .list_queued_work("wake-policy-merge")
+            .list_queued_work("wake-default-batch")
             .await
             .expect("list merged queue after settlement")
             .is_empty(),
@@ -5507,10 +6215,7 @@ async fn wake_turn_policy_controls_coalescing(store: Arc<dyn RuntimePersistence>
     );
     for wake in merged_wakes {
         let error = store
-            .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
-                wake,
-                &merge_policy,
-            ))
+            .enqueue_queued_work(crate::process_wake_batch_draft(wake))
             .await
             .expect_err("settled wake without a live row must trip the receiver floor");
         assert!(matches!(
@@ -5538,6 +6243,7 @@ fn policy_test_wake(session_id: &str, process_id: &str, sequence: u64) -> Proces
             replay: None,
         },
         process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
         input: process_id.to_string(),
         created_at_ms: 1,
     }
@@ -5546,25 +6252,15 @@ fn policy_test_wake(session_id: &str, process_id: &str, sequence: u64) -> Proces
 async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersistence>) {
     let first = store
         .enqueue_queued_work(
-            queued_draft(
-                "root",
-                "join one",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("joined".to_string())),
+            queued_draft("root", "join one", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("joined"),
         )
         .await
         .expect("enqueue first joined batch");
     let second = store
         .enqueue_queued_work(
-            queued_draft(
-                "root",
-                "join two",
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Join,
-            )
-            .with_merge_key(MergeKey::Group("joined".to_string())),
+            queued_draft("root", "join two", DeliveryPolicy::EarliestSafeBoundary)
+                .with_merge_key("joined"),
         )
         .await
         .expect("enqueue second joined batch");
@@ -5576,7 +6272,7 @@ async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersisten
             &claim_session_lease.fence(),
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim joined batches")
@@ -5636,7 +6332,6 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
             "root",
             "atomic queue",
             DeliveryPolicy::EarliestSafeBoundary,
-            SlotPolicy::Exclusive,
         ))
         .await
         .expect("enqueue queue batch");
@@ -5647,7 +6342,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
             &session_lease.fence(),
             &lease_owner("queue-owner"),
             QueuedWorkClaimBoundary::Idle,
-            1,
+            crate::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim queue")
@@ -5681,7 +6376,6 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
         QueuedWorkBatchDraft::new(
             "root",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
             vec![QueuedWorkPayload::agent_frame_task(
                 "follow-frame",
                 "follow-on task",
@@ -6425,7 +7119,7 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
             &crate::TurnId::from(TURN_ID),
             crate::CheckpointKind::AfterWork,
             10,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("reacquire accepted input after unrecorded checkpoint");
@@ -7041,7 +7735,6 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
                 "root",
                 "survives reopen",
                 DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
             )
             .with_source_key("reopen:queued"),
         )
@@ -7186,13 +7879,13 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
             replay: None,
         },
         process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
         input: "wake payload".to_string(),
         created_at_ms: 1,
     };
     let malformed = QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         DeliveryPolicy::EarliestSafeBoundary,
-        SlotPolicy::Exclusive,
         vec![QueuedWorkPayload::process_wake(wake.clone())],
     )
     .with_source_key(crate::process_wake_source_key(
@@ -7233,7 +7926,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
             &session_lease.fence(),
             &lease_owner("wake-owner"),
             QueuedWorkClaimBoundary::Idle,
-            10,
+            crate::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim wake")

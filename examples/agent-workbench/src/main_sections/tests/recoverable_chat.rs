@@ -78,6 +78,28 @@ async fn recoverable_chat_test_state_with_dependencies(
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     queued_work_driver: Option<lash::runtime::QueuedWorkDriver>,
 ) -> AppState {
+    recoverable_chat_test_state_with_dependencies_and_context(
+        data_dir,
+        channel_capacity,
+        provider,
+        trigger_store,
+        store_factory,
+        queued_work_driver,
+        4096,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn recoverable_chat_test_state_with_dependencies_and_context(
+    data_dir: &std::path::Path,
+    channel_capacity: usize,
+    provider: ProviderHandle,
+    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    queued_work_driver: Option<lash::runtime::QueuedWorkDriver>,
+    context_window_tokens: usize,
+) -> AppState {
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &data_dir.join("processes.db"),
@@ -88,7 +110,7 @@ async fn recoverable_chat_test_state_with_dependencies(
     ) as Arc<dyn lash::process::ProcessRegistry>;
     let model = with_workbench_model_capability(
         lash::ModelSpec::builder("test-model")
-            .context_window_tokens(4096)
+            .context_window_tokens(context_window_tokens)
             .build()
             .expect("model spec"),
     );

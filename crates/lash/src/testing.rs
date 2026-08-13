@@ -327,6 +327,7 @@ finish "registered"
         );
         LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory)
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
             .provider(rebuild_provider())
             .model(rebuild_model())
             .plugin(Arc::new(TriggerResourcePluginFactory))
@@ -688,6 +689,26 @@ finish "registered"
                 );
             }
         }
+        let wake_delivery = registry
+            .list_wake_deliveries(None)
+            .await
+            .expect("inspect committed wake delivery")
+            .into_iter()
+            .find(|delivery| delivery.wake.process_id == process_id)
+            .expect("committed process wake delivery");
+        assert_eq!(
+            wake_delivery.state,
+            lash_core::WakeDeliveryState::Enqueued,
+            "recovery wake must reach its terminal delivered state"
+        );
+        assert_eq!(
+            wake_delivery.attempts, 1,
+            "recovery wake must claim and commit on the first background delivery attempt"
+        );
+        assert_eq!(
+            wake_delivery.claim_token, None,
+            "a committed recovery wake must release its delivery claim"
+        );
         drop(session);
 
         let session = core

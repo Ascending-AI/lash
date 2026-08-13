@@ -130,7 +130,7 @@ pub(crate) struct WakeDeliveryDriverSetup {
     registry: Arc<dyn ProcessRegistry>,
     factory: Arc<dyn SessionStoreFactory>,
     clock: Arc<dyn lash_core::Clock>,
-    wake_turn_policy: facade_support::WakeTurnPolicy,
+    delivery_policy: lash_core::DeliveryPolicy,
 }
 
 pub(crate) struct InlineWorkDriverSetup {
@@ -225,12 +225,12 @@ impl InlineWorkDriverSlot {
                     }
                 };
                 let wake = self.setup.wake.as_ref().map(|setup| {
-                    facade_support::WakeDeliveryDriver::new_with_policy(
+                    facade_support::WakeDeliveryDriver::new(
                         Arc::clone(&setup.registry),
                         Arc::clone(&setup.factory),
                         queued.clone(),
                         Arc::clone(&setup.clock),
-                        setup.wake_turn_policy.clone(),
+                        setup.delivery_policy,
                     )
                 });
                 ResolvedWorkDrivers {
@@ -899,6 +899,8 @@ pub struct LashCoreBuilder {
     attachment_store: Option<Arc<dyn AttachmentStore>>,
     process_env_store: Option<Arc<dyn ProcessExecutionEnvStore>>,
     commit_budget: Option<facade_support::CommitBudget>,
+    queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
+    process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
     // Benign core overrides applied on top of the resolved core.
     prompt: Option<PromptLayer>,
@@ -925,7 +927,6 @@ pub struct LashCoreBuilder {
     // Optional host-facing best-effort feed of appended process events,
     // installed on the inline process-registry decorator at build time.
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
-    wake_turn_policy: Option<facade_support::WakeTurnPolicy>,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     queued_work_source: QueuedWorkSource,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
@@ -943,6 +944,8 @@ impl LashCoreBuilder {
             attachment_store: None,
             process_env_store: None,
             commit_budget: None,
+            queued_work_batching: None,
+            process_wake_delivery_policy: None,
             trigger_store: None,
             prompt: None,
             trace_sink: None,
@@ -960,7 +963,6 @@ impl LashCoreBuilder {
             queued_work_execution_concurrency: None,
             worker_slot_supplier: None,
             process_event_sink: None,
-            wake_turn_policy: None,
             process_tool_visibility_filter: None,
             queued_work_source: QueuedWorkSource::default(),
             live_replay_store: None,
@@ -1052,12 +1054,21 @@ impl LashCoreBuilder {
         self.commit_budget = Some(commit_budget);
         self
     }
-    /// Configure how process wake events are drafted into queued turns.
-    ///
-    /// The default preserves the original behavior: earliest-safe-boundary
-    /// delivery, an exclusive slot, and no merge.
-    pub fn wake_turn_policy(mut self, policy: facade_support::WakeTurnPolicy) -> Self {
-        self.wake_turn_policy = Some(policy);
+
+    /// Configure queued-work batching with a required model-action reserve.
+    /// Row-count and pending-age bounds default inside the supplied value and
+    /// may be overridden by the host.
+    pub fn queued_work_batching(
+        mut self,
+        policy: facade_support::QueuedWorkBatchingConfig,
+    ) -> Self {
+        self.queued_work_batching = Some(policy);
+        self
+    }
+
+    /// Select when process wakes may enter an active target session.
+    pub fn process_wake_delivery_policy(mut self, policy: lash_core::DeliveryPolicy) -> Self {
+        self.process_wake_delivery_policy = Some(policy);
         self
     }
 
@@ -1265,9 +1276,12 @@ impl LashCoreBuilder {
         )?;
 
         let live_replay_clock = Arc::clone(&core.clock);
-        let mut env_builder = RuntimeEnvironment::builder(core.durability.commit_budget)
-            .with_plugin_host(Arc::new(default_plugin_host))
-            .with_runtime_host_config(core);
+        let mut env_builder = RuntimeEnvironment::builder(
+            core.durability.commit_budget,
+            core.durability.queued_work_batching,
+        )
+        .with_plugin_host(Arc::new(default_plugin_host))
+        .with_runtime_host_config(core);
         if let Some(process_registry) = process_registry.as_ref() {
             env_builder = env_builder.with_process_registry(Arc::clone(process_registry));
         }
@@ -1317,7 +1331,7 @@ impl LashCoreBuilder {
                     registry,
                     factory,
                     clock: Arc::clone(&env.core.clock),
-                    wake_turn_policy: env.core.control.wake_turn_policy.clone(),
+                    delivery_policy: env.core.control.process_wake_delivery_policy,
                 }),
         };
 

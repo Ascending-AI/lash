@@ -12,7 +12,7 @@ impl RuntimeScenarioContext {
                     &lease.fence(),
                     owner,
                     QueuedWorkClaimBoundary::Idle,
-                    10,
+                    crate::testing::queued_work_claim_policy(10),
                 )
                 .await
                 .expect("turn claim before command");
@@ -46,7 +46,13 @@ impl RuntimeScenarioContext {
         let (owner, lease) = self.owner_and_lease();
         let turn_claim = self
             .store()
-            .claim_ready_queued_work(self.session_id, &lease.fence(), owner, phase.boundary, 10)
+            .claim_ready_queued_work(
+                self.session_id,
+                &lease.fence(),
+                owner,
+                phase.boundary,
+                crate::testing::queued_work_claim_policy(10),
+            )
             .await
             .expect("claim ready turn work");
         assert_eq!(

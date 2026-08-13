@@ -1,14 +1,6 @@
 //! Model-based [`RuntimePersistence`] laws for leases, queues, inputs, commit
 //! CAS, and checkpoint components; process-scoped laws live in the sibling harness.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::future::Future;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-use proptest::prelude::*;
-use proptest::test_runner::{Config, RngSeed, TestRunner};
-
 use super::*;
 use crate::StoreError::SessionExecutionLeaseRenewalRefused as RenewalRefused;
 use crate::store::{
@@ -23,11 +15,17 @@ use crate::{
     SessionExecutionLease, SessionExecutionLeaseClaimOutcome, StoreError, ToolState, TurnInput,
     TurnInputClaim, TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
-
+use proptest::prelude::*;
+use proptest::test_runner::{Config, RngSeed, TestRunner};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 mod attachment_conservation;
 mod claim_honesty;
 mod counterexample;
 mod generator;
+mod interrupted_claim_laws;
 #[cfg(test)]
 mod tests;
 mod usage_conservation;
@@ -555,17 +553,46 @@ async fn apply_operation(
                 let batch_id = pending[usize::from(*selection) % pending.len()]
                     .batch_id
                     .clone();
-                store
+                let required_composition = interrupted_work_composition(model, &batch_id)
+                    .filter(|required| required.len() > 1);
+                let before = required_composition
+                    .as_ref()
+                    .map(|_| session_snapshot(store));
+                let result = store
                     .claim_ready_queued_work_by_batch_ids(
                         SESSION_ID,
                         &lease.fence(),
                         &lease.owner,
                         QueuedWorkClaimBoundary::Idle,
                         std::slice::from_ref(&batch_id),
+                        crate::testing::queued_work_claim_policy(64),
                     )
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .map(|claim| (claim, Some(batch_id)))
+                    .await;
+                if let Some(required_batch_ids) = required_composition {
+                    if !matches!(
+                        &result,
+                        Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                            required_batch_ids: actual,
+                        }) if actual == &required_batch_ids
+                    ) {
+                        return Err(format!(
+                            "partial interrupted-composition selection was not refused with its literal composition {required_batch_ids:?}: {result:?}"
+                        ));
+                    }
+                    assert_snapshot_unchanged(
+                        store,
+                        before
+                            .expect("interrupted-composition refusal captured a snapshot")
+                            .await?,
+                        "partial interrupted-composition selected claim",
+                    )
+                    .await?;
+                    None
+                } else {
+                    result
+                        .map_err(|error| error.to_string())?
+                        .map(|claim| (claim, Some(batch_id)))
+                }
             } else {
                 store
                     .claim_ready_queued_work(
@@ -573,7 +600,7 @@ async fn apply_operation(
                         &lease.fence(),
                         &lease.owner,
                         QueuedWorkClaimBoundary::Idle,
-                        4,
+                        crate::testing::queued_work_claim_policy(4),
                     )
                     .await
                     .map_err(|error| error.to_string())?
@@ -789,6 +816,7 @@ async fn claim_work_with_stale_lease(
             &stale.owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await;
     if !matches!(result, Err(StoreError::SessionExecutionLeaseExpired { .. })) {
@@ -1432,26 +1460,21 @@ fn owner(index: u8) -> LeaseOwnerIdentity {
 }
 
 fn queued_draft(slot: u8, value: u8, coalesce: bool) -> QueuedWorkBatchDraft {
-    QueuedWorkBatchDraft::new(
+    let draft = QueuedWorkBatchDraft::new(
         SESSION_ID,
         DeliveryPolicy::EarliestSafeBoundary,
-        if coalesce {
-            SlotPolicy::Join
-        } else {
-            SlotPolicy::Exclusive
-        },
         vec![QueuedWorkPayload::agent_frame_task(
             format!("property-frame-{value}"),
             format!("property-work-{value}"),
             None,
         )],
     )
-    .with_source_key(format!("runtime-property-work-{slot}"))
-    .with_merge_key(if coalesce {
-        MergeKey::Group("runtime-property-coalesced".to_string())
+    .with_source_key(format!("runtime-property-work-{slot}"));
+    if coalesce {
+        draft.with_merge_key("runtime-property-coalesced")
     } else {
-        MergeKey::Never
-    })
+        draft
+    }
 }
 
 fn turn_input_draft(slot: u8, value: u8) -> PendingTurnInputDraft {
@@ -1473,6 +1496,34 @@ fn pending_work(model: &ReferenceModel) -> Vec<QueuedWorkBatch> {
         .collect::<Vec<_>>();
     work.sort_by_key(|batch| batch.enqueue_seq);
     work
+}
+
+fn interrupted_work_composition(
+    model: &ReferenceModel,
+    selected_batch_id: &str,
+) -> Option<Vec<String>> {
+    let pending = pending_work(model)
+        .into_iter()
+        .map(|batch| batch.batch_id)
+        .collect::<BTreeSet<_>>();
+    model
+        .stale_work_claims
+        .iter()
+        .rev()
+        .find(|claim| {
+            claim
+                .batches
+                .iter()
+                .any(|batch| batch.batch_id == selected_batch_id)
+        })
+        .map(|claim| {
+            claim
+                .batches
+                .iter()
+                .filter(|batch| pending.contains(&batch.batch_id))
+                .map(|batch| batch.batch_id.clone())
+                .collect()
+        })
 }
 
 fn pending_inputs(model: &ReferenceModel) -> Vec<PendingTurnInput> {
@@ -1757,7 +1808,7 @@ where
     })
     .await?;
     assert_on_fresh_store(make, seed + 5, |store| async move {
-        law_stale_settlement_cannot_damage_successor(store).await
+        interrupted_claim_laws::stale_settlement_cannot_damage_successor(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 6, |store| async move {
@@ -1848,6 +1899,7 @@ async fn law_claimed_work_settles_exactly_once(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1931,7 +1983,7 @@ async fn law_reclaim_mediates_supersession(
             &stale_lease.fence(),
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
-            4,
+            crate::testing::queued_work_claim_policy(4),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1949,17 +2001,47 @@ async fn law_reclaim_mediates_supersession(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
         .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
-    let successor_claim = store
+    let before_partial_selection = session_snapshot(store.as_ref())
+        .await
+        .map_err(TestCaseError::fail)?;
+    let partial_selection = store
         .claim_ready_queued_work_by_batch_ids(
             SESSION_ID,
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&first.batch_id),
+            crate::testing::queued_work_claim_policy(64),
+        )
+        .await;
+    prop_assert!(
+        matches!(
+            &partial_selection,
+            Err(StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                required_batch_ids,
+            }) if required_batch_ids == &[first.batch_id.clone(), second.batch_id.clone()]
+        ),
+        "partial selection did not return the literal interrupted composition: {partial_selection:?}"
+    );
+    assert_snapshot_unchanged(
+        store.as_ref(),
+        before_partial_selection,
+        "partial interrupted-composition selected claim",
+    )
+    .await
+    .map_err(TestCaseError::fail)?;
+    let successor_claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            SESSION_ID,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            &[first.batch_id.clone(), second.batch_id.clone()],
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .ok_or_else(|| TestCaseError::fail("successor did not reclaim selected batch"))?;
+        .ok_or_else(|| TestCaseError::fail("successor did not reclaim full composition"))?;
 
     let mut state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
@@ -1993,13 +2075,9 @@ async fn law_reclaim_mediates_supersession(
         .list_pending_queued_work(SESSION_ID)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(
-        pending_while_successor_holds
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .collect::<BTreeSet<_>>(),
-        BTreeSet::from([second.batch_id.as_str()]),
-        "the rejected predecessor commit did not preserve the first batch under the successor claim"
+    prop_assert!(
+        pending_while_successor_holds.is_empty(),
+        "the rejected predecessor commit disturbed successor ownership of the full composition"
     );
     prop_assert!(
         store
@@ -2009,6 +2087,7 @@ async fn law_reclaim_mediates_supersession(
                 &successor_owner,
                 QueuedWorkClaimBoundary::Idle,
                 std::slice::from_ref(&first.batch_id),
+                crate::testing::queued_work_claim_policy(64),
             )
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2032,7 +2111,7 @@ async fn law_reclaim_mediates_supersession(
         BTreeSet::from([first.batch_id.as_str(), second.batch_id.as_str()]),
         "rejected stale completion did not preserve both batches as pending"
     );
-    prop_assert_eq!(successor_claim.batches.len(), 1);
+    prop_assert_eq!(successor_claim.batches.len(), 2);
     Ok(())
 }
 
@@ -2061,6 +2140,7 @@ async fn law_head_cas_serializes_competing_commits(
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&batch.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2136,118 +2216,6 @@ async fn law_head_cas_serializes_competing_commits(
     Ok(())
 }
 
-async fn law_stale_settlement_cannot_damage_successor(
-    store: Arc<dyn RuntimePersistence>,
-) -> Result<(), TestCaseError> {
-    let first = store
-        .enqueue_queued_work(queued_draft(0, 0, true))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let second = store
-        .enqueue_queued_work(queued_draft(1, 1, true))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let stale_owner = owner(0);
-    let stale_lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &stale_owner, 60_000)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .acquired()
-        .ok_or_else(|| TestCaseError::fail("stale-owner lease busy"))?;
-    let stale_claim = store
-        .claim_ready_queued_work(
-            SESSION_ID,
-            &stale_lease.fence(),
-            &stale_owner,
-            QueuedWorkClaimBoundary::Idle,
-            4,
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .ok_or_else(|| TestCaseError::fail("coalesced work absent"))?;
-    store
-        .release_session_execution_lease(&stale_lease.completion())
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let successor_owner = owner(1);
-    let successor_lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &successor_owner, 60_000)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .acquired()
-        .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
-    let successor_claim = store
-        .claim_ready_queued_work_by_batch_ids(
-            SESSION_ID,
-            &successor_lease.fence(),
-            &successor_owner,
-            QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&first.batch_id),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .ok_or_else(|| TestCaseError::fail("successor did not reclaim selected batch"))?;
-
-    let mut stale_completion = stale_claim.completion();
-    stale_completion.batch_ids = vec![second.batch_id.clone()];
-    let mut state = RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    state.set_tool_state_snapshot(Some(ToolState::default().with_generation(51)));
-    let stale_result = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(stale_lease.completion())
-                .completing_queue_claim(stale_completion),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    state.apply_persisted_commit_result(stale_result);
-    let remaining = store
-        .list_queued_work(SESSION_ID)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(remaining.len(), 1);
-    prop_assert_eq!(remaining[0].batch_id.as_str(), first.batch_id.as_str());
-    prop_assert!(
-        store
-            .list_pending_queued_work(SESSION_ID)
-            .await
-            .map_err(|error| TestCaseError::fail(error.to_string()))?
-            .is_empty(),
-        "stale subset settlement disturbed successor claim ownership"
-    );
-    let third_owner = owner(2);
-    prop_assert!(
-        matches!(
-            store
-                .try_claim_session_execution_lease(SESSION_ID, &third_owner, 60_000)
-                .await
-                .map_err(|error| TestCaseError::fail(error.to_string()))?,
-            SessionExecutionLeaseClaimOutcome::Busy { .. }
-        ),
-        "stale completion released the successor session lease"
-    );
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(successor_lease.completion())
-                .completing_queue_claim(successor_claim.completion()),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(
-        store
-            .list_queued_work(SESSION_ID)
-            .await
-            .map_err(|error| TestCaseError::fail(error.to_string()))?
-            .is_empty(),
-        "successor could not settle its preserved claim"
-    );
-    Ok(())
-}
-
 async fn law_selected_batch_out_of_order_never_loses_work(
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<(), TestCaseError> {
@@ -2273,6 +2241,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&later.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -2306,6 +2275,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
             &owner,
             QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&earlier.batch_id),
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?

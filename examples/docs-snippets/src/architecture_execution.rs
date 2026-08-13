@@ -36,6 +36,7 @@ async fn facade_turn(
         .process_env_store(process_env_store)
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build()?;
 
     let session = core.session(chat_id).open().await?;

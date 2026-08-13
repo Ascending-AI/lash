@@ -31,6 +31,17 @@ use crate::{
     TurnStop,
 };
 
+/// Generous claim bounds for store/runtime conformance tests whose subject is
+/// not batching policy. Batching-specific tests construct exact policies.
+pub fn queued_work_claim_policy(max_rows: usize) -> crate::QueuedWorkClaimPolicy {
+    crate::QueuedWorkClaimPolicy {
+        max_context_tokens: usize::MAX / 4,
+        action_token_reserve: 1,
+        max_rows,
+        max_pending_age_ms: u64::MAX,
+    }
+}
+
 /// Synthesize the response produced when a plugin aborts an in-flight LLM
 /// stream after `events` have reached core's stream accumulator.
 ///

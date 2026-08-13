@@ -118,6 +118,8 @@ pub enum RemoteProcessOriginator {
     },
     Session {
         session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_frame_id: Option<String>,
     },
 }
 
@@ -125,7 +127,9 @@ impl RemoteProcessOriginator {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Host { .. } => Ok(()),
-            Self::Session { session_id } => require_non_empty(type_name, "session_id", session_id),
+            Self::Session { session_id, .. } => {
+                require_non_empty(type_name, "session_id", session_id)
+            }
         }
     }
 }

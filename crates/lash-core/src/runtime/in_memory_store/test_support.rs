@@ -324,8 +324,8 @@ mod tests {
 
     use crate::store::{GraphAppend, SessionCommitStore};
     use crate::{
-        DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
-        RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
+        DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkCompletion, QueuedWorkKind,
+        RuntimeCommit, RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory,
         StoreError, TokenLedgerEntry, TokenUsage, TurnInputCompletion,
     };
 
@@ -461,8 +461,9 @@ mod tests {
                     enqueue_seq: 1,
                     source_key: None,
                     delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
-                    slot_policy: SlotPolicy::Exclusive,
-                    merge_key: MergeKey::Never,
+                    kind: QueuedWorkKind::Turn,
+                    authority: QueuedWorkAuthority::default(),
+                    merge_key: None,
                     available_at_ms: 0,
                     enqueued_at_ms: 0,
                     items: vec![crate::runtime::QueuedWorkItem {
@@ -493,7 +494,7 @@ mod tests {
                 &owner,
                 super::super::InMemoryQueuedWorkClaimKind::TurnWork {
                     boundary: crate::QueuedWorkClaimBoundary::Idle,
-                    max_batches: 1,
+                    policy: crate::testing::queued_work_claim_policy(1),
                 },
                 store.clock.timestamp_ms(),
             )
@@ -520,8 +521,9 @@ mod tests {
                     enqueue_seq: 1,
                     source_key: None,
                     delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
-                    slot_policy: SlotPolicy::Join,
-                    merge_key: MergeKey::Never,
+                    kind: QueuedWorkKind::Turn,
+                    authority: QueuedWorkAuthority::default(),
+                    merge_key: None,
                     available_at_ms: 0,
                     enqueued_at_ms: 0,
                     items: Vec::new(),
@@ -602,6 +604,7 @@ mod tests {
                 replay: None,
             },
             process_caused_by: None,
+            authority: crate::QueuedWorkAuthority::default(),
             input: "rewound".to_string(),
             created_at_ms: 1,
         };

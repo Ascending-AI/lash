@@ -60,6 +60,19 @@ pub(crate) struct WorkbenchQueuedTurnWorkflowRequest {
 
 impl WorkbenchQueuedTurnWorkflowRequest {
     pub(crate) fn queued_turn(&self, session: &lash::LashSession) -> lash::QueuedTurnBuilder {
+        debug_assert!(self.batch_ids.is_empty());
+        session.queued_turn().drain_id(
+            self.drain_id
+                .clone()
+                .unwrap_or_else(|| self.turn_id.clone()),
+        )
+    }
+
+    pub(crate) fn selected_queued_turn(
+        &self,
+        session: &lash::LashSession,
+    ) -> lash::SelectedQueuedTurnBuilder {
+        debug_assert!(!self.batch_ids.is_empty());
         session
             .queued_turn()
             .batch_ids(self.batch_ids.iter().cloned())
@@ -991,13 +1004,23 @@ async fn run_queued_turn(
             "model": serde_json::to_value(&selected_model).unwrap_or(Value::Null),
         }),
     );
-    let Some(output) = request
-        .queued_turn(&session)
-        .effects(controller)
-        .stream_to(&ui_events)
-        .await
-        .map_err(AppError::runtime)?
-    else {
+    let output = if request.batch_ids.is_empty() {
+        request
+            .queued_turn(&session)
+            .effects(controller)
+            .stream_to(&ui_events)
+            .await
+            .map_err(AppError::runtime)?
+    } else {
+        request
+            .selected_queued_turn(&session)
+            .effects(controller)
+            .stream_to(&ui_events)
+            .await
+            .map_err(AppError::runtime)?
+            .turn
+    };
+    let Some(output) = output else {
         state.trace_for_session(
             &request.session_id,
             "queued_work.restate.empty",

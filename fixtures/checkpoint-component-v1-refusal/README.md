@@ -4,9 +4,9 @@ These fixtures retain the last durable checkpoint produced with component
 encoding version 1. They are intentionally not regenerated when the current
 durable-read fixture advances.
 
-- `sqlite/durable-core.db` uses the current schema-33 SQLite catalog while
+- `sqlite/durable-core.db` uses the current schema-35 SQLite catalog while
   retaining the checkpoint blob from commit `a461383be`.
-- `postgres/fixture.sql` uses the current schema-46 PostgreSQL catalog while
+- `postgres/fixture.sql` uses the current schema-47 PostgreSQL catalog while
   retaining the checkpoint blob from the same commit.
 
 Both contain the `durable-read-fixture` session with an `execution_state`

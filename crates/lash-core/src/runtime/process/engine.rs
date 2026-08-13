@@ -157,8 +157,8 @@ pub struct ProcessEngineProcessContext {
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     queued_work_driver: Option<crate::QueuedWorkDriver>,
+    process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: Arc<dyn crate::Clock>,
-    wake_turn_policy: crate::WakeTurnPolicy,
 }
 
 impl ProcessEngineProcessContext {
@@ -171,8 +171,8 @@ impl ProcessEngineProcessContext {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
-        wake_turn_policy: crate::WakeTurnPolicy,
     ) -> Self {
         Self {
             process_id,
@@ -182,8 +182,8 @@ impl ProcessEngineProcessContext {
             store,
             session_store_factory,
             queued_work_driver,
+            process_wake_delivery_policy,
             clock,
-            wake_turn_policy,
         }
     }
 
@@ -215,8 +215,8 @@ impl ProcessEngineProcessContext {
             result.wake_delivery,
             None,
             self.queued_work_driver.as_ref(),
+            self.process_wake_delivery_policy,
             Arc::clone(&self.clock),
-            &self.wake_turn_policy,
         )
         .await?;
         Ok(result.event)
@@ -278,8 +278,8 @@ impl<'run> ProcessEngineRunContext<'run> {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
-        wake_turn_policy: crate::WakeTurnPolicy,
         process_registry_available: bool,
         cancellation: CancellationToken,
         turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -299,8 +299,8 @@ impl<'run> ProcessEngineRunContext<'run> {
             store.clone(),
             session_store_factory.clone(),
             queued_work_driver.clone(),
+            process_wake_delivery_policy,
             clock,
-            wake_turn_policy,
         );
         Self {
             registration,

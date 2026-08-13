@@ -11,21 +11,15 @@ use lash_core::store;
 use lash_core::store::{PersistedSessionRead, RuntimeCommitResult, SessionHeadMeta};
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
-    SessionGraph, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-    StoreMaintenance, TurnInputStore, VacuumReport, facade_support::current_epoch_ms,
+    SelectedQueuedWorkClaimOutcome, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionGraph, SessionNodeRecord,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore,
+    VacuumReport, facade_support::current_epoch_ms,
 };
 
-#[derive(Clone)]
-struct RuntimePerfQueuedBatch {
-    batch: QueuedWorkBatch,
-    claim_id: Option<String>,
-    claim_token: Option<String>,
-    claim_owner: Option<LeaseOwnerIdentity>,
-    claim_fencing_token: u64,
-    claim_session_lease_generation: u64,
-}
+mod queued_work;
+use queued_work::RuntimePerfQueuedBatch;
 
 #[derive(Clone)]
 struct RuntimePerfPendingTurnInput {
@@ -122,7 +116,7 @@ enum RuntimePerfQueuedWorkClaimKind {
     LeadingSessionCommand,
     TurnWork {
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
     },
 }
 
@@ -164,7 +158,8 @@ impl RuntimePerfStore {
             enqueue_seq,
             source_key: batch.source_key,
             delivery_policy: batch.delivery_policy,
-            slot_policy: batch.slot_policy,
+            kind: batch.kind,
+            authority: batch.authority,
             merge_key: batch.merge_key,
             available_at_ms: batch.available_at_ms,
             enqueued_at_ms: current_epoch_ms(),
@@ -276,7 +271,7 @@ impl RuntimePerfStore {
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let max_batches = match kind {
             RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand => 1,
-            RuntimePerfQueuedWorkClaimKind::TurnWork { max_batches, .. } => max_batches,
+            RuntimePerfQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
         if max_batches == 0 {
             return Ok(None);
@@ -310,34 +305,41 @@ impl RuntimePerfStore {
             .iter()
             .map(|index| {
                 let batch = &queued[*index].batch;
-                Ok(store::queued_work::ClaimCandidate {
-                    enqueue_seq: batch.enqueue_seq,
-                    claim_fencing_token: queued[*index].claim_fencing_token,
-                    work_class: Self::queued_batch_work_class(batch)?,
-                    delivery_policy: batch.delivery_policy,
-                    slot_policy: batch.slot_policy,
-                    merge_key: batch.merge_key.clone(),
-                })
+                Self::queued_batch_work_class(batch)?;
+                Ok(store::queued_work::ClaimCandidate::from_batch(
+                    batch,
+                    queued[*index].claim_fencing_token,
+                    queued[*index].claim_id.clone(),
+                ))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let selected_len = match kind {
+        let selected_indices: Vec<usize> = match kind {
             RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand => {
-                store::queued_work::select_leading_session_command(&candidates)
+                let selected_len = store::queued_work::select_leading_session_command(&candidates);
+                claimable_indices
+                    .iter()
+                    .copied()
+                    .take(selected_len)
+                    .collect()
             }
-            RuntimePerfQueuedWorkClaimKind::TurnWork {
-                boundary,
-                max_batches,
-            } => store::queued_work::select_turn_work_claim_prefix(
-                &candidates,
-                boundary,
-                max_batches,
-            ),
+            RuntimePerfQueuedWorkClaimKind::TurnWork { boundary, policy } => {
+                store::queued_work::select_turn_work_claim_indices(
+                    &candidates,
+                    boundary,
+                    policy,
+                    now,
+                )?
+                .into_iter()
+                .map(|candidate_index| claimable_indices[candidate_index])
+                .collect()
+            }
         };
-        if selected_len == 0 {
+        if selected_indices.is_empty() {
             return Ok(None);
         }
-        let first_index = claimable_indices[0];
+        let first_index = selected_indices[0];
         let first = queued[first_index].batch.clone();
+        let abandon_restore_claim_id = queued[first_index].claim_id.clone();
         let fencing_token = queued[first_index].claim_fencing_token.saturating_add(1);
         let claim_id = store::queued_work::derive_claim_id(
             store::queued_work::ClaimIdDialect::PerformanceQueuedWork,
@@ -349,7 +351,7 @@ impl RuntimePerfStore {
             owner.owner_id, owner.incarnation_id
         );
         let mut batches = Vec::new();
-        for index in claimable_indices.into_iter().take(selected_len) {
+        for index in selected_indices {
             let entry = &mut queued[index];
             entry.claim_id = Some(claim_id.clone());
             entry.claim_token = Some(lease_token.clone());
@@ -365,7 +367,10 @@ impl RuntimePerfStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            data: lash_core::runtime::QueuedWorkClaimData { batches },
+            data: lash_core::store_backend_support::queued_work_claim_data(
+                batches,
+                abandon_restore_claim_id,
+            ),
         }))
     }
 
@@ -1243,16 +1248,13 @@ impl QueuedWorkStore for RuntimePerfStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         self.claim_ready_queued_work_perf(
             session_id,
             session_execution_lease,
             owner,
-            RuntimePerfQueuedWorkClaimKind::TurnWork {
-                boundary,
-                max_batches,
-            },
+            RuntimePerfQueuedWorkClaimKind::TurnWork { boundary, policy },
         )
     }
 
@@ -1264,7 +1266,7 @@ impl QueuedWorkStore for RuntimePerfStore {
         turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<(Option<lash_core::TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         let turn_input_claim = TurnInputStore::claim_active_turn_inputs(
             self,
@@ -1282,7 +1284,7 @@ impl QueuedWorkStore for RuntimePerfStore {
             owner,
             RuntimePerfQueuedWorkClaimKind::TurnWork {
                 boundary: QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                max_batches,
+                policy,
             },
         )?;
         Ok((turn_input_claim, queued_work_claim))
@@ -1295,55 +1297,151 @@ impl QueuedWorkStore for RuntimePerfStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+        policy: lash_core::QueuedWorkClaimPolicy,
+    ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
         if batch_ids.is_empty() {
-            return Ok(None);
+            return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
         }
         self.verify_session_execution_lease(session_id, session_execution_lease)?;
         let generation = session_execution_lease.fencing_token;
         let now = current_epoch_ms();
         let mut queued = self.queued_work.lock_recover();
-        let mut indices = Vec::new();
-        for batch_id in batch_ids {
-            let Some(index) = queued.iter().position(|entry| {
-                entry.batch.session_id == session_id
-                    && entry.batch.batch_id == *batch_id
-                    && entry.batch.available_at_ms <= now
-                    && (entry.claim_token.is_none()
-                        || entry.claim_session_lease_generation != generation)
-            }) else {
-                return Ok(None);
-            };
-            if Self::queued_batch_work_class(&queued[index].batch)?
-                != lash_core::store::QueuedWorkClass::TurnWork
-            {
-                return Ok(None);
-            }
-            indices.push(index);
+        queued.sort_by_key(|entry| entry.batch.enqueue_seq);
+        let queued_work::SelectedBatchPresence {
+            requested_ids,
+            present_ids,
+            already_satisfied_batch_ids,
+        } = queued_work::selected_batch_presence(&queued, session_id, batch_ids);
+        if present_ids.is_empty() {
+            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
+        let claim_available = |entry: &RuntimePerfQueuedBatch| {
+            entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
+        };
+        let requested_indices = queued
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                entry.batch.session_id == session_id
+                    && entry.batch.available_at_ms <= now
+                    && claim_available(entry)
+                    && requested_ids.contains(&entry.batch.batch_id)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if requested_indices.len() != present_ids.len() {
+            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
+        }
+        let involved_claim_ids = requested_indices
+            .iter()
+            .filter_map(|index| queued[*index].claim_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut validation_indices = requested_indices.clone();
+        if !involved_claim_ids.is_empty() {
+            validation_indices.extend(queued.iter().enumerate().filter_map(|(index, entry)| {
+                (entry.batch.session_id == session_id
+                    && entry.batch.available_at_ms <= now
+                    && claim_available(entry)
+                    && entry
+                        .claim_id
+                        .as_ref()
+                        .is_some_and(|claim_id| involved_claim_ids.contains(claim_id)))
+                .then_some(index)
+            }));
+            validation_indices.sort_unstable();
+            validation_indices.dedup();
+        }
+        let validation_batch_claims = validation_indices
+            .iter()
+            .map(|index| {
+                (
+                    queued[*index].batch.batch_id.clone(),
+                    queued[*index].claim_id.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let interrupted_indices = store::queued_work::select_interrupted_exact_claim_indices(
+            &validation_batch_claims,
+            batch_ids,
+        )
+        .map_err(|required_batch_ids| {
+            StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }
+        })?;
+        let mut indices = if let Some(interrupted_indices) = interrupted_indices {
+            interrupted_indices
+                .into_iter()
+                .map(|position| validation_indices[position])
+                .collect::<Vec<_>>()
+        } else {
+            let min_enqueue_seq = queued[requested_indices[0]].batch.enqueue_seq;
+            let max_enqueue_seq = queued[*requested_indices.last().expect("requested rows exist")]
+                .batch
+                .enqueue_seq;
+            let span_indices = queued
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| {
+                    entry.batch.session_id == session_id
+                        && entry.batch.available_at_ms <= now
+                        && claim_available(entry)
+                        && (min_enqueue_seq..=max_enqueue_seq).contains(&entry.batch.enqueue_seq)
+                })
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            for index in &requested_indices {
+                if Self::queued_batch_work_class(&queued[*index].batch)?
+                    != lash_core::store::QueuedWorkClass::TurnWork
+                {
+                    return Ok(SelectedQueuedWorkClaimOutcome::new(
+                        None,
+                        already_satisfied_batch_ids,
+                    ));
+                }
+            }
+            let first_requested = requested_indices[0];
+            let Some(first_position) = span_indices
+                .iter()
+                .position(|index| *index == first_requested)
+            else {
+                return Ok(SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
+            };
+            span_indices[first_position..]
+                .iter()
+                .copied()
+                .take_while(|index| requested_ids.contains(&queued[*index].batch.batch_id))
+                .collect::<Vec<_>>()
+        };
         let candidates = indices
             .iter()
             .map(|index| {
                 let entry = &queued[*index];
-                store::queued_work::ClaimCandidate {
-                    enqueue_seq: entry.batch.enqueue_seq,
-                    claim_fencing_token: entry.claim_fencing_token,
-                    work_class: lash_core::store::QueuedWorkClass::TurnWork,
-                    delivery_policy: entry.batch.delivery_policy,
-                    slot_policy: entry.batch.slot_policy,
-                    merge_key: entry.batch.merge_key.clone(),
-                }
+                store::queued_work::ClaimCandidate::from_batch(
+                    &entry.batch,
+                    entry.claim_fencing_token,
+                    entry.claim_id.clone(),
+                )
             })
             .collect::<Vec<_>>();
-        if store::queued_work::select_turn_work_claim_prefix(
-            &candidates,
-            boundary,
-            candidates.len(),
-        ) != candidates.len()
-        {
-            return Ok(None);
+        let selected_len =
+            store::queued_work::select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
+        if selected_len == 0 {
+            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
         }
+        indices.truncate(selected_len);
         let first = &queued[indices[0]];
+        let abandon_restore_claim_id = first.claim_id.clone();
         let fencing_token = first.claim_fencing_token.saturating_add(1);
         let claim_id = store::queued_work::derive_claim_id(
             store::queued_work::ClaimIdDialect::PerformanceQueuedWork,
@@ -1364,15 +1462,21 @@ impl QueuedWorkStore for RuntimePerfStore {
             entry.claim_session_lease_generation = generation;
             batches.push(entry.batch.clone());
         }
-        Ok(Some(QueuedWorkClaim {
-            session_id: session_id.to_string(),
-            claim_id,
-            owner: owner.clone(),
-            lease_token,
-            fencing_token,
-            session_lease_generation: generation,
-            data: lash_core::runtime::QueuedWorkClaimData { batches },
-        }))
+        Ok(SelectedQueuedWorkClaimOutcome::new(
+            Some(QueuedWorkClaim {
+                session_id: session_id.to_string(),
+                claim_id,
+                owner: owner.clone(),
+                lease_token,
+                fencing_token,
+                session_lease_generation: generation,
+                data: lash_core::store_backend_support::queued_work_claim_data(
+                    batches,
+                    abandon_restore_claim_id,
+                ),
+            }),
+            already_satisfied_batch_ids,
+        ))
     }
 
     async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {
@@ -1382,7 +1486,9 @@ impl QueuedWorkStore for RuntimePerfStore {
                 && entry.claim_id.as_deref() == Some(claim.claim_id.as_str())
                 && entry.claim_token.as_deref() == Some(claim.lease_token.as_str())
             {
-                entry.claim_id = None;
+                entry.claim_id =
+                    lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim)
+                        .map(str::to_string);
                 entry.claim_token = None;
                 entry.claim_owner = None;
                 entry.claim_session_lease_generation = 0;

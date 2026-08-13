@@ -176,6 +176,7 @@ mod asserted_process_examples {
         RemoteProcessProvenance {
             originator: RemoteProcessOriginator::Session {
                 session_id: "session-finance".to_string(),
+                agent_frame_id: None,
             },
             caused_by: Some(RemoteCausalRef::TriggerOccurrence {
                 occurrence_id: "occurrence-42".to_string(),
@@ -295,6 +296,7 @@ mod asserted_process_examples {
             },
             originator: RemoteProcessOriginator::Session {
                 session_id: "session-finance".to_string(),
+                agent_frame_id: None,
             },
             env_ref: Some(process_env_ref()),
             caused_by: process_provenance().caused_by,
@@ -372,6 +374,7 @@ mod asserted_process_examples {
             env_spec: Some(env_spec.clone()),
             originator: RemoteProcessOriginator::Session {
                 session_id: "session-finance".to_string(),
+                agent_frame_id: None,
             },
             identity: Some(process_identity()),
             wake_session_id: Some("session-finance".to_string()),
@@ -406,6 +409,7 @@ mod asserted_process_examples {
         assert_eq!(request_json["disposition"], "rerunnable");
         assert_eq!(request_json["max_attempts"], 3);
         assert_eq!(request_json["originator"]["type"], "session");
+        assert!(request_json["originator"].get("agent_frame_id").is_none());
         assert_eq!(request_json["wake_session_id"], "session-finance");
         assert_eq!(request_json["observers"].as_array().unwrap().len(), 2);
         assert_eq!(request_json["event_types"][0]["name"], "progress");

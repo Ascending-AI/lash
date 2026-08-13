@@ -171,8 +171,9 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     session_id        TEXT NOT NULL,
     source_key        TEXT,
     delivery_policy   TEXT NOT NULL,
-    slot_policy       TEXT NOT NULL,
-    merge_key_json    TEXT NOT NULL,
+    work_kind         TEXT NOT NULL,
+    authority_json    TEXT NOT NULL,
+    merge_key         TEXT,
     available_at_ms   INTEGER NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
     claim_id          TEXT,
@@ -351,7 +352,9 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Version 33 replaces that JSON carrier with structural columns and narrow
 /// ordered child tables. Older databases are rejected and recreated; there is
 /// no JSON or compatibility read path.
-pub(crate) const SCHEMA_VERSION: i32 = 33;
+/// Version 35 adds queued-work batch identity and coalescing metadata. Version
+/// 34 is reserved by FIG-1133 and is intentionally skipped.
+pub(crate) const SCHEMA_VERSION: i32 = 35;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

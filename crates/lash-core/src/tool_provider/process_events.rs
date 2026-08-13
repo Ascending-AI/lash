@@ -10,8 +10,8 @@ pub(crate) async fn enqueue_wake_delivery(
     wake_delivery: Option<crate::ProcessWakeDelivery>,
     trace_host: Option<&dyn crate::plugin::SessionGraphService>,
     queued_work_driver: Option<&crate::QueuedWorkDriver>,
+    process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: std::sync::Arc<dyn crate::Clock>,
-    wake_turn_policy: &crate::WakeTurnPolicy,
 ) -> Result<(), PluginError> {
     let Some(wake_delivery) = wake_delivery else {
         return Ok(());
@@ -22,12 +22,12 @@ pub(crate) async fn enqueue_wake_delivery(
         // runbook lever once that resolver is available.
         return Ok(());
     };
-    if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once_with_policy(
+    if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once_with_delivery_policy(
         registry,
         std::sync::Arc::clone(factory),
         queued_work_driver.cloned(),
         clock,
-        wake_turn_policy,
+        process_wake_delivery_policy,
         32,
     )
     .await
@@ -58,7 +58,9 @@ pub(crate) async fn enqueue_wake_delivery(
                                 "batch_id": enqueued.batch_id,
                                 "source_key": enqueued.source_key,
                                 "delivery_policy": enqueued.delivery_policy,
-                                "slot_policy": enqueued.slot_policy,
+                                "work_kind": enqueued.kind,
+                                "authority": enqueued.authority,
+                                "merge_key": enqueued.merge_key,
                                 "payload_types": ["process_wake"],
                             }),
                         },
@@ -127,8 +129,8 @@ impl ToolProcessEventClient {
             result.wake_delivery,
             Some(process.session_graph.as_ref()),
             process.queued_work_driver.as_ref(),
+            process.process_wake_delivery_policy,
             std::sync::Arc::clone(&process.clock),
-            &process.wake_turn_policy,
         )
         .await?;
         Ok(result.event)

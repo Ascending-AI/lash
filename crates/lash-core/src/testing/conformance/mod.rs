@@ -84,7 +84,7 @@ use std::time::Duration;
 use crate::{
     AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, DeliveryPolicy,
     EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayResult, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeResult, MergeKey, ModelSpec, PluginSessionSnapshot,
+    LiveReplayStoreError, LiveReplaySubscribeResult, ModelSpec, PluginSessionSnapshot,
     ProtocolEvent, ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaimBoundary, QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeCommit,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
@@ -92,8 +92,8 @@ use crate::{
     RuntimeInvocation, RuntimePersistence, RuntimeScope, RuntimeSessionState, RuntimeSubject,
     RuntimeTurnCommitStamp, ScopedEffectController, SessionMeta, SessionNodePayload,
     SessionNodeRecord, SessionObservationEvent, SessionObservationEventPayload, SessionPolicy,
-    SessionProcessEventKind, SessionQueueEventKind, SessionRelation, SessionRevision, SlotPolicy,
-    StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelation, SessionRevision, StoreError,
+    TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
 };
 use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePersistence};
 use crate::{

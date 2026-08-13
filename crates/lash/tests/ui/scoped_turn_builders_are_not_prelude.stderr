@@ -29,7 +29,7 @@ error[E0432]: unresolved imports `lash::AdvancedTurn`, `lash::ScopedQueuedTurnBu
 help: a similar name exists in the module
   |
 5 - use lash::{AdvancedTurn, ScopedQueuedTurnBuilder, ScopedTurnBuilder};
-5 + use lash::{AdvancedTurn, QueuedTurnBuilder, ScopedTurnBuilder};
+5 + use lash::{AdvancedTurn, SelectedQueuedTurnBuilder, ScopedTurnBuilder};
   |
 help: a similar name exists in the module
   |

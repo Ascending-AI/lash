@@ -11,6 +11,90 @@ use crate::facade_support::{
 use lash_sansio::core_support::*;
 use std::pin::Pin;
 
+/// Why an exact host-selected queued-work set was refused before turn execution.
+///
+/// Missing durable rows are not a refusal: they idempotently satisfy their
+/// requested IDs. Refusal means at least one still-present row could not be
+/// executed under the requested atomic composition, or the execution lane was
+/// unavailable; no selected turn was started.
+#[doc(hidden)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectedQueuedWorkDrainRefusalCause {
+    UnclaimableTogether { unclaimed_batch_ids: Vec<String> },
+    InterruptedBatchRequiresFullComposition { required_batch_ids: Vec<String> },
+    ExecutionLaneBusy,
+}
+
+/// How one distinct requested batch ID satisfied a successful selected drain.
+#[doc(hidden)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectedQueuedWorkBatchSatisfaction {
+    /// This invocation claimed and executed the durable row.
+    ClaimedNow { batch_id: String },
+    /// No durable row remained, so the idempotent request was already done.
+    AlreadySatisfied { batch_id: String },
+}
+
+/// Successful result of an exact, host-selected queued-work drain.
+///
+/// Each distinct requested ID is either executed now or already absent from
+/// durable storage. A present ID that cannot join the exact claim produces a
+/// refusal instead of this type, before any selected turn executes.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct SelectedQueuedWorkDrainOutcome<T> {
+    /// Executed turn, absent only for a fully satisfied drain that produced no
+    /// selected turn (including an empty selection).
+    pub turn: Option<T>,
+    /// One entry per distinct requested ID, ordered by first occurrence.
+    pub satisfied: Vec<SelectedQueuedWorkBatchSatisfaction>,
+}
+
+impl<T> SelectedQueuedWorkDrainOutcome<T> {
+    fn new(turn: Option<T>, satisfied: Vec<SelectedQueuedWorkBatchSatisfaction>) -> Self {
+        Self { turn, satisfied }
+    }
+
+    /// Reports whether this was a fully satisfied drain that needed no new turn.
+    ///
+    /// Because refusals are returned as errors, `true` never means that
+    /// selected work was busy or unclaimable. It means every distinct requested
+    /// ID was satisfied without a selected turn, or the selection was empty.
+    pub fn is_none(&self) -> bool {
+        self.turn.is_none()
+    }
+
+    /// Reports whether this successful drain executed a newly claimed turn.
+    ///
+    /// `false` has the same fully-satisfied meaning as [`Self::is_none`].
+    pub fn is_some(&self) -> bool {
+        self.turn.is_some()
+    }
+
+    /// Returns the executed turn or panics with `message` after a successful
+    /// drain that was fully satisfied without running a selected turn.
+    #[track_caller]
+    pub fn expect(self, message: &str) -> T {
+        self.turn.expect(message)
+    }
+}
+
+/// Error from an exact host-selected queued-work drain.
+///
+/// [`Self::Refused`] is a pre-execution atomicity result: absent rows count as
+/// idempotently satisfied, while present rows that cannot form the requested
+/// composition leave the selection unexecuted.
+#[doc(hidden)]
+#[derive(Debug, thiserror::Error)]
+pub enum SelectedQueuedWorkDrainError {
+    #[error(transparent)]
+    Runtime(#[from] RuntimeError),
+    #[error("selected queued-work drain refused: {cause:?}")]
+    Refused {
+        cause: SelectedQueuedWorkDrainRefusalCause,
+    },
+}
+
 fn trace_fields_from_outcome(
     outcome: &TurnOutcome,
 ) -> (
@@ -680,7 +764,7 @@ impl LashRuntime {
             .map_err(|err| SessionError::Protocol(err.to_string()))
     }
 
-    fn max_context_tokens(&self) -> usize {
+    pub(super) fn max_context_tokens(&self) -> usize {
         self.state.effective_policy().context_window_tokens()
     }
 
@@ -1426,14 +1510,20 @@ impl LashRuntime {
         &mut self,
         opts: TurnOptions<'_>,
     ) -> Result<Option<AssembledTurn>, RuntimeError> {
-        self.stream_queued_work(opts, None).await
+        match self.stream_queued_work(opts, None).await {
+            Ok(outcome) => Ok(outcome.turn),
+            Err(SelectedQueuedWorkDrainError::Runtime(error)) => Err(error),
+            Err(SelectedQueuedWorkDrainError::Refused { .. }) => {
+                unreachable!("automatic queued-work claims cannot be refused as selected drains")
+            }
+        }
     }
 
     pub async fn stream_selected_queued_work(
         &mut self,
         opts: TurnOptions<'_>,
         batch_ids: &[String],
-    ) -> Result<Option<AssembledTurn>, RuntimeError> {
+    ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>, SelectedQueuedWorkDrainError> {
         self.stream_queued_work(opts, Some(batch_ids)).await
     }
 
@@ -1441,11 +1531,57 @@ impl LashRuntime {
         &mut self,
         opts: TurnOptions<'_>,
         selected_batch_ids: Option<&[String]>,
-    ) -> Result<Option<AssembledTurn>, RuntimeError> {
+    ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>, SelectedQueuedWorkDrainError> {
+        let selected_batch_ids = selected_batch_ids.map(|batch_ids| {
+            let mut seen = std::collections::BTreeSet::new();
+            batch_ids
+                .iter()
+                .filter(|batch_id| seen.insert(batch_id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+        let selected_batch_ids = selected_batch_ids.as_deref();
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
         let Some(session_execution_lease) = self.claim_session_execution_lease().await? else {
-            return Ok(None);
+            if let Some(batch_ids) = selected_batch_ids
+                && let Some(store) = self
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.history_store())
+            {
+                let present_ids = store
+                    .list_queued_work(&self.state.session_id)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?
+                    .into_iter()
+                    .map(|batch| batch.batch_id)
+                    .collect::<std::collections::BTreeSet<_>>();
+                if batch_ids
+                    .iter()
+                    .all(|batch_id| !present_ids.contains(batch_id))
+                {
+                    return Ok(SelectedQueuedWorkDrainOutcome::new(
+                        None,
+                        batch_ids
+                            .iter()
+                            .cloned()
+                            .map(
+                                |batch_id| SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                                    batch_id,
+                                },
+                            )
+                            .collect(),
+                    ));
+                }
+            }
+            return if selected_batch_ids.is_some() {
+                Err(SelectedQueuedWorkDrainError::Refused {
+                    cause: SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy,
+                })
+            } else {
+                Ok(SelectedQueuedWorkDrainOutcome::new(None, Vec::new()))
+            };
         };
         // This snapshot stays current while leading commands drain because
         // `RefreshToolCatalog` never acquires a fresh session lease; any later
@@ -1462,7 +1598,7 @@ impl LashRuntime {
                 .map_err(|err| {
                     RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
                 })?;
-            return Ok(None);
+            return Ok(SelectedQueuedWorkDrainOutcome::new(None, Vec::new()));
         };
         let drain_commands_before_turn_input = if selected_batch_ids.is_some() {
             true
@@ -1480,7 +1616,7 @@ impl LashRuntime {
                     Ok(None) => break,
                     Err(err) => {
                         let _ = session_execution_lease.release_if_live().await;
-                        return Err(err);
+                        return Err(err.into());
                     }
                 }
             }
@@ -1546,10 +1682,18 @@ impl LashRuntime {
                 }
                 return self
                     .settle_session_execution_lease(session_execution_lease.as_ref(), result)
-                    .await;
+                    .await
+                    .map(|turn| SelectedQueuedWorkDrainOutcome::new(turn, Vec::new()))
+                    .map_err(Into::into);
             }
         }
         let claim = if let Some(batch_ids) = selected_batch_ids {
+            let claim_policy = self
+                .host
+                .core
+                .durability
+                .queued_work_batching
+                .claim_policy(self.max_context_tokens());
             store
                 .claim_ready_queued_work_by_batch_ids(
                     &self.state.session_id,
@@ -1557,35 +1701,139 @@ impl LashRuntime {
                     &self.runtime_lease_owner,
                     crate::QueuedWorkClaimBoundary::Idle,
                     batch_ids,
+                    claim_policy,
                 )
                 .await
         } else {
+            let claim_policy = self
+                .host
+                .core
+                .durability
+                .queued_work_batching
+                .claim_policy(self.max_context_tokens());
             store
                 .claim_ready_queued_work(
                     &self.state.session_id,
                     &session_execution_fence,
                     &self.runtime_lease_owner,
                     crate::QueuedWorkClaimBoundary::Idle,
-                    64,
+                    claim_policy,
                 )
                 .await
-        }
-        .map_err(super::runtime_error_from_store_commit)?;
-        let Some(claim) = claim else {
+                .map(|claim| crate::SelectedQueuedWorkClaimOutcome::new(claim, Vec::new()))
+        };
+        let claim_outcome = match claim {
+            Err(crate::StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                required_batch_ids,
+            }) => {
+                session_execution_lease
+                    .release_if_live()
+                    .await
+                    .map_err(|err| {
+                        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
+                    })?;
+                return Err(SelectedQueuedWorkDrainError::Refused {
+                    cause: SelectedQueuedWorkDrainRefusalCause::
+                        InterruptedBatchRequiresFullComposition { required_batch_ids },
+                });
+            }
+            other => other.map_err(super::runtime_error_from_store_commit)?,
+        };
+        let already_satisfied_batch_ids = claim_outcome.already_satisfied_batch_ids;
+        let Some(claim) = claim_outcome.claim else {
             session_execution_lease
                 .release_if_live()
                 .await
                 .map_err(|err| {
                     RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
                 })?;
-            return Ok(None);
+            return if let Some(batch_ids) = selected_batch_ids {
+                let already_satisfied = already_satisfied_batch_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>();
+                let unclaimed_batch_ids = batch_ids
+                    .iter()
+                    .filter(|batch_id| !already_satisfied.contains(batch_id.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if unclaimed_batch_ids.is_empty() {
+                    Ok(SelectedQueuedWorkDrainOutcome::new(
+                        None,
+                        batch_ids
+                            .iter()
+                            .cloned()
+                            .map(
+                                |batch_id| SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                                    batch_id,
+                                },
+                            )
+                            .collect(),
+                    ))
+                } else {
+                    Err(SelectedQueuedWorkDrainError::Refused {
+                        cause: SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                            unclaimed_batch_ids,
+                        },
+                    })
+                }
+            } else {
+                Ok(SelectedQueuedWorkDrainOutcome::new(None, Vec::new()))
+            };
         };
+        let mut selected_satisfaction = Vec::new();
+        if let Some(batch_ids) = selected_batch_ids {
+            let claimed_ids = claim
+                .batches
+                .iter()
+                .map(|batch| batch.batch_id.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            let unclaimed_batch_ids = batch_ids
+                .iter()
+                .filter(|batch_id| {
+                    !claimed_ids.contains(batch_id.as_str())
+                        && !already_satisfied_batch_ids.contains(batch_id)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if !unclaimed_batch_ids.is_empty() {
+                store
+                    .abandon_queued_work_claim(&claim)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+                session_execution_lease
+                    .release_if_live()
+                    .await
+                    .map_err(|err| {
+                        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
+                    })?;
+                return Err(SelectedQueuedWorkDrainError::Refused {
+                    cause: SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                        unclaimed_batch_ids,
+                    },
+                });
+            }
+            selected_satisfaction = batch_ids
+                .iter()
+                .map(|batch_id| {
+                    if claimed_ids.contains(batch_id.as_str()) {
+                        SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+                            batch_id: batch_id.clone(),
+                        }
+                    } else {
+                        SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                            batch_id: batch_id.clone(),
+                        }
+                    }
+                })
+                .collect();
+        }
         let mut work = claim.materialize_queued_turn_work();
         if selected_batch_ids.is_some() {
             // A host-selected drain is closed over the rendered batch set. Without this guard,
             // an EarliestSafeBoundary checkpoint in the selected turn could pull unrelated
             // pending batches into the same run after the exact initial claim.
-            work.input.turn_context.suppress_checkpoint_queued_work();
+            work.input.turn_context.mark_selected_queued_work_drain();
         }
         if let Some(hint) = opts.local_cancel_origin_hint() {
             work.input.turn_context.set_local_cancel_origin_hint(hint);
@@ -1647,6 +1895,8 @@ impl LashRuntime {
         }
         self.settle_session_execution_lease(session_execution_lease.as_ref(), result)
             .await
+            .map(|turn| SelectedQueuedWorkDrainOutcome::new(turn, selected_satisfaction))
+            .map_err(Into::into)
     }
 
     async fn session_commands_precede_pending_turn_input(

@@ -326,9 +326,7 @@ impl super::InMemorySessionStoreFactory {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, QueuedWorkStore, SlotPolicy,
-    };
+    use crate::{DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, QueuedWorkStore};
 
     #[tokio::test]
     async fn queued_work_diagnostic_is_unfiltered_without_session_meta() {
@@ -337,7 +335,6 @@ mod tests {
             .enqueue_queued_work(QueuedWorkBatchDraft::new(
                 "deleted-session",
                 DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
                 vec![QueuedWorkPayload::session_command(
                     crate::SessionCommand::RefreshToolCatalog {
                         reason: "prove post-delete diagnostics are non-vacuous".to_string(),

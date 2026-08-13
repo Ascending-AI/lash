@@ -55,6 +55,21 @@ pub enum StoreError {
         max_bytes: usize,
     },
     #[error(
+        "queued-work action reserve {action_token_reserve} exhausts model context window {max_context_tokens}"
+    )]
+    QueuedWorkActionReserveExhaustsContext {
+        max_context_tokens: usize,
+        action_token_reserve: usize,
+    },
+    #[error(
+        "queued-work row at enqueue sequence {batch_enqueue_seq} renders to at least {rendered_tokens} tokens, exceeding model context window {max_context_tokens}; the row remains pending for host review"
+    )]
+    QueuedWorkRowExceedsContextWindow {
+        batch_enqueue_seq: u64,
+        rendered_tokens: usize,
+        max_context_tokens: usize,
+    },
+    #[error(
         "store is already bound to session `{bound_session_id}` and cannot be reused for `{attempted_session_id}`"
     )]
     SessionBindingMismatch {
@@ -211,6 +226,11 @@ pub enum StoreError {
         superseding_claim_id: Option<Box<str>>,
         superseding_session_lease_generation: Option<Box<u64>>,
     },
+    #[doc(hidden)]
+    #[error(
+        "selected queued work intersects an interrupted claim and requires its full composition: {required_batch_ids:?}"
+    )]
+    SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids: Vec<String> },
     #[error(
         "turn input claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
     )]
@@ -416,6 +436,10 @@ impl StoreError {
             Self::Contended => "Contended",
             Self::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
             Self::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",
+            Self::QueuedWorkActionReserveExhaustsContext { .. } => {
+                "QueuedWorkActionReserveExhaustsContext"
+            }
+            Self::QueuedWorkRowExceedsContextWindow { .. } => "QueuedWorkRowExceedsContextWindow",
             Self::SessionBindingMismatch { .. } => "SessionBindingMismatch",
             Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
@@ -445,6 +469,9 @@ impl StoreError {
             Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
             Self::CurrentFrameNodeMismatch { .. } => "CurrentFrameNodeMismatch",
             Self::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
+            Self::SelectedQueuedWorkRequiresInterruptedComposition { .. } => {
+                "SelectedQueuedWorkRequiresInterruptedComposition"
+            }
             Self::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
             Self::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
             Self::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",

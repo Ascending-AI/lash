@@ -92,7 +92,7 @@ impl RecordingEffectController {
 pub(super) fn runtime_host_config_with_inline_controller(
     controller: Arc<dyn RuntimeEffectController>,
 ) -> RuntimeHostConfig {
-    let mut config = RuntimeHostConfig::in_memory(test_commit_budget());
+    let mut config = test_runtime_host_config();
     config.control.effect_host = Arc::new(InlineEffectHost::new(controller));
     config
 }
@@ -960,7 +960,7 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
-        EmbeddedRuntimeHost::new(RuntimeHostConfig::in_memory(test_commit_budget())),
+        EmbeddedRuntimeHost::new(test_runtime_host_config()),
     )
     .await;
 
@@ -1545,7 +1545,7 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
             attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }),
         transport,
-        EmbeddedRuntimeHost::new(RuntimeHostConfig::in_memory(test_commit_budget())),
+        EmbeddedRuntimeHost::new(test_runtime_host_config()),
     )
     .await;
 
@@ -1719,7 +1719,7 @@ async fn tool_batch_serializes_child_attempts_when_controller_disallows_concurre
         Vec::new(),
         Arc::new(EchoTool),
         transport,
-        EmbeddedRuntimeHost::new(RuntimeHostConfig::in_memory(test_commit_budget())),
+        EmbeddedRuntimeHost::new(test_runtime_host_config()),
     )
     .await;
 
@@ -1819,7 +1819,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         .expect("plugins");
     let mut runtime = LashRuntime::from_embedded_state(
         policy,
-        EmbeddedRuntimeHost::new(runtime_host_config_with_provider(
+        EmbeddedRuntimeHost::new(test_runtime_host_config_with_provider(
             mock_provider(Vec::new()).into_handle(),
         )),
         RuntimeServices::new(plugin_session),
@@ -2161,7 +2161,7 @@ async fn direct_effect_restores_required_streaming_for_provider_execution() {
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
-        EmbeddedRuntimeHost::new(RuntimeHostConfig::in_memory(test_commit_budget())),
+        EmbeddedRuntimeHost::new(test_runtime_host_config()),
     )
     .await;
 
@@ -2192,7 +2192,7 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        EmbeddedRuntimeHost::new(RuntimeHostConfig::in_memory(test_commit_budget())),
+        EmbeddedRuntimeHost::new(test_runtime_host_config()),
     )
     .await;
 

@@ -113,10 +113,10 @@ fn process_worker(
 ) -> lash::durability::DurableProcessWorker {
     let config = lash::durability::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
-        lash::durability::RuntimeHostConfig::in_memory(lash::CommitBudget::bounded(
-            1024 * 1024,
-            512,
-        )),
+        lash::durability::RuntimeHostConfig::in_memory(
+            lash::CommitBudget::bounded(1024 * 1024, 512),
+            lash::QueuedWorkBatchingConfig::new(1024),
+        ),
         Arc::new(storage.session_store_factory_with_shared_process_registry()),
         registry,
     )
@@ -341,6 +341,7 @@ fn core(
             attachments.path().to_path_buf(),
         )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .process_env_store(Arc::new(storage.process_env_store()))
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))

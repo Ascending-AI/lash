@@ -1332,7 +1332,6 @@ mod tests {
             crate::QueuedWorkBatchDraft::new(
                 "session-1",
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                crate::SlotPolicy::Exclusive,
                 vec![crate::QueuedWorkPayload::agent_frame_task(
                     "fig905-frame",
                     "peer-owned row",
@@ -1348,7 +1347,7 @@ mod tests {
             &predecessor_lease.fence(),
             &predecessor_lease.owner,
             crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-            64,
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("claim predecessor row")
@@ -1372,7 +1371,7 @@ mod tests {
             &peer_lease.fence(),
             &peer_owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            64,
+            crate::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("peer reclaims row")

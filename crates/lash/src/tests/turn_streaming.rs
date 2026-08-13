@@ -2,6 +2,8 @@ use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
+use lash_core::QueuedWorkStore as _;
+use lash_core::SessionExecutionLeaseStore as _;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 #[cfg(feature = "rlm")]
 use sha2::Digest as _;
@@ -851,6 +853,7 @@ async fn durable_configured_effect_host_requires_explicit_handler_effects() -> R
             dir.path().join("attachments"),
         )))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
         .effect_host(Arc::new(DurableNoopEffectHost))
         .provider(mock_provider())
@@ -978,6 +981,856 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
         );
     }
     assert!(session.queued_turn().run().await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_refuses_partial_key_break_without_settling_rows() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-queued-turn-refusal")
+        .complete(move |_request| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("selected queued turn must not execute"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-queued-turn-key-break-refusal";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    let enqueue = |source_key: &'static str, merge_key: &'static str| {
+        let store = Arc::clone(&store);
+        async move {
+            store
+                .enqueue_queued_work(
+                    crate::persistence::QueuedWorkBatchDraft::new(
+                        session_id,
+                        lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                        vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                            "selected-refusal-frame",
+                            source_key,
+                            None,
+                        )],
+                    )
+                    .with_source_key(source_key)
+                    .with_merge_key(merge_key),
+                )
+                .await
+                .expect("enqueue selected-refusal row")
+        }
+    };
+    let a1 = enqueue("selected-a1", "a").await;
+    let _b1 = enqueue("selected-b1", "b").await;
+    let a2 = enqueue("selected-a2", "a").await;
+
+    let error = session
+        .queued_turn()
+        .batch_ids([a1.batch_id.clone(), a2.batch_id.clone()])
+        .run()
+        .await
+        .expect_err("A1,B1,A2 cannot satisfy selected [A1,A2] atomically");
+    match error {
+        EmbedError::SelectedQueuedWorkDrainRefused {
+            cause:
+                SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                    unclaimed_batch_ids,
+                },
+        } => assert_eq!(unclaimed_batch_ids, vec![a2.batch_id]),
+        other => panic!("expected typed selected-drain refusal, got {other:?}"),
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        session
+            .queued_work()
+            .await?
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("selected-a1"), 1),
+            (Some("selected-b1"), 2),
+            (Some("selected-a2"), 3),
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_redrives_an_interrupted_composition_exactly_or_not_at_all()
+-> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-interrupted-composition")
+        .complete(move |_request| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("redrove interrupted composition"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-interrupted-composition";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    for source_key in ["interrupted-w1", "interrupted-w2"] {
+        store
+            .enqueue_queued_work(
+                crate::persistence::QueuedWorkBatchDraft::new(
+                    session_id,
+                    lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                    vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                        "interrupted-frame",
+                        source_key,
+                        None,
+                    )],
+                )
+                .with_source_key(source_key)
+                .with_merge_key("interrupted-key"),
+            )
+            .await
+            .expect("enqueue interrupted composition row");
+    }
+    let owner_a = lash_core::LeaseOwnerIdentity::opaque(
+        "selected-interrupted-owner-a",
+        "selected-interrupted-owner-a:incarnation",
+    );
+    let lease_a = store
+        .try_claim_session_execution_lease(session_id, &owner_a, 60_000)
+        .await
+        .expect("claim predecessor session execution lease")
+        .acquired()
+        .expect("predecessor session execution lane is free");
+    let claim_a = store
+        .claim_ready_queued_work(
+            session_id,
+            &lease_a.fence(),
+            &owner_a,
+            crate::persistence::QueuedWorkClaimBoundary::Idle,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim predecessor composition")
+        .expect("predecessor composition exists");
+    assert_eq!(
+        claim_a
+            .batches
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["recording-qwb-1", "recording-qwb-2"]
+    );
+    assert_eq!(claim_a.claim_id, "recording-qwc:1:1");
+    store
+        .release_session_execution_lease(&lease_a.completion())
+        .await
+        .expect("release predecessor session execution lease");
+
+    let error = session
+        .queued_turn()
+        .batch_ids(["recording-qwb-1"])
+        .run()
+        .await
+        .expect_err("a selected drain cannot split an interrupted composition");
+    match error {
+        EmbedError::SelectedQueuedWorkDrainRefused { cause } => assert_eq!(
+            cause,
+            SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
+                required_batch_ids: vec![
+                    "recording-qwb-1".to_string(),
+                    "recording-qwb-2".to_string(),
+                ],
+            }
+        ),
+        other => panic!("expected interrupted-composition refusal, got {other:?}"),
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        store
+            .raw_queued_work_for_testing()
+            .into_iter()
+            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id, claim_id))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "recording-qwb-1".to_string(),
+                Some("recording-qwc:1:1".to_string()),
+            ),
+            (
+                "recording-qwb-2".to_string(),
+                Some("recording-qwc:1:1".to_string()),
+            ),
+        ]
+    );
+
+    let output = session
+        .queued_turn()
+        .batch_ids(["recording-qwb-1", "recording-qwb-2"])
+        .run()
+        .await?
+        .expect("the complete interrupted composition executes");
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        output
+            .activities
+            .iter()
+            .find_map(|activity| match &activity.event {
+                TurnEvent::QueuedWorkStarted { batch_ids, .. } => Some(batch_ids.clone()),
+                _ => None,
+            }),
+        Some(vec![
+            "recording-qwb-1".to_string(),
+            "recording-qwb-2".to_string(),
+        ])
+    );
+    assert!(store.raw_queued_work_for_testing().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_reports_claimed_now_and_already_satisfied_ids() -> Result<()> {
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-idempotent-outcome")
+        .complete(|_| async { Ok(text_response("selected outcome")) })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-idempotent-outcome";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    let batch = store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id,
+                lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    "selected-outcome-frame",
+                    "selected-outcome-task",
+                    None,
+                )],
+            )
+            .with_source_key("selected-outcome-source"),
+        )
+        .await
+        .expect("enqueue selected outcome row");
+
+    let claimed = session
+        .queued_turn()
+        .batch_ids([batch.batch_id.clone()])
+        .run()
+        .await?;
+    assert!(claimed.turn.is_some());
+    assert_eq!(
+        claimed.satisfied,
+        vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+            batch_id: batch.batch_id.clone(),
+        }]
+    );
+
+    let replay = session
+        .queued_turn()
+        .batch_ids([batch.batch_id.clone()])
+        .run()
+        .await?;
+    assert!(replay.turn.is_none());
+    assert_eq!(
+        replay.satisfied,
+        vec![
+            crate::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                batch_id: batch.batch_id,
+            },
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_busy_lane() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-duplicate-absent")
+        .complete(move |_| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("absent selection must not execute"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-duplicate-absent";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+
+    let expected = vec![
+        crate::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+            batch_id: "absent-batch".to_string(),
+        },
+    ];
+    let lane_free = session
+        .queued_turn()
+        .batch_ids(["absent-batch", "absent-batch"])
+        .run()
+        .await?;
+    assert!(lane_free.turn.is_none());
+    assert_eq!(lane_free.satisfied, expected);
+
+    let held_owner = lash_core::LeaseOwnerIdentity::opaque(
+        "selected-duplicate-absent-holder",
+        "selected-duplicate-absent-holder:incarnation",
+    );
+    let held_lease = store
+        .try_claim_session_execution_lease(session_id, &held_owner, 60_000)
+        .await
+        .expect("claim held session execution lease")
+        .acquired()
+        .expect("session execution lane is initially free");
+    let lane_busy = session
+        .queued_turn()
+        .batch_ids(["absent-batch", "absent-batch"])
+        .run()
+        .await?;
+    assert!(lane_busy.turn.is_none());
+    assert_eq!(lane_busy.satisfied, expected);
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    store
+        .release_session_execution_lease(&held_lease.completion())
+        .await
+        .expect("release held session execution lease");
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_deduplicates_present_claimable_id() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-duplicate-present")
+        .complete(move |_| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("selected duplicate present outcome"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-duplicate-present";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    let batch = store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id,
+                lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    "selected-duplicate-present-frame",
+                    "selected-duplicate-present-task",
+                    None,
+                )],
+            )
+            .with_source_key("selected-duplicate-present-source"),
+        )
+        .await
+        .expect("enqueue duplicate-selected row");
+
+    let outcome = session
+        .queued_turn()
+        .batch_ids([batch.batch_id.clone(), batch.batch_id.clone()])
+        .run()
+        .await?;
+    assert!(outcome.turn.is_some());
+    assert_eq!(
+        outcome.satisfied,
+        vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+            batch_id: batch.batch_id,
+        }]
+    );
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_empty_selection_is_satisfied_noop() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-empty-noop")
+        .complete(move |_| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("empty selection must not execute"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory)
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session("selected-empty-noop").open().await?;
+    session
+        .enqueue(TurnInput::text("must remain queued"))
+        .id("selected-empty-noop-input")
+        .send()
+        .await?;
+
+    let outcome = session
+        .queued_turn()
+        .batch_ids(std::iter::empty::<String>())
+        .run()
+        .await?;
+    assert!(outcome.turn.is_none());
+    assert_eq!(outcome.satisfied, Vec::new());
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert!(
+        session.queued_turn().run().await?.is_some(),
+        "the empty selection must leave unrestricted queued input pending"
+    );
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_validates_every_interrupted_composition_before_mutating() -> Result<()>
+{
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-two-interrupted-compositions")
+        .complete(move |_request| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("refused selections must not execute"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-two-interrupted-compositions";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    for source_key in ["claim-a1", "claim-a2", "claim-b1", "claim-b2"] {
+        store
+            .enqueue_queued_work(
+                crate::persistence::QueuedWorkBatchDraft::new(
+                    session_id,
+                    lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                    vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                        "two-claims-frame",
+                        source_key,
+                        None,
+                    )],
+                )
+                .with_source_key(source_key)
+                .with_merge_key("two-claims-key"),
+            )
+            .await
+            .expect("enqueue two-claim row");
+    }
+    let predecessor_owner = lash_core::LeaseOwnerIdentity::opaque(
+        "selected-two-claims-predecessor",
+        "selected-two-claims-predecessor:incarnation",
+    );
+    let predecessor_lease = store
+        .try_claim_session_execution_lease(session_id, &predecessor_owner, 60_000)
+        .await
+        .expect("claim predecessor session execution lease")
+        .acquired()
+        .expect("predecessor session execution lane is free");
+    let claim_a = store
+        .claim_ready_queued_work(
+            session_id,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            crate::persistence::QueuedWorkClaimBoundary::Idle,
+            lash_core::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("claim predecessor A")
+        .expect("predecessor A exists");
+    let claim_b = store
+        .claim_ready_queued_work(
+            session_id,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            crate::persistence::QueuedWorkClaimBoundary::Idle,
+            lash_core::testing::queued_work_claim_policy(2),
+        )
+        .await
+        .expect("claim predecessor B")
+        .expect("predecessor B exists");
+    assert_eq!(
+        claim_a
+            .batches
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["recording-qwb-1", "recording-qwb-2"]
+    );
+    assert_eq!(claim_a.claim_id, "recording-qwc:1:1");
+    assert_eq!(
+        claim_b
+            .batches
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["recording-qwb-3", "recording-qwb-4"]
+    );
+    assert_eq!(claim_b.claim_id, "recording-qwc:3:1");
+    store
+        .release_session_execution_lease(&predecessor_lease.completion())
+        .await
+        .expect("release predecessor session execution lease");
+
+    let partial_error = session
+        .queued_turn()
+        .batch_ids(["recording-qwb-1", "recording-qwb-2", "recording-qwb-3"])
+        .run()
+        .await
+        .expect_err("full A plus partial B must refuse before reclaiming A");
+    match partial_error {
+        EmbedError::SelectedQueuedWorkDrainRefused { cause } => assert_eq!(
+            cause,
+            SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
+                required_batch_ids: vec![
+                    "recording-qwb-3".to_string(),
+                    "recording-qwb-4".to_string(),
+                ],
+            }
+        ),
+        other => panic!("expected incomplete-B refusal, got {other:?}"),
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        store
+            .raw_queued_work_for_testing()
+            .into_iter()
+            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id, claim_id))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "recording-qwb-1".to_string(),
+                Some("recording-qwc:1:1".to_string()),
+            ),
+            (
+                "recording-qwb-2".to_string(),
+                Some("recording-qwc:1:1".to_string()),
+            ),
+            (
+                "recording-qwb-3".to_string(),
+                Some("recording-qwc:3:1".to_string()),
+            ),
+            (
+                "recording-qwb-4".to_string(),
+                Some("recording-qwc:3:1".to_string()),
+            ),
+        ]
+    );
+
+    let complete_error = session
+        .queued_turn()
+        .batch_ids([
+            "recording-qwb-1",
+            "recording-qwb-2",
+            "recording-qwb-3",
+            "recording-qwb-4",
+        ])
+        .run()
+        .await
+        .expect_err("one selected drain claims exactly the earliest interrupted composition");
+    match complete_error {
+        EmbedError::SelectedQueuedWorkDrainRefused { cause } => assert_eq!(
+            cause,
+            SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                unclaimed_batch_ids: vec![
+                    "recording-qwb-3".to_string(),
+                    "recording-qwb-4".to_string(),
+                ],
+            }
+        ),
+        other => panic!("expected second-composition refusal, got {other:?}"),
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        store
+            .raw_queued_work_for_testing()
+            .into_iter()
+            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id, claim_id))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "recording-qwb-1".to_string(),
+                Some("recording-qwc:1:1".to_string()),
+            ),
+            (
+                "recording-qwb-2".to_string(),
+                Some("recording-qwc:1:1".to_string()),
+            ),
+            (
+                "recording-qwb-3".to_string(),
+                Some("recording-qwc:3:1".to_string()),
+            ),
+            (
+                "recording-qwb-4".to_string(),
+                Some("recording-qwc:3:1".to_string()),
+            ),
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_redrive_ignores_successor_max_rows() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-redrive-over-row-limit")
+        .complete(move |_request| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("redrove over successor row limit"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(2))
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-redrive-over-row-limit";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    for source_key in [
+        "selected-limit-w1",
+        "selected-limit-w2",
+        "selected-limit-w3",
+    ] {
+        store
+            .enqueue_queued_work(
+                crate::persistence::QueuedWorkBatchDraft::new(
+                    session_id,
+                    lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                    vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                        "selected-limit-frame",
+                        source_key,
+                        None,
+                    )],
+                )
+                .with_source_key(source_key)
+                .with_merge_key("selected-limit-key"),
+            )
+            .await
+            .expect("enqueue selected row-limit row");
+    }
+    let predecessor_owner = lash_core::LeaseOwnerIdentity::opaque(
+        "selected-limit-predecessor",
+        "selected-limit-predecessor:incarnation",
+    );
+    let predecessor_lease = store
+        .try_claim_session_execution_lease(session_id, &predecessor_owner, 60_000)
+        .await
+        .expect("claim selected row-limit predecessor lease")
+        .acquired()
+        .expect("selected row-limit predecessor lane is free");
+    let predecessor_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            crate::persistence::QueuedWorkClaimBoundary::Idle,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await
+        .expect("claim selected row-limit predecessor")
+        .expect("selected row-limit predecessor exists");
+    assert_eq!(
+        predecessor_claim
+            .batches
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["recording-qwb-1", "recording-qwb-2", "recording-qwb-3"]
+    );
+    store
+        .release_session_execution_lease(&predecessor_lease.completion())
+        .await
+        .expect("release selected row-limit predecessor lease");
+
+    let output = session
+        .queued_turn()
+        .batch_ids(["recording-qwb-1", "recording-qwb-2", "recording-qwb-3"])
+        .run()
+        .await?
+        .expect("selected predecessor composition ignores successor max_rows=2");
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        output
+            .activities
+            .iter()
+            .find_map(|activity| match &activity.event {
+                TurnEvent::QueuedWorkStarted { batch_ids, .. } => Some(batch_ids.clone()),
+                _ => None,
+            }),
+        Some(vec![
+            "recording-qwb-1".to_string(),
+            "recording-qwb-2".to_string(),
+            "recording-qwb-3".to_string(),
+        ])
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_reports_execution_lane_contention() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("selected-execution-lane-busy")
+        .complete(move |_request| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("busy selection must not execute"))
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+    let session_id = "selected-execution-lane-busy";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id,
+                lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    "busy-frame",
+                    "busy-w1",
+                    None,
+                )],
+            )
+            .with_source_key("busy-w1"),
+        )
+        .await
+        .expect("enqueue busy selected row");
+    let held_owner = lash_core::LeaseOwnerIdentity::opaque(
+        "selected-busy-holder",
+        "selected-busy-holder:incarnation",
+    );
+    let held_lease = store
+        .try_claim_session_execution_lease(session_id, &held_owner, 60_000)
+        .await
+        .expect("claim held session execution lease")
+        .acquired()
+        .expect("session execution lane is initially free");
+
+    let error = session
+        .queued_turn()
+        .batch_ids(["recording-qwb-1"])
+        .run()
+        .await
+        .expect_err("selected drain under a held lease is typed contention");
+    match error {
+        EmbedError::SelectedQueuedWorkDrainRefused { cause } => assert_eq!(
+            cause,
+            SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
+        ),
+        other => panic!("expected execution-lane-busy refusal, got {other:?}"),
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        session
+            .queued_work()
+            .await?
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["recording-qwb-1"]
+    );
+    store
+        .release_session_execution_lease(&held_lease.completion())
+        .await
+        .expect("release held session execution lease");
     Ok(())
 }
 
@@ -6029,6 +6882,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
             lash_core::facade_support::InlineEffectHost::default(),
         ))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
         .build()?;
     let session = core.session(session_id).open().await?;

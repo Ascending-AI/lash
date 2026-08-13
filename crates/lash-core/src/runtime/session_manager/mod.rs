@@ -379,6 +379,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         policy.clone(),
         crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
             crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
         )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
         crate::RuntimeSessionState {
@@ -691,6 +692,7 @@ pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
         policy.clone(),
         crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
             crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
         )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
         crate::RuntimeSessionState {

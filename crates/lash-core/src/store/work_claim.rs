@@ -81,6 +81,7 @@ mod tests {
     fn queued_claim_json_keeps_the_pre_unification_shape() {
         let claim = authority_fields(crate::QueuedWorkClaimData {
             batches: Vec::new(),
+            abandon_restore_claim_id: None,
         });
         assert_eq!(
             serde_json::to_string(&claim).expect("serialize queued claim"),

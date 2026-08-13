@@ -785,16 +785,10 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         self.inner
-            .claim_ready_queued_work(
-                session_id,
-                session_execution_lease,
-                owner,
-                boundary,
-                max_batches,
-            )
+            .claim_ready_queued_work(session_id, session_execution_lease, owner, boundary, policy)
             .await
     }
 
@@ -806,7 +800,7 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
         turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
         max_inputs: usize,
-        max_batches: usize,
+        policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<(Option<TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         self.inner
             .claim_checkpoint_work(
@@ -816,7 +810,7 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
                 turn_id,
                 checkpoint,
                 max_inputs,
-                max_batches,
+                policy,
             )
             .await
     }
@@ -828,7 +822,8 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
         self.inner
             .claim_ready_queued_work_by_batch_ids(
                 session_id,
@@ -836,6 +831,7 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
                 owner,
                 boundary,
                 batch_ids,
+                policy,
             )
             .await
     }

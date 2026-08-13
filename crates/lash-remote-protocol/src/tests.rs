@@ -545,7 +545,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 31, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 32, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -576,6 +576,7 @@ fn remote_process_dtos_json_round_trip() {
         }),
         originator: RemoteProcessOriginator::Session {
             session_id: "session".to_string(),
+            agent_frame_id: Some("frame-a".to_string()),
         },
         identity: Some(RemoteProcessIdentity {
             kind: "import".to_string(),
@@ -816,6 +817,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
         definition_fingerprint: "definition-hash-a".to_string(),
         registrant: RemoteProcessOriginator::Session {
             session_id: "session".to_string(),
+            agent_frame_id: None,
         },
         env_ref: draft.env_ref.clone(),
         wake_target: draft.wake_target.clone(),

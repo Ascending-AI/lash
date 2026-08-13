@@ -1,5 +1,34 @@
 use crate::support::*;
 
+/// Why a host-selected queued-work drain was refused before executing a turn.
+///
+/// Requested IDs with no remaining durable row are idempotently satisfied and
+/// do not cause refusal. Each cause here means at least one still-present row
+/// could not be executed under the requested atomic composition; no selected
+/// turn was started.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectedQueuedWorkDrainRefusalCause {
+    /// The requested present rows do not form one claimable queue composition.
+    ///
+    /// This includes physical queue gaps and mismatched batching gates. The
+    /// attempted selected composition remains unexecuted.
+    UnclaimableTogether {
+        /// Requested batch IDs that the store could not claim with the rest.
+        unclaimed_batch_ids: Vec<String>,
+    },
+    /// A requested row belongs to an interrupted claim whose complete,
+    /// already-journaled composition must be redriven atomically. If a request
+    /// partially covers more than one interrupted claim, this names the
+    /// physically earliest incomplete claim in durable enqueue order.
+    InterruptedBatchRequiresFullComposition {
+        /// Complete interrupted composition, in durable enqueue order.
+        required_batch_ids: Vec<String>,
+    },
+    /// Another host currently owns the session's execution lane while at least
+    /// one requested row remains present.
+    ExecutionLaneBusy,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum EmbedError {
     #[error(
@@ -26,6 +55,10 @@ pub enum EmbedError {
         "commit budget is required; provide explicit byte and node limits with .commit_budget(...)"
     )]
     MissingCommitBudget,
+    #[error(
+        "queued-work batching policy is required; provide an explicit model-action reserve with .queued_work_batching(...)"
+    )]
+    MissingQueuedWorkBatching,
     #[error("failed to create store for session `{session_id}`: {message}")]
     StoreFactory { session_id: String, message: String },
     #[error("session store operation failed: {0}")]
@@ -74,6 +107,10 @@ pub enum EmbedError {
     StaticTurnStreamRequiresStaticEffectHost,
     #[error("runtime session error: {0}")]
     Session(#[from] SessionError),
+    #[error("selected queued-work drain refused: {cause:?}")]
+    SelectedQueuedWorkDrainRefused {
+        cause: SelectedQueuedWorkDrainRefusalCause,
+    },
     #[error("runtime turn error: {0}")]
     Runtime(#[from] lash_core::RuntimeError),
     #[error("runtime plugin/control error: {0}")]
@@ -152,6 +189,7 @@ impl EmbedError {
             | Self::MissingAttachmentStore
             | Self::MissingProcessEnvStore
             | Self::MissingCommitBudget
+            | Self::MissingQueuedWorkBatching
             | Self::StoreSessionMismatch { .. }
             | Self::MissingProcessWorkerStoreFactory
             | Self::ProcessRegistryRequiresStoreFactory

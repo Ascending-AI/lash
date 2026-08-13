@@ -196,6 +196,7 @@ async fn async_main() -> AnyhowResult<()> {
         Arc::clone(&attachment_store),
         Arc::clone(&stores.process_env_store),
         lash::CommitBudget::bounded(1024 * 1024, 512),
+        lash::QueuedWorkBatchingConfig::new(1024),
     );
 
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(

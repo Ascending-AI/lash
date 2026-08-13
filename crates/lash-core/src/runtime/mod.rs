@@ -50,7 +50,7 @@ pub(crate) mod turn_control;
 mod turn_driver;
 mod turn_graph_editor;
 pub(crate) mod turn_input_ingress;
-mod turn_loop;
+pub(crate) mod turn_loop;
 mod turn_queue;
 mod usage;
 mod wake_delivery_driver;
@@ -391,13 +391,13 @@ pub use turn_input_ingress::{
     TurnInputState,
 };
 pub use turn_loop::ensure_durable_effect_input;
-pub(crate) use turn_queue::process_wake_batch_draft_with_policy;
 pub use turn_queue::{
-    DeliveryPolicy, MergeKey, ProcessWakeSource, QueuedCheckpointWork, QueuedTurnWork,
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome,
-    QueuedWorkItem, QueuedWorkPayload, SessionCommand, SessionCommandReceipt, SlotPolicy,
-    WakeCoalescingKey, WakeTurnMode, WakeTurnPolicy, process_wake_batch_draft,
+    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
+    QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
+    QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
+    SessionCommandReceipt, process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
     process_wake_source_key,
 };
 pub use usage::{
@@ -648,6 +648,7 @@ pub struct TurnContext {
     prompt: crate::PromptLayer,
     local_cancel_origin: TurnCancelOriginHint,
     claim_checkpoint_queued_work: bool,
+    enforce_selected_queued_work_reserve: bool,
 }
 
 impl Default for TurnContext {
@@ -658,6 +659,7 @@ impl Default for TurnContext {
             prompt: crate::PromptLayer::default(),
             local_cancel_origin: TurnCancelOriginHint::default(),
             claim_checkpoint_queued_work: true,
+            enforce_selected_queued_work_reserve: false,
         }
     }
 }
@@ -699,8 +701,13 @@ impl TurnContext {
         self.local_cancel_origin.clone()
     }
 
-    pub(crate) fn suppress_checkpoint_queued_work(&mut self) {
+    pub(crate) fn mark_selected_queued_work_drain(&mut self) {
         self.claim_checkpoint_queued_work = false;
+        self.enforce_selected_queued_work_reserve = true;
+    }
+
+    pub(crate) fn enforces_selected_queued_work_reserve(&self) -> bool {
+        self.enforce_selected_queued_work_reserve
     }
 
     pub(crate) fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
