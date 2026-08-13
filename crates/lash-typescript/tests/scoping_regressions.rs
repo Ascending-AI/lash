@@ -100,6 +100,14 @@ fn function_declarations_capture_initialized_top_level_bindings() {
 }
 
 #[test]
+fn hoisted_function_bodies_can_capture_later_const_bindings() {
+    assert_eq!(
+        finished("function f() { return k; } const k = 3; finish(f());"),
+        Value::Number(3.0)
+    );
+}
+
+#[test]
 fn lexical_bindings_shadow_host_intrinsic_names() {
     assert_eq!(
         finished("const print = (value: number): number => value; finish(print(5));"),
