@@ -1112,7 +1112,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     for statement in [
         "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
         "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_processes WHERE record_json LIKE '%fig1293%'",
+        "DELETE FROM lash_processes WHERE process_id LIKE '%fig1293%' OR record_json LIKE '%fig1293%'",
     ] {
         sqlx::query(statement)
             .execute(storage.pool())
@@ -1345,7 +1345,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     for statement in [
         "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
         "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_processes WHERE record_json LIKE '%fig1293%'",
+        "DELETE FROM lash_processes WHERE process_id LIKE '%fig1293%' OR record_json LIKE '%fig1293%'",
     ] {
         sqlx::query(statement)
             .execute(storage.pool())
@@ -1481,7 +1481,7 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
     for statement in [
         "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
         "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_processes WHERE record_json LIKE '%fig1293%'",
+        "DELETE FROM lash_processes WHERE process_id LIKE '%fig1293%' OR record_json LIKE '%fig1293%'",
     ] {
         sqlx::query(statement)
             .execute(storage.pool())
