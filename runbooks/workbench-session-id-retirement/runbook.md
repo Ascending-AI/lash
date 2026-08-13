@@ -153,12 +153,17 @@ Issue one second `GET /api/state?session_id=<retired-id>` and require the same s
 message so the refusal is stable rather than a transient race. Then gate every accepting
 or observing surface changed by the retirement fence:
 
-1. Record `GET /api/work?session_id=<retired-id>` and require its process-id set to equal
-   the saved Phase-1 retired work set. Submit
+1. Record `GET /api/work?session_id=<retired-id>`. The work read is scoped but
+   deliberately not behind the retirement fence: it returns HTTP 200 with a JSON list,
+   never 409. Because Phase 1 awaited the `retirement_job` to terminal and session
+   deletion prunes terminal process state (the delete response's `process_retention`
+   counters record the pruning), the expected set here is empty — do not require it to
+   equal the saved Phase-1 retired work set. Submit
    `POST /api/turn?session_id=<retired-id>` with a non-empty marker prompt. Require HTTP
    409 and the exact same canonical `error`; then read scoped work again and require the
-   complete process-id set to remain identical. Any accepted response, new work row, or
-   changed existing row means work escaped the fence → Abort/RCA.
+   complete process-id set to remain identical to the pre-turn read. Any accepted
+   response, new work row, or changed existing row means work escaped the fence →
+   Abort/RCA.
 2. Call `GET /api/observations?session_id=<retired-id>` without a cursor. Require HTTP
    409 JSON with the exact canonical `error`, not an NDJSON stream, empty snapshot, or
    generic failure.
