@@ -507,57 +507,6 @@ fn project_recorded_intent_outcomes(
     *value = crate::ToolValue::from(projected);
 }
 
-#[cfg(test)]
-mod projection_tests {
-    use super::*;
-
-    fn refusal(reason: crate::ToolIntentRefusalReason) -> crate::ToolIntentExecutionOutcome {
-        crate::ToolIntentExecutionOutcome::Refused {
-            identity: None,
-            intent_index: 0,
-            kind: crate::ToolIntentKind::SignalProcess,
-            refusal: reason,
-        }
-    }
-
-    #[test]
-    fn command_refusal_projects_its_typed_code_and_message() {
-        let mut output = crate::ToolCallOutput::success(serde_json::json!("optimistic"));
-        project_recorded_intent_outcomes(
-            &mut output,
-            &[refusal(crate::ToolIntentRefusalReason::CommandFailed {
-                code: "process_not_visible".to_string(),
-                message: "process is outside the invoking session".to_string(),
-            })],
-        );
-
-        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
-            panic!("intent command refusal must supersede optimistic success")
-        };
-        assert_eq!(failure.code, "process_not_visible");
-        assert_eq!(failure.message, "process is outside the invoking session");
-    }
-
-    #[test]
-    fn protocol_admission_refusal_does_not_rewrite_provider_output() {
-        let mut output = crate::ToolCallOutput::success(serde_json::json!("provider-terminal"));
-        project_recorded_intent_outcomes(
-            &mut output,
-            &[refusal(
-                crate::ToolIntentRefusalReason::CountBudgetExceeded {
-                    actual: 33,
-                    maximum: 32,
-                },
-            )],
-        );
-
-        assert_eq!(
-            output.value_for_projection(),
-            serde_json::json!("provider-terminal")
-        );
-    }
-}
-
 fn runtime_failure_outcome(
     call: &PreparedToolCall,
     code: impl Into<String>,
@@ -612,5 +561,56 @@ async fn sleep_before_retry(
             crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
             format!("expected sleep outcome, got {}", other.kind().as_str()),
         )),
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+
+    fn refusal(reason: crate::ToolIntentRefusalReason) -> crate::ToolIntentExecutionOutcome {
+        crate::ToolIntentExecutionOutcome::Refused {
+            identity: None,
+            intent_index: 0,
+            kind: crate::ToolIntentKind::SignalProcess,
+            refusal: reason,
+        }
+    }
+
+    #[test]
+    fn command_refusal_projects_its_typed_code_and_message() {
+        let mut output = crate::ToolCallOutput::success(serde_json::json!("optimistic"));
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[refusal(crate::ToolIntentRefusalReason::CommandFailed {
+                code: "process_not_visible".to_string(),
+                message: "process is outside the invoking session".to_string(),
+            })],
+        );
+
+        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("intent command refusal must supersede optimistic success")
+        };
+        assert_eq!(failure.code, "process_not_visible");
+        assert_eq!(failure.message, "process is outside the invoking session");
+    }
+
+    #[test]
+    fn protocol_admission_refusal_does_not_rewrite_provider_output() {
+        let mut output = crate::ToolCallOutput::success(serde_json::json!("provider-terminal"));
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[refusal(
+                crate::ToolIntentRefusalReason::CountBudgetExceeded {
+                    actual: 33,
+                    maximum: 32,
+                },
+            )],
+        );
+
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!("provider-terminal")
+        );
     }
 }
