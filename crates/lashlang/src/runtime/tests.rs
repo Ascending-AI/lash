@@ -1233,3 +1233,4 @@ include!("tests/compiler_cases.rs");
 include!("tests/projection_cases.rs");
 include!("tests/async_and_cache_cases.rs");
 include!("tests/continuation_cases.rs");
+include!("tests/continuation_wire_cases.rs");
