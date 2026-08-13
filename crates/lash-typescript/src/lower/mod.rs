@@ -364,7 +364,10 @@ impl Lowerer {
     }
 
     fn lower_stmt_block(&mut self, stmt: &Stmt) -> Result<LashExpr, Diagnostic> {
-        let mut expressions = self.lower_stmt(stmt)?;
+        let mut expressions = match stmt {
+            Stmt::Block(statements) => self.lower_statements(statements, false)?,
+            _ => self.lower_stmt(stmt)?,
+        };
         expressions.push(LashExpr::Undefined);
         Ok(LashExpr::Block(expressions))
     }

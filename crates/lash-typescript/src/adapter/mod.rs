@@ -1,8 +1,15 @@
+use std::cell::Cell;
+
 use swc_common::{BytePos, Span, Spanned};
 use swc_ecma_ast as swc;
 use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+
+/// Maximum source-level statement or expression nesting accepted by the
+/// TypeScript dialect. This is deliberately below the shared AST and 2 MiB
+/// native-stack limits.
+pub const MAX_SOURCE_NESTING_DEPTH: usize = 28;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
@@ -170,6 +177,7 @@ pub(crate) enum LogicalOp {
 }
 
 pub(crate) fn parse(source: &str) -> Result<Program, Diagnostic> {
+    guard_source_delimiters(source)?;
     let end = u32::try_from(source.len()).unwrap_or(u32::MAX);
     let lexer = Lexer::new(
         Syntax::Typescript(TsSyntax {
@@ -186,14 +194,50 @@ pub(crate) fn parse(source: &str) -> Result<Program, Diagnostic> {
     if let Some(error) = parser.take_errors().into_iter().next() {
         return Err(parser_diagnostic(error));
     }
-    Adapter
+    Adapter::default()
         .convert_module_items(&module.body)
         .map(|statements| Program { statements })
 }
 
-struct Adapter;
+#[derive(Default)]
+struct Adapter {
+    statement_depth: Cell<usize>,
+    expression_depth: Cell<usize>,
+}
 
 impl Adapter {
+    fn with_statement_depth<T>(
+        &self,
+        span: Option<SourceSpan>,
+        convert: impl FnOnce() -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        self.with_depth(&self.statement_depth, span, convert)
+    }
+
+    fn with_expression_depth<T>(
+        &self,
+        span: Option<SourceSpan>,
+        convert: impl FnOnce() -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        self.with_depth(&self.expression_depth, span, convert)
+    }
+
+    fn with_depth<T>(
+        &self,
+        depth: &Cell<usize>,
+        span: Option<SourceSpan>,
+        convert: impl FnOnce() -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let next = depth.get() + 1;
+        if next > MAX_SOURCE_NESTING_DEPTH {
+            return Err(source_nesting_diagnostic(span));
+        }
+        depth.set(next);
+        let result = convert();
+        depth.set(next - 1);
+        result
+    }
+
     fn convert_module_items(&self, items: &[swc::ModuleItem]) -> Result<Vec<Stmt>, Diagnostic> {
         items
             .iter()
@@ -216,6 +260,18 @@ impl Adapter {
     }
 
     fn convert_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
+        if !matches!(
+            stmt,
+            swc::Stmt::If(_) | swc::Stmt::While(_) | swc::Stmt::Try(_) | swc::Stmt::Decl(_)
+        ) {
+            return self.convert_stmt_inner(stmt);
+        }
+        self.with_statement_depth(Some(source_span(stmt.span())), || {
+            self.convert_stmt_inner(stmt)
+        })
+    }
+
+    fn convert_stmt_inner(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
         let span = Some(source_span(stmt.span()));
         Ok(match stmt {
             swc::Stmt::Empty(_) => Stmt::Empty,
@@ -452,6 +508,12 @@ impl Adapter {
     }
 
     fn convert_expr(&self, expr: &swc::Expr) -> Result<Expr, Diagnostic> {
+        self.with_expression_depth(Some(source_span(expr.span())), || {
+            self.convert_expr_inner(expr)
+        })
+    }
+
+    fn convert_expr_inner(&self, expr: &swc::Expr) -> Result<Expr, Diagnostic> {
         let span = Some(source_span(expr.span()));
         Ok(match expr {
             swc::Expr::Ident(ident) => Expr::Ident(ident.sym.to_string()),
@@ -952,6 +1014,138 @@ fn parser_diagnostic(error: swc_ecma_parser::error::Error) -> Diagnostic {
         DiagnosticCode::SyntaxError
     };
     Diagnostic::new(code, message, Some(source_span(error.span())))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScanMode {
+    Code,
+    SingleQuoted,
+    DoubleQuoted,
+    Template,
+    LineComment,
+    BlockComment,
+}
+
+fn guard_source_delimiters(source: &str) -> Result<(), Diagnostic> {
+    let bytes = source.as_bytes();
+    let mut mode = ScanMode::Code;
+    let mut escaped = false;
+    let mut parens = 0usize;
+    let mut brackets = 0usize;
+    let mut braces = 0usize;
+    let mut template_expression_braces = Vec::new();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        let next = bytes.get(index + 1).copied();
+        match mode {
+            ScanMode::Code => match (byte, next) {
+                (b'/', Some(b'/')) => {
+                    mode = ScanMode::LineComment;
+                    index += 1;
+                }
+                (b'/', Some(b'*')) => {
+                    mode = ScanMode::BlockComment;
+                    index += 1;
+                }
+                (b'\'', _) => {
+                    mode = ScanMode::SingleQuoted;
+                    escaped = false;
+                }
+                (b'"', _) => {
+                    mode = ScanMode::DoubleQuoted;
+                    escaped = false;
+                }
+                (b'`', _) => {
+                    mode = ScanMode::Template;
+                    escaped = false;
+                }
+                (b'(', _) => increment_source_depth(&mut parens, index)?,
+                (b')', _) => parens = parens.saturating_sub(1),
+                (b'[', _) => increment_source_depth(&mut brackets, index)?,
+                (b']', _) => brackets = brackets.saturating_sub(1),
+                (b'{', _) => increment_source_depth(&mut braces, index)?,
+                (b'}', _) => {
+                    let closes_template_expression = template_expression_braces
+                        .last()
+                        .is_some_and(|depth| *depth == braces);
+                    braces = braces.saturating_sub(1);
+                    if closes_template_expression {
+                        template_expression_braces.pop();
+                        mode = ScanMode::Template;
+                    }
+                }
+                _ => {}
+            },
+            ScanMode::SingleQuoted => {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'\'' {
+                    mode = ScanMode::Code;
+                }
+            }
+            ScanMode::DoubleQuoted => {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    mode = ScanMode::Code;
+                }
+            }
+            ScanMode::Template => {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'`' {
+                    mode = ScanMode::Code;
+                } else if byte == b'$' && next == Some(b'{') {
+                    index += 1;
+                    increment_source_depth(&mut braces, index)?;
+                    template_expression_braces.push(braces);
+                    mode = ScanMode::Code;
+                }
+            }
+            ScanMode::LineComment => {
+                if matches!(byte, b'\n' | b'\r') {
+                    mode = ScanMode::Code;
+                }
+            }
+            ScanMode::BlockComment => {
+                if byte == b'*' && next == Some(b'/') {
+                    mode = ScanMode::Code;
+                    index += 1;
+                }
+            }
+        }
+        index += 1;
+    }
+    Ok(())
+}
+
+fn increment_source_depth(depth: &mut usize, index: usize) -> Result<(), Diagnostic> {
+    *depth += 1;
+    if *depth > MAX_SOURCE_NESTING_DEPTH {
+        return Err(source_nesting_diagnostic(Some(SourceSpan {
+            start: index,
+            end: index + 1,
+        })));
+    }
+    Ok(())
+}
+
+fn source_nesting_diagnostic(span: Option<SourceSpan>) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::SourceNestingLimit,
+        format!(
+            "TypeScript source nesting exceeds the {MAX_SOURCE_NESTING_DEPTH}-level limit; flatten the source"
+        ),
+        span,
+    )
 }
 
 fn reject(code: DiagnosticCode, construct: &str, span: Option<SourceSpan>) -> Diagnostic {

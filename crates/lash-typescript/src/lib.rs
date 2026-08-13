@@ -8,6 +8,7 @@ mod diagnostics;
 mod lower;
 mod signatures;
 
+pub use adapter::MAX_SOURCE_NESTING_DEPTH;
 pub use diagnostics::{Diagnostic, DiagnosticCode, SourceSpan};
 pub use signatures::render_tool_signature;
 
