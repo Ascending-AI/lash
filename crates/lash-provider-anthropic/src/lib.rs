@@ -169,6 +169,13 @@ mod tests {
             json!("0.02")
         );
         assert_eq!(response.response_metadata["body:/billing/cost"], json!(2));
+        assert_eq!(
+            response
+                .execution_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.provider_finish_reason.as_deref()),
+            Some("end_turn")
+        );
         assert!(!response.response_metadata.contains_key("header:set-cookie"));
         assert!(
             !response

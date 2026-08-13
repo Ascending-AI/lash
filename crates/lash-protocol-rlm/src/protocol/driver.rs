@@ -82,6 +82,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         let terminal_reason = llm_response.terminal_reason;
+        let stopped_at_owned_cell_boundary =
+            crate::response_boundary::stopped_at_owned_cell_boundary(&llm_response);
         let mut actions = Vec::new();
 
         let projected = match project_response(normalized_response_parts(&llm_response)) {
@@ -96,7 +98,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 return actions;
             }
         };
-        let assistant_text = normalize_cell_boundary(&projected.assistant_text);
+        let assistant_text =
+            normalize_cell_boundary(&projected.assistant_text, stopped_at_owned_cell_boundary);
         let reasoning = projected.reasoning;
         let visible_prose = project_visible_assistant_prose(&assistant_text);
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {

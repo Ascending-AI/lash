@@ -166,6 +166,7 @@ impl Provider for AnthropicProvider {
         }
 
         let provider_usage = state.provider_usage.take();
+        let provider_finish_reason = state.stop_reason.clone();
         let (parts, full_text, usage, terminal_reason) = Self::finalize(state);
         Ok(LlmResponse {
             full_text,
@@ -176,7 +177,12 @@ impl Provider for AnthropicProvider {
             provider_usage,
             request_body,
             http_summary: Some(format!("HTTP POST {} (stream)", url)),
-            execution_evidence: None,
+            execution_evidence: provider_finish_reason.map(|provider_finish_reason| {
+                ExecutionEvidence {
+                    provider_finish_reason: Some(provider_finish_reason),
+                    ..ExecutionEvidence::default()
+                }
+            }),
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
         })

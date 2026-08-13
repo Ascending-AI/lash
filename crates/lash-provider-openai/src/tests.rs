@@ -1951,7 +1951,8 @@ fn openrouter_buffered_wire_preserves_concrete_model_and_explicit_zero_reasoning
         "model": "anthropic/claude-sonnet-4.5",
         "choices": [{
             "message": { "role": "assistant", "content": "done" },
-            "finish_reason": "stop"
+            "finish_reason": "stop",
+            "native_finish_reason": "stop_sequence"
         }],
         "usage": {
             "completion_tokens_details": { "reasoning_tokens": 0 }
@@ -1967,7 +1968,7 @@ fn openrouter_buffered_wire_preserves_concrete_model_and_explicit_zero_reasoning
             provider_response_id: Some("gen-123".to_string()),
             provider_request_id: None,
             reasoning_output_tokens: Some(0),
-            provider_finish_reason: Some("stop".to_string()),
+            provider_finish_reason: Some("stop_sequence".to_string()),
         })
     );
     assert_ne!(state.served_model.as_deref(), Some("openrouter/auto"));
@@ -2083,7 +2084,7 @@ fn openrouter_stream_wire_captures_first_stable_identity_and_terminal_facts() {
     for raw in [
         r#"{"id":"","model":"","choices":[{"delta":{"content":"ok"}}]}"#,
         r#"{"id":"gen-first","model":"provider/model-a","choices":[{"delta":{}}]}"#,
-        r#"{"id":"gen-later","model":"provider/model-b","choices":[{"delta":{},"finish_reason":"length"}],"usage":{"completion_tokens_details":{"reasoning_tokens":7}}}"#,
+        r#"{"id":"gen-later","model":"provider/model-b","choices":[{"delta":{},"finish_reason":"stop","native_finish_reason":"stop_sequence"}],"usage":{"completion_tokens_details":{"reasoning_tokens":7}}}"#,
     ] {
         OpenAiCompatibleProvider::process_chat_sse_event(raw, &mut state)
             .expect("SSE chunk parses");
@@ -2093,7 +2094,10 @@ fn openrouter_stream_wire_captures_first_stable_identity_and_terminal_facts() {
     assert_eq!(evidence.provider_response_id.as_deref(), Some("gen-first"));
     assert_eq!(evidence.served_model.as_deref(), Some("provider/model-a"));
     assert_eq!(evidence.reasoning_output_tokens, Some(7));
-    assert_eq!(evidence.provider_finish_reason.as_deref(), Some("length"));
+    assert_eq!(
+        evidence.provider_finish_reason.as_deref(),
+        Some("stop_sequence")
+    );
 }
 
 fn streamed_request(events: Arc<std::sync::Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {

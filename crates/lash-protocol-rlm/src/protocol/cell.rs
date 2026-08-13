@@ -46,17 +46,22 @@ pub fn project_visible_assistant_prose(text: &str) -> String {
 ///
 /// Keep exactly one complete cell and discard anything after it.
 ///
-/// Native provider stop reasons do not prove that a requested delimiter was
-/// consumed: several providers collapse a natural end and a matched stop
-/// sequence into the same terminal reason. Consequently an unclosed cell is
-/// never reconstructed here and always flows to the retry diagnostic.
-pub(super) fn normalize_cell_boundary(text: &str) -> String {
+/// A caller may confirm that the provider stopped specifically on RLM's owned
+/// delimiter. Only that typed evidence closes a cell whose literal delimiter
+/// was withheld; a generic provider stop leaves it unclosed for retry.
+pub(super) fn normalize_cell_boundary(text: &str, close_at_owned_stop: bool) -> String {
     if let Some(span) = first_lashlang_cell_span(text) {
         let trailing = &text[span.end_tag_end..];
         if first_lashlang_cell_span(trailing).is_some() {
             return text.to_string();
         }
         return text[..span.end_tag_end].to_string();
+    }
+
+    if close_at_owned_stop
+        && let Some(closed) = crate::response_boundary::close_unclosed_owned_cell(text)
+    {
+        return closed;
     }
 
     text.to_string()

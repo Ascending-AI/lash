@@ -126,7 +126,7 @@ fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
 }
 
 #[test]
-fn applied_provider_stop_does_not_reconstruct_an_unclosed_cell() {
+fn provider_stop_sequence_closes_and_executes_the_owned_cell_boundary() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
@@ -143,6 +143,10 @@ fn applied_provider_stop_does_not_reconstruct_an_unclosed_cell() {
             full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
+            execution_evidence: Some(lash_core::ExecutionEvidence {
+                provider_finish_reason: Some("stop_sequence".to_string()),
+                ..Default::default()
+            }),
             generation_disposition: Some(lash_core::GenerationDisposition {
                 stop_sequences: lash_core::GenerationOptionDisposition::Applied,
                 ..Default::default()
@@ -152,11 +156,10 @@ fn applied_provider_stop_does_not_reconstruct_an_unclosed_cell() {
     });
 
     let effects = drain_effects(&mut machine);
-    assert!(find_checkpoint(&effects).is_some());
     assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+        effects.iter().any(
+            |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print \"hi\"")
+        )
     );
     assert!(effects.iter().any(|effect| matches!(
         effect,
@@ -164,7 +167,7 @@ fn applied_provider_stop_does_not_reconstruct_an_unclosed_cell() {
             if content == "Before"
     )));
     assert!(
-        machine
+        !machine
             .messages()
             .iter()
             .any(|message| message.parts.iter().any(|part| part
@@ -211,6 +214,45 @@ fn natural_stop_without_applied_boundary_does_not_close_or_execute_a_cell() {
         Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
             if content.contains("<lashlang>")
     )));
+}
+
+#[test]
+fn stop_sequence_evidence_without_an_applied_protocol_stop_does_not_close_the_cell() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "Visible plan.\n<lashlang>\nprint \"unfinished\"";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::Stop,
+            execution_evidence: Some(lash_core::ExecutionEvidence {
+                provider_finish_reason: Some("stop_sequence".to_string()),
+                ..Default::default()
+            }),
+            generation_disposition: Some(lash_core::GenerationDisposition {
+                stop_sequences: lash_core::GenerationOptionDisposition::NotRequested,
+                ..Default::default()
+            }),
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(find_checkpoint(&effects).is_some());
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
 }
 
 #[test]
