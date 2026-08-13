@@ -335,3 +335,38 @@ async fn a_handler_naming_an_unrelated_catch_scope_is_refused() {
     forged.handler_stack[0].catches = scopes[1].2;
     assert_exception_wire_refused(&program, forged, "is not live at");
 }
+
+/// `InvalidExceptionState` is the VM's own signal that the bytecode violated
+/// the handler/finally discipline. Routing it back through the handler stack
+/// would hand an internal invariant violation to the very structure that is
+/// already suspect, so it must be an uncatchable terminal.
+#[tokio::test(flavor = "current_thread")]
+async fn an_invalid_exception_state_bypasses_a_surrounding_catch() {
+    assert_eq!(
+        RuntimeError::InvalidExceptionState {
+            reason: "handler stack underflow".into()
+        }
+        .taxonomy(),
+        ErrorTaxonomy::UncatchableTerminal
+    );
+
+    // A hand-built chunk whose `PopHandler` has no handler to pop, wrapped in a
+    // catch that must never observe the failure.
+    let mut program = compile_program(&exception_finish(exception_try(
+        Expr::Number(1.0),
+        Some(("error", Expr::String("caught".into()))),
+        None,
+    )));
+    let body = program
+        .chunk
+        .code
+        .iter()
+        .position(|instruction| matches!(instruction, Instruction::PushNumber(_)))
+        .expect("the try body pushes its constant");
+    program.chunk.code[body] = Instruction::PopHandler;
+    let outcome = execute_compiled(&program, &mut State::new(), &Host).await;
+    assert!(
+        matches!(outcome, Err(RuntimeError::InvalidExceptionState { .. })),
+        "the surrounding catch must not observe it: {outcome:?}"
+    );
+}

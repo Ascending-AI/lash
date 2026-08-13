@@ -166,3 +166,46 @@ fn ast_nesting_depth(program: &lashlang::Program) -> usize {
     }
     deepest
 }
+
+/// `break` and `continue` are AST nodes with no parser to reject them out of
+/// place, so a host-built function body can carry one with no enclosing loop.
+/// That is a typed refusal at the construction entry points, not a panic in the
+/// compiler, for the same reason the depth cap lives there.
+#[test]
+fn loop_control_outside_a_loop_is_a_typed_error_not_a_panic() {
+    use lashlang::{AssignTarget, Expr, FunctionExpr, Program};
+
+    let program = Program::block(vec![
+        Expr::Assign {
+            target: AssignTarget::variable("f".into()),
+            expr: Box::new(Expr::Function(Box::new(FunctionExpr {
+                name: None,
+                params: Vec::new(),
+                captures: Vec::new(),
+                body: Box::new(Expr::Break),
+            }))),
+        },
+        Expr::Finish(Box::new(Expr::Call {
+            function: Box::new(Expr::Variable("f".into())),
+            args: Vec::new(),
+        })),
+    ]);
+
+    let error = LinkedModule::link(program.clone(), environment())
+        .expect_err("linking must refuse loop control outside a loop");
+    assert!(error.to_string().contains("outside a loop"), "{error}");
+
+    let error =
+        lashlang::compile_ast(&program).expect_err("compiling must refuse it rather than panic");
+    assert!(error.to_string().contains("outside a loop"), "{error}");
+}
+
+/// The same for a `continue` at the top level of a program.
+#[test]
+fn a_bare_continue_at_the_program_root_is_a_typed_error() {
+    use lashlang::{Expr, Program};
+
+    let program = Program::block(vec![Expr::Continue, Expr::Finish(Box::new(Expr::Null))]);
+    let error = lashlang::compile_ast(&program).expect_err("a bare continue must be refused");
+    assert!(error.to_string().contains("outside a loop"), "{error}");
+}
