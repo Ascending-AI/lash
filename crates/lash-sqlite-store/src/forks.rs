@@ -233,6 +233,8 @@ pub(super) async fn fork_at_in_catalog(
     let request = request.clone();
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core::ForkSessionResult, lash_core::StoreError> = (|| {
+            // Keep the fork fences in the shared order: exists -> deleted ->
+            // retained -> live -> frame.
             let exists = tx
                 .query_row(
                     "SELECT 1 FROM session_meta WHERE session_id = ?1
@@ -287,24 +289,42 @@ pub(super) async fn fork_at_in_catalog(
             // The relation records which session the host branched from, while
             // the retained point records which session originally wrote the
             // node. Those identities legitimately differ after a rewind.
+            let live = tx
+                .query_row(
+                    "SELECT 1 FROM graph_nodes
+                     WHERE node_id = ?1 AND tombstoned = 0",
+                    params![request.node_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .is_some();
+            if !live {
+                return Err(lash_core::StoreError::ForkPointNotRetained {
+                    node_id: request.node_id.clone(),
+                });
+            }
             let node_facts = tx
                 .query_row(
-                    "SELECT session_id, generation, frame_node_id FROM graph_nodes
+                    "SELECT session_id, generation FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0",
                     params![request.node_id],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, i64>(1)?,
-                            row.get::<_, String>(2)?,
                         ))
                     },
                 )
                 .optional()
                 .map_err(sqlite_error)?;
-            let (_owning_session_id, fork_generation, current_frame_node_id) = node_facts
+            let (_owning_session_id, fork_generation) = node_facts
                 .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                     node_id: request.node_id.clone(),
+                })?;
+            let current_frame_node_id = persistence::nearest_frame_node_id_conn(tx, &request.node_id)?
+                .ok_or_else(|| lash_core::StoreError::MissingFrameOpenAncestor {
+                    leaf_node_id: request.node_id.clone(),
                 })?;
             let fork_generation = u64::try_from(fork_generation).map_err(|_| {
                 stored_data_corrupt(

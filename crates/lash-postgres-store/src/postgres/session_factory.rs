@@ -302,20 +302,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
             .await?;
-        let deleted = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
-             )",
-        )
-        .bind(&request.session_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if deleted {
-            return Err(StoreError::SessionDeleted {
-                session_id: request.session_id.clone(),
-            });
-        }
+        // Keep the fork fences in the shared order: exists -> deleted ->
+        // retained -> live -> frame.
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(
                  SELECT 1 FROM lash_sessions WHERE session_id = $1
@@ -332,19 +320,20 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 session_id: request.session_id.clone(),
             });
         }
-        let node_facts = sqlx::query_as::<_, (String, i64, String)>(
-            "SELECT session_id, generation, frame_node_id FROM lash_graph_nodes
-             WHERE node_id = $1 AND tombstoned = FALSE
-             FOR UPDATE",
+        let deleted = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
+             )",
         )
-        .bind(&request.node_id)
-        .fetch_optional(&mut *tx)
+        .bind(&request.session_id)
+        .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let (_owning_session_id, fork_generation, current_frame_node_id) =
-            node_facts.ok_or_else(|| StoreError::ForkPointNotRetained {
-                node_id: request.node_id.clone(),
-            })?;
+        if deleted {
+            return Err(StoreError::SessionDeleted {
+                session_id: request.session_id.clone(),
+            });
+        }
         let retained = sqlx::query_as::<_, (String, String)>(
             "SELECT source_session_id, checkpoint_ref FROM (
                  SELECT source_session_id, checkpoint_ref, 0 AS priority
@@ -363,6 +352,25 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             retained.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
             })?;
+        let node_facts = sqlx::query_as::<_, (String, i64)>(
+            "SELECT session_id, generation FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE
+             FOR UPDATE",
+        )
+        .bind(&request.node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let (_owning_session_id, fork_generation) =
+            node_facts.ok_or_else(|| StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            })?;
+        let current_frame_node_id =
+            crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, &request.node_id)
+                .await?
+                .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
+                    leaf_node_id: request.node_id.clone(),
+                })?;
         // Relation and retention-source identities are metadata, not ancestry.
         // Reconstruct every inherited ceiling from the retained parent edges so
         // deleted owners need no surviving head or descendant carrier row.
