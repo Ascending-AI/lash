@@ -1,9 +1,9 @@
 {
   "runtime_stack": {
     "deep_turn_composition": {
-    "budget_bytes": 524288,
-      "headroom_percent": 33,
-      "measured_minimum_passing_bytes": 393216
+      "budget_bytes": 2097152,
+      "headroom_percent": 100,
+      "measured_minimum_passing_bytes": 1048576
     }
   },
   "runtime": {
