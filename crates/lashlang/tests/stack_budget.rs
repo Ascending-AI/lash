@@ -80,8 +80,8 @@ fn stack_budget_lashlang_max_nesting_depth_parse_link_compile_execute() {
     run_on_stack_budget("stack-budget-lashlang-max-nesting", || {
         let deepest = deepest_accepted_nesting();
         assert!(
-            deepest >= 39,
-            "expected the parser to accept at least 39 nested levels, got {deepest}; \
+            deepest >= 29,
+            "expected the parser to accept at least 29 nested levels, got {deepest}; \
              if MAX_NESTING_DEPTH moved on purpose, move this floor with it"
         );
 
@@ -133,6 +133,41 @@ fn stack_budget_environment() -> LashlangHostEnvironment {
         lashlang::LashlangHostCatalog::new(),
         LashlangAbilities::all(),
     )
+}
+
+/// The AST cap is only sound if the *most expensive* per-level AST variant
+/// meets the 2 MiB budget at exactly that depth. Nested `try`/`catch`/`finally`
+/// is that variant — it aborts about ten levels above the cap, where the
+/// cheapest block-bodied shape aborts about fifteen above — so this is the test
+/// that earns the constant. The other budget tests cover cheaper shapes.
+#[test]
+fn stack_budget_most_expensive_ast_variant_at_the_nesting_cap() {
+    run_on_stack_budget("stack-budget-ast-cap", || {
+        // The deepest try chain the cap admits, found rather than assumed so
+        // the test tracks the constant instead of restating its arithmetic.
+        let depth = (1..lashlang::MAX_AST_NESTING_DEPTH)
+            .take_while(|depth| {
+                lashlang::check_ast_nesting_depth(&nested_try_program(*depth)).is_ok()
+            })
+            .last()
+            .expect("some try depth is admitted");
+        assert!(
+            lashlang::check_ast_nesting_depth(&nested_try_program(depth + 1)).is_err(),
+            "depth {depth} must be the deepest the cap admits"
+        );
+        let program = nested_try_program(depth);
+        let linked =
+            lashlang::LinkedModule::link(program, stack_budget_environment()).expect("links");
+        let compiled = compile_linked(&linked);
+        let mut state = State::new();
+        let outcome = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(execute(&compiled, &mut state, &StackBudgetHost))
+            .expect("program executes");
+        assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(7.0)));
+    });
 }
 
 /// The AST-only exception nodes must meet the same 2 MiB budget as parsed

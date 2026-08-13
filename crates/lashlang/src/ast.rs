@@ -27,16 +27,21 @@ pub struct Program {
 /// explicitly and the whole pipeline (link, compile, execute) keeps the 2 MiB
 /// stack contract the parsed path already had.
 ///
-/// It is the parser's own cap plus the constant overhead a parsed expression
-/// contributes — the deepest program the parser admits builds a tree a few
-/// levels deeper than its syntactic depth — and it stays well below the depth
-/// at which the cheapest AST chains exhaust that budget. Per-level stack cost
-/// varies by variant, so this bounds the tree rather than promising a
-/// per-variant margin; `tests/stack_budget.rs` pins the real pipeline cost at
-/// the parser cap.
+/// The value is derived from measurement, not arithmetic. On a 2 MiB thread the
+/// full link/compile/execute pipeline aborts at an AST depth of roughly 74 for
+/// the most expensive per-level variant (nested `try`/`catch`/`finally`) and
+/// roughly 79 for the cheapest block-bodied one, so 64 keeps at least ten
+/// levels of margin under the tighter cliff. `tests/stack_budget.rs` pins that
+/// margin with the most expensive variant at exactly this depth.
+///
+/// The parser's own cap is set so that no program it accepts can exceed this:
+/// a syntactic level is not an AST level, and block-bodied constructs
+/// (`if`/`while`/`for`) build an `Expr::Block` inside them and cost two.
+/// `tests/nesting_cap.rs` is what pins that relation — walking a family of
+/// parsed shapes to the parser's refusal point and requiring every accepted
+/// program to pass this check and to link — rather than a constant comparison,
+/// which cannot see the per-level cost difference.
 pub const MAX_AST_NESTING_DEPTH: usize = 64;
-
-const _: () = assert!(MAX_AST_NESTING_DEPTH > crate::parser::MAX_NESTING_DEPTH);
 
 /// An AST that nests deeper than [`MAX_AST_NESTING_DEPTH`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]

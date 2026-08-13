@@ -158,16 +158,24 @@ pub fn parse_type_expression(source: &str) -> Result<TypeExpr, ParseError> {
 /// precedence ladder (`parse_expr` -> ternary -> or -> and -> compare -> add ->
 /// mul -> unary -> postfix -> primary -> grouping -> `parse_expr`), roughly a
 /// dozen native frames carrying the large parsed-expression/span bundle.
-/// Empirically ~40 levels parse comfortably on a 2 MiB thread stack while
-/// leaving headroom for debug-test frames, so the limit is kept under that
-/// cliff. Block nesting (`parse_block` ->
-/// `parse_statement_expr` -> `parse_if`/`parse_for`/`parse_while` -> `parse_block`) is a
-/// shallower per-level chain and shares the same budget, so any mix of the two
-/// stays bounded. Real generated programs nest only a handful deep, so this is
-/// ample headroom; capping here also bounds every downstream AST walker
-/// (validate, lower, compile, eval), since the tree can never be deeper than
-/// the parser allowed.
-pub(crate) const MAX_NESTING_DEPTH: usize = 40;
+/// Empirically ~40 levels parse comfortably on a 2 MiB thread stack, so the
+/// parser itself is not the binding constraint. The downstream AST walkers
+/// (link, compile, execute) are: a block-bodied level (`parse_block` ->
+/// `parse_statement_expr` -> `parse_if`/`parse_for`/`parse_while` ->
+/// `parse_block`) is cheap to *parse* but builds **two** AST levels, an
+/// `Expr::If`/`While`/`For` wrapping an `Expr::Block`, and those walkers cost
+/// per AST level. At the old limit of 40 the deepest accepted `if` chain built
+/// an 81-level tree and aborted the process in `link`, which the cap existed to
+/// prevent.
+///
+/// So the limit is set from the other end: it is whatever keeps the worst
+/// parsed shape inside [`crate::ast::MAX_AST_NESTING_DEPTH`], which is itself
+/// measured against the 2 MiB budget. Two AST levels per syntactic level plus
+/// the constant a statement contributes puts the worst shape at `2 * 30 + 3`,
+/// inside the 64-level AST cap. Real generated programs nest only a handful
+/// deep, so this remains ample headroom, and `tests/nesting_cap.rs` pins the
+/// relation for a whole family of parsed shapes rather than asserting it.
+pub(crate) const MAX_NESTING_DEPTH: usize = 30;
 
 struct Parser {
     tokens: Vec<Token>,

@@ -115,3 +115,54 @@ fn every_parsed_shape_the_parser_accepts_stays_inside_the_ast_cap() {
     }
     println!("parser-accepted depth per shape: {summary:?}");
 }
+
+/// The margin, stated as a number so a shape family that grows more expensive
+/// is visible rather than merely tolerated: the deepest tree any parsed program
+/// can build must stay inside the AST cap.
+#[test]
+fn the_worst_parsed_shape_stays_inside_the_ast_cap() {
+    let mut worst = (0usize, "none");
+    for (name, build) in parsed_shape_family() {
+        for depth in 1..=128usize {
+            let Ok(program) = parse(&build(depth)) else {
+                break;
+            };
+            let depth = ast_nesting_depth(&program);
+            if depth > worst.0 {
+                worst = (depth, name);
+            }
+        }
+    }
+    println!(
+        "deepest parsed AST tree: {} levels (shape `{}`), cap {}",
+        worst.0,
+        worst.1,
+        lashlang::MAX_AST_NESTING_DEPTH
+    );
+    assert!(
+        worst.0 <= lashlang::MAX_AST_NESTING_DEPTH,
+        "the parser admits a {}-level tree (shape `{}`) but the AST cap is {}",
+        worst.0,
+        worst.1,
+        lashlang::MAX_AST_NESTING_DEPTH
+    );
+}
+
+/// Mirrors `check_ast_nesting_depth`'s walk so the assertion above reports the
+/// number, not just pass or fail.
+fn ast_nesting_depth(program: &lashlang::Program) -> usize {
+    let mut pending: Vec<(&lashlang::Expr, usize)> = vec![(&program.main, 1)];
+    for declaration in &program.declarations {
+        if let lashlang::Declaration::Process(process) = declaration {
+            pending.push((&process.body, 1));
+        }
+    }
+    let mut deepest = 0;
+    while let Some((expr, depth)) = pending.pop() {
+        deepest = deepest.max(depth);
+        for child in expr.children() {
+            pending.push((child, depth + 1));
+        }
+    }
+    deepest
+}
