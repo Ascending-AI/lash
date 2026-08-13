@@ -290,7 +290,7 @@ pub(crate) fn javascript_join(
 }
 
 fn parse_radix_integer(digits: &str, radix: u32) -> f64 {
-    if digits.is_empty() || !digits.chars().all(|ch| ch.to_digit(radix).is_some()) {
+    if digits.is_empty() || !digits.chars().all(|ch| ch.is_digit(radix)) {
         return f64::NAN;
     }
     BigUint::parse_bytes(digits.as_bytes(), radix)
