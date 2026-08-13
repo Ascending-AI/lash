@@ -50,9 +50,9 @@ use super::{
     execute_compiled_format_direct, execute_compiled_format_one_number_compact_direct,
     execute_intrinsic, execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values,
     javascript_join, javascript_split, materialize_projected_async, materialize_value,
-    range_bounds, range_bounds_async, read_field_direct, read_field_ref_direct, read_index_direct,
-    read_javascript_field_direct, read_javascript_index_direct, unwrap_tool_result,
-    unwrap_type_value,
+    range_bounds, range_bounds_async, read_field_direct, read_index_direct,
+    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
+    read_javascript_index_direct, unwrap_tool_result, unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -411,11 +411,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let target = self.pop_stack()?;
-                let value = if self.reference_semantics {
-                    read_javascript_field_direct(target, &self.chunk.names[field])?
-                } else {
-                    read_field_direct(target, &self.chunk.names[field])?
-                };
+                let field = self.chunk.names[field].clone();
+                let value = self.read_dialect_field(target, &field)?;
                 self.stack.push(value);
             }
             Instruction::Index => {
@@ -428,11 +425,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 }
                 let index = self.pop_stack()?;
                 let target = self.pop_stack()?;
-                self.stack.push(if self.reference_semantics {
-                    read_javascript_index_direct(target, index)?
-                } else {
-                    read_index_direct(target, index)?
-                });
+                let value = self.read_dialect_index(target, index)?;
+                self.stack.push(value);
             }
             Instruction::ResultUnwrap => {
                 let value = self.pop_stack()?;
@@ -971,44 +965,41 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     async fn step_instruction(&mut self, instruction: Instruction) -> Result<VmStep, RuntimeError> {
         match instruction {
             Instruction::LoadField { slot, field } => {
-                let value = self.load_slot(slot)?;
-                let field = &self.chunk.names[field];
+                let value = self.load_slot(slot)?.clone();
+                let field = self.chunk.names[field].clone();
                 let value = match value {
                     Value::Projected(projected) => {
                         let parent_name = projected.name().to_string();
-                        let inner = projected.get_field(field).await?;
+                        let inner = projected.get_field(&field).await?;
                         ProjectedValue::propagate_field(&parent_name, &field.text, inner)
                     }
-                    value => read_field_ref_direct(value, field)?,
+                    value => self.read_dialect_field(value, &field)?,
                 };
                 self.stack.push(value);
             }
             Instruction::LoadFieldUnwrap { slot, field } => {
-                let value = self.load_slot(slot)?;
-                let field = &self.chunk.names[field];
+                let value = self.load_slot(slot)?.clone();
+                let field = self.chunk.names[field].clone();
                 let value = match value {
                     Value::Projected(projected) => {
                         let parent_name = projected.name().to_string();
-                        let inner = projected.get_field(field).await?;
+                        let inner = projected.get_field(&field).await?;
                         ProjectedValue::propagate_field(&parent_name, &field.text, inner)
                     }
-                    value => read_field_ref_direct(value, field)?,
+                    value => self.read_dialect_field(value, &field)?,
                 };
                 self.stack.push(unwrap_tool_result(value)?);
             }
             Instruction::Field(field) => {
                 let target = self.pop_stack()?;
-                let field = &self.chunk.names[field];
+                let field = self.chunk.names[field].clone();
                 let value = match target {
                     Value::Projected(projected) => {
                         let parent_name = projected.name().to_string();
-                        let inner = projected.get_field(field).await?;
+                        let inner = projected.get_field(&field).await?;
                         ProjectedValue::propagate_field(&parent_name, &field.text, inner)
                     }
-                    target if self.reference_semantics => {
-                        read_javascript_field_direct(target, field)?
-                    }
-                    target => read_field_direct(target, field)?,
+                    target => self.read_dialect_field(target, &field)?,
                 };
                 self.stack.push(value);
             }
@@ -1021,10 +1012,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         let inner = projected.get_index(&index).await?;
                         ProjectedValue::propagate_index(&parent_name, &index, inner)
                     }
-                    target if self.reference_semantics => {
-                        read_javascript_index_direct(target, index)?
-                    }
-                    target => read_index_direct(target, index)?,
+                    target => self.read_dialect_index(target, index)?,
                 };
                 self.stack.push(value);
             }

@@ -198,19 +198,22 @@ impl State {
     pub(crate) fn validate_program(&self, program: &CompiledProgram) -> Result<(), RuntimeError> {
         self.heap.validate_closures(&program.chunk.functions)?;
         if program.dialect == super::CompilationDialect::Lashlang {
+            let mut heap = self.heap.clone();
+            let root_values = self.runtime_globals.values().cloned().collect::<Vec<_>>();
+            heap.collect(root_values.iter());
             let mut roots = PersistedRoots::default();
             roots.durable_all(
                 self.runtime_globals
                     .iter()
                     .map(|(name, value)| (name.to_string(), value)),
             );
-            self.heap
-                .validate_persisted_forest(&roots)
-                .map_err(|reason| RuntimeError::ValidationFailed {
+            heap.validate_persisted_forest(&roots).map_err(|reason| {
+                RuntimeError::ValidationFailed {
                     reason: format!(
                         "Lashlang state cannot contain a shared TypeScript heap graph: {reason}"
                     ),
-                })?;
+                }
+            })?;
         }
         Ok(())
     }

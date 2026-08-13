@@ -449,6 +449,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         instruction: super::Instruction,
     ) -> Result<(), RuntimeError> {
+        if self.reference_semantics
+            && matches!(
+                instruction,
+                super::Instruction::LoadField { .. }
+                    | super::Instruction::LoadFieldUnwrap { .. }
+                    | super::Instruction::Field(_)
+                    | super::Instruction::Index
+            )
+        {
+            return Ok(());
+        }
         let plan = instruction_heap_plan(instruction, self.chunk)?;
         match plan.stack {
             StackExport::Top(window) => {

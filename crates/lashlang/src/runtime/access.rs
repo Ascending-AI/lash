@@ -181,6 +181,40 @@ pub(crate) fn read_javascript_index_direct(
     }
 }
 
+pub(crate) fn read_javascript_heap_field(
+    heap: &Heap,
+    id: HeapId,
+    field: &Name,
+) -> Result<Value, RuntimeError> {
+    Ok(match heap.get(id)? {
+        HeapObject::Record(record) => record
+            .get_symbol(field.symbol)
+            .cloned()
+            .unwrap_or(Value::Undefined),
+        HeapObject::List(values) | HeapObject::Tuple(values) if field.text.as_ref() == "length" => {
+            Value::Number(values.len() as f64)
+        }
+        _ => Value::Undefined,
+    })
+}
+
+pub(crate) fn read_javascript_heap_index(
+    heap: &Heap,
+    id: HeapId,
+    index: &Value,
+) -> Result<Value, RuntimeError> {
+    Ok(match heap.get(id)? {
+        HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index(index)
+            .and_then(|index| values.get(index).cloned())
+            .unwrap_or(Value::Undefined),
+        HeapObject::Record(record) => record
+            .get(&javascript_to_string(index))
+            .cloned()
+            .unwrap_or(Value::Undefined),
+        _ => Value::Undefined,
+    })
+}
+
 pub(crate) fn assign_path(
     root: &mut Value,
     path: &CompiledAssignPath,

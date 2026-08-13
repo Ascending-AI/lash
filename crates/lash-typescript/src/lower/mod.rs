@@ -92,13 +92,9 @@ impl Lowerer {
                     target: AssignTarget::variable(binding.internal.into()),
                     expr: Box::new(function),
                 });
+            } else {
+                output.extend(self.lower_stmt(statement)?);
             }
-        }
-        for statement in statements {
-            if matches!(statement, Stmt::Function { .. }) {
-                continue;
-            }
-            output.extend(self.lower_stmt(statement)?);
         }
         if !root {
             self.scopes.pop();
@@ -188,10 +184,11 @@ impl Lowerer {
             .find_map(|scope| scope.bindings.get(name))
             .cloned()
         else {
-            if let Some(function) = self.functions.last_mut() {
-                function.captures.insert(name.to_string());
-            }
-            return Ok(name.to_string());
+            return Err(Diagnostic::new(
+                DiagnosticCode::UnknownBinding,
+                format!("unknown binding `{name}`"),
+                None,
+            ));
         };
         let current_function = self.current_function();
         if current_function == binding.owner_function && !binding.initialized {
@@ -342,7 +339,7 @@ impl Lowerer {
                         self.scopes.push(Scope::default());
                         self.declare(&catch.binding, BindingKind::Catch, true, false)?;
                         let binding = self.binding(&catch.binding)?.internal.clone();
-                        let body = LashExpr::Block(self.lower_statements(&catch.body, true)?);
+                        let body = LashExpr::Block(self.lower_statements(&catch.body, false)?);
                         self.scopes.pop();
                         Ok(CatchClause {
                             binding: binding.into(),
@@ -522,12 +519,25 @@ impl Lowerer {
                     .find_map(|scope| scope.bindings.get(name))
                     .cloned()
                 else {
-                    return Ok(AssignTarget::variable(name.as_str().into()));
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnknownBinding,
+                        format!("unknown binding `{name}`"),
+                        None,
+                    ));
                 };
                 if binding.kind != BindingKind::Let {
                     return Err(Diagnostic::new(
                         DiagnosticCode::AssignConst,
                         format!("cannot assign to `{name}`"),
+                        None,
+                    ));
+                }
+                if binding.owner_function != self.current_function() {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::MutableCaptureUnsupported,
+                        format!(
+                            "mutable binding `{name}` cannot be captured until live lexical cells are available"
+                        ),
                         None,
                     ));
                 }
@@ -594,33 +604,44 @@ impl Lowerer {
 
     fn lower_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<LashExpr, Diagnostic> {
         if let Expr::Ident(name) = callee {
-            return match (name.as_str(), args) {
-                ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
-                ("print", [value]) => Ok(LashExpr::Print(Box::new(self.lower_expr(value)?))),
-                ("finish" | "print", _) => Err(Diagnostic::new(
-                    DiagnosticCode::UnsupportedExpression,
-                    format!("{name} expects one argument"),
-                    None,
-                )),
-                _ => Ok(LashExpr::Call {
-                    function: Box::new(self.lower_expr(callee)?),
-                    args: args
-                        .iter()
-                        .map(|arg| self.lower_expr(arg))
-                        .collect::<Result<_, _>>()?,
-                }),
-            };
+            if !self.has_binding(name) {
+                return match (name.as_str(), args) {
+                    ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
+                    ("print", [value]) => Ok(LashExpr::Print(Box::new(self.lower_expr(value)?))),
+                    ("finish" | "print", _) => Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        format!("{name} expects one argument"),
+                        None,
+                    )),
+                    _ => Ok(LashExpr::Call {
+                        function: Box::new(self.lower_expr(callee)?),
+                        args: args
+                            .iter()
+                            .map(|arg| self.lower_expr(arg))
+                            .collect::<Result<_, _>>()?,
+                    }),
+                };
+            }
         }
         if let Expr::Member {
             object,
             property: MemberProperty::Field(method),
         } = callee
         {
-            if matches!(object.as_ref(), Expr::Ident(name) if name == "console")
-                && method == "log"
-                && args.len() == 1
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "console") && method == "log"
             {
-                return Ok(LashExpr::Print(Box::new(self.lower_expr(&args[0])?)));
+                if !self.has_binding("console") && args.len() == 1 {
+                    return Ok(LashExpr::Print(Box::new(self.lower_expr(&args[0])?)));
+                }
+                if self.has_binding("console") {
+                    return Ok(LashExpr::Call {
+                        function: Box::new(self.lower_expr(callee)?),
+                        args: args
+                            .iter()
+                            .map(|arg| self.lower_expr(arg))
+                            .collect::<Result<_, _>>()?,
+                    });
+                }
             }
             let target = self.lower_expr(object)?;
             let lowered = args

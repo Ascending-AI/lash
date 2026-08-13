@@ -1,6 +1,44 @@
 use super::*;
 
 impl<H: ExecutionHost> Vm<'_, H> {
+    pub(super) fn read_dialect_field(
+        &mut self,
+        target: Value,
+        field: &Name,
+    ) -> Result<Value, RuntimeError> {
+        if let Value::Ref(id) = target {
+            if self.reference_semantics {
+                return read_javascript_heap_field(&self.heap, id, field);
+            }
+            let target = self.heap.export_for_instruction(&Value::Ref(id))?;
+            return read_field_direct(target, field);
+        }
+        if self.reference_semantics {
+            read_javascript_field_direct(target, field)
+        } else {
+            read_field_direct(target, field)
+        }
+    }
+
+    pub(super) fn read_dialect_index(
+        &mut self,
+        target: Value,
+        index: Value,
+    ) -> Result<Value, RuntimeError> {
+        if let Value::Ref(id) = target {
+            if self.reference_semantics {
+                return read_javascript_heap_index(&self.heap, id, &index);
+            }
+            let target = self.heap.export_for_instruction(&Value::Ref(id))?;
+            return read_index_direct(target, index);
+        }
+        if self.reference_semantics {
+            read_javascript_index_direct(target, index)
+        } else {
+            read_index_direct(target, index)
+        }
+    }
+
     pub(super) fn execute_javascript_unary(
         &mut self,
         op: JavaScriptUnaryOp,
