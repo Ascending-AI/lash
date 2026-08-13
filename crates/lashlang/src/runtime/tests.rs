@@ -1257,3 +1257,4 @@ include!("tests/function_cases.rs");
 include!("tests/exception_cases.rs");
 include!("tests/exception_control_flow_cases.rs");
 include!("tests/exception_wire_cases.rs");
+include!("tests/exception_review_cases.rs");

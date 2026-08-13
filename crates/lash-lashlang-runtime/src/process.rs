@@ -332,6 +332,7 @@ pub async fn run_lashlang_process(
         event_sequence: AtomicU64::new(event_sequence),
         signal_send_sequence: AtomicU64::new(signal_send_sequence),
         signal_wait_ordinals: tokio::sync::Mutex::new(signal_wait_ordinals),
+        cancellation: cancellation.clone(),
     };
     let env = lashlang::ExecutionEnvironment::new(&host)
         .process()
@@ -518,6 +519,10 @@ struct LashlangProcessHost<'run> {
     event_sequence: AtomicU64,
     signal_send_sequence: AtomicU64,
     signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,
+    /// The engine's cancellation token, read by the VM's cooperative
+    /// cancellation probe so a cancelled process terminates as an uncatchable
+    /// host terminal instead of running to completion inside a guest handler.
+    cancellation: CancellationToken,
 }
 
 type ProcessHostAbilityFuture<'a> =
@@ -935,6 +940,10 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
         op: lashlang::AbilityOp,
     ) -> impl Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send {
         self.perform_selected_ability(op)
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
     }
 
     fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {
