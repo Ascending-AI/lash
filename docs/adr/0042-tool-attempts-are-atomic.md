@@ -26,8 +26,8 @@ The implementation law has two provider shapes:
 > process shape. If you only need to cause it, return an intent.
 
 Leaf providers receive `AttemptContext` and execute as one opaque recorded
-attempt. Orchestrating providers opt in per tool id and receive the distinct
-`OrchestrationContext`; their body never enters `coordinate_tool_invocation`
+attempt. First-party facade components may opt in per tool id through the
+private orchestration seam; their body never enters `coordinate_tool_invocation`
 and has no enclosing `ToolAttempt`. The body is authored process-replay code,
 so every journal command it issues is a direct child of the enclosing process
 invocation. `ExecCode`, runtime-owned `batch`, and `spawn_agent` use that replay
@@ -36,18 +36,22 @@ shape; leaf tools cannot recursively dispatch a batch.
 The orchestration-body determinism contract is binding: no wall clock, random
 number generation, or unordered iteration may drive commands; no unjournaled
 I/O is permitted; and every journaled action is immediately awaited. The
-`orchestrating-tool-determinism` pre-commit lint rejects cheap-to-detect
-violations at each `execute_orchestration` entrypoint. Structural runtime laws
-additionally assert the actual command frames: `batch` and `spawn_agent` have
-no `ToolAttempt` frame of their own, while their journaled children retain
-stable direct lineage.
+`orchestrating-tool-determinism` pre-commit lint is defense in depth: it
+lexically inspects each `execute_orchestration` and
+`execute_orchestration_by_id` body, resolves direct import aliases, and rejects
+cheap-to-detect inline violations. It deliberately does not claim transitive
+helper analysis. Review owns the authored call graph, while crash-redrive and
+structural runtime laws enforce the binding contract at execution: `batch` and
+`spawn_agent` have no `ToolAttempt` frame of their own, and their journaled
+children retain stable direct lineage.
 
 An internal owner-bound `ProcessInput::ToolCall` body is a different boundary:
 it is the process activity itself and may perform host I/O. Core executes an
 `Internal` process tool directly, with panic containment but without a
 `ToolAttempt`; that route is not exposed to model-facing providers as an escape
 from the orchestration determinism contract. The internal shell runner uses
-this boundary for PTY ownership and journaled signal-event waits.
+this boundary for PTY ownership and registry point-read/backoff signal-event
+waits; those waits do not consume journal ordinals.
 
 FIG-1127 completion (2026-08-12) replaces the falsified static route inventory
 with this structural rule:

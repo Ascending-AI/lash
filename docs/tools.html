@@ -62,10 +62,10 @@
 
         <div class="section" id="orchestrating-tools">
           <div class="section-header">
-            <h2>Orchestrating Tools</h2>
-            <p>If a tool must await durable work in the middle of its body, opt that tool id into <code>OrchestrationContext</code> instead of an atomic attempt.</p>
+            <h2>Multi-step tools</h2>
+            <p>Public tool providers are atomic leaf attempts. First-party facade components that need to await durable work use a private process-replay seam; it is not a fifth tool-provider integration class.</p>
           </div>
-          <p><code>execute_orchestration(OrchestratingToolCall)</code> runs as authored process-replay code and never enters the tool-attempt coordinator. Its start, await, signal, cancel, and nested-batch commands are direct children of the enclosing replay invocation; the orchestration body itself has no <code>ToolAttempt</code> frame. Use this shape sparingly: protocol-standard <code>batch</code> owns recursive scheduling through <code>call_tool_batch</code>, and <code>spawn_agent</code> starts and immediately awaits its prepared child.</p>
+          <p>The built-in protocol <code>batch</code> and <code>spawn_agent</code> implementations use that private seam. Their durable commands are direct children of the enclosing replay invocation and their orchestration bodies have no <code>ToolAttempt</code> frame. External tool authors should decompose multi-step work into processes rather than depending on this facade-support implementation detail.</p>
           <p>The determinism contract is strict: orchestration code must not read wall clock or randomness, let unordered iteration choose command order, perform unjournaled I/O, or leave a journaled action un-awaited. If a tool only needs to cause durable work, keep it leaf-shaped and return an intent instead.</p>
         </div>
 
