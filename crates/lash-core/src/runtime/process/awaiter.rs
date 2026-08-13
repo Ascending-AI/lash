@@ -18,68 +18,14 @@ use crate::PluginError;
 
 mod attach;
 mod change_hub;
+#[path = "awaiter/event_sink.rs"]
+mod event_sink;
 pub use attach::ProcessAttach;
 pub use change_hub::ProcessChangeHub;
+pub use event_sink::ProcessEventSink;
 
 const AWAIT_BACKOFF_MIN: Duration = Duration::from_millis(25);
 const AWAIT_BACKOFF_MAX: Duration = Duration::from_secs(1);
-
-/// Host-facing, best-effort push of each appended process event.
-///
-/// A sink is an optional freshness feed, **never a source of truth.** The
-/// durable event log ([`ProcessRegistry::events_after`]) is the only complete
-/// record; a sink lets a host observe appends promptly without polling, but it
-/// makes no delivery promise.
-///
-/// # Contract
-///
-/// - **Best-effort freshness, never truth.** The decorator installed by
-///   [`watch_process_registry_with_sink`] calls
-///   [`emit`](Self::emit) after a successful `append_event`, in that pod's
-///   per-process append order. There is no buffering, no retry, and no
-///   delivery guarantee across pod crashes or restarts: an event that was
-///   appended durably may never reach the sink (e.g. the pod died between the
-///   durable write and the emit). Consumers that need completeness reconcile
-///   from `events_after` — the durable log is authoritative — typically at
-///   terminal time.
-/// - **Emission cannot fail the write.** `emit` returns `()`, so a sink can
-///   never fail or roll back an append; the durable write has already
-///   committed by the time `emit` runs. But the decorator *awaits* `emit`
-///   inline on the append path, so a slow sink slows every append. Implementors
-///   must return fast: hand any real I/O off to a channel or background task
-///   internally rather than blocking inside `emit`.
-///
-/// # Example: offload to a channel
-///
-/// A sink must return fast, so a real implementation hands each event to a
-/// channel and does its projection/logging on a consumer task. Dropping on a
-/// full channel is the correct best-effort behavior — the durable log, read via
-/// `events_after`, remains the reconcile source.
-///
-/// ```
-/// use lash_core::ProcessEvent;
-/// use lash_core::runtime::ProcessEventSink;
-/// use tokio::sync::mpsc;
-///
-/// struct ChannelSink {
-///     tx: mpsc::Sender<ProcessEvent>,
-/// }
-///
-/// #[async_trait::async_trait]
-/// impl ProcessEventSink for ChannelSink {
-///     async fn emit(&self, event: &ProcessEvent) {
-///         // Non-blocking: drop on a full channel rather than slow the append.
-///         let _ = self.tx.try_send(event.clone());
-///     }
-/// }
-/// ```
-#[async_trait::async_trait]
-pub trait ProcessEventSink: Send + Sync {
-    /// Observe one appended process event. Best-effort; see the trait contract.
-    ///
-    /// Must be fast and non-blocking — offload I/O to a channel/task internally.
-    async fn emit(&self, event: &ProcessEvent);
-}
 
 /// [`ProcessRegistry`] decorator: publishes in-process change ticks on every
 /// mutation (so [`ProcessAwaiter`] wakes without polling) and, when a
@@ -543,6 +489,25 @@ impl ProcessRegistry for WatchedProcessRegistry {
         Ok(outcome)
     }
 
+    async fn complete_process_with_parent_end(
+        &self,
+        process_id: &str,
+        await_output: ProcessAwaitOutput,
+        authority: ProcessCompletionAuthority,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        let event_path = self.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(process_id).await;
+        let outcome = self
+            .inner
+            .complete_process_with_parent_end(process_id, await_output, authority, actions)
+            .await?;
+        self.hub.notify(process_id);
+        self.emit_events_after(process_id, sink_cursor).await;
+        Ok(outcome)
+    }
+
     async fn complete_process_with_lease(
         &self,
         lease: &ProcessLease,
@@ -558,6 +523,42 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.hub.notify(&lease.process_id);
         self.emit_events_after(&lease.process_id, sink_cursor).await;
         Ok(outcome)
+    }
+
+    async fn complete_process_with_lease_and_parent_end(
+        &self,
+        lease: &ProcessLease,
+        await_output: ProcessAwaitOutput,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        let event_path = self.event_path(&lease.process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(&lease.process_id).await;
+        let outcome = self
+            .inner
+            .complete_process_with_lease_and_parent_end(lease, await_output, actions)
+            .await?;
+        self.hub.notify(&lease.process_id);
+        self.emit_events_after(&lease.process_id, sink_cursor).await;
+        Ok(outcome)
+    }
+
+    async fn list_pending_parent_end_plans(
+        &self,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<super::ProcessParentEndPlan>, PluginError> {
+        self.inner.list_pending_parent_end_plans(limit).await
+    }
+
+    async fn get_pending_parent_end_plan(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
+        self.inner.get_pending_parent_end_plan(process_id).await
+    }
+
+    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
+        self.inner.complete_parent_end_plan(process_id).await
     }
 
     async fn record_first_started_with_authority(

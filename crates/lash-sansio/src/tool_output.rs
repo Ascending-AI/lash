@@ -68,6 +68,17 @@ pub struct ToolIntentParentEnd {
     pub policy: ProcessParentEndPolicy,
 }
 
+/// Compact durable teardown action reconstructed from one recorded start intent.
+///
+/// Unlike [`ToolIntentExecutionOutcome`], this value omits the child start's
+/// result payload. Process lifecycle state only needs the stable identity and
+/// declared parent-end policy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolIntentParentEndAction {
+    pub identity: ToolIntentIdentity,
+    pub parent_end: ToolIntentParentEnd,
+}
+
 /// Durable result of applying one recorded start intent's parent-end policy.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]

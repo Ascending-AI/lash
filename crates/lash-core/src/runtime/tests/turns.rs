@@ -6545,9 +6545,11 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
         })
         .build();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(host_clock);
+    let config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(host_clock);
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         tools,
@@ -6607,9 +6609,11 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
     }]);
     let successor_store: Arc<dyn crate::RuntimePersistence> = store.clone();
     let successor_clock: Arc<dyn crate::Clock> = clock.clone();
-    let successor_config =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_clock(successor_clock);
+    let successor_config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(successor_clock);
     let mut successor = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),

@@ -148,8 +148,10 @@ pub async fn public_signal_intent_wakes_parked_process(
             }
         })
         .build();
-    let mut host =
-        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
+    let mut host = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host.control.effect_host = Arc::clone(&effect_host);
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
@@ -161,20 +163,23 @@ pub async fn public_signal_intent_wakes_parked_process(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut runtime = Box::pin(
-        crate::LashRuntime::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .with_session_id(&session_id)
-            .with_policy(policy)
-            .with_initial_state(state)
-            .with_runtime_host(host)
-            .with_plugin_factories(
-                crate::testing::test_standard_protocol_factories()
-                    .into_iter()
-                    .chain([tool_plugin])
-                    .collect(),
-            )
-            .with_store(Arc::new(crate::InMemorySessionStore::new()))
-            .with_process_registry(Arc::clone(&registry))
-            .build(),
+        crate::LashRuntime::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_session_id(&session_id)
+        .with_policy(policy)
+        .with_initial_state(state)
+        .with_runtime_host(host)
+        .with_plugin_factories(
+            crate::testing::test_standard_protocol_factories()
+                .into_iter()
+                .chain([tool_plugin])
+                .collect(),
+        )
+        .with_store(Arc::new(crate::InMemorySessionStore::new()))
+        .with_process_registry(Arc::clone(&registry))
+        .build(),
     )
     .await
     .expect("build public signal-intent conformance runtime");

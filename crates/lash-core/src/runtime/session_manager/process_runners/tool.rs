@@ -6,16 +6,22 @@ impl RuntimeSessionServices {
     pub(in crate::runtime::session_manager::process_runners) async fn run_process_tool_call(
         &self,
         run: ProcessToolCallRun<'_>,
-    ) -> crate::ProcessAwaitOutput {
+    ) -> (
+        crate::ProcessAwaitOutput,
+        Vec<crate::ToolIntentParentEndAction>,
+    ) {
         let result = self.execute_process_tool_call(run).await;
         match result {
-            Ok(output) => crate::ProcessAwaitOutput::from_tool_output(output),
-            Err(err) => crate::ProcessAwaitOutput::from_tool_output(
-                crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                    crate::ToolFailureClass::Internal,
-                    "process_tool_failed",
-                    err.to_string(),
+            Ok((output, actions)) => (crate::ProcessAwaitOutput::from_tool_output(output), actions),
+            Err(err) => (
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+                    crate::ToolFailure::runtime(
+                        crate::ToolFailureClass::Internal,
+                        "process_tool_failed",
+                        err.to_string(),
+                    ),
                 )),
+                Vec::new(),
             ),
         }
     }
@@ -23,7 +29,8 @@ impl RuntimeSessionServices {
     async fn execute_process_tool_call(
         &self,
         run: ProcessToolCallRun<'_>,
-    ) -> Result<crate::ToolCallOutput, crate::PluginError> {
+    ) -> Result<(crate::ToolCallOutput, Vec<crate::ToolIntentParentEndAction>), crate::PluginError>
+    {
         let ProcessToolCallRun {
             registration,
             registry,
@@ -164,8 +171,9 @@ impl RuntimeSessionServices {
                 crate::tool_result::tool_output_from_completion_resolution(resolution)
             }
         };
+        let parent_end_actions = dispatch.recorded_intent_outcomes.snapshot();
         drop(dispatch);
         run_context.shutdown().await;
-        Ok(output)
+        Ok((output, parent_end_actions))
     }
 }

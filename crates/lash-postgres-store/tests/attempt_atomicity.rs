@@ -298,6 +298,7 @@ async fn public_signal_runtime(
         .into_handle();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.control.effect_host = effect_host;
     host.providers.provider_resolver = Arc::new(
@@ -307,10 +308,10 @@ async fn public_signal_runtime(
     let store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(lash_core::facade_support::InMemorySessionStore::new());
     Box::pin(
-        lash_core::facade_support::LashRuntime::builder(lash_core::CommitBudget::bounded(
-            1024 * 1024,
-            512,
-        ))
+        lash_core::facade_support::LashRuntime::builder(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
         .with_session_id(SESSION)
         .with_policy(policy.clone())
         .with_initial_state(public_runtime_state(&policy))

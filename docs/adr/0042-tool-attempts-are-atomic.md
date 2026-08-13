@@ -85,8 +85,10 @@ it as a separate admission fact.
 After the enclosing turn or process reaches its end, recorded start intents are
 handled by a deterministic parent-end step. Version 1 deliberately exposes only
 `Abandon` and `Cancel`, with `Cancel` as the default: `Abandon` is a recorded
-no-op, while `Cancel` emits one replay-keyed `cancel_recorded_intent` command
-with a recorded typed outcome. Lash processes are cooperative and Lash has no
+no-op, while both policies are adjudicated by one replay-keyed
+`ProcessCommand::ParentEnd` carrying the complete validated intent identity and
+returning a typed `Abandoned`, `Cancelled`, or `Refused` outcome. Lash processes
+are cooperative and Lash has no
 hard-kill primitive; engines own their own kill semantics. Temporal's three-way
 Parent Close Policy therefore maps to Lash as `{Abandon, Cancel}`. This is a
 recorded model deviation, not an omitted implementation. If a hard-kill
@@ -94,6 +96,16 @@ primitive earns its way into the process model, reject-and-recreate versioning
 adds the policy only together with that primitive, never ahead of it. The old
 `ToolContext` guards remain only for providers that have not yet moved to the
 FIG-1291 leaf signature.
+
+For a process parent, "reaches its end" means after its terminal outcome is
+durable. The terminal write atomically retains a compact
+`ToolIntentParentEndAction` plan; teardown runs afterward and clears the plan
+only after every replay-keyed `ParentEnd` command settles. A crash after the
+terminal write, including between two commands, therefore redrives the plan.
+Lashlang segment state version 2 carries the compact actions across segment
+boundaries so an early-segment start is governed at the real process end.
+Successful and refused adjudications emit structured evidence containing the
+full identity, policy, child process id, and typed outcome.
 
 Layer 2 assigns policy per tool. In particular, `shell.start` maps to
 `Abandon`: its owner-bound command is intentionally allowed to continue across

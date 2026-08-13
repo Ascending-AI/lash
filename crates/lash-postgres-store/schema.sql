@@ -351,6 +351,11 @@ CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
     PRIMARY KEY (process_id, segment_ordinal)
 );
 
+CREATE TABLE IF NOT EXISTS lash_process_parent_end_plans (
+    process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
+    actions_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
     scope_id TEXT NOT NULL,
     session_id TEXT,

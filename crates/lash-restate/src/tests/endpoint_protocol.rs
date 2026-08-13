@@ -583,6 +583,98 @@ pub(super) fn encode_run_replay<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
+/// Build a replay journal from two `RunCommand` suspensions captured from the
+/// same endpoint invocation. The first completion advances the handler into
+/// the second command; omitting the second completion preserves the exact
+/// mid-command interruption, while including it yields a fully replayable
+/// journal.
+pub(super) fn encode_captured_run_and_interrupted_call_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    run_suspension: &[u8],
+    call_suspension: &[u8],
+    call_completion: Option<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let run_command = restate_message_frame(run_suspension, 0x0411)
+        .ok_or_else(|| TerminalError::new("first interruption omitted its RunCommand"))?;
+    let proposal = restate_message_frame(run_suspension, 0x0005)
+        .ok_or_else(|| TerminalError::new("first interruption omitted its run proposal"))?;
+    let (run_id, run_value) = proposed_run_completion(
+        proposal
+            .get(8..)
+            .ok_or_else(|| TerminalError::new("run proposal omitted its payload"))?,
+    )
+    .ok_or_else(|| TerminalError::new("captured run proposal was invalid"))?;
+    let call = restate_call_frames(call_suspension)
+        .and_then(|calls| calls.into_iter().next())
+        .ok_or_else(|| TerminalError::new("second interruption omitted its CallCommand"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 3));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(run_command);
+    body.extend_from_slice(&call.frame);
+    body.extend_from_slice(&encode_run_completion(run_id, run_value));
+    if let Some(completion) = call_completion {
+        let completion = serde_json::to_vec(&completion).map_err(TerminalError::from_error)?;
+        body.extend_from_slice(&encode_call_completion(
+            call.result_completion_id,
+            &completion,
+        ));
+    }
+    Ok(body.freeze())
+}
+
+pub(super) fn encode_completed_intent_drain_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    attempt_suspension: &[u8],
+    call_suspension: &[u8],
+    outcome_suspension: &[u8],
+    call_completion: serde_json::Value,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let first_run = restate_message_frame(attempt_suspension, 0x0411)
+        .ok_or_else(|| TerminalError::new("attempt interruption omitted its RunCommand"))?;
+    let first_proposal = restate_message_frame(attempt_suspension, 0x0005)
+        .ok_or_else(|| TerminalError::new("attempt interruption omitted its proposal"))?;
+    let (first_id, first_value) = proposed_run_completion(
+        first_proposal
+            .get(8..)
+            .ok_or_else(|| TerminalError::new("attempt proposal omitted payload"))?,
+    )
+    .ok_or_else(|| TerminalError::new("attempt proposal was invalid"))?;
+    let call = restate_call_frames(call_suspension)
+        .and_then(|calls| calls.into_iter().next())
+        .ok_or_else(|| TerminalError::new("intent interruption omitted its CallCommand"))?;
+    let second_run = restate_message_frame(outcome_suspension, 0x0411)
+        .ok_or_else(|| TerminalError::new("outcome interruption omitted its RunCommand"))?;
+    let second_proposal = restate_message_frame(outcome_suspension, 0x0005)
+        .ok_or_else(|| TerminalError::new("outcome interruption omitted its proposal"))?;
+    let (second_id, second_value) = proposed_run_completion(
+        second_proposal
+            .get(8..)
+            .ok_or_else(|| TerminalError::new("outcome proposal omitted payload"))?,
+    )
+    .ok_or_else(|| TerminalError::new("outcome proposal was invalid"))?;
+    let call_completion =
+        serde_json::to_vec(&call_completion).map_err(TerminalError::from_error)?;
+
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 4));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(first_run);
+    body.extend_from_slice(&call.frame);
+    body.extend_from_slice(second_run);
+    body.extend_from_slice(&encode_run_completion(first_id, first_value));
+    body.extend_from_slice(&encode_call_completion(
+        call.result_completion_id,
+        &call_completion,
+    ));
+    body.extend_from_slice(&encode_run_completion(second_id, second_value));
+    Ok(body.freeze())
+}
+
 /// FIG-779: `SleepCommand` (0x040C) carrying only `wake_up_time` and its
 /// completion id, as the SDK writes it for `ctx.sleep()`.
 fn encode_sleep_command(completion_id: u32) -> Bytes {

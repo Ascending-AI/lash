@@ -84,6 +84,13 @@ pub struct ProcessWorklistPage {
     pub continuation: Option<ProcessWorklistCursor>,
 }
 
+/// Durable teardown work committed atomically with one parent's terminal outcome.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProcessParentEndPlan {
+    pub process_id: String,
+    pub actions: Vec<crate::ToolIntentParentEndAction>,
+}
+
 pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
 pub const WAKE_ENQUEUING_STALE_AFTER_MS: u64 = 30_000;
 
@@ -669,6 +676,24 @@ pub trait ProcessRegistry: Send + Sync {
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
+    /// Complete without a Lash lease and atomically retain parent-end work.
+    async fn complete_process_with_parent_end(
+        &self,
+        process_id: &str,
+        await_output: ProcessAwaitOutput,
+        authority: ProcessCompletionAuthority,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        if !actions.is_empty() {
+            return Err(PluginError::Session(format!(
+                "process registry cannot durably retain {} parent-end actions for `{process_id}`",
+                actions.len()
+            )));
+        }
+        self.complete_process(process_id, await_output, authority)
+            .await
+    }
+
     /// Atomically append the terminal output while the supplied process lease
     /// is still current, then release that lease in the same transaction.
     ///
@@ -682,6 +707,38 @@ pub trait ProcessRegistry: Send + Sync {
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
+
+    /// Lease-fenced terminal completion with an atomically retained parent-end plan.
+    async fn complete_process_with_lease_and_parent_end(
+        &self,
+        lease: &ProcessLease,
+        await_output: ProcessAwaitOutput,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        if !actions.is_empty() {
+            return Err(PluginError::Session(format!(
+                "process registry cannot durably retain {} parent-end actions for `{}`",
+                actions.len(),
+                lease.process_id
+            )));
+        }
+        self.complete_process_with_lease(lease, await_output).await
+    }
+
+    /// Return a bounded stable set of terminal parents whose teardown remains pending.
+    async fn list_pending_parent_end_plans(
+        &self,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<ProcessParentEndPlan>, PluginError>;
+
+    /// Load the durable post-terminal teardown plan for one process, if any.
+    async fn get_pending_parent_end_plan(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<ProcessParentEndPlan>, PluginError>;
+
+    /// Clear one plan after all replay-keyed commands settle. Repetition is idempotent.
+    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError>;
 
     /// Record the durable, lease-fenced "execution started" fact (ADR 0019).
     ///

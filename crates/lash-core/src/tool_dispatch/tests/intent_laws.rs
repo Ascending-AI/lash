@@ -57,6 +57,7 @@ fn fixed_intent_dispatch_context(
     let mut context = exact_dispatch_context(provider);
     context.effect_controller = RuntimeEffectControllerHandle::shared(controller);
     context.processes = crate::testing::effect_backed_process_service(registry);
+    context.clock = Arc::new(FrozenIntentLawClock::new());
     context
 }
 
@@ -611,13 +612,13 @@ async fn parent_end_cancel_refusal_is_typed_and_operator_visible() {
     context.processes = crate::testing::effect_backed_process_service(registry);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
     context.event_tx = event_tx;
-    let identity = crate::ToolIntentIdentity {
-        session_id: "session".to_string(),
-        execution_scope_id: "turn".to_string(),
-        tool_call_id: "missing-parent-end-call".to_string(),
-        intent_index: 0,
-        replay_key: "missing-parent-end-intent".to_string(),
-    };
+    let identity = crate::derive_tool_intent_identity(
+        "session",
+        "turn",
+        Some("missing-parent-end-call"),
+        0,
+    )
+    .expect("derive valid missing-child intent identity");
     context
         .recorded_intent_outcomes
         .record(&[crate::ToolIntentExecutionOutcome::Executed {

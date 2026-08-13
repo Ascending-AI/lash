@@ -311,6 +311,47 @@ struct IntentReplayController {
     pause_release: tokio::sync::Notify,
 }
 
+#[derive(Debug)]
+struct FrozenIntentLawClock {
+    now: std::time::Instant,
+}
+
+impl FrozenIntentLawClock {
+    fn new() -> Self {
+        Self {
+            now: std::time::Instant::now(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for FrozenIntentLawClock {
+    fn now(&self) -> std::time::Instant {
+        self.now
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        1_700_000_000_000
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.timestamp_datetime().to_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp_millis(self.timestamp_ms() as i64)
+            .expect("fixed intent-law timestamp")
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
+}
+
 impl IntentReplayController {
     fn new(pause: Option<IntentPausePoint>) -> Self {
         Self {

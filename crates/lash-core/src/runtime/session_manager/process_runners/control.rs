@@ -211,8 +211,8 @@ impl<'scope> ProcessCommandRunner<'scope> {
                     wake_delivery.map(|delivery| *delivery),
                     None,
                     self.current.host.queued_work_driver.as_ref(),
+                    self.current.host.core.control.process_wake_delivery_policy,
                     Arc::clone(&self.current.host.core.clock),
-                    &self.current.host.core.control.wake_turn_policy,
                 )
                 .await?;
                 Ok(*event)

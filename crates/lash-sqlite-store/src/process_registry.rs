@@ -1,5 +1,7 @@
 use super::*;
 use lash_core::facade_support;
+#[path = "process_registry/parent_end.rs"]
+mod parent_end;
 mod segment_handover;
 mod support;
 mod wake_delivery;
@@ -524,37 +526,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
         limit: usize,
     ) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
-        let process_id = process_id.to_string();
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    Self::require_process_conn(conn, &process_id)?;
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT event_json FROM process_events
-                             WHERE process_id = ?1
-                             ORDER BY sequence DESC
-                             LIMIT ?2",
-                        )
-                        .map_err(process_sqlite_error)?;
-                    let rows = stmt
-                        .query_map(params![process_id, limit as i64], |row| {
-                            row.get::<_, String>(0)
-                        })
-                        .map_err(process_sqlite_error)?;
-                    let mut events: Vec<ProcessEvent> = Vec::new();
-                    for row in rows {
-                        events.push(
-                            serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                                .map_err(process_decode_error)?,
-                        );
-                    }
-                    events.reverse();
-                    Ok(events)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        support::recent_events(self, process_id, limit).await
     }
 
     async fn complete_process(
@@ -572,6 +544,24 @@ impl ProcessRegistry for SqliteProcessRegistry {
             process_id,
             await_output,
             authority,
+            Vec::new(),
+        )
+        .await
+    }
+
+    async fn complete_process_with_parent_end(
+        &self,
+        process_id: &str,
+        await_output: ProcessAwaitOutput,
+        authority: lash_core::ProcessCompletionAuthority,
+        actions: Vec<lash_core::ToolIntentParentEndAction>,
+    ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
+        super::process_registry_completion::complete_process(
+            self,
+            process_id,
+            await_output,
+            authority,
+            actions,
         )
         .await
     }
@@ -581,8 +571,49 @@ impl ProcessRegistry for SqliteProcessRegistry {
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
     ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
-        super::process_registry_completion::complete_process_with_lease(self, lease, await_output)
-            .await
+        super::process_registry_completion::complete_process_with_lease(
+            self,
+            lease,
+            await_output,
+            Vec::new(),
+        )
+        .await
+    }
+
+    async fn complete_process_with_lease_and_parent_end(
+        &self,
+        lease: &ProcessLease,
+        await_output: ProcessAwaitOutput,
+        actions: Vec<lash_core::ToolIntentParentEndAction>,
+    ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
+        super::process_registry_completion::complete_process_with_lease(
+            self,
+            lease,
+            await_output,
+            actions,
+        )
+        .await
+    }
+
+    async fn list_pending_parent_end_plans(
+        &self,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core::ProcessParentEndPlan>, lash_core::PluginError> {
+        parent_end::list(self, limit).await
+    }
+
+    async fn get_pending_parent_end_plan(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<lash_core::ProcessParentEndPlan>, lash_core::PluginError> {
+        parent_end::get(self, process_id).await
+    }
+
+    async fn complete_parent_end_plan(
+        &self,
+        process_id: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        parent_end::complete(self, process_id).await
     }
 
     async fn record_first_started_with_authority(

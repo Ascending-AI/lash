@@ -79,15 +79,11 @@ pub(crate) async fn execute_final_tool_intents(
 pub(crate) async fn execute_parent_end_actions(
     context: &ToolDispatchContext<'_>,
 ) -> Result<(), crate::PluginError> {
-    for outcome in context.recorded_intent_outcomes.snapshot() {
-        let crate::ToolIntentExecutionOutcome::Executed {
+    for action in context.recorded_intent_outcomes.snapshot() {
+        let crate::ToolIntentParentEndAction {
             identity,
-            parent_end: Some(parent_end),
-            ..
-        } = outcome
-        else {
-            continue;
-        };
+            parent_end,
+        } = action;
         let reason = "recorded start intent parent ended with cancel policy";
         let replay_key = format!("{}:parent-end", identity.replay_key);
         let parent = crate::RuntimeInvocation::effect(
@@ -107,6 +103,8 @@ pub(crate) async fn execute_parent_end_actions(
             .with_parent_invocation(Some(parent))
             .with_agent_frame_id(Some(context.agent_frame_id.clone()));
         let session_id = identity.session_id.clone();
+        let trace_identity = identity.clone();
+        let trace_parent_end = parent_end.clone();
         let outcome = context
             .processes
             .finish_recorded_intent_parent(
@@ -118,6 +116,18 @@ pub(crate) async fn execute_parent_end_actions(
                 scope,
             )
             .await?;
+        tracing::info!(
+            target: "lash::tool_intent",
+            session_id = %session_id,
+            execution_scope_id = %trace_identity.execution_scope_id,
+            tool_call_id = %trace_identity.tool_call_id,
+            intent_index = trace_identity.intent_index,
+            replay_key = %trace_identity.replay_key,
+            process_id = %trace_parent_end.process_id,
+            policy = ?trace_parent_end.policy,
+            outcome = ?outcome,
+            "applied recorded parent-end policy after durable parent completion"
+        );
         if let crate::ToolIntentParentEndOutcome::Refused { code, message, .. } = outcome {
             let _ = context
                 .event_tx

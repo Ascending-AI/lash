@@ -336,22 +336,201 @@ impl SurfaceRunner {
                 Ok(())
             }
             SurfaceOperation::ToolIntentBatch => {
-                let identity = lash_core::ToolIntentIdentity {
-                    session_id: SURFACE_SESSION.to_string(),
-                    execution_scope_id: SURFACE_TURN.to_string(),
-                    tool_call_id: "surface-intent-call".to_string(),
-                    intent_index: 0,
-                    replay_key: "surface-intent-literal-0".to_string(),
-                };
-                let intent_outcome = lash_core::ToolIntentExecutionOutcome::Executed {
-                    identity,
-                    kind: lash_core::ToolIntentKind::StartProcess,
-                    result: serde_json::json!({"id": "surface-intent-child"}),
-                    parent_end: Some(lash_core::ToolIntentParentEnd {
-                        process_id: "surface-intent-child".to_string(),
-                        policy: lash_core::ProcessParentEndPolicy::Abandon,
-                    }),
-                };
+                let controller = self
+                    .effect_host
+                    .scoped(ExecutionScope::turn(SURFACE_SESSION, SURFACE_TURN))
+                    .map_err(|error| error.to_string())?;
+                let intents = lash_core::ToolIntents::v1(
+                    (0..2)
+                        .map(|index| {
+                            lash_core::ToolIntent::StartProcess(Box::new(
+                                lash_core::StartProcessIntent {
+                                    session_id: SURFACE_SESSION.to_string(),
+                                    request: lash_core::ProcessStartRequest::external(
+                                        format!("ignored-derived-intent-id-{index}"),
+                                        ProcessOriginator::host_scoped("surface-differential"),
+                                        serde_json::json!({
+                                            "source": "literal-intent-row",
+                                            "index": index,
+                                        }),
+                                    ),
+                                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
+                                },
+                            ))
+                        })
+                        .collect(),
+                );
+                let processes = lash_core::testing::effect_backed_process_service(Arc::clone(
+                    &self.process_registry,
+                ));
+                let intent_outcomes = lash_core::testing::execute_tool_intents_with_services(
+                    controller.clone(),
+                    Arc::clone(&processes),
+                    SURFACE_SESSION,
+                    "surface-intent-call",
+                    &intents,
+                )
+                .await;
+                let mut actions = Vec::new();
+                for (index, outcome) in intent_outcomes.iter().enumerate() {
+                    let expected_identity = lash_core::derive_tool_intent_identity(
+                        SURFACE_SESSION,
+                        SURFACE_TURN,
+                        Some("surface-intent-call"),
+                        index,
+                    )
+                    .expect("literal differential intent identity");
+                    let lash_core::ToolIntentExecutionOutcome::Executed {
+                        identity,
+                        kind: lash_core::ToolIntentKind::StartProcess,
+                        result,
+                        parent_end: Some(parent_end),
+                    } = outcome
+                    else {
+                        return Err(format!(
+                            "{} intent row did not execute to its literal typed outcome: {intent_outcomes:?}",
+                            self.name
+                        ));
+                    };
+                    let expected_summary = lash_core::ProcessHandleSummary::new(
+                        expected_identity.replay_key.clone(),
+                        ProcessIdentity::new("external"),
+                        lash_core::ProcessStatus::Running,
+                    );
+                    if identity != &expected_identity
+                        || serde_json::from_value::<lash_core::ProcessHandleSummary>(result.clone())
+                            .map_err(|error| error.to_string())?
+                            != expected_summary
+                        || parent_end
+                            != &(lash_core::ToolIntentParentEnd {
+                                process_id: expected_identity.replay_key.clone(),
+                                policy: lash_core::ProcessParentEndPolicy::Cancel,
+                            })
+                    {
+                        return Err(format!(
+                            "{} intent row differed from its literal executed oracle: {intent_outcomes:?}",
+                            self.name
+                        ));
+                    }
+                    actions.push(lash_core::ToolIntentParentEndAction {
+                        identity: identity.clone(),
+                        parent_end: parent_end.clone(),
+                    });
+                }
+
+                self.process_registry
+                    .register_process(lash_core::ProcessRegistration::new(
+                        "surface-intent-parent",
+                        ProcessInput::External {
+                            metadata: serde_json::json!({"role": "durable-parent"}),
+                        },
+                        lash_core::RecoveryDisposition::ExternallyOwned,
+                        lash_core::ProcessProvenance::new(ProcessOriginator::host_scoped(
+                            "surface-differential",
+                        )),
+                    ))
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.process_registry
+                    .complete_process_with_parent_end(
+                        "surface-intent-parent",
+                        lash_core::ProcessAwaitOutput::Success {
+                            value: serde_json::json!({"ended": true}),
+                            control: None,
+                        },
+                        lash_core::ProcessCompletionAuthority::external_owner(),
+                        actions.clone(),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let retained = self
+                    .process_registry
+                    .get_pending_parent_end_plan("surface-intent-parent")
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| format!("{} lost its post-terminal plan", self.name))?;
+                if retained.actions != actions {
+                    return Err(format!(
+                        "{} changed the retained parent-end plan",
+                        self.name
+                    ));
+                }
+                for action in &actions {
+                    if self
+                        .process_registry
+                        .events_after(&action.parent_end.process_id, 0)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .iter()
+                        .any(|event| event.event_type == "process.cancel_requested")
+                    {
+                        return Err(format!(
+                            "{} cancelled a child before the parent terminal was durable",
+                            self.name
+                        ));
+                    }
+                }
+
+                // Execute command zero, then model a crash before command one.
+                // Redrive repeats zero by its stable identity and reaches one.
+                for action in actions.iter().take(1).chain(actions.iter()) {
+                    let replay_key = format!("{}:parent-end", action.identity.replay_key);
+                    let mut parent = RuntimeInvocation::effect(
+                        RuntimeScope::new(SURFACE_SESSION),
+                        format!("tool-intent-parent-end:{}", action.identity.intent_index),
+                        RuntimeEffectKind::ToolParentEnd,
+                        replay_key.clone(),
+                    );
+                    parent.replay = Some(lash_core::RuntimeReplay {
+                        key: replay_key,
+                        attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+                            action.identity.clone(),
+                        )),
+                    });
+                    let outcome = processes
+                        .finish_recorded_intent_parent(
+                            SURFACE_SESSION,
+                            action.identity.clone(),
+                            action.parent_end.process_id.clone(),
+                            action.parent_end.policy,
+                            "differential parent ended".to_string(),
+                            lash_core::ProcessOpScope::new(controller.clone())
+                                .with_parent_invocation(Some(parent)),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    if outcome
+                        != (lash_core::ToolIntentParentEndOutcome::Cancelled {
+                            identity: action.identity.clone(),
+                            process_id: action.parent_end.process_id.clone(),
+                        })
+                    {
+                        return Err(format!(
+                            "{} returned a non-literal parent-end outcome: {outcome:?}",
+                            self.name
+                        ));
+                    }
+                }
+                self.process_registry
+                    .complete_parent_end_plan("surface-intent-parent")
+                    .await
+                    .map_err(|error| error.to_string())?;
+                for action in &actions {
+                    let count = self
+                        .process_registry
+                        .events_after(&action.parent_end.process_id, 0)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .iter()
+                        .filter(|event| event.event_type == "process.cancel_requested")
+                        .count();
+                    if count != 1 {
+                        return Err(format!(
+                            "{} applied child cancellation {count} times after redrive",
+                            self.name
+                        ));
+                    }
+                }
                 let completed = lash_core::sansio::CompletedToolCall {
                     call_id: "surface-intent-call".to_string(),
                     tool_name: "surface_intent_provider".to_string(),
@@ -363,7 +542,7 @@ impl SurfaceRunner {
                         "provider done",
                     ),
                     duration_ms: 1,
-                    intent_outcomes: vec![intent_outcome],
+                    intent_outcomes,
                     replay: None,
                 };
                 let expected = RuntimeEffectOutcome::ToolBatch {
@@ -395,10 +574,6 @@ impl SurfaceRunner {
                         ),
                     },
                 );
-                let controller = self
-                    .effect_host
-                    .scoped(ExecutionScope::turn(SURFACE_SESSION, SURFACE_TURN))
-                    .map_err(|error| error.to_string())?;
                 let outcome = controller
                     .controller()
                     .execute_effect(

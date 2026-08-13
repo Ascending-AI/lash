@@ -9,9 +9,9 @@ use super::process_references::{
 use super::*;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
-// The shared registry fixture performs 44 successful registrations and one
-// prune; the cold refold fixture below adds the 45th registration.
-const REOPEN_BASELINE_SPAWNS: usize = 45;
+// The shared registry fixture performs 45 successful registrations and one
+// prune; the cold refold fixture below adds the 46th registration.
+const REOPEN_BASELINE_SPAWNS: usize = 46;
 const REOPEN_BASELINE_PRUNED: usize = 1;
 
 /// Run the process-registry contract against a fresh backend.
@@ -393,7 +393,88 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     )
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
-    tombstones_make_pruned_processes_distinguishable(registry).await;
+    tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
+    terminal_completion_atomically_retains_parent_end_plan(registry).await;
+}
+
+async fn terminal_completion_atomically_retains_parent_end_plan(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let process_id = "process-parent-end-plan";
+    registry
+        .register_process(ProcessRegistration::new(
+            process_id,
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryDisposition::Rerunnable,
+            ProcessProvenance::host(),
+        ))
+        .await
+        .expect("register parent-end-plan process");
+    let lease = registry
+        .claim_process_lease(
+            process_id,
+            &crate::LeaseOwnerIdentity::opaque("parent-end-owner", "parent-end-owner:i"),
+            60_000,
+        )
+        .await
+        .expect("claim parent-end-plan process")
+        .acquired()
+        .expect("parent-end-plan lease acquired");
+    let action = crate::ToolIntentParentEndAction {
+        identity: crate::derive_tool_intent_identity(
+            "parent-end-session",
+            process_id,
+            Some("parent-end-call"),
+            0,
+        )
+        .expect("parent-end identity"),
+        parent_end: crate::ToolIntentParentEnd {
+            process_id: "parent-end-child".to_string(),
+            policy: crate::ProcessParentEndPolicy::Cancel,
+        },
+    };
+    let completion = registry
+        .complete_process_with_lease_and_parent_end(
+            &lease,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!({"parent": "done"}),
+                control: None,
+            },
+            vec![action.clone()],
+        )
+        .await
+        .expect("terminal write and parent-end plan commit atomically");
+    assert!(matches!(
+        completion,
+        crate::ProcessCompletionOutcome::Committed(_)
+    ));
+    assert_eq!(
+        registry
+            .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
+            .await
+            .expect("list pending parent-end plan"),
+        vec![crate::ProcessParentEndPlan {
+            process_id: process_id.to_string(),
+            actions: vec![action],
+        }]
+    );
+    registry
+        .complete_parent_end_plan(process_id)
+        .await
+        .expect("complete parent-end plan");
+    registry
+        .complete_parent_end_plan(process_id)
+        .await
+        .expect("parent-end plan completion is idempotent");
+    assert!(
+        registry
+            .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
+            .await
+            .expect("parent-end plan cleared")
+            .is_empty()
+    );
 }
 
 /// Prove bounded keyset pagination and its page-boundary completion contract.

@@ -61,4 +61,5 @@ pub(super) struct ManagedProcessRecord {
     pub(super) change_seq: u64,
     pub(super) events: Vec<ProcessEvent>,
     pub(super) keyed_events: HashMap<String, ProcessEvent>,
+    pub(super) parent_end_actions: Option<Vec<crate::ToolIntentParentEndAction>>,
 }

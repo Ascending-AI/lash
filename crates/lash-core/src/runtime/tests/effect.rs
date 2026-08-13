@@ -3,19 +3,16 @@ use crate::facade_support::SessionGraphFacadeOps;
 use crate::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice};
 use crate::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_sansio::sync::MutexExt;
-
 mod controller_doubles;
 pub(in crate::runtime::tests) use controller_doubles::RejectingEffectController;
 use controller_doubles::{SerialOnlyEffectController, WrongOutcomeEffectController};
 mod fig1127;
-
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
     turn_id: Option<String>,
     replay_key: String,
 }
-
 #[derive(Clone, Default)]
 pub(super) struct RecordingEffectController {
     records: Arc<Mutex<Vec<EffectControllerRecord>>>,

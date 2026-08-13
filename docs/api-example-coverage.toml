@@ -37731,7 +37731,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:250#attribution: None,"
+usage = "examples/docs-snippets/src/remote_protocol.rs:251#attribution: None,"
 reason = "The remote process provenance example explicitly constructs an unattributed replay frame; intent-attributed frames are runtime evidence rather than author input."
 
 [[api]]
@@ -74034,3 +74034,169 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Core-only host seam: the process executor needs its owning controller to resolve signal waits atomically inside the journaled command; no root facade export names this field."
+
+[[api]]
+symbol = "lash::durability::DurableProcessWorker::execute_parent_end_plan_with_scoped_effect_controller"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::runtime::process_worker::DurableProcessWorker::execute_parent_end_plan_with_scoped_effect_controller"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: the Restate durable process adapter calls this worker seam to execute an atomically retained parent-end plan with the workflow's scoped controller."
+
+[[api]]
+symbol = "lash::process::ProcessRegistry::complete_parent_end_plan"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessRegistry::complete_parent_end_plan"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: durable process registries clear a retained teardown plan only after every recorded parent-end command has completed."
+
+[[api]]
+symbol = "lash::process::ProcessRegistry::complete_process_with_lease_and_parent_end"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessRegistry::complete_process_with_lease_and_parent_end"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: lease-fenced durable process workers atomically commit a terminal outcome and its recorded parent-end teardown plan."
+
+[[api]]
+symbol = "lash::process::ProcessRegistry::complete_process_with_parent_end"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessRegistry::complete_process_with_parent_end"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: key-addressed durable process adapters atomically commit a terminal outcome and its recorded parent-end teardown plan."
+
+[[api]]
+symbol = "lash::process::ProcessRegistry::get_pending_parent_end_plan"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessRegistry::get_pending_parent_end_plan"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: durable process workers recover one retained teardown plan by process identity after terminal-write interruption."
+
+[[api]]
+symbol = "lash::process::ProcessRegistry::list_pending_parent_end_plans"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessRegistry::list_pending_parent_end_plans"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: durable process workers perform a bounded recovery scan for terminal parents whose recorded teardown remains pending."
+
+[[api]]
+symbol = "lash_core::ProcessParentEndPlan"
+kind = "struct"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Core durable-host contract: SQLite, PostgreSQL, in-memory, and Restate adapters exchange the retained teardown plan after terminal completion."
+
+[[api]]
+symbol = "lash_core::ProcessParentEndPlan::actions"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Core durable-host contract carrying the ordered, fully identified parent-end commands that remain to be applied."
+
+[[api]]
+symbol = "lash_core::ProcessParentEndPlan::process_id"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Core durable-host contract identifying the terminal parent that owns the retained teardown plan."
+
+[[api]]
+symbol = "lash_core::ProcessRunOutcome::TerminalWithParentEnd"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: process-engine adapters return terminal output together with recorded child policies so the worker can commit both atomically."
+
+[[api]]
+symbol = "lash_core::ProcessRunOutcome::TerminalWithParentEnd::actions"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: Lashlang and ToolCall process engines hand recorded parent-end actions to the durable worker at their true terminal boundary."
+
+[[api]]
+symbol = "lash_core::ProcessRunOutcome::TerminalWithParentEnd::output"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: durable process workers commit this terminal outcome in the same operation as the retained teardown plan."
+
+[[api]]
+symbol = "lash_core::ProcessRunOutcome::into_terminal_parts"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: durable process adapters normalize both terminal variants into output plus recorded parent-end actions."
+
+[[api]]
+symbol = "lash_core::ProcessRunOutcome::is_terminal"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: the Lashlang process engine uses this helper to distinguish segment handovers from either terminal variant."
+
+[[api]]
+symbol = "lash_core::ProcessRunOutcome::terminal_output"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: the Lashlang process engine projects terminal output without dropping the separately retained parent-end actions."
+
+[[api]]
+symbol = "lash_core::RuntimeExecutionContext::parent_end_actions"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: the Lashlang process-engine adapter snapshots early-segment parent-end actions into versioned durable handover state."
+
+[[api]]
+symbol = "lash_core::RuntimeExecutionContext::restore_parent_end_actions"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: the Lashlang process-engine adapter restores recorded parent-end actions when resuming a durable segment handover."
+
+[[api]]
+symbol = "lash_core::ToolIntentParentEndAction"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract pairing a fully validated intent identity with the child policy retained until durable parent completion."
+
+[[api]]
+symbol = "lash_core::ToolIntentParentEndAction::identity"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract preserving the complete session, execution-scope, call, index, and replay identity used for redrive-stable deduplication."
+
+[[api]]
+symbol = "lash_core::ToolIntentParentEndAction::parent_end"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Runtime host contract carrying the recorded child process identity and Cancel or Abandon policy until durable parent completion."

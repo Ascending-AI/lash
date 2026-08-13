@@ -179,7 +179,8 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // there is no compatibility read path.
 // Version 48 remains reserved by FIG-1133. Version 50 also adds the versioned
 // tool-intent carrier to recorded tool-attempt outcomes and the typed execution
-// outcomes to completed tool batches.
+// outcomes to completed tool batches, and atomically retains pending
+// process-parent teardown beside terminal completion.
 const SCHEMA_VERSION: i32 = 50;
 
 #[derive(Clone)]

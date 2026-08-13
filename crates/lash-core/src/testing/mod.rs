@@ -590,9 +590,28 @@ pub fn atomic_tool_context_with_services<'run>(
     trigger_router: Option<crate::TriggerRouter>,
     parent_invocation: crate::RuntimeInvocation,
 ) -> crate::ToolContext<'run> {
+    crate::ToolContext::from_dispatch(atomic_tool_dispatch_with_services(
+        scoped_effect_controller,
+        session_lifecycle,
+        processes,
+        trigger_router,
+        parent_invocation,
+        "atomic-tool-test-session",
+    ))
+    .build()
+}
+
+fn atomic_tool_dispatch_with_services<'run>(
+    scoped_effect_controller: crate::ScopedEffectController<'run>,
+    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
+    parent_invocation: crate::RuntimeInvocation,
+    session_id: &str,
+) -> Arc<crate::tool_dispatch::ToolDispatchContext<'run>> {
     let host = Arc::new(MockSessionManager::default());
     let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
-        .build_session("atomic-tool-test-session", None)
+        .build_session(session_id, None)
         .expect("build atomic-tool test plugin session");
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
@@ -600,7 +619,7 @@ pub fn atomic_tool_context_with_services<'run>(
         crate::PluginOptions::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
-    let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
+    Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools: Arc::new(EmptyToolProvider),
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
@@ -617,7 +636,7 @@ pub fn atomic_tool_context_with_services<'run>(
         ),
         parent_invocation: Some(parent_invocation),
         execution_env_spec,
-        session_id: "atomic-tool-test-session".to_string(),
+        session_id: session_id.to_string(),
         agent_frame_id: String::new(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -627,8 +646,39 @@ pub fn atomic_tool_context_with_services<'run>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
-    });
-    crate::ToolContext::from_dispatch(dispatch).build()
+    })
+}
+
+/// Execute a recorded tool-intent drain through the production process-command
+/// route while retaining a small, backend-neutral differential-test surface.
+pub async fn execute_tool_intents_with_services(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    session_id: &str,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+) -> Vec<crate::ToolIntentExecutionOutcome> {
+    let parent_invocation = crate::RuntimeInvocation::effect(
+        crate::RuntimeScope::new(session_id),
+        format!("tool-intent-drain:{tool_call_id}"),
+        crate::RuntimeEffectKind::ToolBatch,
+        format!("tool-intent-drain:{tool_call_id}"),
+    );
+    let dispatch = atomic_tool_dispatch_with_services(
+        scoped_effect_controller,
+        Arc::new(MockSessionManager::default()),
+        processes,
+        None,
+        parent_invocation,
+        session_id,
+    );
+    crate::tool_dispatch::execute_final_tool_intents(
+        dispatch.as_ref(),
+        Some(tool_call_id),
+        intents,
+        None,
+    )
+    .await
 }
 
 /// A `ProcessService` that applies the production command-runner guard, then

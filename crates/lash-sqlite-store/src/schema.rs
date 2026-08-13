@@ -486,6 +486,12 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS process_parent_end_plans (
+    process_id       TEXT PRIMARY KEY,
+    actions_json     TEXT NOT NULL,
+    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
+);
+
 ";
 
 // Bumped to 10: ADR 0020 added a per-store process-row `change_seq` plus the
@@ -521,7 +527,8 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // Version 22 stores v3 process-environment refs whose content-addressed policy
 // payload includes the required per-turn budget.
 // Version 23 indexes the bounded non-terminal recovery worklist by process id.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 23;
+// Version 24 durably retains pending process-parent teardown beside terminal completion.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 24;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

@@ -48,39 +48,88 @@ pub(crate) struct ToolTriggerOutcomeBuffer {
 
 #[derive(Clone, Default)]
 pub(crate) struct RecordedToolIntentOutcomeBuffer {
-    outcomes: Arc<Mutex<Vec<crate::ToolIntentExecutionOutcome>>>,
+    actions: Arc<Mutex<Vec<crate::ToolIntentParentEndAction>>>,
 }
 
 impl RecordedToolIntentOutcomeBuffer {
     pub(crate) fn record(&self, outcomes: &[crate::ToolIntentExecutionOutcome]) {
-        let mut recorded = self.outcomes.lock_recover();
+        let mut recorded = self.actions.lock_recover();
         for outcome in outcomes {
             let crate::ToolIntentExecutionOutcome::Executed {
                 identity,
-                parent_end: Some(_),
+                parent_end: Some(parent_end),
                 ..
             } = outcome
             else {
                 continue;
             };
-            if recorded.iter().any(|recorded| {
-                matches!(
-                    recorded,
-                    crate::ToolIntentExecutionOutcome::Executed {
-                        identity: recorded_identity,
-                        parent_end: Some(_),
-                        ..
-                    } if recorded_identity.replay_key == identity.replay_key
-                )
-            }) {
+            let Ok(derived) = crate::derive_tool_intent_identity(
+                &identity.session_id,
+                &identity.execution_scope_id,
+                Some(&identity.tool_call_id),
+                identity.intent_index as usize,
+            ) else {
+                tracing::error!(
+                    target: "lash::tool_intent",
+                    session_id = %identity.session_id,
+                    execution_scope_id = %identity.execution_scope_id,
+                    tool_call_id = %identity.tool_call_id,
+                    intent_index = identity.intent_index,
+                    replay_key = %identity.replay_key,
+                    "discarded parent-end action with an invalid recorded identity"
+                );
+                continue;
+            };
+            if &derived != identity {
+                tracing::error!(
+                    target: "lash::tool_intent",
+                    session_id = %identity.session_id,
+                    execution_scope_id = %identity.execution_scope_id,
+                    tool_call_id = %identity.tool_call_id,
+                    intent_index = identity.intent_index,
+                    replay_key = %identity.replay_key,
+                    expected_replay_key = %derived.replay_key,
+                    "discarded parent-end action whose replay key does not match its full identity"
+                );
                 continue;
             }
-            recorded.push(outcome.clone());
+            let action = crate::ToolIntentParentEndAction {
+                identity: identity.clone(),
+                parent_end: parent_end.clone(),
+            };
+            if let Some(existing) = recorded
+                .iter()
+                .find(|recorded| recorded.identity == action.identity)
+            {
+                if existing != &action {
+                    tracing::error!(
+                        target: "lash::tool_intent",
+                        replay_key = %action.identity.replay_key,
+                        existing_process_id = %existing.parent_end.process_id,
+                        recorded_process_id = %action.parent_end.process_id,
+                        "discarded conflicting parent-end action for one full intent identity"
+                    );
+                }
+                continue;
+            }
+            recorded.push(action);
         }
     }
 
-    pub(crate) fn snapshot(&self) -> Vec<crate::ToolIntentExecutionOutcome> {
-        self.outcomes.lock_recover().clone()
+    pub(crate) fn restore(&self, actions: &[crate::ToolIntentParentEndAction]) {
+        let outcomes = actions
+            .iter()
+            .map(|action| crate::ToolIntentExecutionOutcome::Executed {
+                identity: action.identity.clone(),
+                kind: crate::ToolIntentKind::StartProcess,
+                result: serde_json::Value::Null,
+                parent_end: Some(action.parent_end.clone()),
+            });
+        self.record(&outcomes.collect::<Vec<_>>());
+    }
+
+    pub(crate) fn snapshot(&self) -> Vec<crate::ToolIntentParentEndAction> {
+        self.actions.lock_recover().clone()
     }
 
     pub(crate) fn record_launches(&self, launches: &[crate::runtime::ToolCallLaunch]) {
@@ -162,6 +211,67 @@ impl<'run> ToolDispatchContext<'run> {
             turn_context: self.turn_context.clone(),
             clock: Arc::clone(&self.clock),
         })
+    }
+}
+
+#[cfg(test)]
+mod parent_end_buffer_tests {
+    use super::RecordedToolIntentOutcomeBuffer;
+
+    fn outcome(
+        identity: crate::ToolIntentIdentity,
+        process_id: &str,
+    ) -> crate::ToolIntentExecutionOutcome {
+        crate::ToolIntentExecutionOutcome::Executed {
+            identity,
+            kind: crate::ToolIntentKind::StartProcess,
+            result: serde_json::json!({"started": process_id}),
+            parent_end: Some(crate::ToolIntentParentEnd {
+                process_id: process_id.to_string(),
+                policy: crate::ProcessParentEndPolicy::Cancel,
+            }),
+        }
+    }
+
+    #[test]
+    fn parent_end_buffer_validates_full_identity_and_rejects_conflicting_sightings() {
+        let valid = crate::derive_tool_intent_identity(
+            "buffer-session",
+            "buffer-process",
+            Some("buffer-call"),
+            0,
+        )
+        .expect("valid intent identity");
+        let mut wrong_key = valid.clone();
+        wrong_key.replay_key = "tool-intent:v1:sha256:wrong".to_string();
+        let mut wrong_tuple_same_key = valid.clone();
+        wrong_tuple_same_key.intent_index = 1;
+
+        let buffer = RecordedToolIntentOutcomeBuffer::default();
+        buffer.record(&[
+            outcome(wrong_key, "wrong-key-child"),
+            outcome(wrong_tuple_same_key, "wrong-tuple-child"),
+            outcome(valid.clone(), "canonical-child"),
+            outcome(valid, "conflicting-child"),
+        ]);
+
+        assert_eq!(
+            buffer.snapshot(),
+            vec![crate::ToolIntentParentEndAction {
+                identity: crate::derive_tool_intent_identity(
+                    "buffer-session",
+                    "buffer-process",
+                    Some("buffer-call"),
+                    0,
+                )
+                .expect("canonical identity"),
+                parent_end: crate::ToolIntentParentEnd {
+                    process_id: "canonical-child".to_string(),
+                    policy: crate::ProcessParentEndPolicy::Cancel,
+                },
+            }],
+            "malformed replay keys and conflicting duplicate sightings must not alter teardown"
+        );
     }
 }
 

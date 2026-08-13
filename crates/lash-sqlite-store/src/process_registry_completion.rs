@@ -17,6 +17,7 @@ pub(super) async fn complete_process(
     process_id: &str,
     await_output: ProcessAwaitOutput,
     authority: lash_core::ProcessCompletionAuthority,
+    parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
 ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
     let process_id = process_id.to_string();
     let now = registry.clock.timestamp_ms();
@@ -109,6 +110,14 @@ pub(super) async fn complete_process(
                         .map_err(process_sqlite_error)?;
                         record = projected_record;
                         SqliteProcessRegistry::save_process_conn(tx, &record)?;
+                        if !parent_end_actions.is_empty() {
+                            tx.execute(
+                                "INSERT INTO process_parent_end_plans (process_id, actions_json)
+                                 VALUES (?1, ?2)",
+                                params![process_id, process_encode_json(&parent_end_actions)?],
+                            )
+                            .map_err(process_sqlite_error)?;
+                        }
                         SqliteProcessRegistry::insert_wake_delivery_conn(
                             tx,
                             wake_delivery.as_ref(),
@@ -133,6 +142,7 @@ pub(super) async fn complete_process_with_lease(
     registry: &SqliteProcessRegistry,
     lease: &ProcessLease,
     await_output: ProcessAwaitOutput,
+    parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
 ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
@@ -237,6 +247,14 @@ pub(super) async fn complete_process_with_lease(
                 .map_err(process_sqlite_error)?;
                 record = projected_record;
                 SqliteProcessRegistry::save_process_conn(tx, &record)?;
+                if !parent_end_actions.is_empty() {
+                    tx.execute(
+                        "INSERT INTO process_parent_end_plans (process_id, actions_json)
+                         VALUES (?1, ?2)",
+                        params![process_id, process_encode_json(&parent_end_actions)?],
+                    )
+                    .map_err(process_sqlite_error)?;
+                }
                 SqliteProcessRegistry::insert_wake_delivery_conn(
                     tx,
                     wake_delivery.as_ref(),

@@ -498,8 +498,8 @@ fn tool_context<'run>(
             None,
             None,
             None,
+            crate::DeliveryPolicy::EarliestSafeBoundary,
             Arc::new(crate::SystemClock),
-            crate::WakeTurnPolicy::default(),
         )
         .build()
 }

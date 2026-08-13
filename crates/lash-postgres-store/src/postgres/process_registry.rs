@@ -1,5 +1,7 @@
 use crate::*;
 use lash_core::facade_support;
+#[path = "process_registry/parent_end.rs"]
+mod parent_end;
 mod prune;
 mod retention;
 mod wake_delivery;
@@ -547,6 +549,17 @@ impl ProcessRegistry for PostgresProcessRegistry {
         await_output: ProcessAwaitOutput,
         authority: lash_core::ProcessCompletionAuthority,
     ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
+        self.complete_process_with_parent_end(process_id, await_output, authority, Vec::new())
+            .await
+    }
+
+    async fn complete_process_with_parent_end(
+        &self,
+        process_id: &str,
+        await_output: ProcessAwaitOutput,
+        authority: lash_core::ProcessCompletionAuthority,
+        parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
+    ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
         // Load (FOR UPDATE), validate the authority against the row's declared
         // disposition, and append the terminal event as one transaction. The
         // `FOR UPDATE` row lock held from the load through the commit is the
@@ -625,6 +638,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?;
                 record = projected_record;
                 save_process_tx(&mut tx, &record).await?;
+                parent_end::insert(&mut tx, process_id, &parent_end_actions).await?;
                 insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
                     .await?;
                 advance_wake_allocation_floor_tx(
@@ -644,6 +658,16 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
+    ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
+        self.complete_process_with_lease_and_parent_end(lease, await_output, Vec::new())
+            .await
+    }
+
+    async fn complete_process_with_lease_and_parent_end(
+        &self,
+        lease: &ProcessLease,
+        await_output: ProcessAwaitOutput,
+        parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
     ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let process_id = lease.process_id.as_str();
@@ -722,6 +746,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .map_err(plugin_sqlx_error)?;
         record = projected_record;
         save_process_tx(&mut tx, &record).await?;
+        parent_end::insert(&mut tx, process_id, &parent_end_actions).await?;
         insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config).await?;
         advance_wake_allocation_floor_tx(&mut tx, wake_session_id.as_deref(), process_id, sequence)
             .await?;
@@ -756,6 +781,24 @@ impl ProcessRegistry for PostgresProcessRegistry {
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
+    }
+
+    async fn list_pending_parent_end_plans(
+        &self,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core::ProcessParentEndPlan>, PluginError> {
+        parent_end::list(&self.pool, limit).await
+    }
+
+    async fn get_pending_parent_end_plan(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<lash_core::ProcessParentEndPlan>, PluginError> {
+        parent_end::get(&self.pool, process_id).await
+    }
+
+    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
+        parent_end::complete(&self.pool, process_id).await
     }
 
     async fn record_first_started_with_authority(

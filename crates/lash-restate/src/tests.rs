@@ -62,10 +62,11 @@ mod process_tool_replay;
 mod replay_corpus;
 mod tool_context_conformance;
 use endpoint_protocol::{
-    encode_call_replay, encode_captured_run_and_call_replay, encode_captured_run_command_replay,
-    encode_completed_captured_sleep_replay, encode_completed_sleep_replay,
-    encode_effectful_process_terminal_replay, encode_one_way_call_replay,
-    encode_pending_sleep_replay, encode_process_segment_send_replay,
+    encode_call_replay, encode_captured_run_and_call_replay,
+    encode_captured_run_and_interrupted_call_replay, encode_captured_run_command_replay,
+    encode_completed_captured_sleep_replay, encode_completed_intent_drain_replay,
+    encode_completed_sleep_replay, encode_effectful_process_terminal_replay,
+    encode_one_way_call_replay, encode_pending_sleep_replay, encode_process_segment_send_replay,
     encode_process_terminal_delivery_replay, encode_run_replay,
     encode_two_one_way_calls_and_call_replay, invoke_endpoint, invoke_endpoint_body,
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
@@ -5204,15 +5205,141 @@ struct ReplayableRecordingContext {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 struct ToolIntentJournalCorpusFixture {
     crash_point: String,
-    command_reply_observed: bool,
-    records: Vec<ToolIntentJournalCorpusRecord>,
+    captured_from_endpoint_interruption: bool,
+    invocation_body_bytes: Vec<u8>,
+    expected_response_command_frame_types: Vec<u16>,
+    expected_output: Option<serde_json::Value>,
+    expected_signal_events: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-struct ToolIntentJournalCorpusRecord {
-    effect_name: String,
-    command_frame_bytes: Vec<u8>,
-    outcome_frame_bytes: Vec<u8>,
+const TOOL_INTENT_CORPUS_KEY: &str = "tool-intent-corpus-v1";
+const TOOL_INTENT_CORPUS_SESSION: &str = "tool-intent-corpus-session";
+const TOOL_INTENT_CORPUS_TURN: &str = "tool-intent-corpus-turn";
+const TOOL_INTENT_CORPUS_TARGET: &str = "tool-intent-corpus-target";
+
+#[restate_sdk::workflow]
+trait ToolIntentCorpusReplay {
+    async fn run(input: Json<()>) -> HandlerResult<Json<serde_json::Value>>;
+}
+
+struct ToolIntentCorpusReplayImpl {
+    registry: Arc<dyn ProcessRegistry>,
+}
+
+impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(()): Json<()>,
+    ) -> HandlerResult<Json<serde_json::Value>> {
+        let controller = RestateRuntimeEffectController::new(ctx);
+        let scope = ExecutionScope::turn(TOOL_INTENT_CORPUS_SESSION, TOOL_INTENT_CORPUS_TURN);
+        let attempt = controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    RuntimeInvocation::effect(
+                        RuntimeScope::for_turn(
+                            TOOL_INTENT_CORPUS_SESSION,
+                            TOOL_INTENT_CORPUS_TURN,
+                            0,
+                            0,
+                        ),
+                        "tool-intent-corpus-attempt",
+                        RuntimeEffectKind::ToolAttempt,
+                        "tool-intent-corpus-attempt",
+                    ),
+                    RuntimeEffectCommand::ToolAttempt {
+                        call: prepared_tool_call_with(
+                            "tool-intent-corpus-call",
+                            "tool_intent_corpus",
+                        ),
+                        execution_grant: None,
+                        attempt: 1,
+                        max_attempts: 1,
+                    },
+                ),
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    Ok(RuntimeEffectOutcome::ToolAttempt {
+                        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
+                            record: Box::new(completed_tool_record(
+                                "tool-intent-corpus-call",
+                                "tool_intent_corpus",
+                            )),
+                            intents: lash_core::ToolIntents::v1(vec![
+                                lash_core::ToolIntent::SignalProcess(
+                                    lash_core::SignalProcessIntent {
+                                        session_id: TOOL_INTENT_CORPUS_SESSION.to_string(),
+                                        process_id: TOOL_INTENT_CORPUS_TARGET.to_string(),
+                                        signal_name: "resume".to_string(),
+                                        payload: serde_json::json!({
+                                            "source": "checked-in-endpoint-corpus"
+                                        }),
+                                    },
+                                ),
+                            ]),
+                        }),
+                        triggers: Vec::new(),
+                    })
+                }),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::ToolAttempt { launch, .. } = attempt else {
+            return Err(TerminalError::new("corpus attempt returned the wrong effect").into());
+        };
+        let lash_core::ToolAttemptLaunch::Done { intents, .. } = *launch else {
+            return Err(TerminalError::new("corpus attempt did not finish").into());
+        };
+        let outcomes = lash_core::testing::execute_tool_intents_with_services(
+            controller
+                .scoped_effect_controller(scope)
+                .map_err(TerminalError::from_error)?,
+            lash_core::testing::effect_backed_process_service(Arc::clone(&self.registry)),
+            TOOL_INTENT_CORPUS_SESSION,
+            "tool-intent-corpus-call",
+            &intents,
+        )
+        .await;
+        Ok(Json(
+            serde_json::to_value(outcomes).map_err(TerminalError::from_error)?,
+        ))
+    }
+}
+
+async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessRegistry>) {
+    let clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
+    let registry = lash_sqlite_store::SqliteProcessRegistry::memory()
+        .await
+        .expect("open corpus process registry")
+        .with_runtime_clock(clock)
+        .expect("install fixed corpus clock");
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                TOOL_INTENT_CORPUS_TARGET,
+                ProcessInput::External {
+                    metadata: serde_json::json!({"fixture": "endpoint-corpus"}),
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+        )
+        .await
+        .expect("seed corpus signal target");
+    let endpoint = Endpoint::builder()
+        .bind(
+            ToolIntentCorpusReplayImpl {
+                registry: Arc::clone(&registry),
+            }
+            .serve(),
+        )
+        .build();
+    (endpoint, registry)
 }
 
 #[derive(Debug)]
@@ -5246,25 +5373,166 @@ impl lash_core::Clock for ToolIntentCorpusClock {
     }
 }
 
-fn assert_tool_intent_journal_corpus(
-    name: &str,
+async fn replay_tool_intent_corpus_fixture(
     fixture: &ToolIntentJournalCorpusFixture,
-    checked_in: &[u8],
-) {
-    let mut actual =
-        serde_json::to_vec_pretty(fixture).expect("encode Restate intent corpus fixture");
-    actual.push(b'\n');
-    if std::env::var_os("LASH_UPDATE_RESTATE_INTENT_CORPUS").is_some() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/tool_intent_journals")
-            .join(format!("{name}.json"));
-        std::fs::write(path, &actual).expect("refresh Restate intent corpus fixture");
-        return;
+) -> (Vec<u16>, Option<serde_json::Value>, usize) {
+    let (endpoint, registry) = tool_intent_corpus_endpoint().await;
+    let response = invoke_endpoint_body(
+        &endpoint,
+        "ToolIntentCorpusReplay",
+        "run",
+        bytes::Bytes::from(fixture.invocation_body_bytes.clone()),
+    )
+    .await
+    .expect("feed checked-in corpus bytes through the Restate endpoint");
+    let signal_events = registry
+        .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
+        .await
+        .expect("read corpus signal outcomes")
+        .into_iter()
+        .filter(|event| event.event_type == "signal.resume")
+        .count();
+    (
+        restate_command_frame_types(&response),
+        restate_output_json::<serde_json::Value>(&response),
+        signal_events,
+    )
+}
+
+#[tokio::test]
+async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes() {
+    for checked_in in [
+        include_bytes!("../tests/fixtures/tool_intent_journals/v1-mid-drain.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v1-mid-intent.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v1-full-drain.json").as_slice(),
+    ] {
+        let fixture: ToolIntentJournalCorpusFixture =
+            serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
+        assert!(
+            fixture.captured_from_endpoint_interruption,
+            "{} must name its real endpoint-interruption provenance",
+            fixture.crash_point
+        );
+        let (command_frames, output, signal_events) =
+            replay_tool_intent_corpus_fixture(&fixture).await;
+        assert_eq!(
+            command_frames, fixture.expected_response_command_frame_types,
+            "{} response command frames",
+            fixture.crash_point
+        );
+        assert_eq!(
+            output, fixture.expected_output,
+            "{} output",
+            fixture.crash_point
+        );
+        assert_eq!(
+            signal_events, fixture.expected_signal_events,
+            "{} literal process outcome count",
+            fixture.crash_point
+        );
     }
-    assert_eq!(
-        actual, checked_in,
-        "captured Restate tool-intent journal `{name}` drifted; retain the old fixture and add a versioned corpus entry when the protocol changes"
-    );
+}
+
+/// Regeneration is deliberately separate from the replay law above: the law
+/// only consumes checked-in bytes. This ignored capture utility obtains each
+/// prefix by closing a real endpoint invocation at the named `RunCommand`.
+#[tokio::test]
+#[ignore = "explicit corpus capture utility"]
+async fn capture_tool_intent_journal_corpus_from_real_endpoint_interruptions() {
+    let (endpoint, _) = tool_intent_corpus_endpoint().await;
+    let first_interruption = invoke_endpoint(
+        &endpoint,
+        "ToolIntentCorpusReplay",
+        "run",
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+    )
+    .await
+    .expect("interrupt at the ToolAttempt run");
+    let mid_drain = encode_captured_run_command_replay(
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+        &first_interruption,
+        &[],
+        &[],
+    )
+    .expect("capture the completed-attempt journal prefix");
+    let second_interruption = invoke_endpoint_body(
+        &endpoint,
+        "ToolIntentCorpusReplay",
+        "run",
+        mid_drain.clone(),
+    )
+    .await
+    .expect("interrupt at the intent command run");
+    let call_completion = serde_json::to_value(ResolveOutcome::Accepted)
+        .expect("serialize durable-wait resolution outcome");
+    let mid_intent = encode_captured_run_and_interrupted_call_replay(
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+        &first_interruption,
+        &second_interruption,
+        None,
+    )
+    .expect("capture pending intent-command journal");
+    let progressed = encode_captured_run_and_interrupted_call_replay(
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+        &first_interruption,
+        &second_interruption,
+        Some(call_completion.clone()),
+    )
+    .expect("complete the intent's nested durable-wait call");
+    let third_interruption =
+        invoke_endpoint_body(&endpoint, "ToolIntentCorpusReplay", "run", progressed)
+            .await
+            .expect("interrupt while recording the settled intent outcome");
+    let full = encode_completed_intent_drain_replay(
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+        &first_interruption,
+        &second_interruption,
+        &third_interruption,
+        call_completion,
+    )
+    .expect("capture completed intent-command journal");
+
+    let captures = [
+        (
+            "v1-mid-drain",
+            "after_tool_attempt_before_signal_command",
+            mid_drain,
+        ),
+        (
+            "v1-mid-intent",
+            "after_signal_command_commit_before_reply",
+            mid_intent,
+        ),
+        ("v1-full-drain", "full_drain", full),
+    ];
+    for (name, crash_point, invocation_body) in captures {
+        let mut fixture = ToolIntentJournalCorpusFixture {
+            crash_point: crash_point.to_string(),
+            captured_from_endpoint_interruption: true,
+            invocation_body_bytes: invocation_body.to_vec(),
+            expected_response_command_frame_types: Vec::new(),
+            expected_output: None,
+            expected_signal_events: 0,
+        };
+        let (frames, output, signal_events) = replay_tool_intent_corpus_fixture(&fixture).await;
+        fixture.expected_response_command_frame_types = frames;
+        fixture.expected_output = output;
+        fixture.expected_signal_events = signal_events;
+        let mut bytes = serde_json::to_vec_pretty(&fixture).expect("serialize corpus fixture");
+        bytes.push(b'\n');
+        std::fs::write(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/tool_intent_journals")
+                .join(format!("{name}.json")),
+            bytes,
+        )
+        .expect("write captured endpoint corpus fixture");
+    }
 }
 
 impl ReplayableRecordingContext {
@@ -5352,7 +5620,6 @@ impl ReplayableRecordingContext {
         records.sort_by(|left, right| left.0.cmp(&right.0));
         records
     }
-
     fn install_process_worker(&self, worker: DurableProcessWorker) {
         *self.process_worker.lock_recover() = Some(worker);
     }
@@ -5604,7 +5871,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                     .await
                     .map_err(TerminalError::from_error)?
                 {
-                    lash_core::ProcessRunOutcome::Terminal(output) => break *output,
+                    lash_core::ProcessRunOutcome::Terminal(output)
+                    | lash_core::ProcessRunOutcome::TerminalWithParentEnd { output, .. } => {
+                        break *output;
+                    }
                     lash_core::ProcessRunOutcome::SegmentBoundary(next) => handover = Some(next),
                 }
             };
@@ -6845,6 +7115,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
         .into_handle();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
@@ -7515,57 +7786,6 @@ finish (await handle)?
     let signal_envelope_hash = signal_envelope
         .stable_hash()
         .expect("signal command envelope hash");
-    let raw_records = context.recorded_runtime_effect_bytes();
-    let record_for = |effect_name: &str| {
-        let (_, recorded_bytes) = raw_records
-            .iter()
-            .find(|(name, _)| name == effect_name)
-            .expect("captured Restate runtime-effect bytes");
-        ToolIntentJournalCorpusRecord {
-            effect_name: effect_name.to_string(),
-            command_frame_bytes: {
-                let recorded: RecordedRuntimeEffect = serde_json::from_slice(recorded_bytes)
-                    .expect("decode captured Restate runtime effect");
-                serde_json::to_vec(recorded.envelope.as_ref())
-                    .expect("encode deterministic Restate command frame")
-            },
-            outcome_frame_bytes: {
-                let recorded: RecordedRuntimeEffect = serde_json::from_slice(recorded_bytes)
-                    .expect("decode captured Restate runtime effect");
-                serde_json::to_vec(&recorded.outcome)
-                    .expect("encode deterministic Restate outcome frame")
-            },
-        }
-    };
-    let attempt_record = record_for(scalar_effect_name);
-    let signal_record = record_for(signal_effect_name);
-    assert_tool_intent_journal_corpus(
-        "v1-full-drain",
-        &ToolIntentJournalCorpusFixture {
-            crash_point: "full_drain".to_string(),
-            command_reply_observed: true,
-            records: vec![attempt_record.clone(), signal_record.clone()],
-        },
-        include_bytes!("../tests/fixtures/tool_intent_journals/v1-full-drain.json"),
-    );
-    assert_tool_intent_journal_corpus(
-        "v1-mid-drain",
-        &ToolIntentJournalCorpusFixture {
-            crash_point: "after_tool_attempt_before_signal_command".to_string(),
-            command_reply_observed: false,
-            records: vec![attempt_record.clone()],
-        },
-        include_bytes!("../tests/fixtures/tool_intent_journals/v1-mid-drain.json"),
-    );
-    assert_tool_intent_journal_corpus(
-        "v1-mid-intent",
-        &ToolIntentJournalCorpusFixture {
-            crash_point: "after_signal_command_commit_before_reply".to_string(),
-            command_reply_observed: false,
-            records: vec![attempt_record, signal_record],
-        },
-        include_bytes!("../tests/fixtures/tool_intent_journals/v1-mid-intent.json"),
-    );
     let first_intent_events = process_registry
         .events_after("restate-recorded-intent-target", 0)
         .await
@@ -9699,6 +9919,489 @@ fn recovery_worker_with_plugins(
         )
         .with_session_policy(recovery_session_policy()),
     )
+}
+
+struct ProcessParentIntentTool {
+    calls: Arc<AtomicUsize>,
+}
+
+impl ProcessParentIntentTool {
+    fn definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::raw(
+            "tool:process_parent_intent",
+            "process_parent_intent",
+            "Optionally start a child carrying a Cancel-at-parent-end policy.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "emit": { "type": "boolean" },
+                    "child": { "type": "string" }
+                },
+                "required": ["emit", "child"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "object" }),
+        )
+        .with_lashlang_binding(LashlangToolBinding::new(["tools"], "process_parent_intent"))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for ProcessParentIntentTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "process_parent_intent").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        panic!("the process-parent law must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == Self::definition().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let child = call
+            .args
+            .get("child")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("missing-child");
+        let intents = if call
+            .args
+            .get("emit")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+                lash_core::StartProcessIntent {
+                    session_id: call.context.session_id().to_string(),
+                    request: lash_core::ProcessStartRequest::external(
+                        format!("ignored-{child}"),
+                        lash_core::ProcessOriginator::host_scoped("process-parent-law"),
+                        serde_json::json!({"process_parent_child": child}),
+                    ),
+                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
+                },
+            ))])
+        } else {
+            lash_core::ToolIntents::default()
+        };
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({"child": child})),
+            intents,
+        )
+    }
+}
+
+fn process_parent_intent_plugin(
+    calls: Arc<AtomicUsize>,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(lash_core::plugin::StaticPluginFactory::new(
+        "process-parent-intent",
+        lash_core::facade_support::PluginSpec::new()
+            .with_tool_provider(Arc::new(ProcessParentIntentTool { calls })),
+    ))
+}
+
+struct PanicOnceAfterDurableProcessTerminal {
+    crashes: AtomicUsize,
+}
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicOnceAfterDurableProcessTerminal {
+    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn begin_named(&self, phase: &str) {
+        if phase == "process.parent_end.after_terminal"
+            && self.crashes.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            panic!("injected crash after durable process terminal and before parent teardown");
+        }
+    }
+}
+
+fn process_parent_worker(
+    registry: Arc<dyn ProcessRegistry>,
+    plugin: Arc<dyn lash_core::facade_support::PluginFactory>,
+    probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
+) -> DurableProcessWorker {
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        RECOVERY_PROCESS_ENV_STORE.clone();
+    let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_process_env_store(process_env_store)
+    .with_process_engine(Arc::new(
+        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+            lash_lashlang_runtime::LashlangSurface::default(),
+        ),
+    ));
+    let plugins = vec![
+        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
+            as Arc<dyn lash_core::facade_support::PluginFactory>,
+        plugin,
+    ];
+    DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(plugins)),
+            runtime_host,
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            registry,
+        )
+        .with_session_policy(recovery_session_policy())
+        .with_turn_phase_probe_slot(probe_slot),
+    )
+}
+
+async fn process_parent_lashlang_registration(
+    process_id: &str,
+    env_ref: lash_core::ProcessExecutionEnvRef,
+) -> ProcessRegistration {
+    let module = lashlang::parse(
+        r#"
+        process main() {
+          early = await tools.process_parent_intent({ emit: true, child: "segmented" })?
+          later = await tools.process_parent_intent({ emit: false, child: "none" })?
+          finish later.child
+        }
+        "#,
+    )
+    .expect("parse segmented process-parent law");
+    let contract = ProcessParentIntentTool::definition().contract();
+    let mut resources = lashlang::LashlangHostCatalog::new();
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "process_parent_intent",
+            "tool:process_parent_intent",
+            lashlang::json_schema_to_type_expr(contract.input_schema.canonical()),
+            lashlang::json_schema_to_type_expr(contract.output_schema.canonical()),
+        )
+        .expect("link process-parent law tool");
+    let linked = lashlang::LinkedModule::link(
+        module,
+        lashlang::LashlangHostEnvironment::new(
+            resources,
+            lashlang::LashlangAbilities::default().with_processes(),
+        ),
+    )
+    .expect("link segmented process-parent law");
+    lashlang::LashlangArtifactStore::put_module_artifact(
+        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &linked.artifact,
+    )
+    .await
+    .expect("store segmented process-parent artifact");
+    ProcessRegistration::new(
+        process_id,
+        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+            module_ref: linked.module_ref,
+            process_ref: linked
+                .artifact
+                .process_ref("main")
+                .expect("main process ref")
+                .clone(),
+            host_requirements_ref: linked.host_requirements_ref,
+            process_name: "main".to_string(),
+            args: serde_json::Map::new(),
+        }),
+        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
+    )
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
+    .with_execution_env_ref(Some(env_ref))
+}
+
+#[tokio::test]
+async fn process_parents_teardown_after_durable_end_across_segments_and_tool_call_route() {
+    let (registry, continuations) = process_stores();
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let plugin = process_parent_intent_plugin(Arc::clone(&provider_calls));
+    let probe_slot = lash_core::runtime::RuntimeTurnPhaseProbeSlot::default();
+    probe_slot.set_for_session(
+        "process-parent-law",
+        Arc::new(PanicOnceAfterDurableProcessTerminal {
+            crashes: AtomicUsize::new(0),
+        }),
+    );
+    let worker = process_parent_worker(Arc::clone(&registry), Arc::clone(&plugin), probe_slot);
+    let workflow = Arc::new(
+        LashProcessWorkflowImpl::new_for_test(
+            Arc::new(RestateCoreProcessRunner::new(worker.clone())),
+            Arc::clone(&registry),
+            Arc::clone(&continuations),
+        )
+        .with_segment_effect_budget_selector(|_| 1),
+    );
+    let env_ref = persist_recovery_env_ref().await;
+    let segmented =
+        process_parent_lashlang_registration("segmented-process-parent", env_ref.clone()).await;
+    registry
+        .register_process(segmented.clone())
+        .await
+        .expect("register segmented process parent");
+
+    let mut ordinal = 0_u64;
+    let mut input_handover = None;
+    let mut boundary_count = 0_usize;
+    let mut execution_id = None::<String>;
+    loop {
+        let context = Arc::new(ReplayableRecordingContext::default());
+        context.defer_process_workflows();
+        let context_evidence = Arc::clone(&context);
+        let controller = RestateRuntimeEffectController::with_options(
+            context,
+            RestateEffectControllerOptions::default().segment_effect_budget(1),
+        );
+        let workflow = Arc::clone(&workflow);
+        let registration = segmented.clone();
+        let handover = input_handover.take();
+        let retained = registry
+            .get_process("segmented-process-parent")
+            .await
+            .expect("read retained process execution")
+            .expect("segmented process exists");
+        let (current_execution_id, execution_authority) = segment_execution_authority(
+            "segmented-process-parent",
+            ordinal,
+            execution_id.as_deref(),
+            &format!("process-parent-law-invocation-{ordinal}"),
+            retained.first_started.as_deref(),
+        )
+        .expect("derive process-parent invocation authority");
+        execution_id = Some(current_execution_id);
+        let run = tokio::spawn(async move {
+            workflow
+                .run_registration(
+                    registration,
+                    ProcessExecutionContext::default()
+                        .with_execution_write_authority(execution_authority),
+                    controller
+                        .scoped_effect_controller(ExecutionScope::process(
+                            "segmented-process-parent",
+                        ))
+                        .expect("segmented process scope"),
+                    ordinal,
+                    handover,
+                    pending_process_cancel_signal(),
+                )
+                .await
+        })
+        .await;
+        match run {
+            Ok(Ok(lash_core::ProcessRunOutcome::SegmentBoundary(boundary))) => {
+                boundary_count += 1;
+                let durable_state: serde_json::Value =
+                    serde_json::from_slice(&boundary.engine_state)
+                        .expect("decode versioned Lashlang handover state");
+                let visible_processes = registry
+                    .list_processes(&lash_core::ProcessListFilter {
+                        status: lash_core::ProcessStatusFilter::Any,
+                        ..lash_core::ProcessListFilter::default()
+                    })
+                    .await
+                    .expect("inspect early intent children");
+                assert_eq!(durable_state["version"], serde_json::json!(2));
+                assert_eq!(
+                    durable_state["parent_end_actions"]
+                        .as_array()
+                        .expect("handover carries parent-end action array")
+                        .len(),
+                    1,
+                    "the early intent survives every segment boundary; provider_calls={}; records={:?}; processes={visible_processes:?}",
+                    provider_calls.load(Ordering::SeqCst),
+                    context_evidence
+                        .records
+                        .lock_recover()
+                        .values()
+                        .filter_map(
+                            |bytes| serde_json::from_slice::<RecordedRuntimeEffect>(bytes).ok()
+                        )
+                        .map(|recorded| recorded.outcome)
+                        .collect::<Vec<_>>(),
+                );
+                let next = ordinal + 1;
+                continuations
+                    .put_segment_handover(
+                        "segmented-process-parent",
+                        lash_core::PersistedSegmentHandover {
+                            segment_ordinal: next,
+                            program_hash: boundary
+                                .program_hash
+                                .clone()
+                                .expect("versioned Lashlang program hash"),
+                            handover: boundary,
+                        },
+                    )
+                    .await
+                    .expect("durably store process-parent handover");
+                let loaded = continuations
+                    .get_segment_handover("segmented-process-parent", next)
+                    .await
+                    .expect("reload process-parent handover")
+                    .expect("stored process-parent handover");
+                input_handover = Some(
+                    validate_segment_program_hash("segmented-process-parent", loaded)
+                        .expect("valid process-parent program identity"),
+                );
+                ordinal = next;
+            }
+            Err(join_error) if join_error.is_panic() => break,
+            other => panic!("unexpected segmented process-parent result: {other:?}"),
+        }
+    }
+    assert_eq!(
+        boundary_count, 2,
+        "the real Lashlang process spans three segments"
+    );
+    let terminal_parent = registry
+        .get_process("segmented-process-parent")
+        .await
+        .expect("read terminal segmented parent")
+        .expect("segmented parent exists");
+    assert_eq!(
+        terminal_parent.outcome,
+        Some(ProcessAwaitOutput::Success {
+            value: serde_json::json!("none"),
+            control: None,
+        }),
+        "the terminal is durable before the injected teardown crash"
+    );
+    let pending = registry
+        .get_pending_parent_end_plan("segmented-process-parent")
+        .await
+        .expect("load segmented parent-end plan")
+        .expect("the early-segment action survives in durable state");
+    let [segmented_action] = pending.actions.as_slice() else {
+        panic!("expected one literal early-segment action: {pending:?}");
+    };
+    assert_eq!(
+        segmented_action.parent_end.policy,
+        lash_core::ProcessParentEndPolicy::Cancel
+    );
+    assert_eq!(
+        lash_core::derive_tool_intent_identity(
+            &segmented_action.identity.session_id,
+            &segmented_action.identity.execution_scope_id,
+            Some(&segmented_action.identity.tool_call_id),
+            segmented_action.identity.intent_index as usize,
+        )
+        .expect("rederive retained segmented identity"),
+        segmented_action.identity,
+        "the retained action carries its full validated identity"
+    );
+    assert_eq!(
+        registry
+            .events_after(&segmented_action.parent_end.process_id, 0)
+            .await
+            .expect("events before segmented redrive")
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        0,
+        "the crash is after terminal commit and before teardown"
+    );
+
+    worker
+        .drive_pending_processes()
+        .await
+        .expect("redrive durable segmented parent-end plan");
+    assert!(
+        registry
+            .get_pending_parent_end_plan("segmented-process-parent")
+            .await
+            .expect("inspect completed segmented plan")
+            .is_none()
+    );
+    assert_eq!(
+        registry
+            .events_after(&segmented_action.parent_end.process_id, 0)
+            .await
+            .expect("events after segmented redrive")
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        1,
+        "redrive applies the early-segment Cancel exactly once"
+    );
+
+    let tool_parent = ProcessRegistration::new(
+        "tool-call-process-parent",
+        ProcessInput::ToolCall {
+            call: lash_core::PreparedToolCall::from_parts(
+                "tool-call-process-parent-call",
+                "tool:process_parent_intent",
+                "process_parent_intent",
+                serde_json::json!({"emit": true, "child": "tool-call"}),
+                None,
+                serde_json::Value::Null,
+            ),
+        },
+        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
+    )
+    .with_execution_env_ref(Some(env_ref));
+    registry
+        .register_process(tool_parent)
+        .await
+        .expect("register ToolCall process parent");
+    worker
+        .drive_pending_processes()
+        .await
+        .expect("drive ToolCall process parent");
+    let tool_terminal = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+        .await_terminal("tool-call-process-parent")
+        .await
+        .expect("await ToolCall parent terminal");
+    assert_eq!(
+        tool_terminal,
+        ProcessAwaitOutput::Success {
+            value: serde_json::json!({"child": "tool-call"}),
+            control: None,
+        }
+    );
+    let children = registry
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        })
+        .await
+        .expect("list process-parent children");
+    for child_name in ["segmented", "tool-call"] {
+        let child = children
+            .iter()
+            .find(|record| {
+                matches!(
+                    record.input.as_ref(),
+                    ProcessInput::External { metadata }
+                        if metadata["process_parent_child"] == child_name
+                )
+            })
+            .unwrap_or_else(|| panic!("missing {child_name} child in {children:?}"));
+        assert_eq!(
+            registry
+                .events_after(&child.id, 0)
+                .await
+                .expect("read child cancellation")
+                .iter()
+                .filter(|event| event.event_type == "process.cancel_requested")
+                .count(),
+            1,
+            "{child_name} child receives one literal Cancel"
+        );
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 3);
 }
 
 fn recovery_session_policy() -> lash_core::SessionPolicy {

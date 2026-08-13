@@ -40,17 +40,7 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
     tracing::warn!(error = %error, declined_total, "{message}");
 }
 
-fn trace_lifecycle_for_segment(
-    is_initial_segment: bool,
-    output: &lash_core::ProcessRunOutcome,
-) -> (bool, bool) {
-    (
-        is_initial_segment,
-        matches!(output, lash_core::ProcessRunOutcome::Terminal(_)),
-    )
-}
-
-const LASHLANG_SEGMENT_STATE_VERSION: u32 = 1;
+const LASHLANG_SEGMENT_STATE_VERSION: u32 = 2;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -79,6 +69,7 @@ struct LashlangSegmentState {
     event_sequence: u64,
     signal_send_sequence: u64,
     signal_wait_ordinals: BTreeMap<String, u64>,
+    parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
 }
 
 fn decode_lashlang_segment_state(
@@ -315,6 +306,9 @@ pub async fn run_lashlang_process(
         let state = lashlang::State::from_snapshot(lashlang::Snapshot { globals });
         (ctx, guard, state)
     };
+    if let Some(segment_state) = segment_state.as_ref() {
+        ctx.restore_parent_end_actions(&segment_state.parent_end_actions);
+    }
     let sleep_sequence = segment_state
         .as_ref()
         .map_or(0, |state| state.sleep_sequence);
@@ -342,7 +336,7 @@ pub async fn run_lashlang_process(
     let env = lashlang::ExecutionEnvironment::new(&host)
         .process()
         .with_execution_bounds(engine.execution_bounds);
-    let output = {
+    let mut output = {
         let _phase = host.ctx.named_phase("rlm_process.execute");
         execute_lashlang(
             compiled,
@@ -355,18 +349,32 @@ pub async fn run_lashlang_process(
         )
         .await
     };
+    output = match output {
+        lash_core::ProcessRunOutcome::Terminal(output_value) => {
+            let actions = host.ctx.parent_end_actions();
+            if actions.is_empty() {
+                lash_core::ProcessRunOutcome::Terminal(output_value)
+            } else {
+                lash_core::ProcessRunOutcome::TerminalWithParentEnd {
+                    output: output_value,
+                    actions,
+                }
+            }
+        }
+        other => other,
+    };
     drop(env);
     drop(host);
     {
         let _phase =
             lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, "rlm_process.shutdown");
         guard
-            .shutdown(matches!(output, lash_core::ProcessRunOutcome::Terminal(_)))
+            .shutdown(false)
             .await
             .map_err(lash_core::ProcessInfraError::new)?;
     }
-    if trace_lifecycle_for_segment(is_initial_segment, &output).1
-        && let lash_core::ProcessRunOutcome::Terminal(output) = &output
+    if output.is_terminal()
+        && let Some(output) = output.terminal_output()
     {
         lashlang_execution_trace.emit_finished(output);
     }
@@ -457,6 +465,7 @@ async fn execute_lashlang(
                             event_sequence: host.event_sequence.load(Ordering::Relaxed),
                             signal_send_sequence: host.signal_send_sequence.load(Ordering::Relaxed),
                             signal_wait_ordinals: host.signal_wait_ordinals.lock().await.clone(),
+                            parent_end_actions: host.ctx.parent_end_actions(),
                         };
                         match serde_json::to_vec(&segment_state) {
                             Ok(engine_state) => {
@@ -1497,7 +1506,7 @@ mod segment_trace_tests {
         EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentStateError,
         SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
         process_lashlang_execution_result, record_segment_boundary_decline,
-        trace_lifecycle_for_segment, validate_lashlang_program_hash,
+        validate_lashlang_program_hash,
     };
     use std::sync::atomic::Ordering;
 
@@ -1539,9 +1548,9 @@ mod segment_trace_tests {
             control: None,
         });
         let lifecycle = [
-            trace_lifecycle_for_segment(true, &boundary()),
-            trace_lifecycle_for_segment(false, &boundary()),
-            trace_lifecycle_for_segment(false, &terminal),
+            (true, boundary().is_terminal()),
+            (false, boundary().is_terminal()),
+            (false, terminal.is_terminal()),
         ];
         assert_eq!(lifecycle.iter().filter(|(started, _)| *started).count(), 1);
         assert_eq!(

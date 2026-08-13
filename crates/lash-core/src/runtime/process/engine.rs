@@ -35,7 +35,37 @@ pub struct PersistedSegmentHandover {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProcessRunOutcome {
     Terminal(Box<ProcessAwaitOutput>),
+    TerminalWithParentEnd {
+        output: Box<ProcessAwaitOutput>,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    },
     SegmentBoundary(SegmentHandover),
+}
+
+impl ProcessRunOutcome {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Terminal(_) | Self::TerminalWithParentEnd { .. })
+    }
+
+    pub fn terminal_output(&self) -> Option<&ProcessAwaitOutput> {
+        match self {
+            Self::Terminal(output) | Self::TerminalWithParentEnd { output, .. } => Some(output),
+            Self::SegmentBoundary(_) => None,
+        }
+    }
+
+    pub fn into_terminal_parts(
+        self,
+    ) -> Option<(
+        Box<ProcessAwaitOutput>,
+        Vec<crate::ToolIntentParentEndAction>,
+    )> {
+        match self {
+            Self::Terminal(output) => Some((output, Vec::new())),
+            Self::TerminalWithParentEnd { output, actions } => Some((output, actions)),
+            Self::SegmentBoundary(_) => None,
+        }
+    }
 }
 
 /// Failure of the host/runtime infrastructure needed to execute a process.

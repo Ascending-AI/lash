@@ -235,8 +235,9 @@ Figments coordination is one Lash revision. SQLite durable-core schema 36 includ
 the keyed checkpoint-component cutover on top of the required per-turn budget and
 immutable graph-generation cutover. PostgreSQL schema 50 includes those cutovers,
 the indexed recovery worklist, and the session-metadata payload cutover.
-Process-registry schema 23 and trigger schema 5 carry the v3 process-environment
-reference cutover; effect schema 10 carries both the agent-frame-key and recorded
+Process-registry schema 24 adds atomic pending process-parent teardown to the v3
+process-environment reference cutover; trigger schema 5 carries its existing
+contract. Effect schema 10 carries both the agent-frame-key and recorded
 tool-intent cutovers.
 Development/test stores must be recreated.
 Process-event sequences remain small ordered values; downstream prompts,

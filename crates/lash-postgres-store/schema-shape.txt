@@ -135,6 +135,11 @@ table lash_process_observers
   column session_id text not-null
   primary-key (session_id, process_id)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
+table lash_process_parent_end_plans
+  column actions_json text not-null
+  column process_id text not-null
+  primary-key (process_id)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_segment_handovers
   column handover_json text not-null
   column process_id text not-null

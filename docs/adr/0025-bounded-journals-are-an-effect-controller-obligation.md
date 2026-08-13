@@ -172,6 +172,30 @@ no-op there. `StoreMaintenance` remains maintenance for the domain session
 store and does not know about effect-journal tables; lifecycle owners call the
 effect host directly.
 
+### ToolBatch entry payloads
+
+The segmentation guarantee bounds journal growth by completed effect count; it
+does not claim that every effect result has a universal byte ceiling. Restate
+records one aggregate `ToolBatch` result per protocol iteration so replay can
+recover the ordered launch results and parent-end evidence without re-entering
+the batch interpreter. The same launch records are also present in their
+individual `ToolAttempt` entries. The intent portion has hard admission bounds:
+at most 32 declarations, at most 16 of one kind, and at most 64 KiB of canonical
+intent JSON per completed attempt. Tool output values have no core-wide byte
+cap: deployments may install the tool-output-budget plugin, and provider or
+tool contracts may impose tighter limits, but those are host policy rather than
+a durability invariant.
+
+Accordingly the precise bound for a Restate `ToolBatch` is one journal entry per
+batch and a finite source batch, not a fixed byte count. Its payload is live
+program data, like a value retained in the VM continuation described in section
+3. Large tool outputs can therefore make one journal entry large even though
+segmentation prevents an unbounded number of entries in one incarnation. Hosts
+must size and monitor their substrate entry limit and apply an output policy
+when tools can return large values; changing to a universal byte rejection
+would be a separate product contract because it can turn an otherwise valid
+tool result into a deterministic failure.
+
 Checkpoint journal rows deliberately carry the complete `CheckpointClaimSet`,
 not a compact list of row ids: the minimal durable-engine encoding is roughly
 2 KB — an order-of-magnitude estimate, not a measured bound — and grows with
