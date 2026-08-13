@@ -494,3 +494,132 @@ async fn suspension_inside_a_finally_entered_by_break_resumes_to_the_break() {
         ExecutionOutcome::Finished(control_flow_strings(&["cleanup"]))
     );
 }
+
+// ---------------------------------------------------------------------------
+// Error identity through a cleanup-only unwind.
+// ---------------------------------------------------------------------------
+
+/// Wrapping an expression in `try { … } finally { … }` must not change which
+/// error the host sees. `UncaughtException` is reserved for values thrown by an
+/// explicit `throw`; a runtime failure that nothing catches keeps its variant.
+#[tokio::test(flavor = "current_thread")]
+async fn a_cleanup_only_scope_preserves_the_runtime_error_identity() {
+    let failing = || Expr::BuiltinCall {
+        name: "len".into(),
+        args: vec![Expr::Number(1.0)],
+    };
+    let bare = run_exception_program(exception_finish(failing()), &Host)
+        .await
+        .expect_err("len(1) fails");
+    let wrapped = run_exception_program(
+        exception_finish(exception_try(failing(), None, Some(Expr::Number(0.0)))),
+        &Host,
+    )
+    .await
+    .expect_err("len(1) still fails inside a cleanup-only scope");
+    assert_eq!(bare, wrapped, "bare={bare:?} wrapped={wrapped:?}");
+    assert_eq!(bare, RuntimeError::LenUnsupported);
+}
+
+/// The same for an effect failure: host-side classification is variant-based,
+/// so a cleanup-only scope must not reclassify a failed effect as a guest
+/// exception.
+#[tokio::test(flavor = "current_thread")]
+async fn a_cleanup_only_scope_preserves_an_effect_failure_identity() {
+    let failing = || exception_resource_call("err", Expr::String("x".into()));
+    let bare = run_exception_program(exception_finish(failing()), &Host)
+        .await
+        .expect_err("the effect fails");
+    let wrapped = run_exception_program(
+        exception_finish(exception_try(failing(), None, Some(Expr::Number(0.0)))),
+        &Host,
+    )
+    .await
+    .expect_err("the effect still fails inside a cleanup-only scope");
+    assert_eq!(bare, wrapped, "bare={bare:?} wrapped={wrapped:?}");
+    assert!(
+        matches!(bare, RuntimeError::UnwrappedModuleOperationFailed { .. }),
+        "{bare:?}"
+    );
+}
+
+/// The trap keeps pointing at the failing expression rather than at the
+/// cleanup block that ran on the way out. Spans are attached directly to the
+/// compiled instructions so the assertion is about attribution, not parsing.
+#[tokio::test(flavor = "current_thread")]
+async fn a_cleanup_only_scope_keeps_the_failing_expression_span() {
+    let mut program = compile_program(&exception_finish(exception_try(
+        Expr::BuiltinCall {
+            name: "len".into(),
+            args: vec![Expr::Number(1.0)],
+        },
+        None,
+        Some(Expr::Number(0.0)),
+    )));
+    let failing_ip = program
+        .chunk
+        .code
+        .iter()
+        .position(|instruction| matches!(instruction, Instruction::Intrinsic(IntrinsicOp::Len)))
+        .expect("the program compiles a `len` intrinsic");
+    let failing_span = Span { start: 11, end: 17 };
+    for (ip, span) in program.chunk.spans.iter_mut().enumerate() {
+        *span = Some(if ip == failing_ip {
+            failing_span
+        } else {
+            Span { start: 90, end: 99 }
+        });
+    }
+    let host = Host;
+    let slots = SlotState::from_globals(
+        Record::new(),
+        &program.chunk.slot_names,
+        &ProjectedBindings::new(),
+    );
+    let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
+    let failure = vm
+        .run_traced_for_mode()
+        .await
+        .expect_err("the wrapped program still fails");
+    assert_eq!(failure.error, RuntimeError::LenUnsupported);
+    assert_eq!(failure.span, Some(failing_span));
+}
+
+/// A cleanup chain that suspends mid-`finally` must resume to the same
+/// identity: the pending origin is durable, not VM-local.
+#[tokio::test(flavor = "current_thread")]
+async fn a_suspended_cleanup_chain_resumes_with_the_original_error() {
+    let program = compile_program(&exception_finish(exception_try(
+        Expr::BuiltinCall {
+            name: "len".into(),
+            args: vec![Expr::Number(1.0)],
+        },
+        None,
+        Some(exception_resource_call(
+            "echo",
+            Expr::String("cleanup".into()),
+        )),
+    )));
+    let host = Host;
+    let slots = SlotState::from_globals(
+        Record::new(),
+        &program.chunk.slot_names,
+        &ProjectedBindings::new(),
+    );
+    let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
+    vm.suspend_after_effects(1);
+    assert_eq!(
+        vm.run_for_mode()
+            .await
+            .expect("the cleanup effect suspends"),
+        ExecutionOutcome::Continued
+    );
+    let continuation = vm.suspend().expect("cleanup continuation");
+    let bytes = serde_json::to_vec(&continuation).expect("encode");
+    let restored: VmContinuation = serde_json::from_slice(&bytes).expect("decode");
+    let mut resumed = Vm::resume_from(restored, &program, &host).expect("resume");
+    assert_eq!(
+        resumed.run_for_mode().await,
+        Err(RuntimeError::LenUnsupported)
+    );
+}
