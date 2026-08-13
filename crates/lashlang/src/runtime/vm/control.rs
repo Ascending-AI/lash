@@ -5,8 +5,8 @@ use super::super::{
     ExecutionOutcome, RuntimeError, RuntimeFailure, Value,
 };
 use super::effects::VmEffect;
+use super::heap_plan::{SlotExport, StackExport, instruction_heap_plan};
 use super::{Vm, VmRunOutcome};
-use crate::ast::BinaryOp;
 use crate::lexer::Span;
 
 pub(super) enum VmStep {
@@ -229,32 +229,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         while let Some(instruction) = self.chunk.code.get(self.ip).copied() {
             let instruction_ip = self.ip;
-            let uses_heap_values = matches!(
-                instruction,
-                super::Instruction::DeepCopy | super::Instruction::DeepCopyLoopBinding(_)
-            ) || matches!(
-                instruction,
-                super::Instruction::Intrinsic(super::IntrinsicOp::PushAssign(_))
-            ) || matches!(
-                instruction,
-                super::Instruction::AddAssignIndexNumber { .. }
-                    | super::Instruction::AddAssignIndexSlotNumber { .. }
-                    | super::Instruction::AppendAssign(_)
-                    | super::Instruction::ListAppend
-            ) || matches!(
-                instruction,
-                super::Instruction::Binary(BinaryOp::Equal | BinaryOp::NotEqual)
-            );
-            if !uses_heap_values
-                && let Err(error) = self.materialize_instruction_operands(instruction)
-            {
+            if let Err(error) = self.materialize_instruction_operands(instruction) {
                 return Err(VmTrap {
                     error,
                     instruction_ip,
                     span: None,
                 });
             }
-            if uses_heap_values && self.heap.allocation_scope_needs_roots() {
+            // Under stress collection the scope opens before every instruction,
+            // not just before the ones a list said could allocate. Any
+            // instruction can reach an allocation — a general concat isolates
+            // its result — and an allocation that commits outside an open scope
+            // collects against empty pins and sweeps live objects.
+            if self.heap.allocation_scope_needs_roots() {
                 let roots = self.heap_roots();
                 self.heap.begin_allocation_scope(roots);
             }
@@ -410,95 +397,33 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    /// Exports whatever this instruction's heap plan says it reads.
     fn materialize_instruction_operands(
         &mut self,
         instruction: super::Instruction,
     ) -> Result<(), RuntimeError> {
-        match self.stack_operand_window(instruction) {
-            Some(window) => {
+        let plan = instruction_heap_plan(instruction, self.chunk);
+        match plan.stack {
+            StackExport::Top(window) => {
                 let start = self.stack.len().saturating_sub(window);
                 for index in start..self.stack.len() {
                     let exported = self.heap.export_for_instruction(&self.stack[index])?;
                     self.stack[index] = exported;
                 }
             }
-            None => {
+            StackExport::All => {
                 for value in &mut self.stack {
                     *value = self.heap.export_for_instruction(value)?;
                 }
             }
         }
-        match instruction {
-            super::Instruction::LoadField { slot, .. }
-            | super::Instruction::LoadFieldUnwrap { slot, .. }
-            | super::Instruction::SlotNumberBinary { slot, .. }
-            | super::Instruction::SlotNumberCompare { slot, .. }
-            | super::Instruction::SlotNumberBinaryCompare { slot, .. }
-            | super::Instruction::JumpIfSlotNumberCompareFalse { slot, .. }
-            | super::Instruction::JumpIfSlotNumberBinaryCompareFalse { slot, .. }
-            | super::Instruction::ResolveTypeRef(slot) => self.materialize_slot(slot)?,
-            super::Instruction::PathAssign { slot, .. }
-            | super::Instruction::AddAssign(slot)
-            | super::Instruction::AddAssignNumber { slot, .. } => {
-                self.materialize_mutable_slot(slot)?;
+        for (slot, export) in plan.slots.into_iter().flatten() {
+            match export {
+                SlotExport::Read => self.materialize_slot(slot)?,
+                SlotExport::Mutate => self.materialize_mutable_slot(slot)?,
             }
-            super::Instruction::AddAssignSlot { slot, right } => {
-                self.materialize_mutable_slot(slot)?;
-                self.materialize_slot(right)?;
-            }
-            _ => {}
         }
         Ok(())
-    }
-
-    /// How many operands from the top of the stack this instruction reads.
-    ///
-    /// `None` means "unknown, materialize the whole stack", which is the
-    /// conservative default every opcode not listed here keeps. Listing an
-    /// opcode is a claim about its implementation — that it touches at most that
-    /// many stack values — and it matters because a value left deeper on the
-    /// stack must not be exported: an accumulator sitting under a loop body
-    /// would be rebuilt from its heap object on every instruction, which is
-    /// quadratic in the accumulator's length.
-    ///
-    /// A reference left on the stack is safe to leave there: it is a collection
-    /// root, it serializes into a continuation, and the terminal export walks
-    /// the whole stack.
-    fn stack_operand_window(&self, instruction: super::Instruction) -> Option<usize> {
-        use super::Instruction as I;
-        Some(match instruction {
-            I::PushConst(_)
-            | I::PushNull
-            | I::PushBool(_)
-            | I::PushNumber(_)
-            | I::LoadName(_)
-            | I::StoreConst { .. }
-            | I::Jump(_)
-            | I::IterNext { .. }
-            | I::EndIter
-            | I::ObserveStep
-            | I::AddAssignNumber { .. }
-            | I::AddAssignSlot { .. }
-            | I::SlotNumberBinary { .. }
-            | I::SlotNumberCompare { .. }
-            | I::SlotNumberBinaryCompare { .. }
-            | I::JumpIfSlotNumberCompareFalse { .. }
-            | I::JumpIfSlotNumberBinaryCompareFalse { .. } => 0,
-            I::Field(_)
-            | I::ResultUnwrap
-            | I::ToBool
-            | I::JumpIfFalse(_)
-            | I::JumpIfTrue(_)
-            | I::Unary(_)
-            | I::Pop
-            | I::StoreName(_)
-            | I::AddAssign(_)
-            | I::BeginIter(_) => 1,
-            I::Index | I::Binary(_) | I::JumpIfCompareFalse { .. } => 2,
-            I::BuildTuple(len) | I::BuildList(len) => len,
-            I::BeginRangeIter { argc, .. } => argc,
-            _ => return None,
-        })
     }
 
     fn materialize_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {

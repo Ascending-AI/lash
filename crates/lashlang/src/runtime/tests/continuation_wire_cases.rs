@@ -248,3 +248,78 @@ fn continuation_test_vm_with_host<'a, H: ExecutionHost>(
     );
     Vm::new_with_mode(&program.chunk, slots, host, ExecutionMode::Foreground)
 }
+
+/// Under stress collection every instruction that can allocate must run inside
+/// an open allocation scope.
+///
+/// A general concat isolates its result, and the isolation commits objects one
+/// at a time with a collection between each. If the scope was not open, that
+/// collection ran against empty pins and swept everything the VM still held —
+/// including bindings the program had not touched. The reported repro left a
+/// dangling reference behind an untouched binding.
+async fn stress_collected_result(source: &str) -> Result<Value, RuntimeError> {
+    let program = compile_source(source).expect("stress program should compile");
+    let host = HeapConformanceHost {
+        stress_gc: true,
+        memory_limit: ExecutionBound::Unbounded,
+    };
+    match execute_compiled(&program, &mut State::new(), &host).await? {
+        ExecutionOutcome::Finished(value) => Ok(value),
+        other => panic!("expected a finish, got {other:?}"),
+    }
+}
+
+async fn unstressed_result(source: &str) -> Result<Value, RuntimeError> {
+    let program = compile_source(source).expect("program should compile");
+    let host = HeapConformanceHost {
+        stress_gc: false,
+        memory_limit: ExecutionBound::Unbounded,
+    };
+    match execute_compiled(&program, &mut State::new(), &host).await? {
+        ExecutionOutcome::Finished(value) => Ok(value),
+        other => panic!("expected a finish, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stress_collection_survives_a_general_concat() {
+    // The reported repro: the concat's isolation allocates while `x` is live
+    // only from a slot.
+    let source = "x = [1]\nz = [2]\ny = [9]\ny = y + z\nfinish [x, y, z]";
+    let stressed = stress_collected_result(source)
+        .await
+        .expect("stress-collected concat should not lose live objects");
+    assert_eq!(stressed, unstressed_result(source).await.expect("baseline"));
+    assert_eq!(
+        stressed,
+        Value::List(
+            vec![
+                Value::List(vec![Value::Number(1.0)].into()),
+                Value::List(vec![Value::Number(9.0), Value::Number(2.0)].into()),
+                Value::List(vec![Value::Number(2.0)].into()),
+            ]
+            .into()
+        )
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stress_collection_survives_a_slot_concat_and_a_loop_concat() {
+    // `acc = acc + other` where the right operand is a bare variable lowers to
+    // the fused slot form, which reads both slots without touching the stack.
+    let slot_form = "x = [1]\nother = [2]\nacc = [0]\nacc = acc + other\nfinish [x, acc]";
+    assert_eq!(
+        stress_collected_result(slot_form)
+            .await
+            .expect("stress-collected slot concat should hold"),
+        unstressed_result(slot_form).await.expect("baseline")
+    );
+
+    let loop_form = "kept = [[7]]\nacc = []\nfor n in range(0, 6) { acc = acc + [[n]] }\nfinish [kept, acc]";
+    assert_eq!(
+        stress_collected_result(loop_form)
+            .await
+            .expect("stress-collected loop concat should hold"),
+        unstressed_result(loop_form).await.expect("baseline")
+    );
+}

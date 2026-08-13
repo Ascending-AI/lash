@@ -23,6 +23,7 @@ use rustc_hash::FxHashMap;
 mod continuation;
 mod control;
 mod effects;
+mod heap_plan;
 
 #[cfg(test)]
 use continuation::TestSuspension;

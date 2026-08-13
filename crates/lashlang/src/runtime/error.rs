@@ -51,6 +51,13 @@ pub enum RuntimeError {
     /// The deterministic allocation identity counter was exhausted.
     #[error("lashlang heap allocation identity space exhausted")]
     HeapIdExhausted,
+    /// A heap reference reached a boundary that requires an exported value.
+    ///
+    /// The instruction heap plan is what keeps references off these paths. This
+    /// error is the backstop for an opcode that forgets to declare what it
+    /// reads: the cell fails, the process lives.
+    #[error("lashlang heap reference {id} reached {context} before it was exported")]
+    UnexportedHeapReference { id: u64, context: &'static str },
     /// A host boundary cannot represent cyclic heap values.
     #[error("lashlang heap value contains a cycle through object {id}")]
     CyclicHostValue { id: u64 },
@@ -622,6 +629,9 @@ mod tests {
                 RuntimeError::DanglingHeapReference { .. } => "dangling lashlang heap reference",
                 RuntimeError::HeapIdExhausted => {
                     "lashlang heap allocation identity space exhausted"
+                }
+                RuntimeError::UnexportedHeapReference { .. } => {
+                    "lashlang heap reference 7 reached string formatting"
                 }
                 RuntimeError::CyclicHostValue { .. } => "lashlang heap value contains a cycle",
                 RuntimeError::UndefinedVariable { .. } => "unknown name `name`",

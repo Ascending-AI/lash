@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use super::value_contains_projected;
-use super::{ImageValue, ProjectedFuture, ResourceHandle, Value};
+use super::{ImageValue, ProjectedFuture, ResourceHandle, Value, debug_assert_exported_value};
 use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq};
 use std::fmt::Write as _;
@@ -61,7 +61,10 @@ pub(crate) fn to_json_async<'a>(value: &'a Value) -> ProjectedFuture<'a, serde_j
                 serde_json::Value::Object(object)
             }
             Value::Projected(value) => to_json_async(&value.materialize_async().await).await,
-            Value::Ref(_) => unreachable!("heap references must be exported before JSON"),
+            Value::Ref(_) => {
+                debug_assert_exported_value("JSON conversion");
+                serde_json::Value::Null
+            }
         }
     })
 }
@@ -97,7 +100,10 @@ pub(crate) fn to_json_direct(value: &Value) -> serde_json::Value {
             serde_json::Value::Object(object)
         }
         Value::Projected(_) => unreachable!("projected values require async json conversion"),
-        Value::Ref(_) => unreachable!("heap references must be exported before JSON"),
+        Value::Ref(_) => {
+            debug_assert_exported_value("JSON conversion");
+            serde_json::Value::Null
+        }
     }
 }
 
@@ -253,7 +259,10 @@ pub(crate) fn append_runtime_json_async<'a>(
             Value::Projected(projected) => {
                 append_runtime_json_async(output, &projected.materialize_async().await).await;
             }
-            Value::Ref(_) => unreachable!("heap references must be exported before JSON"),
+            Value::Ref(_) => {
+                debug_assert_exported_value("JSON conversion");
+                output.push_str("null");
+            }
         }
     })
 }

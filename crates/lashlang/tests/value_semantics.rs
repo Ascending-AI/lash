@@ -316,3 +316,70 @@ async fn snapshot_equality_survives_a_round_trip_after_temporaries() {
     run(&mut other, "kept = push(kept, [4])\nfinish 0").await;
     assert_ne!(other.snapshot(), snapshot);
 }
+
+/// Formatting a container variable must not take down the process.
+///
+/// `format("{0}", xs)` lowers to the fused slot-format opcode for any bare
+/// variable argument, and that opcode reads the slot directly. When the slot
+/// held a heap reference the reference reached the stringifier, which treated
+/// the case as impossible.
+#[tokio::test(flavor = "current_thread")]
+async fn formatting_a_container_binding_renders_it() {
+    let mut state = State::new();
+    let value = run(
+        &mut state,
+        r#"
+        xs = [1, 2]
+        rec = { a: 1 }
+        tup = (1, 2)
+        built = []
+        for n in range(0, 3) { built = push(built, n) }
+        finish [
+          format("{0}", xs),
+          format("{0}", rec),
+          format("{0}", tup),
+          format("{0}", built),
+          format("list is {0} and record is {1}", xs, rec)
+        ]
+        "#,
+    )
+    .await;
+
+    let Value::List(rendered) = value else {
+        panic!("expected a list of rendered strings")
+    };
+    let rendered = rendered
+        .iter()
+        .map(|value| match value {
+            Value::String(text) => text.to_string(),
+            other => panic!("expected a string, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rendered[0], "[1,2]");
+    assert_eq!(rendered[1], "{\"a\":1}");
+    assert_eq!(rendered[2], "(1, 2)");
+    assert_eq!(rendered[3], "[0,1,2]");
+    assert_eq!(rendered[4], "list is [1,2] and record is {\"a\":1}");
+}
+
+/// A type error against a container binding names the container's type, not the
+/// internal representation it happens to be stored in.
+#[tokio::test(flavor = "current_thread")]
+async fn arithmetic_on_a_container_binding_names_the_container_type() {
+    let mut state = State::new();
+    let compiled =
+        compile("xs = [1, 2]\nfinish format(\"{0}\", xs + 1)").expect("program should compile");
+    let error = execute(&compiled, &mut state, &ProbeHost)
+        .await
+        .expect_err("adding a number to a list should fail");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("list"),
+        "error should name the list type: {message}"
+    );
+    assert!(
+        !message.contains("heap_ref"),
+        "error must not leak the heap representation: {message}"
+    );
+}

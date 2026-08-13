@@ -51,7 +51,12 @@ pub(crate) fn append_stringified_value_direct(
         }
         Value::Projected(_) => unreachable!("projected values require async stringification"),
         Value::Tuple(values) => append_tuple_literal_direct(output, values)?,
-        Value::Ref(_) => unreachable!("heap references must be exported before formatting"),
+        Value::Ref(id) => {
+            return Err(RuntimeError::UnexportedHeapReference {
+                id: id.get(),
+                context: "string formatting",
+            });
+        }
         Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => {
             append_direct_json(output, value)
         }
@@ -73,7 +78,12 @@ pub(crate) fn append_stringified_value_async<'a>(
             }
             Value::Projected(value) => output.push_str(&value.render().await),
             Value::Tuple(values) => append_tuple_literal_async(output, values).await?,
-            Value::Ref(_) => unreachable!("heap references must be exported before formatting"),
+            Value::Ref(id) => {
+                return Err(RuntimeError::UnexportedHeapReference {
+                    id: id.get(),
+                    context: "string formatting",
+                });
+            }
             Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => {
                 append_runtime_json_async(output, value).await;
             }
