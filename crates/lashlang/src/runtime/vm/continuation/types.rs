@@ -258,6 +258,27 @@ pub enum ContinuationError {
         stack_depth: usize,
         stack_size: usize,
     },
+    #[error(
+        "continuation handler {handler} names no exception scope in the compiled program (handler {handler_instruction_pointer}, finally {finally_instruction_pointer:?}, catches {catches})"
+    )]
+    HandlerScopeUnknown {
+        handler: usize,
+        handler_instruction_pointer: usize,
+        finally_instruction_pointer: Option<usize>,
+        catches: bool,
+    },
+    #[error("continuation handler {handler} is not nested inside handler {outer}: {reason}")]
+    HandlerNestingNotMonotonic {
+        handler: usize,
+        outer: usize,
+        reason: &'static str,
+    },
+    #[error("continuation finally {finally} is not nested inside finally {outer}: {reason}")]
+    FinallyNestingNotMonotonic {
+        finally: usize,
+        outer: usize,
+        reason: &'static str,
+    },
     #[error("continuation profile shape is incompatible with this VM")]
     ProfileShapeMismatch,
     #[error("lashlang instruction budget of {limit} instructions was already exceeded")]

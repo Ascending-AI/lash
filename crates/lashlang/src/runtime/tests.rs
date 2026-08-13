@@ -1,4 +1,4 @@
-use super::vm::{VM_CONTINUATION_FORMAT_VERSION, VmFrameReturnContinuation};
+use super::vm::{VM_CONTINUATION_FORMAT_VERSION, VmFrameContinuation, VmFrameReturnContinuation};
 use super::*;
 use crate::ast::{Expr, Program};
 use lash_sansio::sync::{LockResultExt, MutexExt};
@@ -1256,3 +1256,4 @@ include!("tests/continuation_wire_cases.rs");
 include!("tests/function_cases.rs");
 include!("tests/exception_cases.rs");
 include!("tests/exception_control_flow_cases.rs");
+include!("tests/exception_wire_cases.rs");
