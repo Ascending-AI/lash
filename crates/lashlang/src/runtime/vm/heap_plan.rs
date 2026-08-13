@@ -11,7 +11,7 @@
 
 use super::Instruction;
 use crate::ast::BinaryOp;
-use crate::runtime::{Chunk, IntrinsicOp};
+use crate::runtime::{Chunk, IntrinsicOp, RuntimeError};
 
 /// How much of the operand stack an instruction needs exported to tree values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,14 +79,14 @@ impl InstructionHeapPlan {
 pub(super) fn instruction_heap_plan(
     instruction: Instruction,
     chunk: &Chunk,
-) -> InstructionHeapPlan {
+) -> Result<InstructionHeapPlan, RuntimeError> {
     use Instruction as I;
     use StackExport::Top;
 
     // Keep this match exhaustive. Compile-time failure is the guard that makes
     // every new opcode author declare its heap boundary explicitly; a catch-all
     // would silently restore the old conservative default and hide omissions.
-    match instruction {
+    let plan = match instruction {
         // Isolation and in-place container mutation consume heap references as
         // they are: exporting them would be the copy these opcodes exist to
         // avoid.
@@ -207,10 +207,13 @@ pub(super) fn instruction_heap_plan(
         // Every remaining intrinsic reads exactly its argument count from the
         // stack — that same count is what dispatch uses to find them — and
         // touches no slot. The three that do carry a slot are declared above.
-        I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op
-            .fixed_argc()
-            .expect("context-dependent intrinsics have explicit heap plans"))),
-    }
+        I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op.fixed_argc().ok_or(
+            RuntimeError::ContextDependentIntrinsicMisdispatch {
+                context: "heap planning",
+            },
+        )?)),
+    };
+    Ok(plan)
 }
 
 #[cfg(test)]
@@ -232,7 +235,7 @@ mod tests {
             I::Return,
         ];
         for (index, instruction) in function_opcodes.into_iter().enumerate() {
-            let plan = instruction_heap_plan(instruction, chunk);
+            let plan = instruction_heap_plan(instruction, chunk).expect("function heap plan");
             assert_eq!(
                 (plan.stack, plan.slots),
                 (StackExport::Top(0), SlotExport::None),

@@ -318,6 +318,8 @@ pub enum ContinuationError {
         frame: usize,
         instruction_pointer: usize,
     },
+    #[error("continuation with an active function must have a root-owned bottom frame")]
+    MissingRootFrame,
     #[error("continuation has {actual} slots but program requires {expected}")]
     SlotCountMismatch { expected: usize, actual: usize },
     #[error(
@@ -816,6 +818,14 @@ fn validate_continuation(continuation: &VmContinuation) -> Result<(), Continuati
             location: "frame stack".to_string(),
             variant: "frames without an active function",
         });
+    }
+    if continuation.active_function.is_some()
+        && continuation
+            .frame_stack
+            .first()
+            .is_none_or(|frame| frame.function.is_some())
+    {
+        return Err(ContinuationError::MissingRootFrame);
     }
     validate_values(&continuation.operand_stack, "operand stack")?;
     validate_heap_references(&continuation.heap.heap, &continuation.operand_stack)?;

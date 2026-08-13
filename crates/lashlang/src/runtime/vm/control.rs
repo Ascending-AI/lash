@@ -228,6 +228,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.heap_initialized = true;
         }
         while self.active_function.is_some() || self.ip < self.chunk.root_code_len {
+            if let Some(function) = self.active_function
+                && self.ip == self.chunk.functions[function].end_ip
+            {
+                if let Err(error) = self.return_from_function() {
+                    return Err(VmTrap {
+                        error,
+                        instruction_ip: self.ip.saturating_sub(1),
+                        span: None,
+                    });
+                }
+                continue;
+            }
             let Some(instruction) = self.chunk.code.get(self.ip).copied() else {
                 break;
             };
@@ -416,7 +428,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         instruction: super::Instruction,
     ) -> Result<(), RuntimeError> {
-        let plan = instruction_heap_plan(instruction, self.chunk);
+        let plan = instruction_heap_plan(instruction, self.chunk)?;
         match plan.stack {
             StackExport::Top(window) => {
                 let start = self.stack.len().saturating_sub(window);

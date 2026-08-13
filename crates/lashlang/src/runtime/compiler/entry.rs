@@ -143,9 +143,11 @@ impl Compiler {
             let entry_ip = self.code.len();
             self.compile_expr(&definition.body);
             self.code.push(Instruction::Return);
+            let end_ip = self.code.len();
             let slot_names = self.slots.borrow().names.clone().into_boxed_slice();
             self.functions.push(CompiledFunction {
                 entry_ip,
+                end_ip,
                 parameter_count: definition.params.len(),
                 capture_count: definition.captures.len(),
                 self_slot,

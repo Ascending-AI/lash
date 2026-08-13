@@ -39,6 +39,7 @@ pub(crate) struct Chunk {
 #[derive(Clone)]
 pub(crate) struct CompiledFunction {
     pub(crate) entry_ip: usize,
+    pub(crate) end_ip: usize,
     pub(crate) parameter_count: usize,
     pub(crate) capture_count: usize,
     pub(crate) self_slot: Option<usize>,

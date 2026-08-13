@@ -1429,9 +1429,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             _ => {
-                let argc = op
-                    .fixed_argc()
-                    .expect("context-dependent intrinsics dispatch above");
+                let argc =
+                    op.fixed_argc()
+                        .ok_or(RuntimeError::ContextDependentIntrinsicMisdispatch {
+                            context: "intrinsic dispatch",
+                        })?;
                 let start = self
                     .stack
                     .len()

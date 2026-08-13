@@ -2,12 +2,12 @@
 
 ## Result
 
-The two blocking reviews are reconciled and every confirmed finding is fixed.
-The functions/closures layer now has one frame-aware root model for collection
-and serialization, program-aware continuation validation, a non-panicking host
-boundary, explicit performance coverage, and checked public-AST examples. The
-parser, grammar, prompt, model-visible builtin registry, and surface language
-remain unchanged.
+The two blocking reviews and the decisive verification's five final residuals
+are reconciled, and every confirmed finding is fixed. The functions/closures
+layer now has one frame-aware root model for collection and serialization,
+program-aware continuation validation, a non-panicking host boundary, explicit
+performance coverage, and checked public-AST examples. The parser, grammar,
+prompt, model-visible builtin registry, and surface language remain unchanged.
 
 ## Red-first reconciliation
 
@@ -54,13 +54,18 @@ suspension where caller and callee simultaneously retain heap-backed state.
 
 ### Program-aware restore validation
 
-Compiled code ranges are derived as root `0..root_code_len`, followed by each
-function's `entry_ip..next_entry_ip` (or `code.len()` for the last function).
-Resume rejects:
+Compiled code ranges are root `0..root_code_len` plus an explicit
+`entry_ip..end_ip` stored on every compiled function. Validation therefore has
+no dependency on function-table ordering. A suspended active instruction
+pointer may equal its owning range end: root fallthrough completes the program,
+while function fallthrough performs the function's natural return. Saved return
+pointers remain legal only inside the caller range and immediately after a
+`Call` or `Map`. Resume rejects:
 
-- an active PC outside the active function's exact range;
+- an active PC outside the active function's range plus its accepted end
+  boundary;
 - a saved return PC outside the recorded caller's exact range;
-- `code.len()` and cross-root, root-to-function, function-to-root, and sibling
+- cross-root, non-boundary root-to-function, function-to-root, and sibling
   function substitutions;
 - return PCs that are not legal post-`Call`/post-`Map` sites.
 
@@ -102,6 +107,21 @@ instruction match is exhaustive, and its source comment makes the contract
 explicit: adding an opcode must make a compile error until its heap behavior is
 classified. Compile-enforced exhaustiveness is the stronger replacement for a
 runtime default that could silently assign the wrong plan.
+
+`BuildTuple`, `BuildList`, and `BuildRecord` deliberately use `heap_native`
+rather than `Top(len)`. Lowering emits `DeepCopy` for every literal member, so
+the builders receive already-isolated values and must assemble those values
+without exporting heap references back into trees. Exporting the whole operand
+window would add avoidable materialization and weaken the direct heap contract.
+`shared_binding_list_and_record_literals_remain_independent_after_snapshot_round_trip`
+commits the PB6 shape: list and record literals repeat one heap-backed binding,
+the original is mutated, and canonical encode/decode proves both literal copies
+remain independent.
+
+The two generic `fixed_argc()` fallthroughs no longer assert compiler
+invariants with `expect`. Heap planning and intrinsic dispatch now return
+`ContextDependentIntrinsicMisdispatch`, a typed runtime error, if a future
+context-dependent intrinsic lacks its required explicit arm.
 
 Map no longer isolates an item before `begin_function_call`, because ordinary
 argument lowering already performs the required isolation. The redundant deep
@@ -148,6 +168,8 @@ The fix round adds or extends these named probes:
 - `effect_suspension_inside_a_user_function_with_heap_argument_round_trips`
 - `suspended_caller_and_callee_preserve_heap_arguments_and_locals`
 - `resume_rejects_cross_function_active_and_return_instruction_pointers`
+- `continuation_decode_rejects_an_active_function_without_a_root_frame`
+- `shared_binding_list_and_record_literals_remain_independent_after_snapshot_round_trip`
 - `caller_and_callee_iterators_round_trip_and_corrupt_frames_fail_closed`
 - `resume_validates_closures_in_active_frames_globals_and_nested_containers`
 - `resume_reports_unknown_closure_function_indices_by_name`
@@ -177,6 +199,16 @@ occurrence-counter stability, and independent-process continuation determinism.
 
 No parser, grammar, prompt, or model-visible Lashlang test was changed.
 
+## Final polish dispositions
+
+| Residual | Disposition |
+| --- | --- |
+| `ip == range.end` acceptance | Fixed. Active root and function PCs accept the owning end boundary; the run loop treats function end as an implicit `Return`, and the updated cross-range regression proves root and function completion. |
+| Function-table ordering assumption | Fixed. `CompiledFunction` owns an explicit `end_ip`; range validation no longer consults the next table entry. |
+| `Build*` to `heap_native` rationale and PB6 | Fixed. The plan-change rationale is recorded above, and the shared-binding list/record mutation survives canonical encode/decode in a committed regression. |
+| `fixed_argc()` `expect` calls | Fixed. Both sites propagate the typed `ContextDependentIntrinsicMisdispatch` runtime error. |
+| Bottom-frame owner check | Fixed. Decode explicitly requires an active function's bottom frame to be root-owned, with a scalar-only malformed wire proving rejection independent of heap reachability. |
+
 ## Performance
 
 Release measurements from the final 500-iteration `just perf-guard` run:
@@ -204,7 +236,7 @@ bytes. All 837 runtime and 686 Lashlang budget checks passed.
 | Command | Result |
 | --- | --- |
 | `cargo check --workspace --all-targets --locked` | PASS |
-| `cargo test --workspace` | PASS; Lashlang unit battery: 407 passed |
+| `cargo test -p lashlang` | PASS; 409 unit tests plus all integration, property, prompt, stack-budget, value-semantics, and benchmark-contract tests |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS |
 | `cargo fmt --all --check` | PASS |
 | `python3 scripts/check_included_file_formatting.py` | PASS; 32 included files |
@@ -214,9 +246,8 @@ bytes. All 837 runtime and 686 Lashlang budget checks passed.
 | `python3 scripts/check_api_example_coverage.py` | PASS; 8,065 host entries plus checked low-level dispositions |
 | `just perf-guard` | PASS; 837 runtime + 686 Lashlang checks, zero failures |
 
-The red-first repro, both reviews' committed probe classes, the public docs
-example, and the state-snapshot validation suite were also run directly and
-pass.
+The updated range-end regression, malformed bottom-frame wire, and PB6
+shared-binding snapshot regression were also rerun directly and pass.
 
 ## Reviewable commits
 

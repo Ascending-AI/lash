@@ -401,6 +401,9 @@ pub enum RuntimeError {
     /// Loop bytecode executed without its required loop state.
     #[error("missing loop state")]
     MissingLoopState,
+    /// A context-dependent intrinsic reached a generic path without an explicit arm.
+    #[error("context-dependent intrinsic reached generic {context}")]
+    ContextDependentIntrinsicMisdispatch { context: &'static str },
 }
 
 impl RuntimeError {
@@ -659,6 +662,9 @@ mod tests {
             RuntimeError::InvalidAggregateAwaitRecordShape,
             RuntimeError::VmStackUnderflow,
             RuntimeError::MissingLoopState,
+            RuntimeError::ContextDependentIntrinsicMisdispatch {
+                context: "heap planning",
+            },
         ];
 
         for error in errors {
@@ -907,6 +913,9 @@ mod tests {
                 }
                 RuntimeError::VmStackUnderflow => "vm stack underflow",
                 RuntimeError::MissingLoopState => "missing loop state",
+                RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => {
+                    "context-dependent intrinsic reached generic heap planning"
+                }
             };
 
             assert_eq!(error.to_string(), expected);

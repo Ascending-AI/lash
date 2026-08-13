@@ -12,11 +12,10 @@ fn function_code_range(
                 .functions
                 .get(index_usize)
                 .ok_or(ContinuationError::UnknownFunction { index })?;
-            let end = chunk
-                .functions
-                .get(index_usize + 1)
-                .map_or(chunk.code.len(), |next| next.entry_ip);
-            Ok((compiled.entry_ip..end, format!("function {index}")))
+            Ok((
+                compiled.entry_ip..compiled.end_ip,
+                format!("function {index}"),
+            ))
         }
     }
 }
@@ -26,7 +25,9 @@ pub(super) fn validate_program_continuation(
     chunk: &Chunk,
 ) -> Result<(), ContinuationError> {
     let (active_range, active_owner) = function_code_range(chunk, continuation.active_function)?;
-    if !active_range.contains(&continuation.instruction_pointer) {
+    if !active_range.contains(&continuation.instruction_pointer)
+        && continuation.instruction_pointer != active_range.end
+    {
         return Err(ContinuationError::InstructionPointerOutsideCodeRange {
             location: "active".to_string(),
             instruction_pointer: continuation.instruction_pointer,

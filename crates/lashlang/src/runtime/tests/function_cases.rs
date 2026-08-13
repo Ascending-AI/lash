@@ -370,16 +370,14 @@ async fn resume_rejects_cross_function_active_and_return_instruction_pointers() 
     let caller = nested.frame_stack[1]
         .function
         .expect("caller frame records its function") as usize;
+    let function_end = |index: usize| program.chunk.functions[index].end_ip;
     let sibling = (0..program.chunk.functions.len())
-        .find(|index| *index != leaf && *index != caller)
-        .expect("sibling function");
-    let function_end = |index: usize| {
-        program
-            .chunk
-            .functions
-            .get(index + 1)
-            .map_or(program.chunk.code.len(), |function| function.entry_ip)
-    };
+        .find(|index| {
+            *index != leaf
+                && *index != caller
+                && program.chunk.functions[*index].entry_ip != function_end(leaf)
+        })
+        .expect("non-adjacent sibling function");
 
     let mut active_function_to_root = nested.clone();
     active_function_to_root.instruction_pointer = 0;
@@ -391,12 +389,23 @@ async fn resume_rejects_cross_function_active_and_return_instruction_pointers() 
 
     let mut active_exact_end = nested.clone();
     active_exact_end.instruction_pointer = function_end(leaf);
-    assert_resume_rejects_program_counter(&program, active_exact_end);
+    active_exact_end.operand_stack.push(Value::Number(1.0));
+    assert_eq!(
+        round_trip_and_resume(&program, active_exact_end).await,
+        ExecutionOutcome::Finished(Value::Number(1.0)),
+        "a function resumed at its exact end must return its stacked result"
+    );
 
     let mut root_to_function = nested.clone();
     root_to_function.frame_stack.clear();
     root_to_function.active_function = None;
-    root_to_function.instruction_pointer = program.chunk.functions[leaf].entry_ip;
+    root_to_function.instruction_pointer = program
+        .chunk
+        .functions
+        .iter()
+        .find(|function| function.entry_ip != program.chunk.root_code_len)
+        .expect("function start beyond the accepted root end")
+        .entry_ip;
     root_to_function.slots = nested.frame_stack[0].slots.clone();
     root_to_function.projected_slots = nested.frame_stack[0].projected_slots.clone();
     root_to_function.globals = nested.frame_stack[0].globals.clone();
@@ -411,7 +420,11 @@ async fn resume_rejects_cross_function_active_and_return_instruction_pointers() 
     root_exact_end.projected_slots = nested.frame_stack[0].projected_slots.clone();
     root_exact_end.globals = nested.frame_stack[0].globals.clone();
     root_exact_end.iterator_stack = nested.frame_stack[0].iterator_stack.clone();
-    assert_resume_rejects_program_counter(&program, root_exact_end);
+    assert_eq!(
+        round_trip_and_resume(&program, root_exact_end).await,
+        ExecutionOutcome::Continued,
+        "root resumed at its exact end must complete without executing function code"
+    );
 
     let mut return_root_to_function = nested.clone();
     return_root_to_function.frame_stack[0].return_instruction_pointer =

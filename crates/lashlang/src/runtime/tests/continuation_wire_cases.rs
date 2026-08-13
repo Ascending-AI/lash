@@ -66,6 +66,16 @@ fn continuation_decode_rejects_inline_compound_heap_members() {
     );
 }
 
+#[test]
+fn continuation_decode_rejects_an_active_function_without_a_root_frame() {
+    // This is the scalar-only shape left after stripping the root frame from a
+    // one-deep function call. No heap reachability accident is available to
+    // reject it, so the frame-owner invariant itself must do so.
+    let wire = r#"{"format_version":2,"instruction_pointer":1,"active_function":0,"operand_stack":[],"last_value":{"kind":"unset"},"slots":[],"projected_slots":[],"globals":{"kind":"record","value":[]},"iterator_stack":[],"frame_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":1,"active_execution_elapsed":{"secs":0,"nanos":0},"heap":{"next_id":1,"allocation_counter":0,"live_logical_bytes":0,"size_schedule_version":1,"objects":[]}}"#;
+
+    reject_continuation(wire, "must have a root-owned bottom frame");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn accepted_continuation_wire_survives_resume_suspend_and_re_encode() {
     // An accepted wire has to stay accepted across a full round of execution:
@@ -452,6 +462,45 @@ async fn a_store_allocates_one_object_per_live_object() {
             "allocation count for {source:?}"
         );
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shared_binding_list_and_record_literals_remain_independent_after_snapshot_round_trip() {
+    let program = compile_source("a = [1]\nxs = [a, a]\nrecord = { left: a, right: a }\na[0] = 9")
+        .expect("shared-binding literal program should compile");
+    let mut state = State::new();
+    execute_compiled(&program, &mut state, &Host)
+        .await
+        .expect("shared-binding literal program should run");
+
+    let encoded = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("shared-binding state should encode");
+    let decoded =
+        Snapshot::from_canonical_bytes(&encoded).expect("shared-binding state should decode");
+    let restored = State::from_snapshot(decoded);
+
+    let original = Value::List(vec![Value::Number(1.0)].into());
+    assert_eq!(
+        restored.globals().get("a"),
+        Some(&Value::List(vec![Value::Number(9.0)].into()))
+    );
+    assert_eq!(
+        restored.globals().get("xs"),
+        Some(&Value::List(
+            vec![original.clone(), original.clone()].into()
+        ))
+    );
+    assert_eq!(
+        restored.globals().get("record"),
+        Some(&Value::Record(std::sync::Arc::new({
+            let mut record = Record::new();
+            record.insert("left".to_string(), original.clone());
+            record.insert("right".to_string(), original);
+            record
+        })))
+    );
 }
 
 /// A concatenation that runs out of memory partway leaves the accumulator
