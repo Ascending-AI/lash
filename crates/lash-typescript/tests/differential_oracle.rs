@@ -38,7 +38,6 @@ fn committed_node_expectations_match_the_accepted_dialect() {
         };
         *lane_counts.entry(lane).or_default() += 1;
         let expression: String = serde_json::from_str(expression_json).expect("expression JSON");
-        let expected: String = serde_json::from_str(expected_json).expect("expected JSON");
 
         if *disposition == "reject" {
             let error = lash_typescript::compile(&format!("finish({expression});"))
@@ -46,8 +45,21 @@ fn committed_node_expectations_match_the_accepted_dialect() {
             assert_eq!(error.code.as_str(), *diagnostic, "expression: {expression}");
             continue;
         }
+        if *disposition == "runtime-reject" {
+            let program = lash_typescript::compile(&format!("finish({expression});"))
+                .expect("runtime-only deviation must compile");
+            let error =
+                futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+                    .expect_err("registered runtime deviation must reject");
+            assert!(
+                error.to_string().contains(diagnostic),
+                "expression: {expression}; error: {error}"
+            );
+            continue;
+        }
         assert_eq!(*disposition, "accept", "unknown disposition");
-        assert!(diagnostic.is_empty(), "accepted rows have no diagnostic");
+        assert_eq!(*diagnostic, "-", "accepted rows have no diagnostic");
+        let expected: String = serde_json::from_str(expected_json).expect("expected JSON");
         let source = format!("finish(`${{{expression}}}`);");
         let program = lash_typescript::compile(&source)
             .unwrap_or_else(|error| panic!("compile `{expression}`: {error}"));
