@@ -10,10 +10,11 @@ use std::collections::BTreeSet;
 
 use lash_trace::{
     TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLashlangExecutionEvent,
-    TraceLashlangExecutionIdentity, TraceLashlangStatus, TraceLlmRequest, TraceLlmResponse,
-    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
-    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRecord,
+    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLanguageExecutionEvent,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionStatus, TraceLlmRequest,
+    TraceLlmResponse, TraceProviderReplayDropEvent, TraceProviderReplayDropReason,
+    TraceProviderReplayKind, TraceProviderRequestEvent, TraceProviderRouteIdentity,
+    TraceProviderStreamEvent, TraceRecord,
     TraceRuntimeScope, TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage,
     TraceToolCallOutcome, TraceToolCallOutput,
 };
@@ -82,8 +83,8 @@ fn token_usage_sample() -> TraceTokenUsage {
     }
 }
 
-fn lashlang_identity() -> TraceLashlangExecutionIdentity {
-    TraceLashlangExecutionIdentity {
+fn lashlang_identity() -> TraceLanguageExecutionIdentity {
+    TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
         subject: TraceRuntimeSubject::Process {
             process_id: "p1".to_string(),
@@ -270,11 +271,12 @@ fn event_samples() -> Vec<TraceEvent> {
             usage: token_usage_sample(),
             cumulative: Some(token_usage_sample()),
         },
-        TraceEvent::LashlangExecution {
-            event: TraceLashlangExecutionEvent::ExecutionFinished {
+        TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: TraceLanguageExecutionEvent::ExecutionFinished {
                 event_key: "process:p1:finished".to_string(),
                 identity: lashlang_identity(),
-                status: TraceLashlangStatus::Completed,
+                status: TraceLanguageExecutionStatus::Completed,
                 error: None,
             },
         },
@@ -311,7 +313,7 @@ const ALL_TRACE_EVENT_KINDS: &[&str] = &[
     "tool_call_completed",
     "protocol_step",
     "token_usage",
-    "lashlang_execution",
+    "language_execution",
     "turn_completed",
     "custom",
 ];
@@ -747,19 +749,21 @@ fn protocol_step_exec_diagnostic_full_shape() {
 }
 
 #[test]
-fn lashlang_execution_full_shape() {
-    let event = TraceEvent::LashlangExecution {
-        event: TraceLashlangExecutionEvent::ExecutionFinished {
+fn language_execution_full_shape() {
+    let event = TraceEvent::LanguageExecution {
+        language: "lashlang".to_string(),
+        event: TraceLanguageExecutionEvent::ExecutionFinished {
             event_key: "process:p1:finished".to_string(),
             identity: lashlang_identity(),
-            status: TraceLashlangStatus::Completed,
+            status: TraceLanguageExecutionStatus::Completed,
             error: None,
         },
     };
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
         json!({
-            "type": "lashlang_execution",
+            "type": "language_execution",
+            "language": "lashlang",
             "event": {
                 "kind": "execution_finished",
                 "event_key": "process:p1:finished",

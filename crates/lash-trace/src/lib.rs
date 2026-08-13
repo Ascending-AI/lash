@@ -397,8 +397,9 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cumulative: Option<TraceTokenUsage>,
     },
-    LashlangExecution {
-        event: TraceLashlangExecutionEvent,
+    LanguageExecution {
+        language: String,
+        event: TraceLanguageExecutionEvent,
     },
     TurnCompleted {
         status: String,
@@ -482,7 +483,7 @@ impl TraceEvent {
             Self::StoreErrorObserved { .. } => "store_error_observed",
             Self::ProtocolStep { .. } => "protocol_step",
             Self::TokenUsage { .. } => "token_usage",
-            Self::LashlangExecution { .. } => "lashlang_execution",
+            Self::LanguageExecution { .. } => "language_execution",
             Self::TurnCompleted { .. } => "turn_completed",
             Self::Custom { .. } => "custom",
         }
@@ -841,7 +842,7 @@ impl TraceRuntimeSubject {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceLashlangExecutionIdentity {
+pub struct TraceLanguageExecutionIdentity {
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
     pub module_ref: String,
@@ -851,7 +852,7 @@ pub struct TraceLashlangExecutionIdentity {
     pub entry_name: String,
 }
 
-impl TraceLashlangExecutionIdentity {
+impl TraceLanguageExecutionIdentity {
     pub fn graph_key(&self) -> String {
         self.subject.graph_key(&self.scope)
     }
@@ -859,22 +860,22 @@ impl TraceLashlangExecutionIdentity {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TraceLashlangExecutionEvent {
+pub enum TraceLanguageExecutionEvent {
     ExecutionStarted {
         event_key: String,
-        identity: TraceLashlangExecutionIdentity,
-        execution_map: TraceLashlangMap,
+        identity: TraceLanguageExecutionIdentity,
+        execution_map: TraceLanguageExecutionMap,
     },
     ExecutionFinished {
         event_key: String,
-        identity: TraceLashlangExecutionIdentity,
-        status: TraceLashlangStatus,
+        identity: TraceLanguageExecutionIdentity,
+        status: TraceLanguageExecutionStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
     NodeStarted {
         event_key: String,
-        identity: TraceLashlangExecutionIdentity,
+        identity: TraceLanguageExecutionIdentity,
         node_id: String,
         node_kind: String,
         label: String,
@@ -882,7 +883,7 @@ pub enum TraceLashlangExecutionEvent {
     },
     NodeCompleted {
         event_key: String,
-        identity: TraceLashlangExecutionIdentity,
+        identity: TraceLanguageExecutionIdentity,
         node_id: String,
         node_kind: String,
         label: String,
@@ -890,7 +891,7 @@ pub enum TraceLashlangExecutionEvent {
     },
     NodeFailed {
         event_key: String,
-        identity: TraceLashlangExecutionIdentity,
+        identity: TraceLanguageExecutionIdentity,
         node_id: String,
         node_kind: String,
         label: String,
@@ -899,7 +900,7 @@ pub enum TraceLashlangExecutionEvent {
     },
     BranchSelected {
         event_key: String,
-        identity: TraceLashlangExecutionIdentity,
+        identity: TraceLanguageExecutionIdentity,
         node_id: String,
         occurrence: u64,
         edge_id: String,
@@ -907,15 +908,15 @@ pub enum TraceLashlangExecutionEvent {
     },
     ChildStarted {
         event_key: String,
-        identity: TraceLashlangExecutionIdentity,
+        identity: TraceLanguageExecutionIdentity,
         parent_node_id: String,
         occurrence: u64,
-        child: TraceLashlangChildExecution,
+        child: TraceLanguageChildExecution,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceLashlangChildExecution {
+pub struct TraceLanguageChildExecution {
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -926,7 +927,7 @@ pub struct TraceLashlangChildExecution {
     pub entry_name: Option<String>,
 }
 
-impl TraceLashlangChildExecution {
+impl TraceLanguageChildExecution {
     pub fn graph_key(&self) -> String {
         self.subject.graph_key(&self.scope)
     }
@@ -934,7 +935,7 @@ impl TraceLashlangChildExecution {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TraceLashlangStatus {
+pub enum TraceLanguageExecutionStatus {
     Running,
     Completed,
     Failed,
@@ -949,20 +950,20 @@ pub enum TraceBranchSelection {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceLashlangMap {
+pub struct TraceLanguageExecutionMap {
     pub module_ref: String,
     pub entry_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_ref: Option<String>,
     pub entry_name: String,
     #[serde(default)]
-    pub nodes: Vec<TraceLashlangMapNode>,
+    pub nodes: Vec<TraceLanguageExecutionMapNode>,
     #[serde(default)]
-    pub edges: Vec<TraceLashlangMapEdge>,
+    pub edges: Vec<TraceLanguageExecutionMapEdge>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceLashlangMapNode {
+pub struct TraceLanguageExecutionMapNode {
     pub id: String,
     pub kind: String,
     pub label: String,
@@ -978,7 +979,7 @@ pub struct TraceLabelMetadata {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceLashlangMapEdge {
+pub struct TraceLanguageExecutionMapEdge {
     pub id: String,
     pub from: String,
     pub to: String,
@@ -1207,8 +1208,8 @@ mod tests {
     }
 
     #[test]
-    fn lashlang_execution_records_are_jsonl_shaped() {
-        let identity = TraceLashlangExecutionIdentity {
+    fn language_execution_records_are_jsonl_shaped() {
+        let identity = TraceLanguageExecutionIdentity {
             scope: TraceRuntimeScope::new("s1"),
             subject: TraceRuntimeSubject::Process {
                 process_id: "p1".to_string(),
@@ -1218,7 +1219,7 @@ mod tests {
             entry_ref: Some("component:0".to_string()),
             entry_name: "main".to_string(),
         };
-        let event = TraceLashlangExecutionEvent::NodeStarted {
+        let event = TraceLanguageExecutionEvent::NodeStarted {
             event_key: "process:p1:node:n1:1:started".to_string(),
             identity,
             node_id: "n1".to_string(),
@@ -1228,21 +1229,26 @@ mod tests {
         };
         let record = TraceRecord::new(
             TraceContext::default().for_session("s1"),
-            TraceEvent::LashlangExecution { event },
+            TraceEvent::LanguageExecution {
+                language: "lashlang".to_string(),
+                event,
+            },
         );
 
-        let json = serde_json::to_value(&record).expect("serialize lashlang execution");
-        assert_eq!(json["type"], "lashlang_execution");
+        let json = serde_json::to_value(&record).expect("serialize language execution");
+        assert_eq!(json["type"], "language_execution");
+        assert_eq!(json["language"], "lashlang");
         assert_eq!(json["event"]["kind"], "node_started");
         assert_eq!(json["event"]["event_key"], "process:p1:node:n1:1:started");
 
         let round_trip =
-            serde_json::from_value::<TraceRecord>(json).expect("deserialize lashlang execution");
+            serde_json::from_value::<TraceRecord>(json).expect("deserialize language execution");
         assert!(matches!(
             round_trip.event,
-            TraceEvent::LashlangExecution {
-                event: TraceLashlangExecutionEvent::NodeStarted { .. }
-            }
+            TraceEvent::LanguageExecution {
+                language,
+                event: TraceLanguageExecutionEvent::NodeStarted { .. }
+            } if language == "lashlang"
         ));
     }
 
