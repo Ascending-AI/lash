@@ -943,9 +943,10 @@ pub use tool_intent::{
     ToolResultDone, derive_tool_intent_identity,
 };
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,
-    ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall,
+    OrchestratingToolCall, OrchestrationContext, PreparedToolBatch, PreparedToolBatchCall,
+    PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider,
 };
 
 #[cfg(test)]

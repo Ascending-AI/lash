@@ -51,6 +51,15 @@ repos:
         files: '\.rs$'
         pass_filenames: false
 
+      # Orchestrating provider bodies are authored replay code. Keep obvious
+      # nondeterminism out of their entrypoints before it reaches a journal.
+      - id: orchestrating-tool-determinism
+        name: orchestrating tool determinism
+        language: system
+        entry: python3 scripts/lint_orchestrating_tools.py
+        files: '^crates/.*\.rs$'
+        pass_filenames: false
+
       # Restate retries non-terminal handler failures indefinitely; production
       # handler code must use typed errors rather than panic-capable operations.
       - id: restate-handler-panic-boundary

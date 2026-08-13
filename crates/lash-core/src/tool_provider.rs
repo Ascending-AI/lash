@@ -13,6 +13,7 @@ use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolResult};
 mod attachments;
 mod direct_completion;
 mod dispatch;
+mod orchestration;
 mod process;
 pub(crate) mod process_events;
 mod session;
@@ -21,6 +22,7 @@ mod triggers;
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
+pub use orchestration::{OrchestratingToolCall, OrchestrationContext};
 pub use process::ToolSessionProcessAdmin;
 pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;
@@ -111,6 +113,7 @@ pub struct AttemptContext<'run> {
     attempt_number: u32,
     max_attempts: u32,
     replay_key: Option<String>,
+    execution_env_spec: crate::ProcessExecutionEnvSpec,
     completion_key: Option<crate::AwaitEventKey>,
     completion_supported: bool,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -155,10 +158,20 @@ impl<'run> AttemptContext<'run> {
             attempt_number: context.attempt_number,
             max_attempts: context.max_attempts,
             replay_key: context.replay_key.clone(),
+            execution_env_spec: context.execution_env_spec.clone(),
             completion_key,
             completion_supported,
             phase_probe,
         }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn __for_testing(
+        context: &ToolContext<'run>,
+        execution_scope_id: impl Into<String>,
+    ) -> Self {
+        Self::from_tool_context(context, execution_scope_id.into(), None, false)
     }
 
     pub fn session_id(&self) -> &str {
@@ -218,6 +231,11 @@ impl<'run> AttemptContext<'run> {
     }
     pub fn replay_key(&self) -> Option<&str> {
         self.replay_key.as_deref()
+    }
+    /// Return the recorded process execution environment for a leaf intent
+    /// that starts a tool- or engine-backed process.
+    pub fn process_execution_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
+        self.execution_env_spec.clone()
     }
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>
     where
@@ -1316,6 +1334,42 @@ pub trait ToolProvider: Send + Sync + 'static {
             )));
         };
         self.execute_attempt(AttemptToolCall {
+            name: &manifest.name,
+            args,
+            context,
+        })
+        .await
+    }
+    /// Whether this tool id uses authored process-replay execution instead of
+    /// the recorded attempt coordinator.
+    fn supports_orchestration_context(&self, _tool_id: &ToolId) -> bool {
+        false
+    }
+    /// Execute an opted-in tool body as deterministic process-replay code.
+    async fn execute_orchestration(&self, call: OrchestratingToolCall<'_>) -> ToolResult {
+        ToolResult::failure(crate::ToolFailure {
+            class: crate::ToolFailureClass::Unavailable,
+            code: "tool_orchestration_context_not_implemented".to_string(),
+            message: format!(
+                "tool `{}` has not implemented the orchestration context signature",
+                call.name
+            ),
+            source: crate::ToolFailureSource::Runtime,
+            retry: crate::ToolRetryDisposition::Never,
+            raw: None,
+        })
+    }
+    /// Resolve an opted-in orchestrating tool by stable catalog identity.
+    async fn execute_orchestration_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &OrchestrationContext<'_>,
+    ) -> ToolResult {
+        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
+            return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
+        };
+        self.execute_orchestration(OrchestratingToolCall {
             name: &manifest.name,
             args,
             context,

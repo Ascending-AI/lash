@@ -22,8 +22,8 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
         // language-specific runtimes into the kernel.
         match input.as_ref() {
             crate::ProcessInput::ToolCall { call } => {
-                let (output, actions) = self
-                    .run_process_tool_call(ProcessToolCallRun {
+                let (output, actions) = Box::pin(
+                    self.run_process_tool_call(ProcessToolCallRun {
                         registration,
                         registry: Arc::clone(&registry),
                         call: call.clone(),
@@ -33,8 +33,9 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                             .expect("process worker installs execution write authority"),
                         scoped_effect_controller,
                         cancellation,
-                    })
-                    .await;
+                    }),
+                )
+                .await;
                 if actions.is_empty() {
                     Ok(crate::ProcessRunOutcome::Terminal(Box::new(output)))
                 } else {

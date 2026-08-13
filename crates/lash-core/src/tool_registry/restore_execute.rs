@@ -287,6 +287,11 @@ impl ToolProvider for ToolRegistry {
             .is_ok_and(|(source, _)| source.supports_attempt_context(tool_id))
     }
 
+    fn supports_orchestration_context(&self, tool_id: &ToolId) -> bool {
+        self.resolve_execution_source(tool_id)
+            .is_ok_and(|(source, _)| source.supports_orchestration_context(tool_id))
+    }
+
 
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.resolve_execution_source(tool_id)
@@ -304,6 +309,21 @@ impl ToolProvider for ToolRegistry {
             Err(result) => return crate::ToolAttemptResult::from_tool_result(result),
         };
         source.execute_attempt_by_id(tool_id, args, context).await
+    }
+
+    async fn execute_orchestration_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::OrchestrationContext<'_>,
+    ) -> ToolResult {
+        let (source, _) = match self.resolve_execution_source(tool_id) {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        source
+            .execute_orchestration_by_id(tool_id, args, context)
+            .await
     }
 
     async fn execute_by_id(

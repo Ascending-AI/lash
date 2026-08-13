@@ -911,14 +911,12 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::ToolBatch { batch } => {
-                let outcome = self
-                    .context
-                    .execute_prepared_tool_batch_launches(
-                        batch,
-                        envelope.invocation,
-                        self.child_trace_hooks,
-                    )
-                    .await?;
+                let outcome = Box::pin(self.context.execute_prepared_tool_batch_launches(
+                    batch,
+                    envelope.invocation,
+                    self.child_trace_hooks,
+                ))
+                .await?;
                 Ok(RuntimeEffectOutcome::ToolBatch {
                     launches: outcome.launches,
                     triggers: outcome.triggers,
@@ -1037,19 +1035,17 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     call_record,
                 })
             }
-            RuntimeEffectCommand::ToolBatch { batch } => runner
-                .driver
-                .run_tool_batch(
-                    batch,
-                    envelope.invocation,
-                    &runner.event_tx,
-                    &runner.cancellation,
-                )
-                .await
-                .map(|outcome| RuntimeEffectOutcome::ToolBatch {
-                    launches: outcome.launches,
-                    triggers: outcome.triggers,
-                }),
+            RuntimeEffectCommand::ToolBatch { batch } => Box::pin(runner.driver.run_tool_batch(
+                batch,
+                envelope.invocation,
+                &runner.event_tx,
+                &runner.cancellation,
+            ))
+            .await
+            .map(|outcome| RuntimeEffectOutcome::ToolBatch {
+                launches: outcome.launches,
+                triggers: outcome.triggers,
+            }),
             RuntimeEffectCommand::ExecCode { language, code } => {
                 let result = runner
                     .driver

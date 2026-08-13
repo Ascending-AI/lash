@@ -372,8 +372,12 @@ pub fn lashlang_resources_from_tool_catalog(
     catalog: &lash_core::ToolCatalog,
 ) -> Result<LashlangHostCatalog, LashlangRuntimeError> {
     let mut host_catalog = LashlangHostCatalog::new();
-    // Every catalog member is callable; membership is the execution gate.
+    // Every externally activated catalog member is callable. Internal members
+    // remain registry-resolvable for runtime-owned process bodies only.
     for entry in catalog.tools.iter() {
+        if entry.manifest.activation == lash_core::ToolActivation::Internal {
+            continue;
+        }
         let lashlang_binding = required_tool_lashlang_executable(&entry.manifest)?;
         let operation_binding = catalog
             .resolve_contract(&entry.manifest.name)

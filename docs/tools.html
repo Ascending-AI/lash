@@ -60,6 +60,15 @@
           <p>Declare <code>attempt_may_defer</code> only when the leaf can actually return <code>Pending</code>; Lash reserves a process-lifetime completion key only for declared-deferable providers.</p>
         </div>
 
+        <div class="section" id="orchestrating-tools">
+          <div class="section-header">
+            <h2>Orchestrating Tools</h2>
+            <p>If a tool must await durable work in the middle of its body, opt that tool id into <code>OrchestrationContext</code> instead of an atomic attempt.</p>
+          </div>
+          <p><code>execute_orchestration(OrchestratingToolCall)</code> runs as authored process-replay code and never enters the tool-attempt coordinator. Its start, await, signal, cancel, and nested-batch commands are direct children of the enclosing replay invocation; the orchestration body itself has no <code>ToolAttempt</code> frame. Use this shape sparingly: protocol-standard <code>batch</code> owns recursive scheduling through <code>call_tool_batch</code>, and <code>spawn_agent</code> starts and immediately awaits its prepared child.</p>
+          <p>The determinism contract is strict: orchestration code must not read wall clock or randomness, let unordered iteration choose command order, perform unjournaled I/O, or leave a journaled action un-awaited. If a tool only needs to cause durable work, keep it leaf-shaped and return an intent instead.</p>
+        </div>
+
         <div class="section" id="fixed-tools">
           <div class="section-header">
             <h2>Fixed Tools</h2>

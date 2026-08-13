@@ -10,7 +10,7 @@ impl RuntimeSessionServices {
         crate::ProcessAwaitOutput,
         Vec<crate::ToolIntentParentEndAction>,
     ) {
-        let result = self.execute_process_tool_call(run).await;
+        let result = Box::pin(self.execute_process_tool_call(run)).await;
         match result {
             Ok((output, actions)) => (crate::ProcessAwaitOutput::from_tool_output(output), actions),
             Err(err) => (
@@ -75,10 +75,32 @@ impl RuntimeSessionServices {
                 Arc::clone(&self.current.host.core.clock),
             )
             .build();
-        let retry_policy =
-            crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch.as_ref(), &call.tool_id)
-                .map(|manifest| manifest.retry_policy)
-                .unwrap_or(crate::ToolRetryPolicy::Never);
+        let manifest =
+            crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch.as_ref(), &call.tool_id);
+        if manifest
+            .as_ref()
+            .is_some_and(|manifest| manifest.activation == crate::ToolActivation::Internal)
+        {
+            let outcome = crate::tool_dispatch::execute_internal_process_tool(
+                dispatch.as_ref(),
+                call,
+                tool_context,
+            )
+            .await;
+            return Ok((outcome.record.output, Vec::new()));
+        }
+        if dispatch.tools.supports_orchestration_context(&call.tool_id) {
+            let outcome = crate::tool_dispatch::execute_orchestrating_tool(
+                dispatch.as_ref(),
+                call,
+                tool_context,
+            )
+            .await;
+            return Ok((outcome.record.output, Vec::new()));
+        }
+        let retry_policy = manifest
+            .map(|manifest| manifest.retry_policy)
+            .unwrap_or(crate::ToolRetryPolicy::Never);
         let coordinated = crate::tool_dispatch::coordinate_tool_invocation(
             dispatch.as_ref(),
             call,

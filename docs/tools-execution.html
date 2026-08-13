@@ -108,7 +108,7 @@ ToolResult::pending(PendingCompletion::new())</code></pre>
             </div>
             <div class="listing__row">
               <div class="listing__label">composition</div>
-              <div class="listing__body"><p>When work needs several independently durable effects, waits, or decisions, decompose it into process steps. Nested tool-batch dispatch is unavailable inside an attempt because it would create ambiguous nested durability.</p></div>
+              <div class="listing__body"><p>When work needs several independently durable effects, waits, or decisions, decompose it into process steps. A rare model-facing operation that must await durable work mid-body implements the distinct <code>OrchestrationContext</code> provider shape; it runs as deterministic process-replay code with no enclosing <code>ToolAttempt</code>. Nested tool-batch dispatch remains unavailable inside an atomic attempt.</p></div>
             </div>
           </div>
           <h3>Choose The Durable Boundary</h3>

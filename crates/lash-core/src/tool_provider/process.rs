@@ -131,6 +131,25 @@ impl ToolSessionProcessAdmin<'_> {
             )
             .await
     }
+
+    pub(crate) async fn signal_with_id(
+        &self,
+        process_id: &str,
+        signal_name: &str,
+        signal_id: String,
+        payload: serde_json::Value,
+    ) -> Result<crate::ProcessEvent, PluginError> {
+        self.processes
+            .signal(
+                &self.session_id,
+                process_id,
+                signal_name.to_string(),
+                signal_id,
+                payload,
+                self.process_scope(),
+            )
+            .await
+    }
 }
 
 #[cfg(test)]

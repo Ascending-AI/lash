@@ -20,17 +20,34 @@ does not submit a nested `Direct` envelope. This decision depends only on the
 operation's position inside a tool attempt, so inline and workflow-backed tiers
 follow the same path.
 
-The two-line implementation law is:
+The implementation law has two provider shapes:
 
-> `DirectLocal` execution is reserved for Lash-owned deterministic interpreters
-> (`ExecCode` and `ToolBatch`).
-> Opaque host code gets one atomic journaled entry per attempt.
+> If you need to await durable work mid-body, you are orchestration — declare
+> process shape. If you only need to cause it, return an intent.
 
-`ExecCode` and `ToolBatch` may be rebuilt during workflow replay because Lash
-owns their interpreters and their nested atomic effects have stable identities.
-That exception does not extend to a `ToolProvider::execute` implementation.
-Nested tool-batch dispatch from a tool attempt remains prohibited; authors must
-decompose that composition into process steps.
+Leaf providers receive `AttemptContext` and execute as one opaque recorded
+attempt. Orchestrating providers opt in per tool id and receive the distinct
+`OrchestrationContext`; their body never enters `coordinate_tool_invocation`
+and has no enclosing `ToolAttempt`. The body is authored process-replay code,
+so every journal command it issues is a direct child of the enclosing process
+invocation. `ExecCode`, runtime-owned `batch`, and `spawn_agent` use that replay
+shape; leaf tools cannot recursively dispatch a batch.
+
+The orchestration-body determinism contract is binding: no wall clock, random
+number generation, or unordered iteration may drive commands; no unjournaled
+I/O is permitted; and every journaled action is immediately awaited. The
+`orchestrating-tool-determinism` pre-commit lint rejects cheap-to-detect
+violations at each `execute_orchestration` entrypoint. Structural runtime laws
+additionally assert the actual command frames: `batch` and `spawn_agent` have
+no `ToolAttempt` frame of their own, while their journaled children retain
+stable direct lineage.
+
+An internal owner-bound `ProcessInput::ToolCall` body is a different boundary:
+it is the process activity itself and may perform host I/O. Core executes an
+`Internal` process tool directly, with panic containment but without a
+`ToolAttempt`; that route is not exposed to model-facing providers as an escape
+from the orchestration determinism contract. The internal shell runner uses
+this boundary for PTY ownership and journaled signal-event waits.
 
 FIG-1127 completion (2026-08-12) replaces the falsified static route inventory
 with this structural rule:
@@ -57,7 +74,13 @@ pin the ordinal behavior, including active crash-redrive laws for the formerly
 unguarded await, cancel, and signal routes. The PostgreSQL crash/replay law
 proves the converse: its controller is key-addressed by stable replay key, so
 nested commands remain safe and all guarded capabilities stay available there.
-Runtime-owned tiers are likewise unaffected.
+Runtime-owned tiers are likewise unaffected. Layer 2 reclassifies the shipped
+tool routes without weakening those legacy-capability guards:
+`shell.start`/detach declare `StartProcess`, `shell.write` declares
+`SignalProcess`, and `processes.cancel` declares `CancelProcess`; `spawn_agent`
+and protocol-standard `batch` use process-replay orchestration. The five tools
+therefore have one behavior on every tier even while the direct legacy
+`ToolContext` routes remain fenced until the aggregate cutover deletes them.
 
 FIG-1291 ships the capability-separated authoring model. A provider opts in with
 `supports_attempt_context` and receives the sealed, controller-free
@@ -107,11 +130,19 @@ boundaries so an early-segment start is governed at the real process end.
 Successful and refused adjudications emit structured evidence containing the
 full identity, policy, child process id, and typed outcome.
 
-Layer 2 assigns policy per tool. In particular, `shell.start` maps to
-`Abandon`: its owner-bound command is intentionally allowed to continue across
-turns, so the generic default `Cancel` would contradict that tool's lifecycle.
-Other tools must choose explicitly when their child lifetime differs from the
-v1 default.
+`shell.start` and its detached form map explicitly to `Abandon`: their
+owner-bound commands intentionally continue across turns, so the generic
+default `Cancel` would contradict the tool lifecycle. Their leaf result prints
+the identity-derived process id; the coordinator drains the recorded start
+before any later model step. `shell.write` and `processes.cancel` project their
+recorded signal/cancel requests and receive typed intent outcome addenda.
+
+Protocol-standard retains the model-facing `batch` contract and argument/result
+projection, while its execution is runtime-owned orchestration through
+`OrchestrationContext::call_tool_batch`. This is the minimal home: protocol owns
+syntax, limits, and projection; runtime owns recursive scheduling and durable
+command frames. `spawn_agent` likewise starts its prepared child and
+immediately awaits that exact process through the orchestration context.
 
 The former `ToolContext::durable_effects()` facade and its `DurableStep`
 producer are removed, including the serialized command and outcome. External

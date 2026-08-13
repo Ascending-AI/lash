@@ -371,12 +371,11 @@ async fn concurrent_batch_drains_intents_in_call_order_then_intent_index() {
         ],
     );
 
-    let outcome = execution
-        .execute_prepared_tool_batch_launches(
+    let outcome = Box::pin(execution.execute_prepared_tool_batch_launches(
             batch,
             intent_law_batch_parent("intent-order-parent"),
             std::collections::HashMap::new(),
-        )
+        ))
         .await
         .expect("execute ordered intent batch");
     assert_eq!(outcome.launches.len(), 2);
@@ -423,12 +422,11 @@ async fn cancellation_before_result_commit_executes_no_intents() {
         )],
     );
     let run = crate::task::spawn(async move {
-        execution
-            .execute_prepared_tool_batch_launches(
+        Box::pin(execution.execute_prepared_tool_batch_launches(
                 batch,
                 intent_law_batch_parent("pre-result-cancel-parent"),
                 std::collections::HashMap::new(),
-            )
+            ))
             .await
     });
     entered.notified().await;
@@ -475,12 +473,11 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
         )],
     );
     let run = crate::task::spawn(async move {
-        execution
-            .execute_prepared_tool_batch_launches(
+        Box::pin(execution.execute_prepared_tool_batch_launches(
                 batch,
                 intent_law_batch_parent("post-result-cancel-parent"),
                 std::collections::HashMap::new(),
-            )
+            ))
             .await
     });
     controller.wait_until_paused().await;

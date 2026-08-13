@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::plugin::ToolResultHookContext;
 use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolResult};
+use futures_util::FutureExt as _;
 
-#[cfg(test)]
 use super::context::ToolDispatchOutcome;
 use super::context::{
     PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchContext, launch_done, outcome,
@@ -11,6 +11,128 @@ use super::context::{
 };
 use super::directives::apply_after_tool_directives;
 use super::retry::{execute_granted_leaf_tool_attempt, execute_leaf_tool_attempt};
+
+/// Runs an authored process-replay tool body without creating a ToolAttempt
+/// frame. Any durable operations the body issues are consequently direct
+/// children of the enclosing process replay and must be awaited by the body.
+pub(crate) async fn execute_orchestrating_tool<'run>(
+    context: &ToolDispatchContext<'run>,
+    prepared: PreparedToolCall,
+    tool_context: ToolContext<'run>,
+) -> ToolDispatchOutcome {
+    let started = context.clock.now();
+    let tool_name = prepared.tool_name.clone();
+    let args = prepared.args.clone();
+    let orchestration_context = crate::OrchestrationContext::from_tool_context(
+        tool_context.with_prepared_payload(prepared.prepared_payload.clone()),
+    );
+    let result = std::panic::AssertUnwindSafe(context.tools.execute_orchestration_by_id(
+        &prepared.tool_id,
+        &prepared.args,
+        &orchestration_context,
+    ))
+    .catch_unwind()
+    .await
+    .unwrap_or_else(|payload| {
+        let message = crate::panic_containment::payload_message(payload.as_ref());
+        crate::panic_containment::enforce_loudness(payload);
+        ToolResult::failure(crate::ToolFailure::runtime(
+            ToolFailureClass::Internal,
+            "tool_panicked",
+            message,
+        ))
+    });
+    let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
+    let result = finalize_tool_result_with_execution_context(
+        context,
+        &tool_name,
+        &args,
+        result,
+        duration_ms,
+    )
+    .await;
+    let output = match result {
+        ToolResult::Done(output) => *output,
+        ToolResult::Pending(_) => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+            ToolFailureClass::Internal,
+            "orchestrating_tool_returned_pending",
+            "orchestrating tools must immediately await journaled actions and return a completed result",
+        )),
+    };
+    ToolDispatchOutcome {
+        record: crate::ToolCallRecord {
+            call_id: Some(prepared.call_id),
+            tool: tool_name,
+            args,
+            output,
+            duration_ms,
+        },
+        attempts: Vec::new(),
+        intents: crate::ToolIntents::default(),
+        intent_outcomes: Vec::new(),
+    }
+}
+
+/// Runs an internal process-body tool without creating a `ToolAttempt` frame.
+///
+/// Unlike authored orchestration, this is the owner-bound activity of the
+/// process itself and may perform host I/O. It is available only to
+/// `ToolActivation::Internal` process inputs, never to model-facing calls.
+pub(crate) async fn execute_internal_process_tool<'run>(
+    context: &ToolDispatchContext<'run>,
+    prepared: PreparedToolCall,
+    tool_context: ToolContext<'run>,
+) -> ToolDispatchOutcome {
+    let started = context.clock.now();
+    let tool_name = prepared.tool_name.clone();
+    let args = prepared.args.clone();
+    let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
+    let result = std::panic::AssertUnwindSafe(context.tools.execute_by_id(
+        &prepared.tool_id,
+        &prepared.args,
+        &tool_context,
+    ))
+    .catch_unwind()
+    .await
+    .unwrap_or_else(|payload| {
+        let message = crate::panic_containment::payload_message(payload.as_ref());
+        crate::panic_containment::enforce_loudness(payload);
+        ToolResult::failure(crate::ToolFailure::runtime(
+            ToolFailureClass::Internal,
+            "tool_panicked",
+            message,
+        ))
+    });
+    let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
+    let result = finalize_tool_result_with_execution_context(
+        context,
+        &tool_name,
+        &args,
+        result,
+        duration_ms,
+    )
+    .await;
+    let output = match result {
+        ToolResult::Done(output) => *output,
+        ToolResult::Pending(_) => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+            ToolFailureClass::Internal,
+            "internal_process_tool_returned_pending",
+            "internal process-body tools must return a completed result",
+        )),
+    };
+    ToolDispatchOutcome {
+        record: crate::ToolCallRecord {
+            call_id: Some(prepared.call_id),
+            tool: tool_name,
+            args,
+            output,
+            duration_ms,
+        },
+        attempts: Vec::new(),
+        intents: crate::ToolIntents::default(),
+        intent_outcomes: Vec::new(),
+    }
+}
 
 #[cfg(test)]
 pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(

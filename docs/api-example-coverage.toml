@@ -72680,6 +72680,15 @@ disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
 
 [[api]]
+symbol = "lash::tools::AttemptContext::process_execution_env_spec"
+kind = "function"
+aliases = ["lash_core::AttemptContext::process_execution_env_spec"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Host extension contract for leaf StartProcess intent providers; first-party shell tools exercise the recorded environment while application examples do not implement third-party providers."
+
+[[api]]
 symbol = "lash::tools::AttemptContext::provider"
 kind = "function"
 aliases = ["lash_core::AttemptContext::provider"]
@@ -74234,3 +74243,206 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract carrying the recorded child process identity and Cancel or Abandon policy until durable parent completion."
+
+[[api]]
+symbol = "lash::tools::OrchestratingToolCall"
+kind = "struct"
+aliases = ["lash_core::OrchestratingToolCall"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestratingToolCall::args"
+kind = "field"
+aliases = ["lash_core::OrchestratingToolCall::args"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestratingToolCall::context"
+kind = "field"
+aliases = ["lash_core::OrchestratingToolCall::context"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestratingToolCall::name"
+kind = "field"
+aliases = ["lash_core::OrchestratingToolCall::name"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext"
+kind = "struct"
+aliases = ["lash_core::OrchestrationContext"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::await_process"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::await_process"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::cancel_process"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::cancel_process"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::call_tool_batch"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::call_tool_batch"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::callable_tool_manifest"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::callable_tool_manifest"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::decode_prepared_payload"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::decode_prepared_payload"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::emit_child_process_started"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::emit_child_process_started"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::prepared_payload"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::prepared_payload"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::session_id"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::session_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::signal_process"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::signal_process"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::start_process"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::start_process"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::OrchestrationContext::tool_call_id"
+kind = "function"
+aliases = ["lash_core::OrchestrationContext::tool_call_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::StaticToolExecute::execute_attempt"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::StaticToolExecute::execute_orchestration"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::StaticToolExecute::supports_attempt_context"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::StaticToolExecute::supports_orchestration_context"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::execute_orchestration"
+kind = "function"
+aliases = ["lash_core::ToolProvider::execute_orchestration"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::execute_orchestration_by_id"
+kind = "function"
+aliases = ["lash_core::ToolProvider::execute_orchestration_by_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::supports_orchestration_context"
+kind = "function"
+aliases = ["lash_core::ToolProvider::supports_orchestration_context"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."

@@ -21,6 +21,7 @@ pub(crate) use context::{
 #[cfg(test)]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub(crate) use execution::{
+    execute_internal_process_tool, execute_orchestrating_tool,
     execute_prepared_tool_attempt_effect, finalize_tool_result_with_execution_context,
 };
 pub(crate) use intent_executor::{execute_final_tool_intents, execute_parent_end_actions};

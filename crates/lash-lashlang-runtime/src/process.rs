@@ -863,12 +863,12 @@ impl LashlangProcessHost<'_> {
     ) -> ProcessHostAbilityFuture<'a> {
         match op {
             lashlang::AbilityOp::ResourceOperation(operation) => Box::pin(async move {
-                self.resource_operation(
+                Box::pin(self.resource_operation(
                     operation.operation,
                     operation.receiver,
                     operation.args,
                     operation.call_site,
-                )
+                ))
                 .await
                 .map(lashlang::AbilityResult::Value)
             }),
