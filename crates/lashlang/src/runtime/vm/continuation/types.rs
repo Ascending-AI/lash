@@ -267,6 +267,15 @@ pub enum ContinuationError {
         finally_instruction_pointer: Option<usize>,
         catches: bool,
     },
+    #[error(
+        "continuation handler {handler} is not live at instruction {anchor}: its scope covers ({push_ip}, {end_ip}]"
+    )]
+    HandlerScopeNotLive {
+        handler: usize,
+        anchor: usize,
+        push_ip: usize,
+        end_ip: usize,
+    },
     #[error("continuation handler {handler} is not nested inside handler {outer}: {reason}")]
     HandlerNestingNotMonotonic {
         handler: usize,

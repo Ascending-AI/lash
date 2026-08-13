@@ -105,6 +105,38 @@ pub(super) fn validate_program_continuation(
                 catches: handler.catches,
             });
         }
+        // Nesting alone leaves a handler unanchored: it need only name *some*
+        // scope in the right function, so a single-entry stack can be pointed
+        // at a sibling scope and run the wrong cleanup. The innermost handler
+        // of each frame is therefore tied to the code position that frame is
+        // actually sitting at; outer handlers of the same frame are tied to the
+        // inner one by the nesting chain below.
+        let innermost_in_frame = continuation
+            .handler_stack
+            .get(handler_index + 1)
+            .is_none_or(|inner| {
+                inner.frame_depth != handler.frame_depth
+                    || inner.frame_function != handler.frame_function
+            });
+        if innermost_in_frame {
+            let anchor = if handler.frame_depth == continuation.frame_stack.len() {
+                continuation.instruction_pointer
+            } else {
+                continuation.frame_stack[handler.frame_depth].return_instruction_pointer
+            };
+            // The scope is live from just after its `PushHandler` until the
+            // region ends. A handler is never on the stack while its own
+            // `finally` body runs, and suspension inside a `catch` body is
+            // covered by the catch-cleanup scope's own extent.
+            if anchor <= scope.push_ip || anchor > scope.end_ip {
+                return Err(ContinuationError::HandlerScopeNotLive {
+                    handler: handler_index,
+                    anchor,
+                    push_ip: scope.push_ip,
+                    end_ip: scope.end_ip,
+                });
+            }
+        }
         if let Some((outer_index, outer)) = enclosing
             && continuation.handler_stack[outer_index].frame_depth == handler.frame_depth
             && continuation.handler_stack[outer_index].frame_function == handler.frame_function
