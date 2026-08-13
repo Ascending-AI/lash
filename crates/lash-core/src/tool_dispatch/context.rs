@@ -46,24 +46,49 @@ pub(crate) struct ToolTriggerOutcomeBuffer {
     queue: Arc<Mutex<Vec<ToolTriggerEffectOutcome>>>,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ParentEndAction {
-    pub identity: crate::ToolIntentIdentity,
-    pub policy: crate::ProcessParentEndPolicy,
-}
-
 #[derive(Clone, Default)]
-pub(crate) struct ParentEndActionBuffer {
-    queue: Arc<Mutex<Vec<ParentEndAction>>>,
+pub(crate) struct RecordedToolIntentOutcomeBuffer {
+    outcomes: Arc<Mutex<Vec<crate::ToolIntentExecutionOutcome>>>,
 }
 
-impl ParentEndActionBuffer {
-    pub(crate) fn enqueue(&self, action: ParentEndAction) {
-        self.queue.lock_recover().push(action);
+impl RecordedToolIntentOutcomeBuffer {
+    pub(crate) fn record(&self, outcomes: &[crate::ToolIntentExecutionOutcome]) {
+        let mut recorded = self.outcomes.lock_recover();
+        for outcome in outcomes {
+            let crate::ToolIntentExecutionOutcome::Executed {
+                identity,
+                parent_end: Some(_),
+                ..
+            } = outcome
+            else {
+                continue;
+            };
+            if recorded.iter().any(|recorded| {
+                matches!(
+                    recorded,
+                    crate::ToolIntentExecutionOutcome::Executed {
+                        identity: recorded_identity,
+                        parent_end: Some(_),
+                        ..
+                    } if recorded_identity.replay_key == identity.replay_key
+                )
+            }) {
+                continue;
+            }
+            recorded.push(outcome.clone());
+        }
     }
 
-    pub(crate) fn drain(&self) -> Vec<ParentEndAction> {
-        self.queue.lock_recover().drain(..).collect()
+    pub(crate) fn snapshot(&self) -> Vec<crate::ToolIntentExecutionOutcome> {
+        self.outcomes.lock_recover().clone()
+    }
+
+    pub(crate) fn record_launches(&self, launches: &[crate::runtime::ToolCallLaunch]) {
+        for launch in launches {
+            if let crate::runtime::ToolCallLaunch::Done { result } = launch {
+                self.record(&result.intent_outcomes);
+            }
+        }
     }
 }
 
@@ -98,7 +123,7 @@ pub struct ToolDispatchContext<'run> {
     pub event_tx: mpsc::Sender<SessionStreamEvent>,
     pub(crate) checkpoint_messages: CheckpointMessageBuffer,
     pub(crate) trigger_outcomes: ToolTriggerOutcomeBuffer,
-    pub(crate) parent_end_actions: ParentEndActionBuffer,
+    pub(crate) recorded_intent_outcomes: RecordedToolIntentOutcomeBuffer,
     pub attachment_store: Arc<crate::SessionAttachmentStore>,
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     pub turn_context: crate::TurnContext,
@@ -131,7 +156,7 @@ impl<'run> ToolDispatchContext<'run> {
             event_tx: self.event_tx.clone(),
             checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),
-            parent_end_actions: self.parent_end_actions.clone(),
+            recorded_intent_outcomes: self.recorded_intent_outcomes.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
             attachment_source_policy: Arc::clone(&self.attachment_source_policy),
             turn_context: self.turn_context.clone(),

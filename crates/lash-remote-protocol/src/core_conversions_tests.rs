@@ -920,6 +920,7 @@ fn remote_turn_result_maps_core_semantics() {
         },
         kind: RemoteToolIntentKind::EmitProcessEvent,
         result: serde_json::json!({"sequence": 3}),
+        parent_end: None,
     };
     let remote = RemoteTurnResult::from_core(
         "session",
@@ -955,7 +956,12 @@ fn remote_turn_result_maps_core_semantics() {
         .expect("attempt evidence crosses the remote result boundary");
     assert_eq!(evidence.served_model.as_deref(), Some("served-model"));
     assert_eq!(evidence.reasoning_output_tokens, Some(0));
-    assert_eq!(remote.tool_calls[0].intent_outcomes, vec![intent_outcome]);
+    assert!(matches!(
+        remote.activities.get(1),
+        Some(RemoteTurnActivity {
+            event: RemoteTurnEvent::ToolIntentOutcome { outcome, .. }, ..
+        }) if outcome == &intent_outcome
+    ));
     assert!(matches!(
         &remote.tool_calls[0].outcome,
         RemoteToolCallOutcome::Success(value) if value == &serde_json::json!({ "ok": true })

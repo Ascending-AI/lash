@@ -95,7 +95,7 @@ impl AttemptProcessReads {
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
     session_id: String,
-    turn_id: String,
+    execution_scope_id: String,
     agent_frame_id: crate::AgentFrameId,
     sessions: AttemptSessionReads,
     processes: AttemptProcessReads,
@@ -119,7 +119,7 @@ pub struct AttemptContext<'run> {
 impl<'run> AttemptContext<'run> {
     pub(crate) fn from_tool_context(
         context: &ToolContext<'run>,
-        turn_id: String,
+        execution_scope_id: String,
         completion_key: Option<crate::AwaitEventKey>,
         completion_supported: bool,
     ) -> Self {
@@ -133,7 +133,7 @@ impl<'run> AttemptContext<'run> {
             .and_then(|dispatch| dispatch.turn_context.provider().cloned());
         Self {
             session_id: context.session_id.clone(),
-            turn_id,
+            execution_scope_id,
             agent_frame_id: context.agent_frame_id.clone(),
             sessions: AttemptSessionReads {
                 session_id: context.session_id.clone(),
@@ -164,8 +164,8 @@ impl<'run> AttemptContext<'run> {
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
-    pub fn turn_id(&self) -> &str {
-        &self.turn_id
+    pub fn execution_scope_id(&self) -> &str {
+        &self.execution_scope_id
     }
     pub fn agent_frame_id(&self) -> &str {
         &self.agent_frame_id
@@ -248,7 +248,7 @@ impl<'run> AttemptContext<'run> {
     ) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
         crate::derive_tool_intent_identity(
             &self.session_id,
-            &self.turn_id,
+            &self.execution_scope_id,
             self.tool_call_id.as_deref(),
             intent_index,
         )

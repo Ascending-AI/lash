@@ -666,7 +666,10 @@ impl crate::ProcessEngine for ProductionChainEngine {
                 .await
                 .expect("drive production roots");
             drop(runtime);
-            runtime_guard.shutdown().await;
+            runtime_guard
+                .shutdown(true)
+                .await
+                .expect("finish launcher parent-end teardown");
             return Ok(Self::success(process_id));
         }
 
@@ -756,7 +759,10 @@ impl crate::ProcessEngine for ProductionChainEngine {
             self.begin_work();
         }
         drop(runtime);
-        runtime_guard.shutdown().await;
+        runtime_guard
+            .shutdown(true)
+            .await
+            .expect("finish process parent-end teardown");
         self.end_work();
         Ok(Self::success(process_id))
     }

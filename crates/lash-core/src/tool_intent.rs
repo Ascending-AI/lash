@@ -1,4 +1,5 @@
 use crate::{ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason};
+pub use lash_sansio::ProcessParentEndPolicy;
 use serde::{Deserialize, Serialize};
 
 /// The only intent-to-command protocol understood by this build.
@@ -64,14 +65,6 @@ impl ToolIntent {
             Self::EmitProcessEvent(intent) => &intent.session_id,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessParentEndPolicy {
-    Abandon,
-    #[default]
-    Cancel,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

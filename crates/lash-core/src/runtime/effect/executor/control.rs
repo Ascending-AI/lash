@@ -439,6 +439,13 @@ impl<'run> ScopedEffectController<'run> {
             scope: self.scope.clone(),
         })
     }
+
+    pub(crate) fn owned_controller(&self) -> Option<Arc<dyn RuntimeEffectController>> {
+        match &self.controller {
+            ScopedEffectControllerInner::Shared(controller) => Some(Arc::clone(controller)),
+            ScopedEffectControllerInner::Borrowed(_) => None,
+        }
+    }
 }
 
 pub(crate) mod facade_ops {

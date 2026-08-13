@@ -15,8 +15,8 @@ pub(crate) use attempt_coordinator::{
     BatchIntentDrainGate, IntentDrainSlot, ToolAttemptEffectIdentity, coordinate_tool_invocation,
 };
 pub(crate) use context::{
-    CheckpointMessageBuffer, ParentEndActionBuffer, PendingToolDispatchOutcome, ToolCallLaunch,
-    ToolDispatchOutcome, ToolPreparationOutcome, ToolTriggerOutcomeBuffer,
+    CheckpointMessageBuffer, PendingToolDispatchOutcome, RecordedToolIntentOutcomeBuffer,
+    ToolCallLaunch, ToolDispatchOutcome, ToolPreparationOutcome, ToolTriggerOutcomeBuffer,
 };
 #[cfg(test)]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;

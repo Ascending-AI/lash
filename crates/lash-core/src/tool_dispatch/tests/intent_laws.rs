@@ -516,109 +516,134 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
 }
 
 #[tokio::test]
-async fn committed_intents_survive_lease_takeover_and_a_later_head_cas_loss() {
-    let event_types = ["intent.survivor.committed"];
+async fn parent_end_policies_are_literal_and_redrive_stable() {
+    let mut context = dispatch_context();
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-    register_intent_law_target(&registry, &event_types).await;
-    let calls = Arc::new(AtomicUsize::new(0));
-    let controller = Arc::new(IntentReplayController::new(None));
-    let context = fixed_intent_dispatch_context(
-        controller,
-        Arc::clone(&registry),
-        recorded_event_intents(&event_types),
-        calls,
+    context.processes = crate::testing::effect_backed_process_service(registry.clone());
+    let policies = [
+        crate::ProcessParentEndPolicy::Abandon,
+        crate::ProcessParentEndPolicy::Cancel,
+    ];
+    let intents = crate::ToolIntents::v1(
+        policies
+            .into_iter()
+            .enumerate()
+            .map(|(index, policy)| {
+                crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+                    session_id: "session".to_string(),
+                    request: crate::ProcessStartRequest::external(
+                        format!("ignored-parent-policy-{index}"),
+                        crate::ProcessOriginator::host_scoped("parent-policy-law"),
+                        json!({"policy_index": index}),
+                    ),
+                    on_parent_end: policy,
+                }))
+            })
+            .collect(),
     );
-    let outcome = run_fixed_intent_attempt(&context).await;
-    assert!(matches!(
-        outcome.intent_outcomes.as_slice(),
-        [crate::ToolIntentExecutionOutcome::Executed { .. }]
-    ));
-
-    let clock = Arc::new(crate::testing::TestClock::new(1_000));
-    let store = Arc::new(crate::InMemorySessionStore::with_clock(
-        Arc::clone(&clock) as Arc<dyn crate::Clock>
-    ));
-    store
-        .admit_and_bind_session(&crate::SessionBinding::root("session"))
-        .await
-        .expect("bind survivor-law session");
-    let stale_owner = crate::LeaseOwnerIdentity::opaque("stale", "incarnation-a");
-    let stale_lease = store
-        .try_claim_session_execution_lease("session", &stale_owner, 100)
-        .await
-        .expect("claim the original lease")
-        .acquired()
-        .expect("the original lease is free");
-    clock.advance(101);
-    let successor_owner = crate::LeaseOwnerIdentity::opaque("successor", "incarnation-b");
-    let successor_lease = store
-        .try_claim_session_execution_lease("session", &successor_owner, 100)
-        .await
-        .expect("claim after expiry")
-        .acquired()
-        .expect("the successor takes over the expired lease");
-    assert!(successor_lease.fencing_token > stale_lease.fencing_token);
-
-    let state = crate::RuntimeSessionState {
-        session_id: "session".to_string(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let (winning, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
-        .with_operation(crate::OperationId::turn(
-            "session",
-            "survivor-turn",
-            "winning-commit",
-        ))
-        .expect("stamp winning commit identity");
-    let (stale, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
-        .with_operation(crate::OperationId::turn(
-            "session",
-            "survivor-turn",
-            "stale-commit",
-        ))
-        .expect("stamp stale commit identity");
-    store
-        .commit_runtime_state(
-            winning.releasing_session_execution_lease(successor_lease.completion()),
-        )
-        .await
-        .expect("successor wins the head CAS");
-    let stale_commit_owner = crate::LeaseOwnerIdentity::opaque("stale-cas", "incarnation-c");
-    let stale_commit_lease = store
-        .try_claim_session_execution_lease("session", &stale_commit_owner, 100)
-        .await
-        .expect("claim authority for the stale CAS attempt")
-        .acquired()
-        .expect("the winning commit released the lane");
-    let error = store
-        .commit_runtime_state(
-            stale.releasing_session_execution_lease(stale_commit_lease.completion()),
-        )
-        .await
-        .expect_err("the stale conversational tail must lose the head CAS");
+    let outcomes =
+        execute_final_tool_intents(&context, Some("parent-policy-call"), &intents, None).await;
     assert!(
-        matches!(
-            &error,
-            StoreError::HeadRevisionConflict {
-                expected: 0,
-                actual: 1
-            }
-        ),
-        "stale head produced the wrong typed error: {error:?}"
-    );
-
-    let events = registry
-        .events_after("intent-law-target", 0)
-        .await
-        .expect("read survivor intent events");
-    assert_eq!(
-        events
+        outcomes
             .iter()
-            .filter(|event| event.event_type == "intent.survivor.committed")
-            .count(),
-        1,
-        "durable intent evidence survives lease takeover and discarded conversational state"
+            .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
     );
+    let process_ids = outcomes
+        .iter()
+        .map(|outcome| match outcome {
+            crate::ToolIntentExecutionOutcome::Executed { identity, .. } => {
+                identity.replay_key.clone()
+            }
+            other => panic!("expected executed start, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+
+    context.recorded_intent_outcomes.record(&outcomes);
+    intent_executor::execute_parent_end_actions(&context)
+        .await
+        .expect("execute first parent-end actions");
+    let first_events = futures_util::future::try_join_all(
+        process_ids
+            .iter()
+            .map(|process_id| registry.events_after(process_id, 0)),
+    )
+    .await
+    .expect("read first parent-end event sets");
+    assert_eq!(
+        first_events
+            .iter()
+            .map(|events| {
+                events
+                    .iter()
+                    .filter(|event| event.event_type == "process.cancel_requested")
+                    .count()
+            })
+            .collect::<Vec<_>>(),
+        vec![0, 1],
+        "Abandon is a recorded no-op and Cancel emits exactly one command"
+    );
+    assert_eq!(
+        first_events[1][0].payload["reason"],
+        json!("recorded start intent parent ended with cancel policy")
+    );
+    context.recorded_intent_outcomes.record(&outcomes);
+    intent_executor::execute_parent_end_actions(&context)
+        .await
+        .expect("redrive parent-end actions");
+    let redriven_events = futures_util::future::try_join_all(
+        process_ids
+            .iter()
+            .map(|process_id| registry.events_after(process_id, 0)),
+    )
+    .await
+    .expect("read redriven parent-end event sets");
+    assert_eq!(
+        serde_json::to_vec(&redriven_events).expect("serialize redriven events"),
+        serde_json::to_vec(&first_events).expect("serialize first events"),
+        "parent-end command outcomes are byte-stable on redrive"
+    );
+}
+
+#[tokio::test]
+async fn parent_end_cancel_refusal_is_typed_and_operator_visible() {
+    let mut context = dispatch_context();
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    context.processes = crate::testing::effect_backed_process_service(registry);
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
+    context.event_tx = event_tx;
+    let identity = crate::ToolIntentIdentity {
+        session_id: "session".to_string(),
+        execution_scope_id: "turn".to_string(),
+        tool_call_id: "missing-parent-end-call".to_string(),
+        intent_index: 0,
+        replay_key: "missing-parent-end-intent".to_string(),
+    };
+    context
+        .recorded_intent_outcomes
+        .record(&[crate::ToolIntentExecutionOutcome::Executed {
+            identity,
+            kind: crate::ToolIntentKind::StartProcess,
+            result: json!({"id": "missing-parent-end-child"}),
+            parent_end: Some(crate::ToolIntentParentEnd {
+                process_id: "missing-parent-end-child".to_string(),
+                policy: crate::ProcessParentEndPolicy::Cancel,
+            }),
+        }]);
+
+    intent_executor::execute_parent_end_actions(&context)
+        .await
+        .expect("a business refusal is a recorded parent-end outcome");
+    let event = event_rx
+        .recv()
+        .await
+        .expect("operator-visible refusal event");
+    let crate::SessionStreamEvent::Error { message, envelope } = event else {
+        panic!("parent-end refusal must register an error event");
+    };
+    assert!(message.contains("missing-parent-end-child"));
+    let envelope = envelope.expect("typed parent-end error envelope");
+    assert_eq!(envelope.kind, "tool_intent_parent_end");
+    assert_eq!(envelope.code.as_deref(), Some("plugin"));
 }
 
 #[tokio::test]

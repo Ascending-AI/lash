@@ -499,7 +499,7 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::clone(&attachment_store),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -622,7 +622,7 @@ pub fn atomic_tool_context_with_services<'run>(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -666,16 +666,29 @@ impl EffectBackedProcessService {
             scope.parent_invocation.clone(),
             &effect_id,
         );
-        let outcome = scope
-            .controller()
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::process(command),
-                ),
-                crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None),
-            )
-            .await?;
+        let controller = scope.controller();
+        let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
+            controller,
+            scope.effect_controller.scoped().execution_scope().clone(),
+        )
+        .map_err(crate::RuntimeEffectControllerError::from)?;
+        let local_executor =
+            crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None)
+                .with_process_effect_controller(
+                    proxy
+                        .owned_controller()
+                        .expect("effect-task proxy owns its controller"),
+                );
+        let outcome = crate::runtime::effect::drive_effect_controller_task(
+            controller,
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::process(command),
+            ),
+            local_executor,
+            requests,
+        )
+        .await?;
         outcome.into_process().map_err(crate::PluginError::from)
     }
 }
@@ -845,6 +858,32 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
+    async fn finish_recorded_intent_parent(
+        &self,
+        _session_id: &str,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
+        match self
+            .execute(
+                scope,
+                crate::ProcessCommand::ParentEnd {
+                    identity,
+                    process_id,
+                    policy,
+                    reason,
+                },
+            )
+            .await?
+        {
+            crate::ProcessEffectOutcome::ParentEnd { outcome } => Ok(*outcome),
+            _ => unreachable!("parent-end command returns parent-end outcome"),
+        }
+    }
+
     async fn signal(
         &self,
         _session_id: &str,
@@ -905,7 +944,7 @@ impl crate::ProcessService for EffectBackedProcessService {
                 .with_replay_key(replay_key),
         };
         match self.execute(scope, command).await? {
-            crate::ProcessEffectOutcome::EmitEvent { event } => Ok(*event),
+            crate::ProcessEffectOutcome::EmitEvent { event, .. } => Ok(*event),
             _ => unreachable!("emit-event command returns emit-event outcome"),
         }
     }

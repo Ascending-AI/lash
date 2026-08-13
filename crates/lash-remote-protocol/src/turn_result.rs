@@ -268,8 +268,6 @@ pub struct RemoteToolCallSummary {
     pub args: serde_json::Value,
     pub outcome: RemoteToolCallOutcome,
     pub duration_ms: u64,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub intent_outcomes: Vec<RemoteToolIntentExecutionOutcome>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -288,6 +286,20 @@ pub enum RemoteToolIntentKind {
     SignalProcess,
     CancelProcess,
     EmitProcessEvent,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProcessParentEndPolicy {
+    Abandon,
+    #[default]
+    Cancel,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteToolIntentParentEnd {
+    pub process_id: String,
+    pub policy: RemoteProcessParentEndPolicy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -328,6 +340,8 @@ pub enum RemoteToolIntentExecutionOutcome {
         identity: RemoteToolIntentIdentity,
         kind: RemoteToolIntentKind,
         result: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_end: Option<RemoteToolIntentParentEnd>,
     },
     Refused {
         #[serde(default, skip_serializing_if = "Option::is_none")]

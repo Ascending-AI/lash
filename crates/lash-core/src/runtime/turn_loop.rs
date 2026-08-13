@@ -1404,7 +1404,12 @@ impl LashRuntime {
         turn_index: usize,
         trace_turn_id: String,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
-        driver.finish_parent_end_actions().await?;
+        emit_parent_end_events(
+            driver.finish_parent_end_actions().await?,
+            &mut assembler,
+            events,
+        )
+        .await;
         let RuntimeTurnDriver {
             session,
             policy,
@@ -2871,7 +2876,8 @@ impl LashRuntime {
             pending_turn_input_claims: initial_claims.turn_inputs,
             pending_checkpoint_turn_input_claim: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-            parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             session_execution_lease: session_execution_fence,
             runtime_lease_owner: self.runtime_lease_owner.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
@@ -2927,6 +2933,12 @@ impl LashRuntime {
                     ))
                     .await;
                 }
+                emit_parent_end_events(
+                    driver.finish_parent_end_actions().await?,
+                    &mut assembler,
+                    events,
+                )
+                .await;
                 let driver = driver.into_inner();
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                 let RuntimeTurnDriver {
@@ -2943,6 +2955,12 @@ impl LashRuntime {
                 return Err(err);
             }
             Err(err) => {
+                emit_parent_end_events(
+                    driver.finish_parent_end_actions().await?,
+                    &mut assembler,
+                    events,
+                )
+                .await;
                 let driver = driver.into_inner();
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                 let RuntimeTurnDriver {
@@ -2967,7 +2985,12 @@ impl LashRuntime {
             "runtime post-run_task"
         );
 
-        driver.finish_parent_end_actions().await?;
+        emit_parent_end_events(
+            driver.finish_parent_end_actions().await?,
+            &mut assembler,
+            events,
+        )
+        .await;
         let RuntimeTurnDriver {
             session,
             policy,
@@ -3152,6 +3175,17 @@ impl TurnActivitySink for TurnScopedActivitySink<'_> {
 
     async fn emit(&self, activity: TurnActivity) {
         self.inner.emit_for_turn(&self.turn_id, activity).await;
+    }
+}
+
+async fn emit_parent_end_events(
+    parent_end_events: Vec<SessionStreamEvent>,
+    assembler: &mut TurnAssembler,
+    events: &dyn EventSink,
+) {
+    for event in parent_end_events {
+        assembler.push(&event);
+        emit_session_event_to_sink(events, event).await;
     }
 }
 

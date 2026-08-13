@@ -49,16 +49,6 @@ impl RemoteTurnResult {
             errors,
         } = turn;
         let activities = activities.into_iter().collect::<Vec<_>>();
-        let mut intent_outcomes_by_call =
-            HashMap::<String, Vec<RemoteToolIntentExecutionOutcome>>::new();
-        for activity in &activities {
-            if let RemoteTurnEvent::ToolIntentOutcome { call_id, outcome } = &activity.event {
-                intent_outcomes_by_call
-                    .entry(call_id.clone())
-                    .or_default()
-                    .push(outcome.clone());
-            }
-        }
         let parent = RemoteUsage::from(token_usage);
         let children = children_usage
             .into_iter()
@@ -84,18 +74,7 @@ impl RemoteTurnResult {
                 total,
             },
             execution: execution.into(),
-            tool_calls: tool_calls
-                .into_iter()
-                .map(|record| {
-                    let mut summary = RemoteToolCallSummary::from(record);
-                    if let Some(call_id) = summary.call_id.as_ref() {
-                        summary.intent_outcomes = intent_outcomes_by_call
-                            .remove(call_id)
-                            .unwrap_or_default();
-                    }
-                    summary
-                })
-                .collect(),
+            tool_calls: tool_calls.into_iter().map(RemoteToolCallSummary::from).collect(),
             llm_calls: llm_calls.into_iter().map(Into::into).collect(),
             issues: errors.into_iter().map(Into::into).collect(),
             activities,
@@ -274,10 +253,12 @@ impl From<lash_core::ToolIntentExecutionOutcome> for RemoteToolIntentExecutionOu
                 identity,
                 kind,
                 result,
+                parent_end,
             } => Self::Executed {
                 identity: identity.into(),
                 kind: kind.into(),
                 result,
+                parent_end: parent_end.map(Into::into),
             },
             lash_core::ToolIntentExecutionOutcome::Refused {
                 identity,
@@ -299,6 +280,24 @@ impl From<lash_core::ToolIntentExecutionOutcome> for RemoteToolIntentExecutionOu
     }
 }
 
+impl From<lash_core::ProcessParentEndPolicy> for RemoteProcessParentEndPolicy {
+    fn from(value: lash_core::ProcessParentEndPolicy) -> Self {
+        match value {
+            lash_core::ProcessParentEndPolicy::Abandon => Self::Abandon,
+            lash_core::ProcessParentEndPolicy::Cancel => Self::Cancel,
+        }
+    }
+}
+
+impl From<lash_core::ToolIntentParentEnd> for RemoteToolIntentParentEnd {
+    fn from(value: lash_core::ToolIntentParentEnd) -> Self {
+        Self {
+            process_id: value.process_id,
+            policy: value.policy.into(),
+        }
+    }
+}
+
 impl From<lash_core::ToolCallRecord> for RemoteToolCallSummary {
     fn from(value: lash_core::ToolCallRecord) -> Self {
         let lash_core::ToolCallRecord {
@@ -314,7 +313,6 @@ impl From<lash_core::ToolCallRecord> for RemoteToolCallSummary {
             args,
             outcome: output.into(),
             duration_ms,
-            intent_outcomes: Vec::new(),
         }
     }
 }

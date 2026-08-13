@@ -367,6 +367,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                     },
                     kind: ToolIntentKind::StartProcess,
                     result: json!({"process_id": "p-1"}),
+                    parent_end: None,
                 },
             },
             json!({
@@ -376,7 +377,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                     "status": "executed",
                     "identity": {
                         "session_id": "session-1",
-                        "turn_id": "turn-1",
+                        "execution_scope_id": "turn-1",
                         "tool_call_id": "call-1",
                         "intent_index": 0,
                         "replay_key": "tool-intent:v1:sha256:literal",

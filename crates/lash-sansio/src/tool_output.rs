@@ -50,6 +50,44 @@ impl ToolIntentKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessParentEndPolicy {
+    Abandon,
+    #[default]
+    Cancel,
+}
+
+/// Recorded teardown metadata for a successfully started child process.
+///
+/// The durable tool-batch outcome carries this value so parent-end handling
+/// can be reconstructed after a crash without consulting live side state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolIntentParentEnd {
+    pub process_id: String,
+    pub policy: ProcessParentEndPolicy,
+}
+
+/// Durable result of applying one recorded start intent's parent-end policy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ToolIntentParentEndOutcome {
+    Abandoned {
+        identity: ToolIntentIdentity,
+        process_id: String,
+    },
+    Cancelled {
+        identity: ToolIntentIdentity,
+        process_id: String,
+    },
+    Refused {
+        identity: ToolIntentIdentity,
+        process_id: String,
+        code: String,
+        message: String,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolIntentIdentity {
     pub session_id: String,
@@ -114,6 +152,8 @@ pub enum ToolIntentExecutionOutcome {
         identity: ToolIntentIdentity,
         kind: ToolIntentKind,
         result: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_end: Option<ToolIntentParentEnd>,
     },
     Refused {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -141,6 +181,7 @@ impl ToolIntentExecutionOutcome {
                 identity,
                 kind,
                 result,
+                ..
             } => format!(
                 "[tool intent {} #{} executed: {}]",
                 kind.as_str(),

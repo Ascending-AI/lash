@@ -119,9 +119,10 @@ impl RuntimeSessionServices {
                 .scoped_effect_controller(scoped_effect_controller)
                 .causal_invocation(execution_context_for_runtime.causal_invocation.clone())
                 .build()?;
+            let dispatch = run_context.dispatch();
             let mut context = crate::RuntimeExecutionContext::new(
                 services.current.session_id.clone(),
-                run_context.dispatch(),
+                Arc::clone(&dispatch),
                 Arc::clone(&services.current.host.core.durability.process_env_store),
                 Arc::clone(&services.current.host.core.durability.attachment_store),
                 Arc::new(crate::ChronologicalProjection::default()),
@@ -153,9 +154,14 @@ impl RuntimeSessionServices {
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);
             }
-            let guard = crate::ProcessEngineRunGuard::new(move || {
+            let guard = crate::ProcessEngineRunGuard::new(move |parent_ended| {
                 Box::pin(async move {
+                    if parent_ended {
+                        crate::tool_dispatch::execute_parent_end_actions(dispatch.as_ref()).await?;
+                    }
+                    drop(dispatch);
                     run_context.shutdown().await;
+                    Ok(())
                 })
             });
             Ok(crate::ProcessEngineRuntimeContext::new(context, guard))

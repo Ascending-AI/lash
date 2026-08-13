@@ -127,8 +127,8 @@ impl RuntimeExecutionTracing {
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
-    pub(crate) async fn finish_parent_end_actions(&self) {
-        crate::tool_dispatch::execute_parent_end_actions(self.dispatch.as_ref()).await;
+    pub(crate) async fn finish_parent_end_actions(&self) -> Result<(), crate::PluginError> {
+        crate::tool_dispatch::execute_parent_end_actions(self.dispatch.as_ref()).await
     }
     pub(super) fn process_scope(
         &self,
@@ -669,7 +669,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             })?;
         let event_type = crate::process_signal_event_type(signal_name)?;
         let replay_key = format!("process:{process_id}:signal.{signal_name}:{signal_id}");
-        let signal_payload = payload.clone();
         let command = crate::ProcessCommand::Signal {
             process_id: process_id.to_string(),
             signal_name: signal_name.to_string(),
@@ -683,73 +682,51 @@ impl<'run> RuntimeExecutionContext<'run> {
             self.parent_invocation.clone(),
             &effect_id,
         );
-        let outcome = self
-            .dispatch
-            .effect_controller
-            .controller()
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::process(command),
-                ),
-                crate::RuntimeEffectLocalExecutor::processes(
-                    Arc::clone(&registry),
-                    self.process_work_driver.clone(),
-                ),
+        let controller = self.dispatch.effect_controller.controller();
+        let scoped = self.dispatch.effect_controller.scoped();
+        let (owned_controller, task_requests): (
+            Arc<dyn crate::RuntimeEffectController>,
+            Option<
+                tokio::sync::mpsc::UnboundedReceiver<
+                    crate::runtime::effect::EffectControllerTaskRequest,
+                >,
+            >,
+        ) = if let Some(owned) = scoped.owned_controller() {
+            (owned, None)
+        } else {
+            let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
+                controller,
+                scoped.execution_scope().clone(),
+            )?;
+            (
+                proxy
+                    .owned_controller()
+                    .expect("effect-task proxy owns its controller"),
+                Some(requests),
             )
-            .await?;
+        };
+        let envelope = crate::RuntimeEffectEnvelope::new(
+            invocation,
+            crate::RuntimeEffectCommand::process(command),
+        );
+        let local_executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry),
+            self.process_work_driver.clone(),
+        )
+        .with_process_effect_controller(owned_controller);
+        let outcome = if let Some(task_requests) = task_requests {
+            crate::runtime::effect::drive_effect_controller_task(
+                controller,
+                envelope,
+                local_executor,
+                task_requests,
+            )
+            .await?
+        } else {
+            controller.execute_effect(envelope, local_executor).await?
+        };
         match outcome.into_process()? {
-            crate::ProcessEffectOutcome::Signal { event } => {
-                let waiting_ordinal =
-                    registry
-                        .get_process(process_id)
-                        .await?
-                        .and_then(|record| match record.wait {
-                            Some(crate::WaitState {
-                                kind:
-                                    crate::WaitKind::Signal {
-                                        name,
-                                        event_type: wait_event_type,
-                                        ordinal,
-                                        ..
-                                    },
-                                ..
-                            }) if name == signal_name && wait_event_type == event_type => {
-                                Some(ordinal)
-                            }
-                            _ => None,
-                        });
-                let ordinal = match waiting_ordinal {
-                    Some(ordinal) => ordinal,
-                    None => {
-                        registry
-                            .count_events_through(process_id, &event_type, event.sequence)
-                            .await?
-                    }
-                };
-                if ordinal > 0 {
-                    let key = self
-                        .dispatch
-                        .effect_controller
-                        .controller()
-                        .await_event_key(
-                            &crate::ExecutionScope::process(process_id),
-                            crate::AwaitEventWaitIdentity::process_signal(
-                                process_id,
-                                signal_name,
-                                ordinal,
-                            ),
-                        )
-                        .await?;
-                    let _ = self
-                        .dispatch
-                        .effect_controller
-                        .controller()
-                        .resolve_await_event(&key, crate::Resolution::Ok(signal_payload))
-                        .await?;
-                }
-                Ok(*event)
-            }
+            crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
             other => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                 format!("expected signal outcome, got {other:?}"),
@@ -1023,7 +1000,8 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),

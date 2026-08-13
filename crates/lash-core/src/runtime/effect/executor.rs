@@ -22,7 +22,8 @@ pub use control::{
     Resolution, ResolveOutcome, RuntimeEffectController, ScopedEffectController, SegmentProgress,
 };
 pub(crate) use control::{
-    EffectTaskController, RuntimeEffectControllerHandle, drive_effect_controller_task,
+    EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,
+    drive_effect_controller_task,
 };
 pub use controller_error::RuntimeEffectControllerError;
 pub use trigger::TriggerLocalExecution;
@@ -34,8 +35,6 @@ use crate::provider::ProviderHandle;
 use crate::runtime::{RuntimeStreamEvent, RuntimeTurnDriver};
 use crate::sansio::LlmCallError;
 use crate::{PluginError, RuntimeError};
-#[cfg(test)]
-use control::EffectControllerTaskRequest;
 use control::{RemoteLocalExecutionRequest, ScopedEffectControllerInner};
 
 use super::envelope::{
@@ -106,6 +105,7 @@ pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work_driver: Option<crate::ProcessWorkDriver>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
+    pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
 }
 
 #[allow(private_interfaces)]
@@ -333,6 +333,20 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    pub(crate) fn with_process_effect_controller(
+        mut self,
+        controller: Arc<dyn RuntimeEffectController>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
+            effect_controller: current,
+            ..
+        }) = &mut self.state
+        {
+            *current = Some(controller);
+        }
+        self
+    }
+
     /// Binds process registry and optional work-driver services for effect-host implementors
     /// executing process effects inline.
     pub fn processes(
@@ -344,6 +358,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 registry,
                 process_work_driver,
                 turn_cancellation: None,
+                effect_controller: None,
             }),
             replay_trace: None,
         }
@@ -423,7 +438,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             pending_turn_input_claims: driver.pending_turn_input_claims.clone(),
             pending_checkpoint_turn_input_claim: driver.pending_checkpoint_turn_input_claim.clone(),
             checkpoint_messages: driver.checkpoint_messages.clone(),
-            parent_end_actions: driver.parent_end_actions.clone(),
+            recorded_intent_outcomes: driver.recorded_intent_outcomes.clone(),
             session_execution_lease: driver.session_execution_lease.clone(),
             runtime_lease_owner: driver.runtime_lease_owner.clone(),
             turn_phase_probe: driver.turn_phase_probe.clone(),

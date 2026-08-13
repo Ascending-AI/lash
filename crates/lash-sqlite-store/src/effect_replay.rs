@@ -353,9 +353,11 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.inner
-            .execute_effect(&self.scope, envelope, local_executor)
-            .await
+        Box::pin(
+            self.inner
+                .execute_effect(&self.scope, envelope, local_executor),
+        )
+        .await
     }
 }
 

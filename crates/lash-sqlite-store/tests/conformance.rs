@@ -1652,6 +1652,30 @@ async fn sqlite_effect_host_satisfies_scope_conformance() {
 }
 
 #[tokio::test]
+async fn sqlite_public_signal_intent_wakes_a_parked_process() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let effect_host = Arc::new(
+        SqliteEffectHost::open(&dir.path().join("signal-intent-effects.db"))
+            .await
+            .expect("open SQLite signal-intent effect host"),
+    ) as Arc<dyn EffectHost>;
+    let registry = Arc::new(
+        SqliteProcessRegistry::open(
+            &dir.path().join("signal-intent-processes.db"),
+            dir.path().join("signal-intent-sessions"),
+        )
+        .await
+        .expect("open SQLite signal-intent process registry"),
+    ) as Arc<dyn ProcessRegistry>;
+    lash_core::testing::conformance::public_signal_intent_wakes_parked_process(
+        "sqlite-public-signal-intent",
+        effect_host,
+        registry,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_effect_host_and_controller_reject_non_file_backed_path_spellings() {
     for path in [
         "",

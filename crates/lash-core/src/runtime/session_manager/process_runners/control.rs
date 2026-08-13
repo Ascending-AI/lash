@@ -1,5 +1,6 @@
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -9,6 +10,7 @@ struct ProcessCommandRunner<'scope> {
     registry: Arc<dyn crate::ProcessRegistry>,
     parent_invocation: Option<crate::RuntimeInvocation>,
     effect_controller: &'scope dyn crate::RuntimeEffectController,
+    effect_controller_handle: crate::runtime::RuntimeEffectControllerHandle<'scope>,
     turn_cancellation: Option<crate::ProcessTurnCancellation>,
 }
 
@@ -27,6 +29,7 @@ pub(crate) fn guard_process_command_in_recorded_body(
             crate::ProcessCommand::Start { .. } => "processes().start()",
             crate::ProcessCommand::Await { .. } => "processes().await_process()",
             crate::ProcessCommand::Cancel { .. } => "processes().cancel()",
+            crate::ProcessCommand::ParentEnd { .. } => "recorded parent-end teardown",
             crate::ProcessCommand::Signal { .. } => "processes().signal()",
             crate::ProcessCommand::EmitEvent { .. } => "process_events().emit()",
             crate::ProcessCommand::Transfer { .. } => "processes().transfer()",
@@ -55,6 +58,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             registry: Arc::clone(registry),
             parent_invocation: scope.parent_invocation.clone(),
             effect_controller,
+            effect_controller_handle: scope.effect_controller.clone_scoped(),
             turn_cancellation: scope.turn_cancellation.clone(),
         })
     }
@@ -131,79 +135,28 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
-    async fn signal(
+    async fn parent_end(
         &self,
-        process_id: &str,
-        signal_name: String,
-        signal_id: String,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let event_type = request.event_type.clone();
-        let payload = request.payload.clone();
-        let event = match self
-            .run(crate::ProcessCommand::Signal {
-                process_id: process_id.to_string(),
-                signal_name: signal_name.clone(),
-                signal_id,
-                request,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
+        match self
+            .run(crate::ProcessCommand::ParentEnd {
+                identity,
+                process_id,
+                policy,
+                reason,
             })
             .await?
         {
-            crate::ProcessEffectOutcome::Signal { event } => *event,
-            _ => return Err(wrong_process_outcome("signal")),
-        };
-        let waiting_ordinal = self
-            .registry
-            .get_process(process_id)
-            .await?
-            .and_then(|record| match record.wait {
-                Some(crate::WaitState {
-                    kind:
-                        crate::WaitKind::Signal {
-                            name,
-                            event_type: wait_event_type,
-                            ordinal,
-                            ..
-                        },
-                    ..
-                }) if name == signal_name && wait_event_type == event_type => Some(ordinal),
-                _ => None,
-            });
-        let ordinal = match waiting_ordinal {
-            Some(ordinal) => ordinal,
-            None => {
-                self.registry
-                    .count_events_through(process_id, &event_type, event.sequence)
-                    .await?
-            }
-        };
-        if ordinal > 0 {
-            let key = self
-                .effect_controller
-                .await_event_key(
-                    &crate::ExecutionScope::process(process_id),
-                    crate::AwaitEventWaitIdentity::process_signal(
-                        process_id,
-                        &signal_name,
-                        ordinal,
-                    ),
-                )
-                .await
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-            let _ = self
-                .effect_controller
-                .resolve_await_event(&key, crate::Resolution::Ok(payload))
-                .await
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+            crate::ProcessEffectOutcome::ParentEnd { outcome } => Ok(*outcome),
+            _ => Err(wrong_process_outcome("parent_end")),
         }
-        Ok(event)
     }
 
-    /// Intent realization stops at the one recorded process command. The
-    /// ordinary tool path performs live waiter-resolution bookkeeping after
-    /// that command; doing so here would make the intent outcome depend on
-    /// post-command registry state during redrive.
-    async fn signal_recorded(
+    async fn signal(
         &self,
         process_id: &str,
         signal_name: String,
@@ -224,6 +177,17 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
+    async fn signal_recorded(
+        &self,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        request: crate::ProcessEventAppendRequest,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.signal(process_id, signal_name, signal_id, request)
+            .await
+    }
+
     async fn emit_event(
         &self,
         process_id: &str,
@@ -236,7 +200,23 @@ impl<'scope> ProcessCommandRunner<'scope> {
             })
             .await?
         {
-            crate::ProcessEffectOutcome::EmitEvent { event } => Ok(*event),
+            crate::ProcessEffectOutcome::EmitEvent {
+                event,
+                wake_delivery,
+            } => {
+                crate::tool_provider::process_events::enqueue_wake_delivery(
+                    Arc::clone(&self.registry),
+                    self.current.store.clone(),
+                    self.current.host.session_store_factory.as_ref(),
+                    wake_delivery.map(|delivery| *delivery),
+                    None,
+                    self.current.host.queued_work_driver.as_ref(),
+                    Arc::clone(&self.current.host.core.clock),
+                    &self.current.host.core.control.wake_turn_policy,
+                )
+                .await?;
+                Ok(*event)
+            }
             _ => Err(wrong_process_outcome("emit_event")),
         }
     }
@@ -282,17 +262,50 @@ impl<'scope> ProcessCommandRunner<'scope> {
         // Route through the controller explicitly selected by the process
         // operation scope: host-configured for host/API paths, scoped for
         // in-turn paths.
+        let scoped = self.effect_controller_handle.scoped();
+        let (owned_controller, task_requests): (
+            Arc<dyn crate::RuntimeEffectController>,
+            Option<
+                tokio::sync::mpsc::UnboundedReceiver<
+                    crate::runtime::effect::EffectControllerTaskRequest,
+                >,
+            >,
+        ) = if let Some(owned) = scoped.owned_controller() {
+            (owned, None)
+        } else {
+            let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
+                self.effect_controller,
+                scoped.execution_scope().clone(),
+            )
+            .map_err(crate::RuntimeEffectControllerError::from)?;
+            (
+                proxy
+                    .owned_controller()
+                    .expect("effect-task proxy owns its controller"),
+                Some(requests),
+            )
+        };
         let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
             self.current.host.process_work_driver.clone(),
-        );
+        )
+        .with_process_effect_controller(owned_controller);
         if let Some(turn_cancellation) = self.turn_cancellation.clone() {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
         }
-        let outcome = self
-            .effect_controller
-            .execute_effect(envelope, local_executor)
-            .await?;
+        let outcome = if let Some(task_requests) = task_requests {
+            crate::runtime::effect::drive_effect_controller_task(
+                self.effect_controller,
+                envelope,
+                local_executor,
+                task_requests,
+            )
+            .await?
+        } else {
+            self.effect_controller
+                .execute_effect(envelope, local_executor)
+                .await?
+        };
         outcome.into_process().map_err(crate::PluginError::from)
     }
 }
@@ -633,6 +646,20 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.command_runner(current, &scope)?
             .cancel(process_id, reason)
+            .await
+    }
+
+    pub(in crate::runtime::session_manager) async fn finish_recorded_intent_parent(
+        &self,
+        current: &CurrentSessionCapability,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
+        self.command_runner(current, &scope)?
+            .parent_end(identity, process_id, policy, reason)
             .await
     }
 

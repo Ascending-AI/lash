@@ -139,6 +139,44 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
 
+    /// Applies one recorded start intent's parent-end policy through a durable
+    /// typed command. Runtime-backed implementations override this default so
+    /// `Abandon` is journaled as an explicit no-op as well.
+    async fn finish_recorded_intent_parent(
+        &self,
+        session_id: &str,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
+        if policy == crate::ProcessParentEndPolicy::Abandon {
+            return Ok(crate::ToolIntentParentEndOutcome::Abandoned {
+                identity,
+                process_id,
+            });
+        }
+        match self
+            .cancel_recorded_intent(session_id, &process_id, Some(reason), scope)
+            .await
+        {
+            Ok(_) => Ok(crate::ToolIntentParentEndOutcome::Cancelled {
+                identity,
+                process_id,
+            }),
+            Err(error) => {
+                let error = crate::RuntimeEffectControllerError::from(error);
+                Ok(crate::ToolIntentParentEndOutcome::Refused {
+                    identity,
+                    process_id,
+                    code: error.code.as_str().to_string(),
+                    message: error.message,
+                })
+            }
+        }
+    }
+
     async fn cancel_visible(
         &self,
         session_id: &str,

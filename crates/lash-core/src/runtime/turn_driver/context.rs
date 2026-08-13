@@ -5,8 +5,13 @@ use crate::facade_support::RuntimeSessionStateFacadeOps;
 impl<'run> RuntimeTurnDriver<'run> {
     pub(in crate::runtime) async fn finish_parent_end_actions(
         &self,
-    ) -> Result<(), crate::RuntimeError> {
-        let (event_tx, _event_rx) = mpsc::channel(1);
+    ) -> Result<Vec<SessionStreamEvent>, crate::RuntimeError> {
+        let _phase = crate::runtime::RuntimeNamedPhase::begin(
+            self.turn_phase_probe.clone(),
+            "tool_intent.parent_end",
+        );
+        let capacity = self.recorded_intent_outcomes.snapshot().len().max(1);
+        let (event_tx, mut event_rx) = mpsc::channel(capacity);
         let context = self
             .execution_context(
                 event_tx,
@@ -18,8 +23,18 @@ impl<'run> RuntimeTurnDriver<'run> {
                     error.to_string(),
                 )
             })?;
-        context.finish_parent_end_actions().await;
-        Ok(())
+        context.finish_parent_end_actions().await.map_err(|error| {
+            crate::RuntimeError::new(
+                crate::RuntimeErrorCode::PluginSessionManager,
+                error.to_string(),
+            )
+        })?;
+        drop(context);
+        let mut events = Vec::new();
+        while let Ok(event) = event_rx.try_recv() {
+            events.push(event);
+        }
+        Ok(events)
     }
 
     pub(super) fn effect_controller_handle(&self) -> RuntimeEffectControllerHandle<'run> {
@@ -62,7 +77,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                 self.turn_context.clone(),
                 execution_env_spec,
                 self.checkpoint_messages.clone(),
-                self.parent_end_actions.clone(),
+                self.recorded_intent_outcomes.clone(),
                 Arc::clone(&self.host.core.attachment_source_policy),
             )
             .map(|context| context.with_turn_phase_probe(self.turn_phase_probe.clone()))

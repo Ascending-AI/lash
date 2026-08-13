@@ -968,6 +968,7 @@ pub enum RemoteRuntimeEffectKind {
     Direct,
     ToolAttempt,
     ToolBatch,
+    ToolParentEnd,
     Process,
     Trigger,
     ExecCode,

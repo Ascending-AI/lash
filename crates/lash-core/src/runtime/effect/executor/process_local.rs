@@ -9,6 +9,7 @@ impl ProcessLocalExecution {
             registry,
             process_work_driver,
             turn_cancellation,
+            effect_controller,
         } = self;
         match command {
             ProcessCommand::Start {
@@ -103,12 +104,80 @@ impl ProcessLocalExecution {
                     record: Box::new(record),
                 })
             }
+            ProcessCommand::ParentEnd {
+                identity,
+                process_id,
+                policy,
+                reason,
+            } => {
+                let outcome = match policy {
+                    crate::ProcessParentEndPolicy::Abandon => {
+                        crate::ToolIntentParentEndOutcome::Abandoned {
+                            identity,
+                            process_id,
+                        }
+                    }
+                    crate::ProcessParentEndPolicy::Cancel => {
+                        match InlineRuntimeEffectController::request_process_cancel(
+                            registry,
+                            &process_id,
+                            Some(reason),
+                        )
+                        .await
+                        {
+                            Ok(_) => crate::ToolIntentParentEndOutcome::Cancelled {
+                                identity,
+                                process_id,
+                            },
+                            Err(error) => {
+                                let error = RuntimeEffectControllerError::from(error);
+                                crate::ToolIntentParentEndOutcome::Refused {
+                                    identity,
+                                    process_id,
+                                    code: error.code.as_str().to_string(),
+                                    message: error.message,
+                                }
+                            }
+                        }
+                    }
+                };
+                Ok(ProcessEffectOutcome::ParentEnd {
+                    outcome: Box::new(outcome),
+                })
+            }
             ProcessCommand::Signal {
                 process_id,
+                signal_name,
                 request,
                 ..
             } => {
+                let effect_controller = effect_controller.ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                        "local process signal execution requires its effect controller",
+                    )
+                })?;
                 let result = registry.append_event(&process_id, request).await?;
+                let ordinal = registry
+                    .count_events_through(
+                        &process_id,
+                        result.event.event_type.as_str(),
+                        result.event.sequence,
+                    )
+                    .await?;
+                let key = effect_controller
+                    .await_event_key(
+                        &crate::ExecutionScope::process(&process_id),
+                        crate::AwaitEventWaitIdentity::process_signal(
+                            &process_id,
+                            &signal_name,
+                            ordinal,
+                        ),
+                    )
+                    .await?;
+                let _ = effect_controller
+                    .resolve_await_event(&key, crate::Resolution::Ok(result.event.payload.clone()))
+                    .await?;
                 Ok(ProcessEffectOutcome::Signal {
                     event: Box::new(result.event),
                 })
@@ -120,6 +189,7 @@ impl ProcessLocalExecution {
                 let result = registry.append_event(&process_id, request).await?;
                 Ok(ProcessEffectOutcome::EmitEvent {
                     event: Box::new(result.event),
+                    wake_delivery: result.wake_delivery.map(Box::new),
                 })
             }
         }

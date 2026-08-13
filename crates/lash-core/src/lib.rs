@@ -475,10 +475,11 @@ pub use lash_sansio::{
     PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PruneState,
     SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode,
     TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
-    ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
-    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
-    ToolManifest, ToolOutputContract, ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
+    ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolControl,
+    ToolDefinition, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
+    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
+    ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolManifest, ToolOutputContract,
+    ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,

@@ -30,8 +30,8 @@ pub use validation::{
 };
 
 pub(crate) use executor::{
-    EffectTaskController, ProcessRunner, RuntimeEffectControllerHandle, TurnEffectStateUpdate,
-    drive_effect_controller_task,
+    EffectControllerTaskRequest, EffectTaskController, ProcessRunner,
+    RuntimeEffectControllerHandle, TurnEffectStateUpdate, drive_effect_controller_task,
 };
 pub(crate) use outcome::{
     LlmTraceFailure, apply_direct_outcome, emit_llm_trace_completed, emit_llm_trace_failed,

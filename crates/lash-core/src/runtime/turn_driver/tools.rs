@@ -93,6 +93,8 @@ impl RuntimeTurnDriver<'_> {
                     ),
                 ));
             }
+            self.recorded_intent_outcomes
+                .record_launches(&outcome.launches);
             for ((source_index, prepared), launch) in
                 prepared_entries.into_iter().zip(outcome.launches)
             {

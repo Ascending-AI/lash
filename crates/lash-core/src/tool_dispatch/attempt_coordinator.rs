@@ -358,11 +358,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         child_trace_hook.as_ref(),
                     )
                     .await;
-                    super::intent_executor::record_parent_end_actions(
-                        context,
-                        &intents,
-                        &intent_outcomes,
-                    );
+                    context.recorded_intent_outcomes.record(&intent_outcomes);
                     if let Some(slot) = &intent_drain_slot {
                         slot.complete_final_drain().await;
                     }
@@ -396,11 +392,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         child_trace_hook.as_ref(),
                     )
                     .await;
-                    super::intent_executor::record_parent_end_actions(
-                        context,
-                        &intents,
-                        &intent_outcomes,
-                    );
+                    context.recorded_intent_outcomes.record(&intent_outcomes);
                     if let Some(slot) = &intent_drain_slot {
                         slot.complete_final_drain().await;
                     }

@@ -1746,6 +1746,54 @@ struct PauseAfterEffectLoop {
     release: Arc<AtomicBool>,
 }
 
+struct CasSurvivorIntentTools {
+    calls: Arc<AtomicUsize>,
+}
+
+fn cas_survivor_intent_tool() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        "tool:cas_survivor_intent",
+        "cas_survivor_intent",
+        "Emit durable evidence before the enclosing turn competes on head CAS.",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for CasSurvivorIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![cas_survivor_intent_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "cas_survivor_intent").then(|| Arc::new(cas_survivor_intent_tool().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+        panic!("the lease/CAS survivor law must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == cas_survivor_intent_tool().id()
+    }
+
+    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        crate::ToolAttemptResult::done(
+            crate::ToolResultDone::ok(serde_json::json!({"intent": "committed"})),
+            crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+                crate::EmitProcessEventIntent {
+                    session_id: call.context.session_id().to_string(),
+                    process_id: "cas-survivor-intent-target".to_string(),
+                    event_type: "intent.survivor.committed".to_string(),
+                    payload: serde_json::json!({"survives": true}),
+                },
+            )]),
+        )
+    }
+}
+
 impl crate::runtime::RuntimeTurnPhaseProbe for PauseAfterEffectLoop {
     fn begin(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
 
@@ -6430,6 +6478,176 @@ async fn idle_queued_work_claim_lease_expiry_surfaces_session_execution_lease_lo
         .expect_err("expired idle queued-work claim lease must fail as lease lost");
 
     assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionLeaseLost);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtime_turn() {
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    registry
+        .register_process_with_observers(
+            crate::ProcessRegistration::new(
+                "cas-survivor-intent-target",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([crate::ProcessEventType {
+                name: "intent.survivor.committed".to_string(),
+                payload_schema: crate::LashSchema::any(),
+                semantics: crate::ProcessEventSemanticsSpec::default(),
+            }]),
+            &["root".to_string()],
+        )
+        .await
+        .expect("register same-turn CAS survivor target");
+    let tool_calls = Arc::new(AtomicUsize::new(0));
+    let tools: Arc<dyn crate::ToolProvider> = Arc::new(CasSurvivorIntentTools {
+        calls: Arc::clone(&tool_calls),
+    });
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .complete({
+            let model_calls = Arc::clone(&model_calls);
+            move |_| {
+                let model_calls = Arc::clone(&model_calls);
+                async move {
+                    Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
+                        0 => LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "cas-survivor-call".to_string(),
+                                tool_name: "cas_survivor_intent".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        },
+                        1 => LlmResponse {
+                            full_text: "stale conversational tail".to_string(),
+                            parts: vec![LlmOutputPart::Text {
+                                text: "stale conversational tail".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        },
+                        index => panic!("unexpected CAS survivor model call {index}"),
+                    })
+                }
+            }
+        })
+        .build();
+    let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock);
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        tools,
+        transport,
+        crate::EmbeddedRuntimeHost::new(config),
+        runtime_store,
+    )
+    .await;
+    runtime.host.process_registry = Some(registry.clone());
+    let effect_loop_ended = Arc::new(AtomicBool::new(false));
+    let release_effect_loop = Arc::new(AtomicBool::new(false));
+    runtime.set_turn_phase_probe(Arc::new(PauseAfterEffectLoop {
+        entered: Arc::clone(&effect_loop_ended),
+        release: Arc::clone(&release_effect_loop),
+    }));
+    let first = crate::task::spawn(async move {
+        runtime
+            .run_turn_assembled(
+                TurnInput::text("emit evidence before losing CAS"),
+                CancellationToken::new(),
+                named_turn_scope("root", "cas-survivor-stale-turn"),
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !effect_loop_ended.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the intent-owning runtime turn reaches the pre-CAS boundary");
+    assert_eq!(tool_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        registry
+            .events_after("cas-survivor-intent-target", 0)
+            .await
+            .expect("read committed pre-CAS intent")
+            .iter()
+            .filter(|event| event.event_type == "intent.survivor.committed")
+            .count(),
+        1,
+        "the same runtime turn executes the intent before its head CAS"
+    );
+
+    clock.advance_ms(crate::LeaseTimings::default().ttl_ms() + 1);
+    let successor_transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            full_text: "successor wins".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "successor wins".to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    }]);
+    let successor_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let successor_clock: Arc<dyn crate::Clock> = clock.clone();
+    let successor_config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(successor_clock);
+    let mut successor = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        successor_transport,
+        crate::EmbeddedRuntimeHost::new(successor_config),
+        successor_store,
+    )
+    .await;
+    successor.host.process_registry = Some(registry.clone());
+    successor
+        .run_turn_assembled(
+            TurnInput::text("take over and win the head"),
+            CancellationToken::new(),
+            named_turn_scope("root", "cas-survivor-successor-turn"),
+        )
+        .await
+        .expect("successor wins the shared store head CAS");
+    release_effect_loop.store(true, Ordering::SeqCst);
+    let error = first
+        .await
+        .expect("stale runtime task joins")
+        .expect_err("the intent-owning stale conversational tail loses head CAS");
+    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitFailed);
+    assert!(
+        error.message.contains("head revision conflict"),
+        "the same-turn loser must retain typed CAS diagnostics: {error:?}"
+    );
+    assert_eq!(
+        registry
+            .events_after("cas-survivor-intent-target", 0)
+            .await
+            .expect("read intent after CAS loss")
+            .iter()
+            .filter(|event| event.event_type == "intent.survivor.committed")
+            .count(),
+        1,
+        "the intent survives the enclosing turn's failing CAS without duplication"
+    );
 }
 
 // Regression (FIG-862): lease serialization is advisory; a foreground turn that

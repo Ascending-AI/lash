@@ -377,6 +377,28 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
+    async fn finish_recorded_intent_parent(
+        &self,
+        _session_id: &str,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
+        self.services
+            .processes
+            .finish_recorded_intent_parent(
+                &self.services.current,
+                identity,
+                process_id,
+                policy,
+                reason,
+                scope,
+            )
+            .await
+    }
+
     async fn signal(
         &self,
         session_id: &str,
@@ -660,6 +682,24 @@ impl crate::ProcessService for ModelToolSessionProcessService {
         };
         crate::ProcessService::cancel_recorded_intent(&host, session_id, process_id, reason, scope)
             .await
+    }
+
+    async fn finish_recorded_intent_parent(
+        &self,
+        session_id: &str,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::finish_recorded_intent_parent(
+            &host, session_id, identity, process_id, policy, reason, scope,
+        )
+        .await
     }
 
     async fn signal(

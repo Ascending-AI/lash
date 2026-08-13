@@ -53,6 +53,7 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "trigger_occurrence_null_source",
     "process_signal_zero",
     "effect_record",
+    "tool_intent_batch",
     "await_resolve",
     "await_revoke_session",
 ];
@@ -67,6 +68,7 @@ enum SurfaceOperation {
     TriggerOccurrenceNullSource { key: u8 },
     ProcessSignalZero { negative: bool },
     EffectRecord { key: u8, duration_ms: u8 },
+    ToolIntentBatch,
     AwaitResolve { key: u8 },
     AwaitRevokeSession,
 }
@@ -103,6 +105,7 @@ impl SurfaceOperation {
             Self::TriggerOccurrenceNullSource { .. } => "trigger_occurrence_null_source",
             Self::ProcessSignalZero { .. } => "process_signal_zero",
             Self::EffectRecord { .. } => "effect_record",
+            Self::ToolIntentBatch => "tool_intent_batch",
             Self::AwaitResolve { .. } => "await_resolve",
             Self::AwaitRevokeSession => "await_revoke_session",
         }
@@ -174,7 +177,7 @@ struct SurfaceRunner {
 }
 
 fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
-    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 7);
+    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 8);
     let mut operations = vec![
         SurfaceOperation::TriggerRegister { key: 0 },
         SurfaceOperation::TriggerOccurrence { key: 0 },
@@ -182,6 +185,7 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
             key: 0,
             duration_ms: 1,
         },
+        SurfaceOperation::ToolIntentBatch,
         SurfaceOperation::AwaitResolve { key: 0 },
     ];
     for (index, operation) in contract.into_iter().enumerate() {
@@ -329,6 +333,88 @@ impl SurfaceRunner {
                     )
                     .await;
                 result.map_err(|error| error.to_string())?;
+                Ok(())
+            }
+            SurfaceOperation::ToolIntentBatch => {
+                let identity = lash_core::ToolIntentIdentity {
+                    session_id: SURFACE_SESSION.to_string(),
+                    execution_scope_id: SURFACE_TURN.to_string(),
+                    tool_call_id: "surface-intent-call".to_string(),
+                    intent_index: 0,
+                    replay_key: "surface-intent-literal-0".to_string(),
+                };
+                let intent_outcome = lash_core::ToolIntentExecutionOutcome::Executed {
+                    identity,
+                    kind: lash_core::ToolIntentKind::StartProcess,
+                    result: serde_json::json!({"id": "surface-intent-child"}),
+                    parent_end: Some(lash_core::ToolIntentParentEnd {
+                        process_id: "surface-intent-child".to_string(),
+                        policy: lash_core::ProcessParentEndPolicy::Abandon,
+                    }),
+                };
+                let completed = lash_core::sansio::CompletedToolCall {
+                    call_id: "surface-intent-call".to_string(),
+                    tool_name: "surface_intent_provider".to_string(),
+                    args: serde_json::json!({}),
+                    output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true})),
+                    model_return: <lash_core::facade_support::ModelToolReturn as lash_sansio::core_support::ModelToolReturnCoreSupport>::text(
+                        "surface-intent-call".to_string(),
+                        "surface_intent_provider".to_string(),
+                        "provider done",
+                    ),
+                    duration_ms: 1,
+                    intent_outcomes: vec![intent_outcome],
+                    replay: None,
+                };
+                let expected = RuntimeEffectOutcome::ToolBatch {
+                    launches: vec![lash_core::runtime::ToolCallLaunch::Done {
+                        result: Box::new(completed),
+                    }],
+                    triggers: Vec::new(),
+                };
+                let expected_bytes = serde_json::to_vec(&expected)
+                    .expect("serialize literal non-empty intent batch oracle");
+                let envelope = RuntimeEffectEnvelope::new(
+                    RuntimeInvocation::effect(
+                        RuntimeScope::for_turn(SURFACE_SESSION, SURFACE_TURN, 1, 0),
+                        "surface-intent-batch",
+                        RuntimeEffectKind::ToolBatch,
+                        "surface-intent-batch",
+                    ),
+                    RuntimeEffectCommand::ToolBatch {
+                        batch: lash_core::PreparedToolBatch::new(
+                            "surface-intent-batch",
+                            vec![lash_core::PreparedToolCall::from_parts(
+                                "surface-intent-call",
+                                lash_core::ToolId::from("tool:surface_intent_provider"),
+                                "surface_intent_provider",
+                                serde_json::json!({}),
+                                None,
+                                serde_json::Value::Null,
+                            )],
+                        ),
+                    },
+                );
+                let controller = self
+                    .effect_host
+                    .scoped(ExecutionScope::turn(SURFACE_SESSION, SURFACE_TURN))
+                    .map_err(|error| error.to_string())?;
+                let outcome = controller
+                    .controller()
+                    .execute_effect(
+                        envelope,
+                        RuntimeEffectLocalExecutor::testing(move |_| async move { Ok(expected) }),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let actual_bytes = serde_json::to_vec(&outcome)
+                    .expect("serialize observed non-empty intent batch");
+                if actual_bytes != expected_bytes {
+                    return Err(format!(
+                        "{} non-empty intent batch differed from its literal per-tier oracle",
+                        self.name
+                    ));
+                }
                 Ok(())
             }
             SurfaceOperation::AwaitResolve { key } => {

@@ -1,7 +1,6 @@
 use super::*;
 use crate::plugin::{PluginHost, PluginSession, StaticPluginFactory};
 use crate::runtime::RuntimeEffectControllerHandle;
-use crate::store::{SessionCommitStore as _, SessionExecutionLeaseStore as _, StoreError};
 use crate::{
     ProcessRegistry as _, ToolCall, ToolCallOutcome, ToolContext, ToolProvider, ToolResult,
     ToolRetryDisposition, ToolRetryPolicy,
@@ -846,7 +845,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -898,7 +897,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -957,7 +956,7 @@ fn projection_policy_dispatch_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -1149,7 +1148,7 @@ fn lazy_contract_dispatch_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -1208,7 +1207,7 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -1254,7 +1253,7 @@ fn exact_dispatch_context_with_plugins(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -1381,7 +1380,7 @@ fn pending_dispatch_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -1445,7 +1444,7 @@ fn parallel_dispatch_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -2410,91 +2409,6 @@ async fn empty_batch_dispatches_v0_and_v2_to_a_typed_protocol_refusal() {
             }]
         );
     }
-}
-
-#[tokio::test]
-async fn parent_end_policies_are_literal_and_redrive_stable() {
-    let mut context = dispatch_context();
-    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-    context.processes = crate::testing::effect_backed_process_service(registry.clone());
-    let policies = [
-        crate::ProcessParentEndPolicy::Abandon,
-        crate::ProcessParentEndPolicy::Cancel,
-    ];
-    let intents = crate::ToolIntents::v1(
-        policies
-            .into_iter()
-            .enumerate()
-            .map(|(index, policy)| {
-                crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                    session_id: "session".to_string(),
-                    request: crate::ProcessStartRequest::external(
-                        format!("ignored-parent-policy-{index}"),
-                        crate::ProcessOriginator::host_scoped("parent-policy-law"),
-                        json!({"policy_index": index}),
-                    ),
-                    on_parent_end: policy,
-                }))
-            })
-            .collect(),
-    );
-    let outcomes =
-        execute_final_tool_intents(&context, Some("parent-policy-call"), &intents, None).await;
-    assert!(
-        outcomes
-            .iter()
-            .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
-    );
-    let process_ids = outcomes
-        .iter()
-        .map(|outcome| match outcome {
-            crate::ToolIntentExecutionOutcome::Executed { identity, .. } => {
-                identity.replay_key.clone()
-            }
-            other => panic!("expected executed start, got {other:?}"),
-        })
-        .collect::<Vec<_>>();
-
-    intent_executor::record_parent_end_actions(&context, &intents, &outcomes);
-    intent_executor::execute_parent_end_actions(&context).await;
-    let first_events = futures_util::future::try_join_all(
-        process_ids
-            .iter()
-            .map(|process_id| registry.events_after(process_id, 0)),
-    )
-    .await
-    .expect("read first parent-end event sets");
-    assert_eq!(
-        first_events
-            .iter()
-            .map(|events| {
-                events
-                    .iter()
-                    .filter(|event| event.event_type == "process.cancel_requested")
-                    .count()
-            })
-            .collect::<Vec<_>>(),
-        vec![0, 1],
-        "Abandon is a recorded no-op and Cancel emits exactly one command"
-    );
-    assert_eq!(
-        first_events[1][0].payload["reason"],
-        json!("recorded start intent parent ended with cancel policy")
-    );
-    intent_executor::record_parent_end_actions(&context, &intents, &outcomes);
-    intent_executor::execute_parent_end_actions(&context).await;
-    let redriven_events = futures_util::future::try_join_all(
-        process_ids
-            .iter()
-            .map(|process_id| registry.events_after(process_id, 0)),
-    )
-    .await
-    .expect("read redriven parent-end event sets");
-    assert_eq!(
-        serde_json::to_vec(&redriven_events).expect("serialize redriven events"),
-        serde_json::to_vec(&first_events).expect("serialize first events"),
-        "parent-end command outcomes are byte-stable on redrive"
-    );
 }
 
 include!("tests/intent_laws.rs");

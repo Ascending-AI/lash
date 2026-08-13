@@ -360,7 +360,10 @@ pub async fn run_lashlang_process(
     {
         let _phase =
             lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, "rlm_process.shutdown");
-        guard.shutdown().await;
+        guard
+            .shutdown(matches!(output, lash_core::ProcessRunOutcome::Terminal(_)))
+            .await
+            .map_err(lash_core::ProcessInfraError::new)?;
     }
     if trace_lifecycle_for_segment(is_initial_segment, &output).1
         && let lash_core::ProcessRunOutcome::Terminal(output) = &output

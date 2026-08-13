@@ -14,6 +14,7 @@
 //! terminals byte-for-byte without re-executing either body.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::{
@@ -31,6 +32,302 @@ const SESSION: &str = "pg-attempt-atomicity-session";
 const TURN: &str = "pg-attempt-atomicity-turn";
 const ATTEMPT_KEY: &str = "pg-attempt-atomicity:attempt";
 const NESTED_KEY: &str = "pg-attempt-atomicity:attempt:nested";
+
+struct CrossingController {
+    inner: Arc<dyn lash_core::RuntimeEffectController>,
+    signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for CrossingController {
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        self.inner.replay_ownership()
+    }
+
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        self.inner.journal_addressing()
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.inner.allows_process_lifetime_completion_keys()
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.inner.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.inner.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.cancel_await_events_for_session(session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for CrossingController {
+    fn supports_concurrent_effects(&self) -> bool {
+        self.inner.supports_concurrent_effects()
+    }
+
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        if matches!(
+            &envelope.command,
+            RuntimeEffectCommand::Process { command }
+                if matches!(command.as_ref(), lash_core::ProcessCommand::Signal { .. })
+        ) {
+            self.signal_frames
+                .lock()
+                .expect("signal crossing frame lock")
+                .push(serde_json::to_vec(&envelope).expect("serialize signal crossing frame"));
+        }
+        self.inner.execute_effect(envelope, local_executor).await
+    }
+}
+
+struct PublicSignalIntentProvider {
+    calls: Arc<AtomicUsize>,
+    kind: PublicIntentKind,
+}
+
+#[derive(Clone, Copy)]
+enum PublicIntentKind {
+    Signal,
+    ParentEnd,
+}
+
+fn public_signal_tool() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:pg_public_signal_intent",
+        "pg_public_signal_intent",
+        "Signal a process through the recorded intent protocol.",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for PublicSignalIntentProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![public_signal_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "pg_public_signal_intent").then(|| Arc::new(public_signal_tool().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        panic!("the PostgreSQL public-caller law must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == public_signal_tool().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let intent = match self.kind {
+            PublicIntentKind::Signal => {
+                lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
+                    session_id: call.context.session_id().to_string(),
+                    process_id: "pg-public-intent-target".to_string(),
+                    signal_name: "resume".to_string(),
+                    payload: serde_json::json!({"source": "postgres-public-caller"}),
+                })
+            }
+            PublicIntentKind::ParentEnd => {
+                lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
+                    session_id: call.context.session_id().to_string(),
+                    request: lash_core::ProcessStartRequest::external(
+                        "pg-public-parent-end-child",
+                        lash_core::ProcessOriginator::host_scoped("pg-public-caller"),
+                        serde_json::json!({"source": "parent-end"}),
+                    ),
+                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
+                }))
+            }
+        };
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({"signal": "recorded"})),
+            lash_core::ToolIntents::v1(vec![intent]),
+        )
+    }
+}
+
+struct PanicAtParentEnd;
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAtParentEnd {
+    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn begin_named(&self, phase: &str) {
+        if phase == "tool_intent.parent_end" {
+            panic!("injected crash after ToolBatch commit and before parent-end teardown");
+        }
+    }
+}
+
+fn public_runtime_policy() -> lash_core::SessionPolicy {
+    let mut policy = lash_core::testing::mock_session_policy();
+    policy.session_id = Some(SESSION.to_string());
+    policy
+}
+
+fn public_runtime_state(policy: &lash_core::SessionPolicy) -> lash_core::RuntimeSessionState {
+    lash_core::RuntimeSessionState {
+        session_id: SESSION.to_string(),
+        policy: policy.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    }
+}
+
+fn public_runtime_input() -> lash_core::TurnInput {
+    let mut input = lash_core::TurnInput::text("run PostgreSQL signal intent");
+    input.trace_turn_id = Some(TURN.to_string());
+    input
+}
+
+fn postgres_public_turn_scope(
+    storage: &PostgresStorage,
+    signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
+) -> lash_core::ScopedEffectController<'static> {
+    let scope = ExecutionScope::turn(SESSION, TURN);
+    let inner: Arc<dyn lash_core::RuntimeEffectController> =
+        Arc::new(storage.runtime_effect_controller(scope.clone()));
+    lash_core::ScopedEffectController::shared(
+        Arc::new(CrossingController {
+            inner,
+            signal_frames,
+        }),
+        scope,
+    )
+    .expect("scope PostgreSQL public turn")
+}
+
+async fn public_signal_runtime(
+    effect_host: Arc<dyn EffectHost>,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    provider_calls: Arc<AtomicUsize>,
+    model_calls: Arc<AtomicUsize>,
+    kind: PublicIntentKind,
+) -> lash_core::facade_support::LashRuntime {
+    let tool_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(PublicSignalIntentProvider {
+        calls: provider_calls,
+        kind,
+    });
+    let tool_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "pg-public-signal-intent",
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(tool_provider),
+        ));
+    let model = lash_core::testing::TestProvider::builder()
+        .kind("stub")
+        .complete(move |_| {
+            let model_calls = Arc::clone(&model_calls);
+            async move {
+                Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => lash_core::LlmResponse {
+                        parts: vec![lash_core::LlmOutputPart::ToolCall {
+                            call_id: "pg-public-signal-call".to_string(),
+                            tool_name: "pg_public_signal_intent".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..lash_core::LlmResponse::default()
+                    },
+                    1 => lash_core::LlmResponse {
+                        full_text: "signal intent complete".to_string(),
+                        parts: vec![lash_core::LlmOutputPart::Text {
+                            text: "signal intent complete".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..lash_core::LlmResponse::default()
+                    },
+                    index => panic!("unexpected PostgreSQL model call {index}"),
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+    );
+    host.control.effect_host = effect_host;
+    host.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(model),
+    );
+    let policy = public_runtime_policy();
+    let store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    Box::pin(
+        lash_core::facade_support::LashRuntime::builder(lash_core::CommitBudget::bounded(
+            1024 * 1024,
+            512,
+        ))
+        .with_session_id(SESSION)
+        .with_policy(policy.clone())
+        .with_initial_state(public_runtime_state(&policy))
+        .with_runtime_host(host)
+        .with_plugin_factories(
+            lash_core::testing::test_standard_protocol_factories()
+                .into_iter()
+                .chain([tool_plugin])
+                .collect(),
+        )
+        .with_store(store)
+        .with_process_registry(registry)
+        .build(),
+    )
+    .await
+    .expect("build PostgreSQL public-caller runtime")
+}
 
 fn attempt_invocation() -> RuntimeInvocation {
     RuntimeInvocation::effect(
@@ -112,9 +409,10 @@ fn projected_output(outcome: &RuntimeEffectOutcome) -> String {
 }
 
 async fn reset(storage: &PostgresStorage) {
-    for statement in
-        ["DELETE FROM lash_runtime_effect_replay WHERE scope_id LIKE '%pg-attempt-atomicity%'"]
-    {
+    for statement in [
+        "DELETE FROM lash_runtime_effect_replay WHERE scope_id LIKE '%pg-attempt-atomicity%'",
+        "DELETE FROM lash_processes WHERE process_id = 'pg-public-intent-target' OR record_json LIKE '%pg-public-caller%'",
+    ] {
         sqlx::query(statement)
             .execute(storage.pool())
             .await
@@ -363,4 +661,346 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     );
 
     reset(&second_storage).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_postgres() {
+    let Some(database_url) = database_url() else {
+        eprintln!(
+            "skipping the PostgreSQL public signal-intent law: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect PostgreSQL public signal-intent host");
+    reset(&storage).await;
+    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                "pg-public-intent-target",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[SESSION.to_string()],
+        )
+        .await
+        .expect("register PostgreSQL public signal target");
+
+    let first_host = Arc::new(storage.effect_host());
+    let wait_controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
+        storage.runtime_effect_controller(ExecutionScope::process("pg-public-intent-target")),
+    );
+    let wake_key = wait_controller
+        .await_event_key(
+            &ExecutionScope::process("pg-public-intent-target"),
+            lash_core::AwaitEventWaitIdentity::process_signal(
+                "pg-public-intent-target",
+                "resume",
+                1,
+            ),
+        )
+        .await
+        .expect("mint PostgreSQL process-signal wait");
+    let wake = {
+        let wait_controller = Arc::clone(&wait_controller);
+        let wake_key = wake_key.clone();
+        tokio::spawn(async move {
+            wait_controller
+                .await_await_event(&wake_key, tokio_util::sync::CancellationToken::new(), None)
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let signal_crossing_frames = Arc::new(Mutex::new(Vec::new()));
+    let mut first = public_signal_runtime(
+        first_host.clone(),
+        Arc::clone(&registry),
+        Arc::clone(&provider_calls),
+        Arc::clone(&model_calls),
+        PublicIntentKind::Signal,
+    )
+    .await;
+    let first_scope = postgres_public_turn_scope(&storage, Arc::clone(&signal_crossing_frames));
+    let first_turn = first
+        .stream_turn(
+            public_runtime_input(),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                first_scope,
+            ),
+        )
+        .await
+        .expect("run first PostgreSQL public signal-intent turn");
+    assert!(matches!(
+        first_turn.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(_)
+    ));
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), wake)
+            .await
+            .expect("PostgreSQL SignalProcess intent must wake the parked wait")
+            .expect("PostgreSQL wake task")
+            .expect("PostgreSQL wake resolution"),
+        lash_core::Resolution::Ok(serde_json::json!({
+            "source": "postgres-public-caller"
+        }))
+    );
+    let first_signal_frames: Vec<String> = sqlx::query_scalar(
+        "SELECT envelope_json FROM lash_runtime_effect_replay
+         WHERE session_id = $1 AND replay_key LIKE '%process:signal:%'
+         ORDER BY replay_key",
+    )
+    .bind(SESSION)
+    .fetch_all(storage.pool())
+    .await
+    .expect("read first PostgreSQL signal command frames");
+    assert_eq!(
+        first_signal_frames.len(),
+        1,
+        "the provider/coordinator path emits one literal signal command"
+    );
+    let first_crossing_frame = signal_crossing_frames
+        .lock()
+        .expect("first signal crossing frame lock")
+        .first()
+        .cloned()
+        .expect("the live provider/coordinator path crosses one signal command");
+
+    registry
+        .complete_process(
+            "pg-public-intent-target",
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::json!("terminal after public intent drain"),
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("terminalize PostgreSQL signal target before redrive");
+    drop(first);
+
+    let replay_host = Arc::new(storage.effect_host());
+    replay_host.start_replay();
+    let mut replay = public_signal_runtime(
+        replay_host.clone(),
+        Arc::clone(&registry),
+        Arc::clone(&provider_calls),
+        Arc::clone(&model_calls),
+        PublicIntentKind::Signal,
+    )
+    .await;
+    let replay_scope = postgres_public_turn_scope(&storage, Arc::clone(&signal_crossing_frames));
+    let replay_turn = replay
+        .stream_turn(
+            public_runtime_input(),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                replay_scope,
+            ),
+        )
+        .await
+        .expect("redrive PostgreSQL public signal-intent turn");
+    assert!(matches!(
+        replay_turn.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(_)
+    ));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(model_calls.load(Ordering::SeqCst), 2);
+    let replay_signal_frames: Vec<String> = sqlx::query_scalar(
+        "SELECT envelope_json FROM lash_runtime_effect_replay
+         WHERE session_id = $1 AND replay_key LIKE '%process:signal:%'
+         ORDER BY replay_key",
+    )
+    .bind(SESSION)
+    .fetch_all(storage.pool())
+    .await
+    .expect("read redriven PostgreSQL signal command frames");
+    assert_eq!(
+        replay_signal_frames, first_signal_frames,
+        "the public caller reconstructs byte-identical signal frames after live terminal mutation"
+    );
+    {
+        let crossing_frames = signal_crossing_frames
+            .lock()
+            .expect("redriven signal crossing frame lock");
+        assert_eq!(
+            crossing_frames.len(),
+            2,
+            "the production signal command must cross once live and once on redrive"
+        );
+        assert_eq!(
+            crossing_frames[1], first_crossing_frame,
+            "the redriven production signal command frame must be byte-identical"
+        );
+    }
+
+    reset(&storage).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn public_provider_parent_end_cancel_survives_crash_after_tool_batch_on_postgres() {
+    let Some(database_url) = database_url() else {
+        eprintln!(
+            "skipping the PostgreSQL public parent-end law: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect PostgreSQL public parent-end host");
+    reset(&storage).await;
+    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                "pg-public-intent-target",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[SESSION.to_string()],
+        )
+        .await
+        .expect("register PostgreSQL parent-end signal target");
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let effect_host = Arc::new(storage.effect_host());
+    let mut first = public_signal_runtime(
+        effect_host.clone(),
+        Arc::clone(&registry),
+        Arc::clone(&provider_calls),
+        Arc::clone(&model_calls),
+        PublicIntentKind::ParentEnd,
+    )
+    .await;
+    first.set_turn_phase_probe(Arc::new(PanicAtParentEnd));
+    let first_scope = postgres_public_turn_scope(&storage, Arc::new(Mutex::new(Vec::new())));
+    let crashed = tokio::spawn(async move {
+        first
+            .stream_turn(
+                public_runtime_input(),
+                lash_core::facade_support::TurnOptions::new(
+                    tokio_util::sync::CancellationToken::new(),
+                    first_scope,
+                ),
+            )
+            .await
+    })
+    .await
+    .expect_err("the phase probe crashes after ToolBatch commit");
+    assert!(crashed.is_panic());
+    let before_parent_end: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_runtime_effect_replay
+         WHERE session_id = $1 AND replay_key LIKE '%:parent-end:%'",
+    )
+    .bind(SESSION)
+    .fetch_one(storage.pool())
+    .await
+    .expect("count parent-end frames before redrive");
+    assert_eq!(
+        before_parent_end, 0,
+        "the injected crash lands before the parent-end command"
+    );
+    let committed_batches: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_runtime_effect_replay
+         WHERE session_id = $1
+           AND replay_key ~ ':tool_batch:[0-9]+$'
+           AND outcome_json LIKE '%parent_end%'",
+    )
+    .bind(SESSION)
+    .fetch_one(storage.pool())
+    .await
+    .expect("count committed ToolBatch parent-end evidence");
+    assert_eq!(
+        committed_batches, 1,
+        "the durable ToolBatch outcome commits the parent-end metadata before the crash"
+    );
+
+    let replay_host = Arc::new(storage.effect_host());
+    let mut replay = public_signal_runtime(
+        replay_host.clone(),
+        Arc::clone(&registry),
+        Arc::clone(&provider_calls),
+        Arc::clone(&model_calls),
+        PublicIntentKind::ParentEnd,
+    )
+    .await;
+    let replay_scope = postgres_public_turn_scope(&storage, Arc::new(Mutex::new(Vec::new())));
+    let redriven = replay
+        .stream_turn(
+            public_runtime_input(),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                replay_scope,
+            ),
+        )
+        .await
+        .expect("redrive PostgreSQL parent-end turn");
+    assert!(matches!(
+        redriven.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(_)
+    ));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(model_calls.load(Ordering::SeqCst), 2);
+    let processes = registry
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        })
+        .await
+        .expect("list PostgreSQL public parent-end processes");
+    let child = processes
+        .iter()
+        .find(|record| {
+            matches!(
+                record.input.as_ref(),
+                lash_core::ProcessInput::External { metadata }
+                    if metadata == &serde_json::json!({"source": "parent-end"})
+            )
+        })
+        .expect("find the parent-end child reconstructed from ToolBatch outcome");
+    let cancel_events = registry
+        .events_after(&child.id, 0)
+        .await
+        .expect("read redriven parent-end cancellation")
+        .into_iter()
+        .filter(|event| event.event_type == "process.cancel_requested")
+        .count();
+    assert_eq!(
+        cancel_events, 1,
+        "redrive applies the recorded Cancel policy exactly once"
+    );
+    let after_parent_end: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_runtime_effect_replay
+         WHERE session_id = $1 AND replay_key LIKE '%:parent-end:%'",
+    )
+    .bind(SESSION)
+    .fetch_one(storage.pool())
+    .await
+    .expect("count parent-end frames after redrive");
+    assert_eq!(after_parent_end, 1);
+
+    reset(&storage).await;
 }

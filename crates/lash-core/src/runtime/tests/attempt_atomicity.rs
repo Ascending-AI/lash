@@ -475,7 +475,7 @@ fn tool_context<'run>(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        parent_end_actions: crate::tool_dispatch::ParentEndActionBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -925,6 +925,8 @@ fn key_addressed_expected(route: Route) -> (&'static str, &'static [&'static str
             "signal ok",
             &[
                 "execute_effect:process:process:signal:attempt-atomicity-live:signal.resume:attempt-atomicity-call",
+                "await_event_key:attempt-atomicity-live",
+                "resolve_await_event:await-event:v3:sha256:e26984ee33a1b157d5d1925cbc73e2a10c3c7e8808c1085c6798fb3a53926073",
             ],
         ),
         Route::ProcessList => (

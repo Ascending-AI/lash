@@ -95,6 +95,12 @@ adds the policy only together with that primitive, never ahead of it. The old
 `ToolContext` guards remain only for providers that have not yet moved to the
 FIG-1291 leaf signature.
 
+Layer 2 assigns policy per tool. In particular, `shell.start` maps to
+`Abandon`: its owner-bound command is intentionally allowed to continue across
+turns, so the generic default `Cancel` would contradict that tool's lifecycle.
+Other tools must choose explicitly when their child lifetime differs from the
+v1 default.
+
 The former `ToolContext::durable_effects()` facade and its `DurableStep`
 producer are removed, including the serialized command and outcome. External
 waits use deferred tool completion when the whole job has one eventual tool

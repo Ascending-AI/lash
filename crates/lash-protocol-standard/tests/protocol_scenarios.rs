@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use lash_core::ProcessRegistry as _;
 use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
 use lash_core::testing::behavior_transcript::Transcript;
 use lash_core::testing::sansio_transcript::record_effects;
@@ -20,7 +22,6 @@ const STANDARD_TRANSCRIPT_ACTOR: &str = "standard";
 #[derive(Clone, Copy, Debug)]
 struct StandardProtocolScenarioCoverage {
     test_name: &'static str,
-    declared_test: fn(),
     display_name: &'static str,
     owned_invariant: &'static str,
 }
@@ -29,7 +30,6 @@ macro_rules! standard_protocol_coverage {
     ($test_fn:ident, $display_name:literal, $owned_invariant:literal) => {
         StandardProtocolScenarioCoverage {
             test_name: stringify!($test_fn),
-            declared_test: $test_fn,
             display_name: $display_name,
             owned_invariant: $owned_invariant,
         }
@@ -99,7 +99,6 @@ fn standard_protocol_scenario_coverage_metadata_is_unique_and_complete() {
     assert_eq!(STANDARD_PROTOCOL_SCENARIO_COVERAGE.len(), 9);
     let mut names = BTreeSet::new();
     for coverage in STANDARD_PROTOCOL_SCENARIO_COVERAGE {
-        let _declared_test = coverage.declared_test;
         assert!(
             coverage
                 .test_name
@@ -340,14 +339,6 @@ impl StandardToolResult {
             model_return_text,
             intent_outcomes: Vec::new(),
         }
-    }
-
-    fn with_intent_outcomes(
-        mut self,
-        intent_outcomes: Vec<lash_core::ToolIntentExecutionOutcome>,
-    ) -> Self {
-        self.intent_outcomes = intent_outcomes;
-        self
     }
 
     fn completed_call(&self, args: serde_json::Value) -> sansio::CompletedToolCall {
@@ -726,75 +717,206 @@ fn standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint()
     "#);
 }
 
-#[test]
-fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback() {
-    let kinds = [
-        lash_core::ToolIntentKind::StartProcess,
-        lash_core::ToolIntentKind::SignalProcess,
-        lash_core::ToolIntentKind::CancelProcess,
-        lash_core::ToolIntentKind::EmitProcessEvent,
-    ];
-    let outcomes = kinds
-        .into_iter()
-        .enumerate()
-        .map(
-            |(intent_index, kind)| lash_core::ToolIntentExecutionOutcome::Executed {
-                identity: lash_core::ToolIntentIdentity {
-                    session_id: "standard-protocol-scenario".to_string(),
-                    execution_scope_id: "standard-protocol-turn".to_string(),
-                    tool_call_id: "tc-intents".to_string(),
-                    intent_index: intent_index as u32,
-                    replay_key: format!("standard-intent-{intent_index}"),
+struct StandardIntentProvider;
+
+fn standard_intent_tool() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:intent_leaf",
+        "intent_leaf",
+        "Return all four v1 tool intents.",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for StandardIntentProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![standard_intent_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "intent_leaf").then(|| Arc::new(standard_intent_tool().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        panic!("Standard intent scenario must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == standard_intent_tool().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        let session_id = call.context.session_id().to_string();
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({"provider": "done"})),
+            lash_core::ToolIntents::v1(vec![
+                lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
+                    session_id: session_id.clone(),
+                    request: lash_core::ProcessStartRequest::external(
+                        "standard-intent-child",
+                        lash_core::ProcessOriginator::host_scoped("standard-scenario"),
+                        serde_json::json!({"kind": "start"}),
+                    ),
+                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
+                })),
+                lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
+                    session_id: session_id.clone(),
+                    process_id: "standard-intent-target".to_string(),
+                    signal_name: "resume".to_string(),
+                    payload: serde_json::json!({"kind": "signal"}),
+                }),
+                lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
+                    session_id: session_id.clone(),
+                    process_id: "standard-intent-target".to_string(),
+                    event_type: "standard.intent.note".to_string(),
+                    payload: serde_json::json!({"kind": "emit"}),
+                }),
+                lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
+                    session_id,
+                    process_id: "standard-intent-target".to_string(),
+                    reason: Some("standard scenario complete".to_string()),
+                }),
+            ]),
+        )
+    }
+}
+
+#[tokio::test]
+async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback() {
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                "standard-intent-target",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
                 },
-                kind,
-                result: serde_json::json!({"literal_index": intent_index}),
-            },
-        )
-        .collect::<Vec<_>>();
-    let run = StandardProtocolScenario::new(TOOL_INTENT_FEEDBACK.display_name)
-        .user_message("run durable follow-on work")
-        .llm_response(
-            false,
-            vec![tool_call_part("tc-intents", "intent_leaf", "{}")],
-        )
-        .tool_results(vec![
-            StandardToolResult::ok(
-                "tc-intents",
-                "intent_leaf",
-                serde_json::json!({"provider": "done"}),
-                "provider done",
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
             )
-            .with_intent_outcomes(outcomes),
-        ])
-        .checkpoint()
-        .expect(StandardProtocolExpectations {
-            initial_request_contains: vec!["run durable follow-on work"],
-            tool_calls: vec![ExpectedToolCall {
-                call_id: "tc-intents".to_string(),
-                tool_name: "intent_leaf".to_string(),
-                args: serde_json::json!({}),
-            }],
-            checkpoints: vec![CheckpointKind::AfterWork],
-            llm_call_count: Some(2),
-            done: Some(false),
-            model_requests_contain: vec![
-                "[tool intent start_process #0 executed:",
-                "[tool intent signal_process #1 executed:",
-                "[tool intent cancel_process #2 executed:",
-                "[tool intent emit_process_event #3 executed:",
-            ],
-            intent_kinds: kinds.to_vec(),
-            ..StandardProtocolExpectations::default()
+            .with_extra_event_types([
+                lash_core::ProcessEventType {
+                    name: "signal.resume".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                },
+                lash_core::ProcessEventType {
+                    name: "standard.intent.note".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                },
+            ]),
+            &["standard-protocol-scenario".to_string()],
+        )
+        .await
+        .expect("register Standard intent target");
+    let requests = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("standard-scenario")
+        .complete({
+            let requests = Arc::clone(&requests);
+            let model_calls = Arc::clone(&model_calls);
+            move |request| {
+                let requests = Arc::clone(&requests);
+                let model_calls = Arc::clone(&model_calls);
+                async move {
+                    requests
+                        .lock()
+                        .expect("record Standard model request")
+                        .push(
+                            serde_json::to_string(&request.messages).expect("serialize messages"),
+                        );
+                    Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
+                        0 => lash_core::LlmResponse {
+                            parts: vec![lash_core::LlmOutputPart::ToolCall {
+                                call_id: "tc-intents".to_string(),
+                                tool_name: "intent_leaf".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        1 => lash_core::LlmResponse {
+                            full_text: "intent feedback observed".to_string(),
+                            parts: vec![lash_core::LlmOutputPart::Text {
+                                text: "intent feedback observed".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        index => panic!("unexpected Standard model call {index}"),
+                    })
+                }
+            }
         })
-        .run();
-    insta::assert_snapshot!(run.transcript.render(), @r#"
-    standard     provider  model.request           messages=1 tools=0
-    standard     tool      tool.call               name="intent_leaf" call=call-001
-    standard     tool      tool.result             name="intent_leaf" outcome=success call=call-001
-    standard     commit    checkpoint.request      checkpoint=after_work
-    standard                 usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-    standard     provider  model.request           messages=3 tools=0
-    "#);
+        .build();
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(StandardIntentProvider);
+    let mut factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![Arc::new(
+        lash_protocol_standard::StandardProtocolPluginFactory,
+    )];
+    factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+        "standard-intent-tools",
+        lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
+    )));
+    let policy = lash_core::SessionPolicy {
+        provider_id: "standard-scenario".into(),
+        model: lash_core::ModelSpec::builder("standard-scenario-model")
+            .context_window_tokens(100_000)
+            .build()
+            .expect("Standard scenario model"),
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+    };
+    let mut runtime = lash_core::facade_support::LashRuntime::builder(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+    )
+    .with_session_id("standard-protocol-scenario")
+    .with_policy(policy)
+    .with_plugin_factories(factories)
+    .with_provider_resolver(Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider.into_handle()),
+    ))
+    .with_process_registry(registry)
+    .build()
+    .await
+    .expect("build Standard intent runtime");
+    let turn = runtime
+        .run_turn_assembled(
+            lash_core::TurnInput::text("run durable follow-on work"),
+            tokio_util::sync::CancellationToken::new(),
+            lash_core::ScopedEffectController::shared(
+                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+                lash_core::ExecutionScope::turn(
+                    "standard-protocol-scenario",
+                    "standard-protocol-turn",
+                ),
+            )
+            .expect("Standard scenario turn scope"),
+        )
+        .await
+        .expect("run Standard intent turn");
+    assert_eq!(turn.assistant_output.safe_text, "intent feedback observed");
+    let requests = requests.lock().expect("read Standard requests");
+    assert_eq!(requests.len(), 2);
+    for literal in [
+        "[tool intent start_process #0 executed:",
+        "[tool intent signal_process #1 executed:",
+        "[tool intent emit_process_event #2 executed:",
+        "[tool intent cancel_process #3 executed:",
+    ] {
+        assert!(
+            requests[1].contains(literal),
+            "missing `{literal}` in {}",
+            requests[1]
+        );
+    }
 }
 
 #[test]

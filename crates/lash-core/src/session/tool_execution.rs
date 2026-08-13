@@ -673,6 +673,9 @@ impl RuntimeExecutionContext<'_> {
         outcome: ToolDispatchOutcome,
         tool_correlation_id: TurnActivityId,
     ) -> CompletedProtocolToolCall {
+        self.dispatch
+            .recorded_intent_outcomes
+            .record(&outcome.intent_outcomes);
         let attempts = outcome.attempts.clone();
         let output = outcome.record.output.clone();
         let projection_output = output.clone();
@@ -1097,6 +1100,9 @@ impl RuntimeExecutionContext<'_> {
                             .collect();
                     }
                 };
+            self.dispatch
+                .recorded_intent_outcomes
+                .record_launches(&outcome.launches);
             if outcome.launches.len() != prepared_entries.len() {
                 let message = format!(
                     "tool batch returned {} launches for {} prepared calls",

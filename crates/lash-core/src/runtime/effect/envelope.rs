@@ -50,6 +50,7 @@ pub enum RuntimeEffectKind {
     Direct,
     ToolAttempt,
     ToolBatch,
+    ToolParentEnd,
     Trigger,
     Process,
     ExecCode,
@@ -69,6 +70,7 @@ impl RuntimeEffectKind {
             Self::Direct => "direct",
             Self::ToolAttempt => "tool_attempt",
             Self::ToolBatch => "tool_batch",
+            Self::ToolParentEnd => "tool_parent_end",
             Self::Trigger => "trigger",
             Self::Process => "process",
             Self::ExecCode => "exec_code",
@@ -518,6 +520,12 @@ pub enum ProcessCommand {
         process_id: String,
         reason: Option<String>,
     },
+    ParentEnd {
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+    },
     Signal {
         process_id: String,
         signal_name: String,
@@ -578,6 +586,9 @@ impl ProcessCommand {
             Self::DeleteSession { session_id } => format!("process:delete-session:{session_id}"),
             Self::Await { process_id } => format!("process:await:{process_id}"),
             Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
+            Self::ParentEnd { identity, .. } => {
+                format!("process:parent-end:{}", identity.replay_key)
+            }
             Self::Signal {
                 process_id,
                 signal_name,
@@ -626,6 +637,9 @@ pub enum ProcessEffectOutcome {
     Cancel {
         record: Box<ProcessRecord>,
     },
+    ParentEnd {
+        outcome: Box<crate::ToolIntentParentEndOutcome>,
+    },
     Signal {
         // Boxed for the same reason as the record variants: a fat event should
         // not size the outcome enum inline through the recursive executor.
@@ -633,6 +647,8 @@ pub enum ProcessEffectOutcome {
     },
     EmitEvent {
         event: Box<crate::ProcessEvent>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wake_delivery: Option<Box<crate::ProcessWakeDelivery>>,
     },
 }
 
