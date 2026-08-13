@@ -15,7 +15,7 @@ mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 3;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 4;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the
@@ -380,6 +380,7 @@ struct CanonicalBinding {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CanonicalValue {
     Null {},
+    Undefined {},
     Bool { value: bool },
     Number { value: f64 },
     String { value: String },
@@ -451,7 +452,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
         // restore — and it can never be written to durable storage at all.
         let mut forest_roots = PersistedRoots::default();
         forest_roots.durable_all(runtime_globals.iter());
-        heap.validate_persisted_forest(&forest_roots)
+        heap.validate_persisted_graph(&forest_roots)
             .map_err(|reason| ContinuationError::UnserializableValue {
                 location: format!("snapshot heap: {reason}"),
                 variant: "shared heap object",
@@ -531,7 +532,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                 .map_err(SnapshotDecodeError::InvalidEncoding)?;
                 let mut forest_roots = PersistedRoots::default();
                 forest_roots.durable_all(runtime_globals.iter());
-                heap.validate_persisted_forest(&forest_roots)
+                heap.validate_persisted_graph(&forest_roots)
                     .map_err(SnapshotDecodeError::InvalidEncoding)?;
                 // The heap form's depth lives in its chain of objects, not in
                 // its MessagePack nesting, so the structural guard cannot see

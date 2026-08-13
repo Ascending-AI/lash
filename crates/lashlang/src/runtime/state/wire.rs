@@ -81,6 +81,7 @@ impl CanonicalValue {
         }
         Ok(match value {
             Value::Null => Self::Null {},
+            Value::Undefined => Self::Undefined {},
             Value::Bool(value) => Self::Bool { value: *value },
             Value::Number(value) => Self::Number {
                 value: normalize_number(*value),
@@ -139,6 +140,7 @@ impl CanonicalValue {
     pub(super) fn into_runtime(self) -> Result<Value, SnapshotDecodeError> {
         Ok(match self {
             Self::Null {} => Value::Null,
+            Self::Undefined {} => Value::Undefined,
             Self::Bool { value } => Value::Bool(value),
             Self::Number { value } => Value::Number(normalize_number(value)),
             Self::String { value } => Value::String(value.into()),

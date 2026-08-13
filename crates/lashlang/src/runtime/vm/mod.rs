@@ -1,16 +1,9 @@
-//! Bytecode executor: walks a compiled `Chunk` of `Instruction`s,
-//! materializes intermediate `Value`s, calls the host for tool dispatches,
-//! and emits trace/profile data on the way through.
-//!
-//! The VM is the consumer side of the compiler/vm split: it never writes
-//! `Instruction`s, only reads them. Cross-module helpers it relies on
-//! (`read_field*`, `eval_binary_values`, `apply_format_async`,
-//! `to_json_async`, …) remain in `mod.rs` until the Stage 6 module split.
+//! Bytecode executor for compiled chunks, host effects, and trace/profile data.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::ast::{BinaryOp, UnaryOp};
+use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
 use crate::lexer::Span;
 use crate::{
     LashlangExecutionChild, LashlangExecutionObservation, LashlangExecutionSite,
@@ -23,6 +16,7 @@ mod control;
 mod effects;
 mod exceptions;
 mod heap_plan;
+mod reference_assignment;
 
 #[cfg(test)]
 use continuation::TestSuspension;
@@ -50,10 +44,10 @@ use super::{
     LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, PersistedRoots,
     ProfileAccumulator, ProfileReport, ProjectedBindings, ResourceHandle, RuntimeError, State,
     Value, add_assign_index_number, add_values, as_number, assign_path, eval_binary_values,
-    eval_compare_values, eval_number_binary_values, eval_number_compare_values,
-    eval_number_numeric_binary_value, execute_compiled_format, execute_compiled_format_direct,
-    execute_compiled_format_one_number_compact_direct, execute_intrinsic,
-    execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values,
+    eval_compare_values, eval_javascript_binary, eval_javascript_unary, eval_number_binary_values,
+    eval_number_compare_values, eval_number_numeric_binary_value, execute_compiled_format,
+    execute_compiled_format_direct, execute_compiled_format_one_number_compact_direct,
+    execute_intrinsic, execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values,
     materialize_projected_async, materialize_value, range_bounds, range_bounds_async,
     read_field_direct, read_field_ref_direct, read_index_direct, unwrap_tool_result,
     unwrap_type_value,
@@ -310,10 +304,19 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(self.chunk.constants[index].clone());
             }
             Instruction::PushNull => self.stack.push(Value::Null),
+            Instruction::PushUndefined => self.stack.push(Value::Undefined),
             Instruction::PushBool(value) => self.stack.push(Value::Bool(value)),
             Instruction::PushNumber(value) => self.stack.push(Value::Number(value)),
             Instruction::LoadName(name) => {
                 let value = self.load_slot(name)?.clone();
+                self.stack.push(value);
+            }
+            Instruction::Duplicate => {
+                let value = self
+                    .stack
+                    .last()
+                    .cloned()
+                    .ok_or(RuntimeError::VmStackUnderflow)?;
                 self.stack.push(value);
             }
             Instruction::DeepCopy => {
@@ -347,6 +350,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::BuildList(len) => {
                 let values = self.pop_n(len)?;
                 self.stack.push(Value::List(values.into()));
+            }
+            Instruction::BuildHeapList(len) => {
+                let values = self.pop_n(len)?;
+                self.stack.push(self.heap.allocate_list(values)?);
             }
             Instruction::ListAppend => {
                 if self.stack.len() < 2 {
@@ -387,6 +394,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::BuildRecord(keys) => {
                 let record = self.drain_record_from_stack(keys)?;
                 self.stack.push(Value::Record(Arc::new(record)));
+            }
+            Instruction::BuildHeapRecord(keys) => {
+                let record = self.drain_record_from_stack(keys)?;
+                self.stack.push(self.heap.allocate_record(record)?);
             }
             Instruction::Field(field) => {
                 if self
@@ -482,6 +493,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.enter_finally(finally, resume);
             }
             Instruction::AbandonFinally => self.abandon_finally()?,
+            Instruction::AbandonFinallyKeepValue => self.abandon_finally_keep_value()?,
             Instruction::EndFinally => {
                 if let Some(escape) = self.finish_finally()? {
                     // A cleanup chain that ends with nothing catching it
@@ -537,6 +549,34 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     }
                 };
                 self.stack.push(value);
+            }
+            Instruction::JavaScriptUnary(op) => {
+                let mut value = self.pop_stack()?;
+                if op != JavaScriptUnaryOp::TypeOf && matches!(value, Value::Ref(_)) {
+                    value = self.heap.export_for_instruction(&value)?;
+                }
+                self.stack.push(eval_javascript_unary(value, op));
+            }
+            Instruction::JavaScriptBinary(op) => {
+                let mut right = self.pop_stack()?;
+                let mut left = self.pop_stack()?;
+                if !matches!(
+                    op,
+                    JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual
+                ) {
+                    if matches!(left, Value::Ref(_)) {
+                        left = self.heap.export_for_instruction(&left)?;
+                    }
+                    if matches!(right, Value::Ref(_)) {
+                        right = self.heap.export_for_instruction(&right)?;
+                    }
+                }
+                self.stack.push(eval_javascript_binary(left, op, right));
+            }
+            Instruction::IsNullish => {
+                let value = self.pop_stack()?;
+                self.stack
+                    .push(Value::Bool(matches!(value, Value::Null | Value::Undefined)));
             }
             Instruction::SlotNumberBinary { slot, op, right } => {
                 let value = match self.load_slot(slot)? {
@@ -1012,6 +1052,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.record_assignment(slot);
                 self.last_value = Some(last_value);
             }
+            Instruction::HeapPathAssign { slot, path } => {
+                self.execute_reference_path_assignment(slot, path)?;
+            }
             Instruction::ListAppend => {
                 let item = materialize_projected_async(self.pop_stack()?).await;
                 let list = self.pop_stack()?;
@@ -1213,15 +1256,19 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             // the run loop never routes them here.
             Instruction::PushConst(_)
             | Instruction::PushNull
+            | Instruction::PushUndefined
             | Instruction::PushBool(_)
             | Instruction::PushNumber(_)
             | Instruction::LoadName(_)
+            | Instruction::Duplicate
             | Instruction::DeepCopy
             | Instruction::StoreName(_)
             | Instruction::StoreConst { .. }
             | Instruction::BuildTuple(_)
             | Instruction::BuildList(_)
+            | Instruction::BuildHeapList(_)
             | Instruction::BuildRecord(_)
+            | Instruction::BuildHeapRecord(_)
             | Instruction::ResultUnwrap
             | Instruction::AddAssign(_)
             | Instruction::AddAssignNumber { .. }
@@ -1251,7 +1298,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::PopHandler
             | Instruction::EnterFinally { .. }
             | Instruction::EndFinally
+            | Instruction::JavaScriptUnary(_)
+            | Instruction::JavaScriptBinary(_)
+            | Instruction::IsNullish
             | Instruction::AbandonFinally
+            | Instruction::AbandonFinallyKeepValue
             | Instruction::Throw => {
                 unreachable!("opcode is always completed by step_instruction_fast")
             }

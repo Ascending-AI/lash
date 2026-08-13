@@ -13,7 +13,7 @@ pub use types::{
 
 use super::exceptions::PendingErrorOrigin;
 
-pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 4;
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
@@ -213,6 +213,7 @@ mod continuation_serde {
     #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
     enum ValueWire {
         Null,
+        Undefined,
         Bool(bool),
         Number(NumberWire),
         String(String),
@@ -266,6 +267,7 @@ mod continuation_serde {
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
         Ok(match value {
             Value::Null => ValueWire::Null,
+            Value::Undefined => ValueWire::Undefined,
             Value::Bool(value) => ValueWire::Bool(*value),
             Value::Number(value) => ValueWire::Number(NumberWire {
                 version: NUMBER_WIRE_VERSION,
@@ -293,6 +295,7 @@ mod continuation_serde {
     fn value_from_wire(value: ValueWire) -> Result<Value, &'static str> {
         Ok(match value {
             ValueWire::Null => Value::Null,
+            ValueWire::Undefined => Value::Undefined,
             ValueWire::Bool(value) => Value::Bool(value),
             ValueWire::Number(value) => {
                 if value.version != NUMBER_WIRE_VERSION {
@@ -1179,7 +1182,7 @@ mod tests {
         let error = validate_continuation(&continuation)
             .expect_err("a cyclic continuation must be rejected");
         assert!(
-            error.to_string().contains("must have one owner"),
+            error.to_string().contains("must be acyclic"),
             "unexpected rejection: {error}"
         );
 

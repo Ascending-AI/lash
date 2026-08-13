@@ -39,8 +39,20 @@ pub fn compile(source: &str) -> Result<CompiledProgram, crate::parser::ParseErro
 /// nests them. The depth cap is applied here instead, so an over-deep tree is a
 /// typed error rather than a stack overflow in a later AST walk.
 pub fn compile_ast(program: &Program) -> Result<CompiledProgram, crate::ast::InvalidAst> {
+    compile_ast_with_dialect(program, super::CompilationDialect::Lashlang)
+}
+
+/// Compiles an AST using the source dialect's value-semantics contract.
+pub fn compile_ast_with_dialect(
+    program: &Program,
+    dialect: super::CompilationDialect,
+) -> Result<CompiledProgram, crate::ast::InvalidAst> {
     crate::ast::validate_ast(program)?;
-    Ok(compile_program_internal(program))
+    let (chunk, compile_stats) = Compiler::compile_program_with_dialect(program, dialect);
+    Ok(CompiledProgram {
+        chunk,
+        compile_stats,
+    })
 }
 
 pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
@@ -52,10 +64,19 @@ pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
 }
 
 pub fn compile_linked(linked: &LinkedModule) -> CompiledProgram {
-    let (chunk, compile_stats) = Compiler::compile_linked_program(
+    compile_linked_with_dialect(linked, super::CompilationDialect::Lashlang)
+}
+
+/// Compiles a linked shared-AST module using the requested language dialect.
+pub fn compile_linked_with_dialect(
+    linked: &LinkedModule,
+    dialect: super::CompilationDialect,
+) -> CompiledProgram {
+    let (chunk, compile_stats) = Compiler::compile_linked_program_with_dialect(
         linked.program(),
         (&linked.artifact).into(),
         LashlangExecutionContext::main(linked.artifact.module_ref.clone()),
+        dialect,
     );
     CompiledProgram {
         chunk,

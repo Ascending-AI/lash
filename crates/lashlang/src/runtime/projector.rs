@@ -100,7 +100,7 @@ impl BudgetedJsonProjector {
     ) -> ProjectedFuture<'a, String> {
         Box::pin(async move {
             match value {
-                Value::Null => "null".to_string(),
+                Value::Null | Value::Undefined => "null".to_string(),
                 Value::Bool(value) => value.to_string(),
                 Value::Number(value) => {
                     let mut out = String::new();
@@ -173,7 +173,10 @@ impl BudgetedJsonProjector {
                     if record.is_empty() {
                         return "{}".to_string();
                     }
-                    let mut entries: Vec<_> = record.iter().collect();
+                    let mut entries: Vec<_> = record
+                        .iter()
+                        .filter(|(_, value)| !matches!(value, Value::Undefined))
+                        .collect();
                     if !self.is_unbounded() {
                         entries = prioritized_record_entries(entries);
                     }

@@ -59,6 +59,7 @@ impl<'module> Linker<'module> {
             }
             Expr::Variable(name) => self.lower_variable(name, scope)?,
             Expr::Null
+            | Expr::Undefined
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)
@@ -120,10 +121,18 @@ impl<'module> Linker<'module> {
             Expr::Map { items, function } => self.lower_map(items, function, scope)?,
             Expr::Try(exception) => self.lower_try_expr(exception, scope)?,
             Expr::Throw(value) => self.lower_throw_expr(value, scope)?,
+            Expr::Return(value) => self.lower_return_expr(value, scope)?,
             Expr::Field { target, field } => self.lower_field(target, field, scope)?,
             Expr::Index { target, index } => self.lower_index(target, index, scope)?,
             Expr::Unary { op, expr } => self.lower_unary(op, expr, scope)?,
             Expr::Binary { left, op, right } => self.lower_binary(left, op, right, scope)?,
+            Expr::JavaScriptUnary { op, expr } => self.lower_javascript_unary(op, expr, scope)?,
+            Expr::JavaScriptBinary { left, op, right } => {
+                self.lower_javascript_binary(left, op, right, scope)?
+            }
+            Expr::JavaScriptLogical { left, op, right } => {
+                self.lower_javascript_logical(left, op, right, scope)?
+            }
         })
     }
 
@@ -1109,6 +1118,66 @@ impl<'module> Linker<'module> {
     ) -> Result<(Expr, Option<Binding>), LinkError> {
         Ok((
             Expr::Throw(Box::new(self.lower_expr(value, scope)?.0)),
+            Some(any_binding()),
+        ))
+    }
+
+    fn lower_return_expr(
+        &self,
+        value: &Expr,
+        scope: &mut Scope,
+    ) -> Result<(Expr, Option<Binding>), LinkError> {
+        Ok((
+            Expr::Return(Box::new(self.lower_expr(value, scope)?.0)),
+            Some(any_binding()),
+        ))
+    }
+
+    fn lower_javascript_unary(
+        &self,
+        op: &crate::ast::JavaScriptUnaryOp,
+        expr: &Expr,
+        scope: &mut Scope,
+    ) -> Result<(Expr, Option<Binding>), LinkError> {
+        Ok((
+            Expr::JavaScriptUnary {
+                op: *op,
+                expr: Box::new(self.lower_expr(expr, scope)?.0),
+            },
+            Some(any_binding()),
+        ))
+    }
+
+    fn lower_javascript_binary(
+        &self,
+        left: &Expr,
+        op: &crate::ast::JavaScriptBinaryOp,
+        right: &Expr,
+        scope: &mut Scope,
+    ) -> Result<(Expr, Option<Binding>), LinkError> {
+        Ok((
+            Expr::JavaScriptBinary {
+                left: Box::new(self.lower_expr(left, scope)?.0),
+                op: *op,
+                right: Box::new(self.lower_expr(right, scope)?.0),
+            },
+            Some(any_binding()),
+        ))
+    }
+
+    fn lower_javascript_logical(
+        &self,
+        left: &Expr,
+        op: &crate::ast::JavaScriptLogicalOp,
+        right: &Expr,
+        scope: &mut Scope,
+    ) -> Result<(Expr, Option<Binding>), LinkError> {
+        Ok((
+            Expr::JavaScriptLogical {
+                left: Box::new(self.lower_expr(left, scope)?.0),
+                op: *op,
+                right: Box::new(self.lower_expr(right, scope)?.0),
+            },
             Some(any_binding()),
         ))
     }

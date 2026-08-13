@@ -339,9 +339,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x1d, 0x82, 0xf8, 0xf0, 0x68, 0x35, 0xa7, 0xd8, 0x27, 0x7f, 0x55, 0x8c, 0x9c, 0x79,
-            0xe3, 0xb9, 0x8f, 0x73, 0xed, 0x66, 0x24, 0x8c, 0xf1, 0x68, 0x92, 0xe5, 0x1c, 0x6d,
-            0x11, 0xb3, 0x4a, 0x84,
+            0x46, 0xf4, 0xf9, 0x31, 0x8e, 0x6e, 0x73, 0x76, 0x19, 0xe1, 0xe1, 0xa6, 0x8f, 0x8f,
+            0xf2, 0x15, 0xa3, 0xb0, 0x25, 0x78, 0x44, 0xf4, 0x97, 0xc4, 0x28, 0x24, 0xba, 0xbd,
+            0x96, 0x6e, 0xe3, 0x38,
         ]
     );
 }
@@ -355,7 +355,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e03a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e04a7676c6f62616c7390");
 }
 
 #[test]
@@ -585,7 +585,7 @@ fn canonical_decode_rejects_counter_accounting_schedule_and_root_order() {
 }
 
 #[test]
-fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
+fn canonical_decode_accepts_shared_dags_and_rejects_cycles_and_unreachable_objects() {
     let id = HeapId::from_counter(1);
     let empty_bytes = super::super::heap::HeapObject::List(Vec::new()).logical_bytes();
     let shared = canonical_heap_with(
@@ -607,11 +607,11 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
         1,
         empty_bytes,
     );
-    assert!(
-        Snapshot::from_canonical_bytes(&named_bytes(&shared))
-            .expect_err("shared roots must be rejected")
-            .to_string()
-            .contains("must have one owner")
+    let shared_snapshot = Snapshot::from_canonical_bytes(&named_bytes(&shared))
+        .expect("shared roots preserve one heap identity");
+    assert_eq!(
+        shared_snapshot.runtime_globals.get("a"),
+        shared_snapshot.runtime_globals.get("b")
     );
 
     let cyclic_object = super::super::heap::HeapObject::List(vec![Value::Ref(id)]);
@@ -630,13 +630,12 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
         1,
         cyclic_object.logical_bytes(),
     );
-    // A rooted self-cycle is refused as a second owner: the root holds the
-    // object and so does the object itself.
+    // Host values remain acyclic even though aliases are accepted.
     assert!(
         Snapshot::from_canonical_bytes(&named_bytes(&cycle))
             .expect_err("cycles must be rejected")
             .to_string()
-            .contains("must have one owner")
+            .contains("acyclic")
     );
 
     // A cycle no root names has one owner per object and still must not
@@ -671,8 +670,7 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
             .contains("acyclic")
     );
 
-    // A repeated reference inside one root is a DAG, not a tree, and is
-    // refused even though only one root names it.
+    // A repeated reference inside one root is a valid aliasing DAG.
     let diamond_child = super::super::heap::HeapObject::List(Vec::new());
     let diamond_root =
         super::super::heap::HeapObject::List(vec![Value::Ref(second), Value::Ref(second)]);
@@ -700,12 +698,8 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
         2,
         diamond_root.logical_bytes() + diamond_child.logical_bytes(),
     );
-    assert!(
-        Snapshot::from_canonical_bytes(&named_bytes(&diamond))
-            .expect_err("a within-root diamond must be rejected")
-            .to_string()
-            .contains("must have one owner")
-    );
+    Snapshot::from_canonical_bytes(&named_bytes(&diamond))
+        .expect("a within-root diamond must preserve shared identity");
 
     let unreachable = canonical_heap_with(
         Vec::new(),

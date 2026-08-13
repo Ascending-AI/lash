@@ -1,10 +1,18 @@
 impl Compiler {
     pub(crate) fn compile_program(program: &Program) -> (Chunk, CompileStats) {
+        Self::compile_program_with_dialect(program, CompilationDialect::Lashlang)
+    }
+
+    pub(crate) fn compile_program_with_dialect(
+        program: &Program,
+        dialect: CompilationDialect,
+    ) -> (Chunk, CompileStats) {
         let stats = Rc::new(RefCell::new(CompileStats::default()));
         let mut compiler = Self::with_slots_and_stats(
             None,
             Rc::new(RefCell::new(SlotTable::default())),
             stats.clone(),
+            dialect,
         );
         compiler.expression_source_spans = expression_source_spans(program);
         compiler.compile_program_block(program);
@@ -13,16 +21,18 @@ impl Compiler {
         (chunk, compile_stats)
     }
 
-    pub(crate) fn compile_linked_program(
+    pub(crate) fn compile_linked_program_with_dialect(
         program: &Program,
         module_context: CompiledModuleContext,
         lashlang_execution_context: LashlangExecutionContext,
+        dialect: CompilationDialect,
     ) -> (Chunk, CompileStats) {
         let stats = Rc::new(RefCell::new(CompileStats::default()));
         let mut compiler = Self::with_slots_and_stats(
             Some(module_context),
             Rc::new(RefCell::new(SlotTable::default())),
             stats.clone(),
+            dialect,
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
@@ -46,6 +56,7 @@ impl Compiler {
             Some(module_context),
             Rc::new(RefCell::new(SlotTable::default())),
             stats.clone(),
+            CompilationDialect::Lashlang,
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
@@ -63,8 +74,10 @@ impl Compiler {
         module_context: Option<CompiledModuleContext>,
         slots: Rc<RefCell<SlotTable>>,
         compile_stats: Rc<RefCell<CompileStats>>,
+        dialect: CompilationDialect,
     ) -> Self {
         Self {
+            dialect,
             module_context,
             lashlang_execution: None,
             expression_source_spans: FxHashMap::default(),
@@ -87,6 +100,18 @@ impl Compiler {
             pending_finally_sites: Vec::new(),
             functions: Vec::new(),
             pending_functions: Vec::new(),
+        }
+    }
+
+    fn emit_isolation(&mut self) {
+        if self.dialect == CompilationDialect::Lashlang {
+            self.code.push(Instruction::DeepCopy);
+        }
+    }
+
+    fn emit_loop_binding_isolation(&mut self, binding: usize) {
+        if self.dialect == CompilationDialect::Lashlang {
+            self.code.push(Instruction::DeepCopyLoopBinding(binding));
         }
     }
 
@@ -204,6 +229,7 @@ impl Compiler {
     fn emit_push_value(&mut self, value: Value) {
         match value {
             Value::Null => self.code.push(Instruction::PushNull),
+            Value::Undefined => self.code.push(Instruction::PushUndefined),
             Value::Bool(value) => self.code.push(Instruction::PushBool(value)),
             Value::Number(value) => self.code.push(Instruction::PushNumber(value)),
             value => {
@@ -423,7 +449,7 @@ impl Compiler {
                 body,
             } => self.compile_for_expr(binding, iterable, body, false),
             Expr::While { condition, body } => self.compile_while_expr(condition, body, false),
-            Expr::Finish(_) | Expr::Fail(_) | Expr::Break | Expr::Continue => {
+            Expr::Finish(_) | Expr::Fail(_) | Expr::Return(_) | Expr::Break | Expr::Continue => {
                 self.compile_expr(expression);
             }
             expression => {
@@ -517,7 +543,9 @@ impl Compiler {
             let name = &target.root;
             let slot = self.push_slot(name);
             let has_type_literal = contains_type_literal(expr);
-            let const_value = if let Expr::TypeLiteral(ty) = expr {
+            let const_value = if self.dialect == CompilationDialect::Typescript {
+                None
+            } else if let Expr::TypeLiteral(ty) = expr {
                 self.fold_type_expr(ty).map(wrap_type_schema_value)
             } else if has_type_literal {
                 None
@@ -538,7 +566,7 @@ impl Compiler {
                     // other: the entering item is isolated before it joins the
                     // accumulator.
                     self.compile_expr(&items[0]);
-                    self.code.push(Instruction::DeepCopy);
+                    self.emit_isolation();
                     self.code.push(Instruction::AppendAssign(slot));
                     self.set_const_slot(slot, None);
                     self.push_null_if(leave_value);
@@ -575,7 +603,7 @@ impl Compiler {
                 && first_arg == name
             {
                 self.compile_expr(item);
-                self.code.push(Instruction::DeepCopy);
+                self.emit_isolation();
                 self.code
                     .push(Instruction::Intrinsic(IntrinsicOp::PushAssign(slot)));
                 self.set_const_slot(slot, None);
@@ -594,7 +622,7 @@ impl Compiler {
 
             self.compile_expr(expr);
             if store_needs_isolation(expr) {
-                self.code.push(Instruction::DeepCopy);
+                self.emit_isolation();
             }
             self.code.push(Instruction::StoreName(slot));
             self.set_const_slot(slot, const_value);
@@ -637,9 +665,12 @@ impl Compiler {
             }
         }
         self.compile_expr(expr);
-        self.code.push(Instruction::DeepCopy);
+        self.emit_isolation();
         let path = self.push_assign_path(&target.steps);
-        self.code.push(Instruction::PathAssign { slot, path });
+        self.code.push(match self.dialect {
+            CompilationDialect::Lashlang => Instruction::PathAssign { slot, path },
+            CompilationDialect::Typescript => Instruction::HeapPathAssign { slot, path },
+        });
         self.set_const_slot(slot, None);
         self.push_null_if(leave_value);
     }
@@ -677,7 +708,7 @@ impl Compiler {
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
-        self.code.push(Instruction::DeepCopyLoopBinding(binding));
+        self.emit_loop_binding_isolation(binding);
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
             break_jumps: SmallVec::new(),
@@ -712,7 +743,7 @@ impl Compiler {
     ) {
         let Some(clause) = clauses.get(index) else {
             self.compile_expr(element);
-            self.code.push(Instruction::DeepCopy);
+            self.emit_isolation();
             self.code.push(Instruction::ListAppend);
             return;
         };
@@ -775,7 +806,7 @@ impl Compiler {
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
-        self.code.push(Instruction::DeepCopyLoopBinding(binding));
+        self.emit_loop_binding_isolation(binding);
         self.compile_list_comprehension_clause(element, clauses, next_clause);
         self.code.push(Instruction::Jump(loop_start));
         let loop_end = self.code.len();
@@ -813,6 +844,7 @@ impl Compiler {
         match expr {
             Expr::LabelAnnotated { expr, .. } => self.fold_compile_time_expr(expr),
             Expr::Null => Some(Value::Null),
+            Expr::Undefined => Some(Value::Undefined),
             Expr::Bool(value) => Some(Value::Bool(*value)),
             Expr::Number(value) => Some(Value::Number(*value)),
             Expr::String(value) => Some(Value::String(value.clone())),
@@ -927,6 +959,30 @@ impl Compiler {
                     eval_binary_values(left, *op, right).ok()
                 }
             },
+            Expr::JavaScriptUnary { op, expr } => Some(eval_javascript_unary(
+                self.fold_compile_time_expr(expr)?,
+                *op,
+            )),
+            Expr::JavaScriptBinary { left, op, right } => Some(eval_javascript_binary(
+                self.fold_compile_time_expr(left)?,
+                *op,
+                self.fold_compile_time_expr(right)?,
+            )),
+            Expr::JavaScriptLogical { left, op, right } => {
+                let left = self.fold_compile_time_expr(left)?;
+                let use_right = match op {
+                    JavaScriptLogicalOp::And => is_truthy(&left),
+                    JavaScriptLogicalOp::Or => !is_truthy(&left),
+                    JavaScriptLogicalOp::NullishCoalesce => {
+                        matches!(left, Value::Null | Value::Undefined)
+                    }
+                };
+                if use_right {
+                    self.fold_compile_time_expr(right)
+                } else {
+                    Some(left)
+                }
+            }
             Expr::TypeLiteral(ty) => self.fold_type_expr(ty).map(wrap_type_schema_value),
             Expr::Block(_)
             | Expr::Function(_)
@@ -934,6 +990,7 @@ impl Compiler {
             | Expr::Map { .. }
             | Expr::Try(_)
             | Expr::Throw(_)
+            | Expr::Return(_)
             | Expr::Assign { .. }
             | Expr::For { .. }
             | Expr::While { .. }

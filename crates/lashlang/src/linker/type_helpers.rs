@@ -210,6 +210,7 @@ fn type_has_field(ty: &TypeExpr, field: &str) -> bool {
 fn literal_type(expr: &Expr) -> TypeExpr {
     match expr {
         Expr::Null => TypeExpr::Null,
+        Expr::Undefined => TypeExpr::Any,
         Expr::Bool(_) => TypeExpr::Bool,
         Expr::Number(value) if value.is_finite() && value.fract() == 0.0 => TypeExpr::Int,
         Expr::Number(_) => TypeExpr::Float,

@@ -38,7 +38,7 @@ pub(crate) fn json_number(value: f64) -> Option<serde_json::Number> {
 pub(crate) fn to_json_async<'a>(value: &'a Value) -> ProjectedFuture<'a, serde_json::Value> {
     Box::pin(async move {
         match value {
-            Value::Null => serde_json::Value::Null,
+            Value::Null | Value::Undefined => serde_json::Value::Null,
             Value::Bool(value) => serde_json::Value::Bool(*value),
             Value::Number(value) => json_number(*value)
                 .map(serde_json::Value::Number)
@@ -56,7 +56,9 @@ pub(crate) fn to_json_async<'a>(value: &'a Value) -> ProjectedFuture<'a, serde_j
             Value::Record(record) => {
                 let mut object = serde_json::Map::with_capacity(record.len());
                 for (key, value) in record.iter() {
-                    object.insert(key.to_string(), to_json_async(value).await);
+                    if !matches!(value, Value::Undefined) {
+                        object.insert(key.to_string(), to_json_async(value).await);
+                    }
                 }
                 serde_json::Value::Object(object)
             }
@@ -81,7 +83,7 @@ pub(crate) fn to_json(value: &Value) -> serde_json::Value {
 #[cfg(test)]
 pub(crate) fn to_json_direct(value: &Value) -> serde_json::Value {
     match value {
-        Value::Null => serde_json::Value::Null,
+        Value::Null | Value::Undefined => serde_json::Value::Null,
         Value::Bool(value) => serde_json::Value::Bool(*value),
         Value::Number(value) => json_number(*value)
             .map(serde_json::Value::Number)
@@ -95,7 +97,9 @@ pub(crate) fn to_json_direct(value: &Value) -> serde_json::Value {
         Value::Record(record) => {
             let mut object = serde_json::Map::with_capacity(record.len());
             for (key, value) in record.iter() {
-                object.insert(key.to_string(), to_json_direct(value));
+                if !matches!(value, Value::Undefined) {
+                    object.insert(key.to_string(), to_json_direct(value));
+                }
             }
             serde_json::Value::Object(object)
         }
@@ -148,7 +152,7 @@ where
     S: serde::Serializer,
 {
     match value {
-        Value::Null => serializer.serialize_none(),
+        Value::Null | Value::Undefined => serializer.serialize_none(),
         Value::Bool(value) => serializer.serialize_bool(*value),
         Value::Number(value) => match json_number(*value) {
             Some(value) => value.serialize(serializer),
@@ -168,7 +172,10 @@ where
             sequence.end()
         }
         Value::Record(record) => {
-            let mut entries = record.iter().collect::<Vec<_>>();
+            let mut entries = record
+                .iter()
+                .filter(|(_, value)| !matches!(value, Value::Undefined))
+                .collect::<Vec<_>>();
             entries.sort_unstable_by_key(|(key, _)| *key);
             let mut map = serializer.serialize_map(Some(entries.len()))?;
             for (key, value) in entries {
@@ -219,7 +226,7 @@ pub(crate) fn append_runtime_json_async<'a>(
 ) -> ProjectedFuture<'a, ()> {
     Box::pin(async move {
         match value {
-            Value::Null => output.push_str("null"),
+            Value::Null | Value::Undefined => output.push_str("null"),
             Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
             Value::Number(value) => match json_number(*value) {
                 Some(value) => write!(output, "{value}").expect("string writes should not fail"),
@@ -240,7 +247,10 @@ pub(crate) fn append_runtime_json_async<'a>(
                 output.push(']');
             }
             Value::Record(record) => {
-                let mut entries = record.iter().collect::<Vec<_>>();
+                let mut entries = record
+                    .iter()
+                    .filter(|(_, value)| !matches!(value, Value::Undefined))
+                    .collect::<Vec<_>>();
                 entries.sort_unstable_by_key(|(key, _)| *key);
                 output.push('{');
                 for (index, (key, value)) in entries.into_iter().enumerate() {

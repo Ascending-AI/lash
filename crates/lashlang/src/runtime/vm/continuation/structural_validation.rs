@@ -296,7 +296,7 @@ pub(super) fn validate_continuation(
     continuation
         .heap
         .heap
-        .validate_persisted_forest(&continuation_forest_roots(continuation))
+        .validate_persisted_graph(&continuation_forest_roots(continuation))
         .map_err(|reason| ContinuationError::UnserializableValue {
             location: format!("continuation heap: {reason}"),
             variant: "invalid heap object graph",
@@ -374,6 +374,7 @@ pub(super) fn validate_value(value: &Value, location: &str) -> Result<(), Contin
             Ok(())
         }
         Value::Null
+        | Value::Undefined
         | Value::Bool(_)
         | Value::Number(_)
         | Value::String(_)

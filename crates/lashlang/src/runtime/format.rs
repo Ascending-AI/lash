@@ -45,6 +45,7 @@ pub(crate) fn append_stringified_value_direct(
     match value {
         Value::String(value) => output.push_str(value),
         Value::Null => output.push_str("null"),
+        Value::Undefined => output.push_str("undefined"),
         Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
         Value::Number(value) => {
             write_number(output, *value).expect("string writes should not fail")
@@ -72,6 +73,7 @@ pub(crate) fn append_stringified_value_async<'a>(
         match value {
             Value::String(value) => output.push_str(value),
             Value::Null => output.push_str("null"),
+            Value::Undefined => output.push_str("undefined"),
             Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
             Value::Number(value) => {
                 write_number(output, *value).expect("string writes should not fail")

@@ -70,7 +70,7 @@ impl Compiler {
             ("push", 2) => {
                 self.compile_expr(&args[0]);
                 self.compile_expr(&args[1]);
-                self.code.push(Instruction::DeepCopy);
+                self.emit_isolation();
                 self.code.push(Instruction::Intrinsic(IntrinsicOp::Push));
             }
             ("range", 1..=3) => {
@@ -91,7 +91,8 @@ impl Compiler {
     }
 
     fn compile_expr(&mut self, expr: &Expr) {
-        if !contains_type_literal(expr)
+        if self.dialect == CompilationDialect::Lashlang
+            && !contains_type_literal(expr)
             && let Some(value) = self.fold_compile_time_expr(expr)
         {
             self.emit_push_value(value);
@@ -146,6 +147,9 @@ impl Compiler {
             Expr::Null => {
                 self.code.push(Instruction::PushNull);
             }
+            Expr::Undefined => {
+                self.code.push(Instruction::PushUndefined);
+            }
             Expr::Bool(value) => {
                 self.code.push(Instruction::PushBool(*value));
             }
@@ -167,16 +171,19 @@ impl Compiler {
             Expr::Tuple(items) => {
                 for item in items {
                     self.compile_expr(item);
-                    self.code.push(Instruction::DeepCopy);
+                    self.emit_isolation();
                 }
                 self.code.push(Instruction::BuildTuple(items.len()));
             }
             Expr::List(items) => {
                 for item in items {
                     self.compile_expr(item);
-                    self.code.push(Instruction::DeepCopy);
+                    self.emit_isolation();
                 }
-                self.code.push(Instruction::BuildList(items.len()));
+                self.code.push(match self.dialect {
+                    CompilationDialect::Lashlang => Instruction::BuildList(items.len()),
+                    CompilationDialect::Typescript => Instruction::BuildHeapList(items.len()),
+                });
             }
             Expr::ListComprehension { element, clauses } => {
                 self.compile_list_comprehension(element, clauses);
@@ -184,10 +191,13 @@ impl Compiler {
             Expr::Record(entries) => {
                 for (_, value) in entries {
                     self.compile_expr(value);
-                    self.code.push(Instruction::DeepCopy);
+                    self.emit_isolation();
                 }
                 let keys = self.push_key_list(entries.iter().map(|(key, _)| key.as_str()));
-                self.code.push(Instruction::BuildRecord(keys));
+                self.code.push(match self.dialect {
+                    CompilationDialect::Lashlang => Instruction::BuildRecord(keys),
+                    CompilationDialect::Typescript => Instruction::BuildHeapRecord(keys),
+                });
             }
             Expr::StartProcess(process) => {
                 let instruction = self.compile_start_process_expr(process);
@@ -277,7 +287,7 @@ impl Compiler {
                     // The lashlang AST lowering chooses by-value capture. The
                     // VM opcode itself merely stores the values it receives,
                     // so a later dialect may intentionally pass references.
-                    self.code.push(Instruction::DeepCopy);
+                    self.emit_isolation();
                 }
                 self.code.push(Instruction::MakeClosure {
                     function: function_index,
@@ -288,7 +298,7 @@ impl Compiler {
                 self.compile_expr(function);
                 for arg in args {
                     self.compile_expr(arg);
-                    self.code.push(Instruction::DeepCopy);
+                    self.emit_isolation();
                 }
                 let instruction = self.code.len();
                 self.code.push(Instruction::Call { argc: args.len() });
@@ -305,6 +315,12 @@ impl Compiler {
             Expr::Throw(value) => {
                 self.compile_expr(value);
                 self.code.push(Instruction::Throw);
+            }
+            Expr::Return(value) => {
+                self.compile_expr(value);
+                self.emit_return_scope_exit();
+                self.code.push(Instruction::Return);
+                self.clear_const_slots();
             }
             Expr::Field { target, field } => {
                 if let Expr::Variable(name) = target.as_ref() {
@@ -461,6 +477,37 @@ impl Compiler {
                     self.code.push(Instruction::Binary(*op));
                 }
             },
+            Expr::JavaScriptUnary { op, expr } => {
+                self.compile_expr(expr);
+                self.code.push(Instruction::JavaScriptUnary(*op));
+            }
+            Expr::JavaScriptBinary { left, op, right } => {
+                self.compile_expr(left);
+                self.compile_expr(right);
+                self.code.push(Instruction::JavaScriptBinary(*op));
+            }
+            Expr::JavaScriptLogical { left, op, right } => {
+                self.compile_expr(left);
+                self.code.push(Instruction::Duplicate);
+                match op {
+                    JavaScriptLogicalOp::And | JavaScriptLogicalOp::Or => {
+                        self.code.push(Instruction::ToBool);
+                    }
+                    JavaScriptLogicalOp::NullishCoalesce => {
+                        self.code.push(Instruction::IsNullish);
+                    }
+                }
+                let jump = match op {
+                    JavaScriptLogicalOp::And | JavaScriptLogicalOp::NullishCoalesce => {
+                        self.emit_jump_if_false()
+                    }
+                    JavaScriptLogicalOp::Or => self.emit_jump_if_true(),
+                };
+                self.code.push(Instruction::Pop);
+                self.compile_expr(right);
+                self.patch_jump(jump, self.code.len());
+                self.clear_const_slots();
+            }
         }
     }
 
@@ -632,6 +679,30 @@ impl Compiler {
                 // replaced by the jump completion, so it is discarded rather
                 // than resumed or rethrown.
                 HandlerScope::FinallyBody => self.code.push(Instruction::AbandonFinally),
+            }
+        }
+    }
+
+    /// Emits the cleanup edge for `return` while keeping its already-evaluated
+    /// value alive when a return in a `finally` replaces the pending
+    /// completion.
+    fn emit_return_scope_exit(&mut self) {
+        for index in (0..self.handler_scopes.len()).rev() {
+            match self.handler_scopes[index] {
+                HandlerScope::Protected { finally_sites } => {
+                    self.code.push(Instruction::PopHandler);
+                    if let Some(bucket) = finally_sites {
+                        let site = self.code.len();
+                        self.code.push(Instruction::EnterFinally {
+                            finally: usize::MAX,
+                            resume: site + 1,
+                        });
+                        self.pending_finally_sites[bucket].push(site);
+                    }
+                }
+                HandlerScope::FinallyBody => {
+                    self.code.push(Instruction::AbandonFinallyKeepValue);
+                }
             }
         }
     }

@@ -27,16 +27,10 @@ use crate::trigger_manifest::{
 
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v2";
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v3";
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v4";
 
-/// Durability tier of an execution path's wired store or effect host.
-///
-/// Durability is a property established by what the host wired, not a mode
-/// flag: each runtime trait reports the tier of the concrete implementation
-/// behind it, and the runtime validates that wiring is internally consistent.
-/// `Inline` covers in-memory / build-time wiring; `Durable` covers a
-/// crash-recoverable store or effect host (e.g. Sqlite-backed persistence or a
-/// Restate-backed effect host).
+/// Durability tier established by the execution path's concrete store or host.
+/// `Inline` is in-memory/build-time; `Durable` is crash-recoverable wiring.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -199,11 +193,7 @@ impl ModuleArtifact {
             .find_map(|(name, candidate)| (candidate == process_ref).then_some(name.as_str()))
     }
 
-    /// Pretty-print the saved canonical IR as Lashlang source.
-    ///
-    /// The returned source is generated from canonical IR and host
-    /// requirements. It preserves compile-equivalent structure, not comments or
-    /// original formatting.
+    /// Render compile-equivalent Lashlang source from canonical IR and requirements.
     pub fn canonical_source(&self) -> Result<String, crate::CanonicalSourceError> {
         crate::canonical_program_source_with_requirements(
             &self.canonical_ir,
@@ -211,11 +201,7 @@ impl ModuleArtifact {
         )
     }
 
-    /// Pretty-print a focused process definition by process ref.
-    ///
-    /// Returns `Ok(None)` when the ref is not exported by this module artifact.
-    /// The fragment is the process declaration itself; use
-    /// [`Self::canonical_source`] when the host needs a complete module snippet.
+    /// Render one exported process by ref, or `None` when it is absent.
     pub fn canonical_process_source(
         &self,
         process_ref: &ProcessRef,
@@ -761,6 +747,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
             write_expr(writer, expr, normalizer);
         }
         Expr::Null => writer.atom("null"),
+        Expr::Undefined => writer.atom("javascript:undefined"),
         Expr::Bool(value) => {
             writer.atom("bool");
             writer.bool(*value);
@@ -974,6 +961,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
             }
         }
         Expr::Throw(value) => write_unary_expr(writer, "throw", value, normalizer),
+        Expr::Return(value) => write_unary_expr(writer, "javascript:return", value, normalizer),
         Expr::Field { target, field } => {
             writer.atom("field-access");
             write_expr(writer, target, normalizer);
@@ -992,6 +980,23 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
         Expr::Binary { left, op, right } => {
             writer.atom("binary");
             write_binary_op(writer, *op);
+            write_expr(writer, left, normalizer);
+            write_expr(writer, right, normalizer);
+        }
+        Expr::JavaScriptUnary { op, expr } => {
+            writer.atom("javascript:unary");
+            writer.atom(&format!("{op:?}"));
+            write_expr(writer, expr, normalizer);
+        }
+        Expr::JavaScriptBinary { left, op, right } => {
+            writer.atom("javascript:binary");
+            writer.atom(&format!("{op:?}"));
+            write_expr(writer, left, normalizer);
+            write_expr(writer, right, normalizer);
+        }
+        Expr::JavaScriptLogical { left, op, right } => {
+            writer.atom("javascript:logical");
+            writer.atom(&format!("{op:?}"));
             write_expr(writer, left, normalizer);
             write_expr(writer, right, normalizer);
         }
@@ -1494,7 +1499,9 @@ impl<'program> RequirementsCollector<'program> {
                 }
                 Some(RequirementBinding::Value)
             }
-            Expr::Throw(value) => {
+            Expr::Throw(value)
+            | Expr::Return(value)
+            | Expr::JavaScriptUnary { expr: value, .. } => {
                 self.collect_expr(value, scope);
                 Some(RequirementBinding::Value)
             }
@@ -1507,7 +1514,9 @@ impl<'program> RequirementsCollector<'program> {
                 self.collect_expr(index, scope);
                 Some(RequirementBinding::Value)
             }
-            Expr::Binary { left, right, .. } => {
+            Expr::Binary { left, right, .. }
+            | Expr::JavaScriptBinary { left, right, .. }
+            | Expr::JavaScriptLogical { left, right, .. } => {
                 self.collect_expr(left, scope);
                 self.collect_expr(right, scope);
                 Some(RequirementBinding::Value)
@@ -1517,6 +1526,7 @@ impl<'program> RequirementsCollector<'program> {
                 Some(RequirementBinding::Value)
             }
             Expr::Null
+            | Expr::Undefined
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)

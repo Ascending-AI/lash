@@ -15,6 +15,7 @@ use thiserror::Error;
 mod access;
 mod cache;
 mod compiler;
+pub use compiler::CompilationDialect;
 pub(crate) use compiler::is_pure_expr;
 mod entry_points;
 mod error;
@@ -23,8 +24,10 @@ mod format;
 mod heap;
 mod host;
 mod instruction;
+mod javascript;
 mod json;
 mod ops;
+pub(crate) use javascript::*;
 mod projector;
 mod record;
 mod schema;
@@ -39,8 +42,9 @@ pub use cache::{
 #[allow(unused_imports)]
 pub(crate) use compiler::*;
 pub use entry_points::{
-    ExecutableProgram, compile, compile_ast, compile_linked, compile_linked_process,
-    compile_module_artifact_process, compile_process, execute, prewarm,
+    ExecutableProgram, compile, compile_ast, compile_ast_with_dialect, compile_linked,
+    compile_linked_process, compile_linked_with_dialect, compile_module_artifact_process,
+    compile_process, execute, prewarm,
 };
 pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,

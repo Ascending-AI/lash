@@ -1,4 +1,4 @@
-// The persisted-forest invariant: what a durable boundary will accept.
+// The persisted-graph invariant: what a durable boundary will accept.
 //
 // Kept beside the heap rather than inside it because every caller is a wire
 // boundary — snapshot decode and encode, continuation decode, resume and
@@ -42,41 +42,6 @@ impl<'a> PersistedRoots<'a> {
     pub(crate) fn transient(&mut self, value: &'a Value) -> &mut Self {
         self.transient.push(value);
         self
-    }
-}
-
-/// What holds a heap object: a named durable root, or a member of one object.
-#[derive(Clone, Debug)]
-enum OwnerName {
-    Root(String),
-    Member(HeapId),
-}
-
-impl OwnerName {
-    fn describe(&self) -> String {
-        match self {
-            Self::Root(name) => format!("root `{name}`"),
-            Self::Member(id) => format!("object {}", id.get()),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Owner<'a> {
-    Root(&'a str),
-    Member(HeapId),
-}
-
-impl Owner<'_> {
-    fn to_owned_name(self) -> OwnerName {
-        match self {
-            Self::Root(name) => OwnerName::Root(name.to_string()),
-            Self::Member(id) => OwnerName::Member(id),
-        }
-    }
-
-    fn describe(self) -> String {
-        self.to_owned_name().describe()
     }
 }
 
@@ -163,70 +128,55 @@ impl Heap {
         deepest
     }
 
-    /// Checks that the persisted heap is a forest of exclusively owned trees.
+    /// Checks that the persisted heap is a reachable acyclic graph.
     ///
-    /// This is the one validator for the round-3 invariant, and it runs in
+    /// This is the one validator for the durable heap invariant, and it runs in
     /// release builds at every durable boundary: snapshot decode and encode, and
-    /// continuation decode, resume and encode. Sharing is not merely discouraged
-    /// — a wire that expresses it is refused, so nothing downstream has to
-    /// decide how shared ownership would restore.
-    ///
-    /// An *ownership edge* is a reference held by a durable root or by an object
-    /// member. Every reachable object must have at most one, and objects must
-    /// not form a cycle through those edges. Transient roots — the operand
-    /// stack, the last-value register, and an iterator's captured cursor — may
-    /// hold duplicate references, because a VM legitimately has the same object
-    /// on the stack and in the slot it was just stored into, and a loop cursor
-    /// holds the elements it is handing out. Those handles confer no ownership,
-    /// so they can never make a second owner.
+    /// continuation decode, resume and encode. Multiple roots and members may
+    /// name one object: TypeScript reference semantics depend on that identity
+    /// surviving a checkpoint. Cycles remain excluded because host materialization
+    /// is tree-shaped and bounded; all referenced objects must exist.
     ///
     /// Objects must also all be reachable: a wire that carries an object no root
     /// can name is refused rather than silently collected later.
-    pub(crate) fn validate_persisted_forest(
+    pub(crate) fn validate_persisted_graph(
         &self,
         roots: &PersistedRoots<'_>,
     ) -> Result<(), String> {
-        let mut owners = BTreeMap::<HeapId, OwnerName>::new();
-        for (name, root) in &roots.durable {
-            for id in value_refs(root) {
-                self.claim_ownership(&mut owners, id, Owner::Root(name))?;
-            }
-        }
-        for (parent, object) in self.objects_in_id_order() {
-            for id in object.child_refs() {
-                self.claim_ownership(&mut owners, id, Owner::Member(parent))?;
-            }
-        }
-
-        // Every object that no other object holds starts a tree — whether a
-        // root names it or nothing does. Walking down the member edges from all
-        // of them has to reach every live object: whatever is left over can only
-        // be held up by itself, which is a cycle.
-        let mut pending = self
-            .id_to_slot
-            .keys()
-            .filter(|id| !matches!(owners.get(id), Some(OwnerName::Member(_))))
-            .copied()
-            .collect::<Vec<_>>();
-        let mut visited = BTreeSet::new();
-        while let Some(id) = pending.pop() {
-            if !visited.insert(id) {
+        // Iterative three-color traversal: repeated finished nodes are aliases;
+        // an edge to a visiting node is a cycle.
+        let mut colors = BTreeMap::<HeapId, u8>::new();
+        for start in self.id_to_slot.keys().copied() {
+            if colors.get(&start) == Some(&2) {
                 continue;
             }
-            let object = self
-                .get(id)
-                .map_err(|_| format!("dangling heap reference {}", id.get()))?;
-            pending.extend(object.child_refs());
-        }
-        if visited.len() != self.id_to_slot.len() {
-            let orphan = self
-                .id_to_slot
-                .keys()
-                .find(|id| !visited.contains(id))
-                .map_or(0, |id| id.get());
-            return Err(format!(
-                "heap object graph must be acyclic; object {orphan} is only reachable through itself"
-            ));
+            let mut stack = vec![(start, false)];
+            while let Some((id, exiting)) = stack.pop() {
+                if exiting {
+                    colors.insert(id, 2);
+                    continue;
+                }
+                match colors.get(&id).copied() {
+                    Some(1) => {
+                        return Err(format!(
+                            "heap object graph must be acyclic; cycle reaches object {}",
+                            id.get()
+                        ));
+                    }
+                    Some(2) => continue,
+                    _ => {}
+                }
+                let object = self
+                    .get(id)
+                    .map_err(|_| format!("dangling heap reference {}", id.get()))?;
+                colors.insert(id, 1);
+                stack.push((id, true));
+                for child in object.child_refs().into_iter().rev() {
+                    self.get(child)
+                        .map_err(|_| format!("dangling heap reference {}", child.get()))?;
+                    stack.push((child, false));
+                }
+            }
         }
 
         // Reachability from the roots the wire actually carries, which is a
@@ -252,28 +202,6 @@ impl Heap {
             return Err("heap wire must not contain unreachable objects".to_string());
         }
         Ok(())
-    }
-
-    fn claim_ownership(
-        &self,
-        owners: &mut BTreeMap<HeapId, OwnerName>,
-        id: HeapId,
-        owner: Owner<'_>,
-    ) -> Result<(), String> {
-        self.get(id)
-            .map_err(|_| format!("dangling heap reference {}", id.get()))?;
-        match owners.entry(id) {
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(owner.to_owned_name());
-                Ok(())
-            }
-            std::collections::btree_map::Entry::Occupied(entry) => Err(format!(
-                "heap object {} must have one owner, but {} and {} both hold it",
-                id.get(),
-                entry.get().describe(),
-                owner.describe()
-            )),
-        }
     }
 }
 
@@ -311,6 +239,6 @@ mod tests {
         // The measurement is finite and bounded by the number of objects; the
         // exact value is not meaningful for a graph that cannot be persisted.
         assert!(heap.max_value_depth(&roots) <= 2);
-        assert!(heap.validate_persisted_forest(&roots).is_err());
+        assert!(heap.validate_persisted_graph(&roots).is_err());
     }
 }

@@ -336,6 +336,9 @@ impl<'a> SourceFormatter<'a> {
                 kind: "label-annotated expression",
             }),
             Expr::Null => Ok("null".to_string()),
+            Expr::Undefined => Err(CanonicalSourceError::NonSourceableExpression {
+                kind: "AST-only undefined",
+            }),
             Expr::Bool(value) => Ok(value.to_string()),
             Expr::Number(value) => format_number(*value),
             Expr::String(value) => Ok(format_string(value.as_str())),
@@ -500,6 +503,9 @@ impl<'a> SourceFormatter<'a> {
             Expr::Throw(_) => Err(CanonicalSourceError::NonSourceableExpression {
                 kind: "AST-only throw",
             }),
+            Expr::Return(_) => Err(CanonicalSourceError::NonSourceableExpression {
+                kind: "AST-only return",
+            }),
             Expr::Field { target, field } => Ok(format!(
                 "{}.{}",
                 self.postfix_target_source(target)?,
@@ -523,6 +529,13 @@ impl<'a> SourceFormatter<'a> {
                 binary_op_source(*op),
                 self.expr_source(right)?
             )),
+            Expr::JavaScriptUnary { .. }
+            | Expr::JavaScriptBinary { .. }
+            | Expr::JavaScriptLogical { .. } => {
+                Err(CanonicalSourceError::NonSourceableExpression {
+                    kind: "AST-only JavaScript operation",
+                })
+            }
             Expr::TypeLiteral(ty) => Ok(format!("Type {}", self.type_source(ty)?)),
         }
     }
