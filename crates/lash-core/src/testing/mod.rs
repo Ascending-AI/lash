@@ -609,6 +609,31 @@ fn atomic_tool_dispatch_with_services<'run>(
     parent_invocation: crate::RuntimeInvocation,
     session_id: &str,
 ) -> Arc<crate::tool_dispatch::ToolDispatchContext<'run>> {
+    atomic_tool_dispatch_with_provider_and_services(
+        scoped_effect_controller,
+        session_lifecycle,
+        processes,
+        trigger_router,
+        parent_invocation,
+        session_id,
+        Arc::new(EmptyToolProvider),
+        crate::ToolCatalog::from_tool_definitions(Vec::new()),
+        Arc::new(crate::SystemClock),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn atomic_tool_dispatch_with_provider_and_services<'run>(
+    scoped_effect_controller: crate::ScopedEffectController<'run>,
+    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
+    parent_invocation: crate::RuntimeInvocation,
+    session_id: &str,
+    tools: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    clock: Arc<dyn crate::Clock>,
+) -> Arc<crate::tool_dispatch::ToolDispatchContext<'run>> {
     let host = Arc::new(MockSessionManager::default());
     let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
         .build_session(session_id, None)
@@ -621,8 +646,8 @@ fn atomic_tool_dispatch_with_services<'run>(
     );
     Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
-        tools: Arc::new(EmptyToolProvider),
-        tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
+        tools,
+        tool_catalog: Arc::new(tool_catalog),
         sessions: host.clone(),
         session_lifecycle,
         session_graph: host,
@@ -645,7 +670,121 @@ fn atomic_tool_dispatch_with_services<'run>(
         attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
-        clock: Arc::new(crate::SystemClock),
+        clock,
+    })
+}
+
+#[derive(Debug)]
+struct FrozenToolCoordinatorClock(std::time::Instant);
+
+#[async_trait::async_trait]
+impl crate::Clock for FrozenToolCoordinatorClock {
+    fn now(&self) -> std::time::Instant {
+        self.0
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        1_700_000_000_000
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.timestamp_datetime().to_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp_millis(self.timestamp_ms() as i64)
+            .expect("frozen coordinator timestamp")
+    }
+
+    async fn sleep(&self, _duration: std::time::Duration) {}
+
+    async fn sleep_until(&self, _deadline: std::time::Instant) {}
+}
+
+/// Execute one opted-in provider through the production attempt coordinator,
+/// intent drain, and model-return projection against supplied durable services.
+#[doc(hidden)]
+pub async fn coordinate_tool_provider_with_services(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    session_id: &str,
+    definition: crate::ToolDefinition,
+    provider: Arc<dyn crate::ToolProvider>,
+    call: crate::PreparedToolCall,
+) -> Result<crate::sansio::CompletedToolCall, String> {
+    let parent_invocation = crate::RuntimeInvocation::effect(
+        crate::RuntimeScope::for_turn(session_id, scoped_effect_controller.scope_id(), 1, 0),
+        format!("tool-batch:{}", call.call_id),
+        crate::RuntimeEffectKind::ToolBatch,
+        format!("tool-batch:{}", call.call_id),
+    );
+    let dispatch = atomic_tool_dispatch_with_provider_and_services(
+        scoped_effect_controller,
+        Arc::new(MockSessionManager::default()),
+        processes,
+        None,
+        parent_invocation.clone(),
+        session_id,
+        provider,
+        crate::ToolCatalog::from_tool_definitions(vec![definition]),
+        Arc::new(FrozenToolCoordinatorClock(std::time::Instant::now())),
+    );
+    let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
+        .prepared_call(&call)
+        .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
+        .build();
+    let coordinated = crate::tool_dispatch::coordinate_tool_invocation(
+        dispatch.as_ref(),
+        call.clone(),
+        None,
+        crate::ToolRetryPolicy::Never,
+        crate::tool_dispatch::ToolAttemptEffectIdentity::Batch {
+            parent: parent_invocation,
+            replay_suffix: call.call_id.clone(),
+        },
+        tool_context.cancellation_token().cloned(),
+        None,
+        None,
+        |completion_key| {
+            crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
+                Arc::clone(&dispatch),
+                tool_context.clone(),
+                completion_key,
+            )
+        },
+    )
+    .await;
+    let crate::tool_dispatch::ToolCallLaunch::Done(outcome) = coordinated.launch else {
+        return Err("the literal differential provider unexpectedly deferred".to_string());
+    };
+    let outcome = *outcome;
+    let mut model_return = dispatch
+        .plugins
+        .project_tool_result(crate::plugin::ToolResultProjectionContext {
+            session_id: session_id.to_string(),
+            call_id: call.call_id.clone(),
+            tool_name: outcome.record.tool.clone(),
+            args: outcome.record.args.clone(),
+            output: outcome.record.output.clone(),
+            duration_ms: outcome.record.duration_ms,
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    model_return.parts.extend(
+        outcome
+            .intent_outcomes
+            .iter()
+            .map(|intent| crate::ModelToolReturnPart::text(intent.model_addendum())),
+    );
+    Ok(crate::sansio::CompletedToolCall {
+        call_id: call.call_id,
+        tool_name: outcome.record.tool,
+        args: outcome.record.args,
+        output: outcome.record.output,
+        model_return,
+        duration_ms: outcome.record.duration_ms,
+        intent_outcomes: outcome.intent_outcomes,
+        replay: call.replay,
     })
 }
 

@@ -1542,6 +1542,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 })
                 .filter(|(_, record)| max_change_seq.is_none_or(|max| record.change_seq <= max))
                 .filter(|(id, _)| !processes_with_pending_deliveries.contains(*id))
+                .filter(|(_, record)| record.parent_end_actions.is_none())
                 .map(|(id, _)| id.clone())
                 .collect();
             prunable.sort();

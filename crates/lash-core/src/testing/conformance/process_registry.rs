@@ -9,10 +9,10 @@ use super::process_references::{
 use super::*;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
-// The shared registry fixture performs 45 successful registrations and one
-// prune; the cold refold fixture below adds the 46th registration.
+// The shared registry fixture performs 45 successful registrations and two
+// prunes; the cold refold fixture below adds the 46th registration.
 const REOPEN_BASELINE_SPAWNS: usize = 46;
-const REOPEN_BASELINE_PRUNED: usize = 1;
+const REOPEN_BASELINE_PRUNED: usize = 2;
 
 /// Run the process-registry contract against a fresh backend.
 pub async fn process_registry<F>(make: F)
@@ -401,6 +401,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let process_id = "process-parent-end-plan";
+    let originator = SessionScope::new("parent-end-retention-session");
     registry
         .register_process(ProcessRegistration::new(
             process_id,
@@ -408,7 +409,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
                 metadata: serde_json::Value::Null,
             },
             RecoveryDisposition::Rerunnable,
-            ProcessProvenance::host(),
+            ProcessProvenance::session(originator.clone()),
         ))
         .await
         .expect("register parent-end-plan process");
@@ -450,15 +451,49 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
         completion,
         crate::ProcessCompletionOutcome::Committed(_)
     ));
+    let literal_plan = crate::ProcessParentEndPlan {
+        process_id: process_id.to_string(),
+        actions: vec![action],
+    };
     assert_eq!(
         registry
             .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
             .await
             .expect("list pending parent-end plan"),
-        vec![crate::ProcessParentEndPlan {
-            process_id: process_id.to_string(),
-            actions: vec![action],
-        }]
+        vec![literal_plan.clone()]
+    );
+
+    let pending_prune = registry
+        .prune_terminal_processes(
+            u64::MAX,
+            Some(ProcessListFilter {
+                status: ProcessStatusFilter::Any,
+                originator_id: Some(originator.session_id.clone()),
+                ..ProcessListFilter::default()
+            }),
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune-eligible parent with a pending end plan");
+    assert_eq!(
+        pending_prune.pruned_processes, 0,
+        "retention must not prune a terminal process while its parent-end plan is pending"
+    );
+    assert_eq!(
+        registry
+            .get_pending_parent_end_plan(process_id)
+            .await
+            .expect("read parent-end plan after retention prune"),
+        Some(literal_plan),
+        "the pending parent-end plan must survive retention prune literally"
+    );
+    assert!(
+        registry
+            .get_process(process_id)
+            .await
+            .expect("read parent after retention prune")
+            .is_some(),
+        "the plan-owning terminal process must survive until the plan settles"
     );
     registry
         .complete_parent_end_plan(process_id)
@@ -474,6 +509,22 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
             .await
             .expect("parent-end plan cleared")
             .is_empty()
+    );
+    let settled_prune = registry
+        .prune_terminal_processes(
+            u64::MAX,
+            Some(ProcessListFilter {
+                status: ProcessStatusFilter::Any,
+                originator_id: Some(originator.session_id),
+                ..ProcessListFilter::default()
+            }),
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune parent after its end plan settles");
+    assert_eq!(
+        settled_prune.pruned_processes, 1,
+        "the terminal process becomes prune-eligible only after the plan settles"
     );
 }
 

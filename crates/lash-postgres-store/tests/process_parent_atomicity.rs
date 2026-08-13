@@ -25,6 +25,7 @@ struct ParentEndFaultState {
     recorded_parent_end_count: AtomicUsize,
     completed_local_side_effects: AtomicUsize,
     segment_boundaries: AtomicUsize,
+    concurrent_parent_end_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
     frames: Mutex<Vec<RuntimeEffectEnvelope>>,
     outcomes: Mutex<Vec<lash_core::ToolIntentParentEndOutcome>>,
 }
@@ -83,6 +84,15 @@ impl lash_core::RuntimeEffectController for ParentEndFaultController {
                 .lock()
                 .expect("PostgreSQL parent-end frame lock")
                 .push(envelope.clone());
+            let concurrent_barrier = self
+                .state
+                .concurrent_parent_end_barrier
+                .lock()
+                .expect("PostgreSQL concurrent parent-end barrier lock")
+                .clone();
+            if let Some(barrier) = concurrent_barrier {
+                barrier.wait().await;
+            }
         }
         let crash_before_record = is_parent_end
             && self
@@ -438,6 +448,182 @@ async fn wait_for_count(counter: &AtomicUsize, expected: usize, label: &str) {
     })
     .await
     .unwrap_or_else(|_| panic!("timed out waiting for {label}"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
+    const PARENT: &str = "pg-concurrent-scanner-parent";
+    const CHILD: &str = "pg-concurrent-scanner-child";
+
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping PostgreSQL concurrent parent-end law: database URL is not set");
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect PostgreSQL concurrent parent-end law");
+    reset(&storage).await;
+    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    let env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
+    let env_ref = lash_core::runtime::persist_process_execution_env(
+        env_store.as_ref(),
+        &lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::empty(),
+            lash_core::testing::mock_session_policy(),
+        ),
+    )
+    .await
+    .expect("persist concurrent parent-end execution env");
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let plugin = parent_end_plugin(Arc::clone(&provider_calls));
+
+    registry
+        .register_process(lash_core::ProcessRegistration::new(
+            CHILD,
+            lash_core::ProcessInput::External {
+                metadata: serde_json::json!({"role": "concurrent-scanner-child"}),
+            },
+            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        ))
+        .await
+        .expect("register concurrent parent-end child");
+    registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                PARENT,
+                lash_core::ProcessInput::ToolCall {
+                    call: lash_core::PreparedToolCall::from_parts(
+                        "pg-concurrent-scanner-parent-call",
+                        "tool:pg_process_parent_intent",
+                        "pg_process_parent_intent",
+                        serde_json::json!({"emit": false, "child": "unused"}),
+                        None,
+                        serde_json::Value::Null,
+                    ),
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_execution_env_ref(Some(env_ref)),
+        )
+        .await
+        .expect("register concurrent parent-end parent");
+    let identity = lash_core::derive_tool_intent_identity(
+        "pg-concurrent-scanner-session",
+        PARENT,
+        Some("pg-concurrent-scanner-call"),
+        0,
+    )
+    .expect("derive concurrent parent-end identity");
+    let action = lash_core::ToolIntentParentEndAction {
+        identity: identity.clone(),
+        parent_end: lash_core::ToolIntentParentEnd {
+            process_id: CHILD.to_string(),
+            policy: lash_core::ProcessParentEndPolicy::Cancel,
+        },
+    };
+    registry
+        .complete_process_with_parent_end(
+            PARENT,
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::json!({"parent": "done"}),
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::external_owner(),
+            vec![action.clone()],
+        )
+        .await
+        .expect("commit concurrent parent-end plan");
+    assert_eq!(
+        registry
+            .get_pending_parent_end_plan(PARENT)
+            .await
+            .expect("read concurrent parent-end plan"),
+        Some(lash_core::ProcessParentEndPlan {
+            process_id: PARENT.to_string(),
+            actions: vec![action],
+        })
+    );
+
+    let state = Arc::new(ParentEndFaultState::default());
+    *state
+        .concurrent_parent_end_barrier
+        .lock()
+        .expect("install concurrent parent-end barrier") =
+        Some(Arc::new(tokio::sync::Barrier::new(2)));
+    let worker_a = process_worker(
+        Arc::clone(&registry),
+        Arc::new(ParentEndFaultHost::new(&storage, Arc::clone(&state), false)),
+        Arc::clone(&env_store),
+        Arc::clone(&plugin),
+    );
+    let worker_b = process_worker(
+        Arc::clone(&registry),
+        Arc::new(ParentEndFaultHost::new(&storage, Arc::clone(&state), false)),
+        Arc::clone(&env_store),
+        plugin,
+    );
+    let (scan_a, scan_b) = tokio::join!(
+        worker_a.drive_pending_processes(),
+        worker_b.drive_pending_processes()
+    );
+    scan_a.expect("first synchronized PostgreSQL parent-end scan");
+    scan_b.expect("second synchronized PostgreSQL parent-end scan");
+
+    assert_eq!(
+        state
+            .frames
+            .lock()
+            .expect("read concurrent parent-end frames")
+            .len(),
+        2,
+        "both workers must redrive the same pending plan"
+    );
+    let literal_outcome = lash_core::ToolIntentParentEndOutcome::Cancelled {
+        identity,
+        process_id: CHILD.to_string(),
+    };
+    {
+        let outcomes = state
+            .outcomes
+            .lock()
+            .expect("read concurrent parent-end outcomes");
+        assert_eq!(outcomes.len(), 2);
+        assert!(
+            outcomes.iter().all(|outcome| outcome == &literal_outcome),
+            "both scanners must observe the literal recorded cancellation outcome"
+        );
+    }
+    assert!(
+        registry
+            .get_pending_parent_end_plan(PARENT)
+            .await
+            .expect("read settled concurrent parent-end plan")
+            .is_none()
+    );
+    let cancellations = registry
+        .events_after(CHILD, 0)
+        .await
+        .expect("read concurrent parent-end child events")
+        .into_iter()
+        .filter(|event| event.event_type == "process.cancel_requested")
+        .map(|event| event.payload)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        cancellations,
+        vec![serde_json::json!({"reason": PARENT_END_REASON})],
+        "two synchronized scanners must append exactly one literal cancellation"
+    );
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        0,
+        "startup scanners must not enter a provider while settling a retained plan"
+    );
+
+    reset(&storage).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

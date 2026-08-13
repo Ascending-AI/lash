@@ -1457,6 +1457,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
                    WHERE delivery.process_id = lash_processes.process_id
                      AND delivery.state IN ('pending', 'enqueuing')
                )
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_process_parent_end_plans AS plan
+                   WHERE plan.process_id = lash_processes.process_id
+               )
              ORDER BY process_id ASC
              FOR UPDATE",
         )

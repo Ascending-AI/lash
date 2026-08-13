@@ -267,8 +267,8 @@ a sink must return fast and offload any I/O. Host retention is
 a host that has
 projected a process's outcome into its own store calls it on the maintenance
 cadence to replace eligible terminal rows with payload-free tombstones after
-the projection watermark advances — removing their events, wakes, observer edges, and leases —
-only once host policy has retained them beyond every still-replayable
+the projection watermark advances — removing their events, wakes, observer edges, leases, and
+settled parent-end plans — only once host policy has retained them beyond every still-replayable
 `await_terminal`. Lash exposes no finite maximum waiter lifetime to validate a
 cutoff against; a later await after pruning receives `ProcessNoLongerRetained`.
 The optional `ProcessListFilter` narrows which eligible rows one call reclaims,

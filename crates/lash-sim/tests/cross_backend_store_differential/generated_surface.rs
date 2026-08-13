@@ -177,6 +177,73 @@ struct SurfaceRunner {
     reader: SurfaceReader,
 }
 
+struct SurfaceIntentProvider;
+
+impl SurfaceIntentProvider {
+    fn definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::raw(
+            "tool:surface_intent_provider",
+            "surface_intent_provider",
+            "Return a literal result and two durable process intents.",
+            lash_core::ToolDefinition::default_input_schema(),
+            serde_json::json!({"type": "object"}),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for SurfaceIntentProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "surface_intent_provider").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        panic!("the cross-backend intent provider must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == Self::definition().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        assert_eq!(call.context.session_id(), SURFACE_SESSION);
+        assert_eq!(call.context.execution_scope_id(), SURFACE_TURN);
+        assert_eq!(call.context.tool_call_id(), Some("surface-intent-call"));
+        assert_eq!(call.context.attempt_number(), 1);
+        assert_eq!(call.context.max_attempts(), 1);
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({"ok": true})),
+            lash_core::ToolIntents::v1(
+                (0..2)
+                    .map(|index| {
+                        lash_core::ToolIntent::StartProcess(Box::new(
+                            lash_core::StartProcessIntent {
+                                session_id: SURFACE_SESSION.to_string(),
+                                request: lash_core::ProcessStartRequest::external(
+                                    format!("ignored-derived-intent-id-{index}"),
+                                    ProcessOriginator::host_scoped("surface-differential"),
+                                    serde_json::json!({
+                                        "source": "literal-intent-row",
+                                        "index": index,
+                                    }),
+                                ),
+                                on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
+                            },
+                        ))
+                    })
+                    .collect(),
+            ),
+        )
+    }
+}
+
 struct LiteralFrameController {
     inner: lash_core::ScopedEffectController<'static>,
     frames: Arc<Mutex<Vec<RuntimeEffectEnvelope>>>,
@@ -404,37 +471,29 @@ impl SurfaceRunner {
                     scope,
                 )
                 .map_err(|error| error.to_string())?;
-                let intents = lash_core::ToolIntents::v1(
-                    (0..2)
-                        .map(|index| {
-                            lash_core::ToolIntent::StartProcess(Box::new(
-                                lash_core::StartProcessIntent {
-                                    session_id: SURFACE_SESSION.to_string(),
-                                    request: lash_core::ProcessStartRequest::external(
-                                        format!("ignored-derived-intent-id-{index}"),
-                                        ProcessOriginator::host_scoped("surface-differential"),
-                                        serde_json::json!({
-                                            "source": "literal-intent-row",
-                                            "index": index,
-                                        }),
-                                    ),
-                                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
-                                },
-                            ))
-                        })
-                        .collect(),
-                );
                 let processes = lash_core::testing::effect_backed_process_service(Arc::clone(
                     &self.process_registry,
                 ));
-                let intent_outcomes = lash_core::testing::execute_tool_intents_with_services(
+                let completed = lash_core::testing::coordinate_tool_provider_with_services(
                     controller.clone(),
                     Arc::clone(&processes),
                     SURFACE_SESSION,
-                    "surface-intent-call",
-                    &intents,
+                    SurfaceIntentProvider::definition(),
+                    Arc::new(SurfaceIntentProvider),
+                    lash_core::PreparedToolCall::from_parts(
+                        "surface-intent-call",
+                        lash_core::ToolId::from("tool:surface_intent_provider"),
+                        "surface_intent_provider",
+                        serde_json::json!({}),
+                        None,
+                        serde_json::Value::Null,
+                    ),
                 )
-                .await;
+                .await
+                .map_err(|error| {
+                    format!("{} provider/coordinator row failed: {error}", self.name)
+                })?;
+                let intent_outcomes = completed.intent_outcomes.clone();
                 let literal_intent_outcomes = vec![
                     lash_core::ToolIntentExecutionOutcome::Executed {
                         identity: lash_core::ToolIntentIdentity {
@@ -785,57 +844,13 @@ impl SurfaceRunner {
                         self.name
                     ));
                 }
-                let completed = lash_core::sansio::CompletedToolCall {
-                    call_id: "surface-intent-call".to_string(),
-                    tool_name: "surface_intent_provider".to_string(),
-                    args: serde_json::json!({}),
-                    output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true})),
-                    model_return: <lash_core::facade_support::ModelToolReturn as lash_sansio::core_support::ModelToolReturnCoreSupport>::text(
-                        "surface-intent-call".to_string(),
-                        "surface_intent_provider".to_string(),
-                        "provider done",
-                    ),
-                    duration_ms: 1,
-                    intent_outcomes: literal_intent_outcomes,
-                    replay: None,
-                };
-                let emitted = RuntimeEffectOutcome::ToolBatch {
+                let observed = serde_json::to_value(RuntimeEffectOutcome::ToolBatch {
                     launches: vec![lash_core::runtime::ToolCallLaunch::Done {
                         result: Box::new(completed),
                     }],
                     triggers: Vec::new(),
-                };
-                let envelope = RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn(SURFACE_SESSION, SURFACE_TURN, 1, 0),
-                        "surface-intent-batch",
-                        RuntimeEffectKind::ToolBatch,
-                        "surface-intent-batch",
-                    ),
-                    RuntimeEffectCommand::ToolBatch {
-                        batch: lash_core::PreparedToolBatch::new(
-                            "surface-intent-batch",
-                            vec![lash_core::PreparedToolCall::from_parts(
-                                "surface-intent-call",
-                                lash_core::ToolId::from("tool:surface_intent_provider"),
-                                "surface_intent_provider",
-                                serde_json::json!({}),
-                                None,
-                                serde_json::Value::Null,
-                            )],
-                        ),
-                    },
-                );
-                let outcome = controller
-                    .controller()
-                    .execute_effect(
-                        envelope,
-                        RuntimeEffectLocalExecutor::testing(move |_| async move { Ok(emitted) }),
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let observed = serde_json::to_value(&outcome)
-                    .expect("serialize observed non-empty intent batch");
+                })
+                .expect("serialize observed non-empty intent batch");
                 let literal_model_return = serde_json::json!({
                     "type": "tool_batch",
                     "launches": [{
@@ -848,9 +863,19 @@ impl SurfaceRunner {
                             "model_return": {
                                 "call_id": "surface-intent-call",
                                 "tool_name": "surface_intent_provider",
-                                "parts": [{"type": "text", "text": "provider done"}]
+                                "parts": [
+                                    {"type": "text", "text": "{\"ok\":true}"},
+                                    {
+                                        "type": "text",
+                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc\",\"kind\":\"external\",\"process_id\":\"tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc\",\"status\":\"running\"}]"
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0\",\"kind\":\"external\",\"process_id\":\"tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0\",\"status\":\"running\"}]"
+                                    }
+                                ]
                             },
-                            "duration_ms": 1,
+                            "duration_ms": 0,
                             "intent_outcomes": [
                                 {
                                     "status": "executed",
