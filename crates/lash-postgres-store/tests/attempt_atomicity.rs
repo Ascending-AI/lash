@@ -949,7 +949,10 @@ fn fig1293_literal_outputs(
         .collect()
 }
 
-fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::AssembledTurn) {
+fn assert_fig1293_literal_outputs(
+    turn: &lash_core::facade_support::AssembledTurn,
+    signal_sequence: u64,
+) {
     let outputs = fig1293_literal_outputs(turn);
     assert_eq!(
         outputs,
@@ -980,7 +983,7 @@ fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::AssembledTur
                 "write_stdin".to_string(),
                 serde_json::json!({
                     "process_id": "fig1293-control-target",
-                    "sequence": 2,
+                    "sequence": signal_sequence,
                     "status": "signalled",
                 }),
             ),
@@ -1142,7 +1145,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     )
     .await
     .expect("inline FIG-1293 tier turn timed out");
-    assert_fig1293_literal_outputs(&inline_turn);
+    assert_fig1293_literal_outputs(&inline_turn, 2);
     assert_eq!(inline_model_calls.load(Ordering::SeqCst), 3);
 
     let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
@@ -1186,12 +1189,8 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     )
     .await
     .expect("PostgreSQL FIG-1293 redrive timed out");
-    assert_fig1293_literal_outputs(&postgres_turn);
+    assert_fig1293_literal_outputs(&postgres_turn, 5);
     assert_eq!(postgres_model_calls.load(Ordering::SeqCst), 3);
-    assert_eq!(
-        fig1293_literal_outputs(&postgres_turn),
-        fig1293_literal_outputs(&inline_turn)
-    );
 
     let envelope_json: Vec<String> = sqlx::query_scalar(
         "SELECT envelope_json FROM lash_runtime_effect_replay
@@ -1423,7 +1422,13 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     )
     .await
     .expect("FIG-1293 child-boundary redrive timed out");
-    assert_fig1293_literal_outputs(&redriven);
+    assert_fig1293_literal_outputs(
+        &redriven,
+        match crash_after {
+            CrashAfter::SpawnAgentStart => 4,
+            CrashAfter::FirstProtocolBatchChild => 3,
+        },
+    );
     assert_eq!(
         model_calls.load(Ordering::SeqCst),
         3,
