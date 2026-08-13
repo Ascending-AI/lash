@@ -32,6 +32,10 @@ pub enum Scenario {
     IntegerRangeHostEnvironment,
     FanoutExpressionHostEnvironment,
     ImageHostEnvironment,
+    HeapListIteration,
+    HeapNestedLoop,
+    HeapAllocationChurn,
+    HeapDeepChainMutation,
 }
 
 impl Scenario {
@@ -57,6 +61,10 @@ impl Scenario {
         Self::IntegerRangeHostEnvironment,
         Self::FanoutExpressionHostEnvironment,
         Self::ImageHostEnvironment,
+        Self::HeapListIteration,
+        Self::HeapNestedLoop,
+        Self::HeapAllocationChurn,
+        Self::HeapDeepChainMutation,
     ];
 
     #[allow(dead_code)]
@@ -83,13 +91,17 @@ impl Scenario {
             "integer_range_host_environment" => Self::IntegerRangeHostEnvironment,
             "fanout_expression_host_environment" => Self::FanoutExpressionHostEnvironment,
             "image_host_environment" => Self::ImageHostEnvironment,
+            "heap_list_iteration" => Self::HeapListIteration,
+            "heap_nested_loop" => Self::HeapNestedLoop,
+            "heap_allocation_churn" => Self::HeapAllocationChurn,
+            "heap_deep_chain_mutation" => Self::HeapDeepChainMutation,
             _ => return None,
         })
     }
 
     #[allow(dead_code)]
     pub fn expected_values() -> &'static str {
-        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, or all"
+        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, heap_list_iteration, heap_nested_loop, heap_allocation_churn, heap_deep_chain_mutation, or all"
     }
 }
 
@@ -117,6 +129,10 @@ impl fmt::Display for Scenario {
             Self::IntegerRangeHostEnvironment => "integer_range_host_environment",
             Self::FanoutExpressionHostEnvironment => "fanout_expression_host_environment",
             Self::ImageHostEnvironment => "image_host_environment",
+            Self::HeapListIteration => "heap_list_iteration",
+            Self::HeapNestedLoop => "heap_nested_loop",
+            Self::HeapAllocationChurn => "heap_allocation_churn",
+            Self::HeapDeepChainMutation => "heap_deep_chain_mutation",
         })
     }
 }

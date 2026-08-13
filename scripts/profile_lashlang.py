@@ -411,7 +411,13 @@ def evaluate_lashlang_budgets(report: dict[str, Any], budgets: dict[str, Any]) -
     for row in perf_results:
         scenario = str(row.get("scenario_arg", "unknown"))
         mode = str(row.get("mode_arg", "unknown"))
-        for metric in ("allocated_bytes_per_iter", "allocations_per_iter"):
+        for metric in ("allocated_bytes_per_iter", "allocations_per_iter", "ns_per_iter"):
+            budget = budget_value(budgets, "perf", scenario, f"{metric}_max", mode)
+            # Wall-clock budgets are opt-in per scenario: a scenario without one
+            # is not time-guarded, and a missing time measurement is only a
+            # failure where a budget asks for it.
+            if metric == "ns_per_iter" and budget is None:
+                continue
             value = row.get(metric)
             actual = float(value) if isinstance(value, int | float) else None
             results.append(
@@ -421,13 +427,7 @@ def evaluate_lashlang_budgets(report: dict[str, Any], budgets: dict[str, Any]) -
                     mode=mode,
                     metric=metric,
                     actual=actual,
-                    budget=budget_value(
-                        budgets,
-                        "perf",
-                        scenario,
-                        f"{metric}_max",
-                        mode,
-                    ),
+                    budget=budget,
                     reason=None if actual is not None else f"missing {metric}",
                 )
             )
