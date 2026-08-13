@@ -1,136 +1,208 @@
-# FIG-1301 fix-round report
+# FIG-1301 round 3 report
 
-## Result
+## What changed
 
-Both adversarial reviews are fully addressed on `samuel-fig-1301`, without rebasing. Lashlang's heap representation now preserves the pre-heap language's value semantics, persists one representation per value, validates restored heaps through one fail-closed path, and keeps logical metering deterministic across execution, suspension, and restore.
+The heap object graph is now a forest of exclusively owned trees. A heap
+reference may be duplicated only in transient VM operand flow; every durable
+store — name and slot stores, global stores, container members, iterator
+bindings, effect-result bindings, `State` patch APIs — holds a recursive copy
+under fresh IDs. [ADR 0059](docs/adr/0059-lashlang-durable-stores-hold-exclusively-owned-copies.md)
+records the decision and its cost.
 
-The cutover remains whole: there is no compatibility decoder, migration shim, or fallback to a superseded wire version.
+The two blocking defects both re-reviews found are gone as a class rather than
+case by case: an emitted snapshot always decodes because sharing between roots
+is unrepresentable, and a reference can no longer hide inside an inline compound
+member because the decoder refuses those members outright.
 
-## Review finding disposition
+Per-instruction heapification no longer rescans iterator cursors, which is what
+made iterating a heap-backed list quadratic. A single pass over a 2,000-element
+list is 12.6x faster than the fix round; the existing `large_data` scenario is
+4.4x faster.
+
+## Disposition of the re-review findings
 
 | Finding | Disposition |
 | --- | --- |
-| Opus F1 / Sol Critical: container insertion and iterator aliases | Fixed at the Lashlang lowering seam. `DeepCopy` is emitted for name/effect/path stores, iterator bindings, comprehension append, generic and specialized `push` items, and tuple/list/record literal members. `DeepCopy` isolates the entering root; the inductive insertion rule keeps descendants isolated. Heap/VM primitives remain reference-preserving for the future TypeScript lowering. Ancestor-aware materialization-cache invalidation removes the prior two-bugs-cancelling behavior. |
-| Opus F2 / Sol Medium: duplicate persisted tree and heap | Fixed. A snapshot uses the plain tree form when there is no runtime heap and the heap-root form otherwise; it never writes both. A scalar canonical snapshot is 48 bytes. The short-binding RLM root is 33,027 bytes and uses a measured 34 KiB ceiling instead of 96 KiB. |
-| Sol Critical: public globals could diverge from private roots | Fixed. `State::{set_default,insert_global,remove_global}` patch the visible tree and runtime heap roots together, re-meter, and collect. RLM defaulting, projected rehydration, and protected-binding pruning use those APIs. Snapshot fields are private, preventing the stale `Snapshot::globals` mutation path. |
-| Opus F5 / Sol Critical: indexed add mutated before charging and recomputed O(n) size | Fixed. The operation calculates its exact member delta, checks the prospective bound, then commits the value and counters together. Existing-field and new-field updates are O(1) amortized. |
-| Sol High: fallible heapification could leave `null` values | Fixed. Heapification stages all required inline compounds and their accounting, validates the complete batch, then commits and replaces VM values. A failed import leaves stack, slots, iterators, heap, and persisted state structurally intact. The implementation avoids the rejected per-instruction whole-heap clone. |
-| Opus F3 / Sol High: malformed snapshot and continuation heaps were accepted | Fixed. Snapshot and continuation decode share `Heap::from_wire`, which enforces strictly increasing nonzero IDs, exact `next_id == allocation_counter + 1`, schedule version, recomputed byte accounting, resolvable root and nested references, and canonical root ordering. Snapshot restore additionally rejects shared roots, cycles, and unreachable objects. |
-| Sol High: continuation NaN rejection | Fixed. Continuations use a versioned numeric-bits wire shared in policy with snapshots: NaNs normalize to one quiet-NaN representation and negative zero retains its sign bit. Durable segment and cross-process tests cover both. |
-| Opus F4: suspension collected a clone | Fixed. `suspend(&mut self)` collects the live heap at the stop-the-world boundary before encoding the continuation, so park/resume and straight-through execution retain the same heap accounting and hit limits at the same point. |
-| Opus F6: allocation-ID bookkeeping grew forever | Fixed. `id_to_slot` is a sparse `BTreeMap` keyed only by live IDs; materialized entries are a sparse `FxHashMap`. Sweeping removes both, while recycled slots receive fresh monotonic IDs. Reverse parent edges support targeted cache invalidation and are removed with their objects. |
-| Opus F7: `memory_limit` silently defaulted | Fixed. `memory_limit` is required in RLM configuration and every in-repository constructor/config/example states it explicitly. Missing input fails typed construction. ADR-0055 now names instruction, deadline, and logical-memory bounds. |
-| Opus F8 / Sol Medium: test rigor gaps | Fixed. `Snapshot::PartialEq` covers public globals, runtime roots, heap objects, and meters. The two-process probe executes beyond the 1,024-allocation collection threshold, retains objects across collection, creates vacant/reused slots, and compares both snapshot and continuation bytes. Sweep fixed points and every review alias repro are explicit tests. |
-| Opus F9: report overclaims | Fixed by this report. It describes the actual shallow insertion-isolation mechanism, the shared decoder invariants, the single-source persisted size, and current performance measurements. |
-| Opus F10: boundary cache invariant implicit | Fixed. Cache removal is centralized in `forget`, the cache relationship has a debug assertion, and descendant mutation invalidates every materialized ancestor through reverse edges. |
+| Sol P0-1 / opus N1: shallow isolation violates value semantics; emitted snapshots do not decode | Fixed. `isolate_value` reallocates the whole reachable graph under fresh IDs and deliberately ignores the boundary materialization cache, which is what re-introduced sharing on an export/import round trip. The optimized single-item concat, the general concat and the fused slot concat isolate their operands; container literals, comprehension appends, push, path assignment, iterator bindings and effect results already did. Both reviewers' probes are named tests. |
+| Sol P0-2: an accepted continuation loses a live nested reference | Fixed. `Heap::from_wire` rejects a heap object member that is an inline compound, so the shape that hid a reference from tracing is not in the accepted language. One recursive enumerator now answers child discovery for allocation bookkeeping, reverse edges, mark, sweep, wire validation and root traversal. The malformed continuation is a named rejection test, and an accepted wire is driven through resume, park, re-encode and re-decode. |
+| Sol P1 / opus N5: batched global patches can partially commit | Fixed. `State::patch_globals` stages a whole batch against copies of the globals, the runtime roots and the heap, and publishes all of it or none; one heap clone and one collect per batch. RLM `set_default` validates every key before applying any, and records its dirty marks from what the commit reports. Projection rehydrate and protected-binding prune route through the same batch. Two rejection regressions assert byte-identical state; both fail against the previous per-key loop. |
+| Sol P1: cache invalidation can be quadratic in ancestor depth | Mitigated, not eliminated. Invalidation returns immediately when nothing is materialized, which is the common case because `export_for_mutation` drops the whole reachable cache before mutating. When materialized values do exist the walk still visits reachable ancestors. The deep-chain mutation shape is now a perf scenario with a budget; it measures 1.06x faster than the fix round, so the shape is guarded even though the traversal bound is unchanged. |
+| Sol P2: the suspend equivalence test suspended both sides | Fixed. The control VM runs from the same starting point straight to completion and never calls `suspend`. Result, instruction meter and reachable heap accounting are compared against park and resume. |
+| Sol P2 / ADR-0044: the canonical byte test derived its oracle from the serializer | Fixed. An authored continuation wire, written from the wire schema, is decoded and re-encoded exactly. Authoring it caught two things the round-trip tests could not: the member-shape difference between a heap object and a value, and the exact logical-byte arithmetic. |
+| Opus N2: per-instruction heapification makes list iteration quadratic | Fixed. Iterator cursors and the extra-globals record are written once and read after that, so each carries a flag and is heapified once instead of rescanned after every instruction. Numbers below. |
+| Opus N3: snapshot equality compares slot layout | Fixed. Two heaps are equal when they hold the same live objects under the same IDs with the same meters; storage layout is a private allocation detail a round trip legitimately compacts. Capturing a snapshot collects it, so a snapshot holds exactly what its roots reach. `decode(encode(state)) == state` is a passing property test over generated heap-shaping programs, and it fails against the previous equality. |
+| Opus N4: `ExecutionBounds::new` defaulted `memory_limit` | Fixed. It takes all three bounds; every in-repository caller states the memory limit. |
+| Opus N6: member overwrite left a stale parent edge | Fixed. One helper retargets a parent's outgoing edges, used by both member overwrite and object replacement, so the reverse-edge map is exact rather than an over-approximation waiting for a sweep. |
+| Opus N7: `boundary_refs` was a linear scan | Fixed. The boundary cache is indexed both ways, so lookup and forget are constant time. |
+| Opus N8: two import paths differed in transactionality | Fixed by removing the second one. The recursive per-node import is gone; `import_values` and `isolate_value` both stage and charge a whole batch before committing any of it. |
+| Opus N9: the perf guard has no wall-clock budget and no iteration scenario | Fixed. Four heap-shaped scenarios with wall-clock budgets, described under Performance. |
+| Opus judgment: the 34 KiB inline-root assert is too tight | Changed to the property plus a generous ceiling. The test asserts that no leaf is minted — the thing that would actually regress — with a 64 KiB sanity bound above a ~33 KiB measurement, and says why. |
+| Sol note: heap restore errors stay stringly typed | Accepted for this round, unchanged. |
 
-## Design after the fixes
+## What this round does not claim
 
-### Value semantics and lowering
+- **The memory limit is sensitive to collection timing.** It bounds live plus
+  not-yet-collected bytes, so a run that parks — which collects — can survive a
+  point at which the same run without a park would have exhausted the bound. The
+  relation is one-way: parking never brings exhaustion forward. The equivalence
+  test asserts that one-way relation rather than an equal failure instruction,
+  and ADR 0055 records it.
+- **Ancestor invalidation is not proven sub-linear.** See the Sol P1 row.
+- **Wall-clock budgets are not drift detectors.** They carry roughly three times
+  the measured maximum because the same binary on this machine varied by up to
+  75% between runs of the same scenario. They catch the order-of-magnitude class
+  that hid here.
+- **Isolation costs a copy.** Copying an alias-heavy graph is proportional to
+  the graph. `type_system_stress`, which builds large record literals, is about
+  20-25% slower than the fix round for this reason. Copy-on-write behind
+  identical observable semantics is recorded as future work in ADR 0059, not
+  attempted here.
+- **`State::patch_globals` is atomic within a state, not across an RLM turn.**
+  Callers still sequence their own persistence.
 
-`Value::Ref(HeapId)` remains an internal VM representation for tuple, list, and record objects. Heap operations do not implicitly copy references. The Lashlang compiler owns the value-semantics decision by emitting `DeepCopy` immediately before each value crosses an assignment or container-insertion boundary.
+## Design
 
-Isolation is root-level rather than recursively cloning an already-isolated graph. Every container construction/insertion isolates each entering member, so this rule is inductive: later in-place mutation of one root cannot mutate a root held by another binding or container. A dialect with reference semantics can omit this lowering without changing heap primitives.
+### Isolation
 
-### Heap, collection, and metering
+`isolate_value` is the one isolation operation. It reserves fresh IDs for the
+whole graph reachable from the stored value, builds the copies, charges the
+batch, and only then commits — so a copy that would cross the memory bound
+leaves the heap byte-identical. Cycles terminate because an ID is reserved
+before its object is built.
 
-- Heap IDs start at 1 and advance monotonically. Storage slots may be reused after sweep; IDs never are.
-- Mark-sweep traces stack, last value, slots/extras, iterator cursor and restoration state, and persisted runtime roots. Normal collection occurs every 1,024 allocations under size-schedule version 1.
-- Logical size charges a fixed object header, value slots, record fields and keys, and scalar payloads. Allocation and incremental mutation charge before committing. Sweep subtracts the stored per-object charge.
-- Boundary materialization is non-semantic and non-persisted. Sparse caches and reverse parent edges allow a child mutation to invalidate only values that can reach it.
-- The default logical heap limit remains 64 MiB, but hosts must choose and serialize a bound explicitly.
+It does not consult the boundary materialization cache. That cache exists so
+that exporting a heap object to a tree and importing it back is
+identity-preserving, which is exactly the sharing an isolation must not
+reintroduce; the fix round's shallow isolation went through it, which is why
+`pair = (child,)` shared `child`'s object.
+
+The compiler decides where isolation happens. Container literals and
+comprehensions skip the store-level copy because they already isolated every
+member they admitted and built a fresh container around those copies; every
+other right-hand side is copied on store.
+
+Two independent checks keep the invariant honest: the decoder refuses roots that
+share an object, and the encoder asserts the same property in debug builds, so a
+violation fails at the write rather than at a later cold restore in another
+process.
+
+### Iteration
+
+An iterator cursor's values are written once, when the iterator is created or
+restored, and stepping only advances an index. Each cursor carries a flag and is
+heapified once. The extra-globals record is the same shape. What remains scanned
+after every instruction is the operand stack and the slot table, both bounded by
+the program's shape rather than by its data.
+
+`xs = xs + [item]` appends into the accumulator's own object instead of
+exporting the accumulator to a tree, appending, and importing the whole thing
+back — which was O(n) per append. In-place append is safe precisely because
+every other holder of the old value already owns a separate copy.
 
 ### Persistence
 
 | Contract | Version | Policy |
 | --- | ---: | --- |
 | Lashlang canonical snapshot | 2 | Named MessagePack; either plain globals or runtime roots plus ID-ordered heap, never both |
-| RLM snapshot root | 8 | Typed fail-closed root on this unre-based branch |
+| RLM snapshot root | 8 | Typed fail-closed root on this un-rebased branch |
 | Lashlang bytecode | 3 | Includes explicit insertion-isolation instructions |
 | Lashlang segment state | 2 | Carries the canonical continuation and cumulative meters |
 | Heap logical-size schedule | 1 | Required and validated on restore |
 
-Accepted snapshot bytes are a fixed point under decode and re-encode. Heap objects are emitted in ascending ID order. Floating-point values use canonical bits: normalized quiet NaN and sign-preserving negative zero.
+A heap object member is a scalar or a reference. Accepted bytes are a fixed
+point under decode and re-encode. Objects are emitted in ascending ID order.
+NaN normalizes to one quiet representation and negative zero keeps its sign.
 
-## New and strengthened tests
+## Performance
 
-### Exact review repros
+Release build, `compiled_execute` mode, 200 iterations, one machine. "Fix round"
+is `0f746e09a` built in a separate worktree with the same scenario definitions
+copied in; both trees were measured back to back.
 
-- `path_assignment_rhs_matches_pre_heap_value_semantics`
-- `iterator_binding_matches_pre_heap_value_semantics`
-- `push_insertion_matches_pre_heap_value_semantics`
-- `iterator_value_pushed_into_container_matches_pre_heap_semantics`
-- `nested_field_index_and_comprehension_inserts_keep_value_semantics`
-- `effect_result_to_path_isolated_from_later_field_reads`
-- `every_container_insertion_lowering_emits_value_isolation`
+| Scenario | Fix round | This round | Change |
+| --- | ---: | ---: | ---: |
+| `heap_list_iteration` (2,000-element single pass) | 41.20 ms | 3.27 ms | 12.6x faster |
+| `heap_nested_loop` (inner pass over a growing list) | 5.97 ms | 3.30 ms | 1.8x faster |
+| `heap_allocation_churn` | 2.81 ms | 2.11 ms | 1.3x faster |
+| `heap_deep_chain_mutation` | 2.30 ms | 2.17 ms | 1.06x faster |
+| `large_data` | 5.28 ms | 1.19 ms | 4.4x faster |
+| `loop_control` | 0.267 ms | 0.129 ms | 2.1x faster |
+| `type_system_stress` | 0.850 ms | 0.962 ms | 1.13x slower |
 
-These assert the literal pre-heap results from both reviews, including nested path/index reads, loop bindings, comprehension accumulation, generic push, and optimized push.
+At the size opus measured, a single pass over an 8,000-element list is about
+1-2 ms, obtained by differencing a build-and-pass program (7.6-12.4 ms) against
+a build-only one (7.1-8.0 ms); the pass is small next to the build and the
+run-to-run spread is wide. The fix round measured 486 ms for that pass and the
+pre-heap tree runtime measured 1.25 ms, so this is within the requested ~2x of
+pre-heap behaviour, with the caveat that the difference sits close to the noise
+floor of these measurements.
 
-### State, accounting, and persistence
+The scenarios committed to the guard are sized to keep the suite fast — 2,000
+elements for the list pass, 60 outer iterations for the nested loop, 150 for the
+deep chain. The 8,000-element figures came from temporarily raising the constant
+in both trees and are not a committed measurement.
 
-- `plain_scalar_snapshot_has_no_heap_duplicate`
-- `heap_aware_global_patches_survive_next_cell_and_cold_restore`
-- `heap_backed_default_patch_survives_next_cell_and_cold_restore`
-- `heap_backed_projection_rehydrate_and_prune_survive_execution_and_restore`
-- `indexed_add_charges_before_record_growth_and_updates_incrementally`
-- `indexed_add_exact_limit_succeeds_and_one_byte_over_preserves_state`
-- `failed_heapification_preserves_compound_state_transactionally`
-- `canonical_decode_rejects_descending_heap_ids`
-- `canonical_decode_rejects_dangling_root_and_nested_references`
-- `canonical_decode_rejects_counter_accounting_schedule_and_root_order`
-- `canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects`
-- `continuation_decode_rejects_descending_counters_and_dangling_refs`
-- `continuation_numbers_canonicalize_nan_and_preserve_negative_zero`
-- `durable_segment_round_trip_preserves_nan_and_negative_zero`
-- `sparse_object_bookkeeping_stays_bounded_by_live_objects`
-- `child_mutation_invalidates_materialized_ancestor_cache`
-- `suspend_collects_live_heap_before_park_or_keep_running_diverge`
-- `independent_os_processes_emit_byte_identical_snapshot_and_continuation_dumps` now crosses collection, vacancy, and reuse and compares both encodings.
+Scenarios other than those listed moved by less than 15% in either direction,
+which is inside the run-to-run spread on this machine. `type_system_stress` is
+the one repeatable regression and is the alias-copy cost of deep isolation: it
+builds large record literals, and each literal member is now copied recursively.
+
+`large_data` measures 2,303,071 bytes per iteration, down from the 2,340,443 the
+fix round reported. Its byte override stays at 2,400,000 — 4.2% headroom on a
+metric whose run-to-run spread is under 0.01% — and its allocation ceiling stays
+at the unchanged 12,000 default. No other existing scenario's budget changed.
 
 ## Verification
 
 | Gate | Result |
 | --- | --- |
-| Review repro tests named above | PASS |
 | `cargo check --workspace --all-targets --locked` | PASS |
-| `cargo test --workspace` | PASS |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS |
-| `cargo fmt --all --check` | PASS |
-| `python3 scripts/lint_docs.py` | PASS: 46 HTML pages, 42 registry pages |
-| `bash scripts/check-rustdoc.sh` | PASS |
-| `python3 scripts/check_test_quarantines.py` | PASS |
-| `python3 scripts/check_api_example_coverage.py` | PASS: 8,005 entries |
-| `just perf-guard` | PASS: complete quick runtime profile and 210 Lashlang results |
+| `cargo test --workspace` | PENDING |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PENDING |
+| `cargo fmt --all --check` | PENDING |
+| `python3 scripts/lint_docs.py` | PENDING |
+| `bash scripts/check-rustdoc.sh` | PENDING |
+| `python3 scripts/check_test_quarantines.py` | PENDING |
+| `python3 scripts/check_api_example_coverage.py` | PENDING |
+| `just perf-guard` | PENDING |
 
-## Performance
+### Probe tests
 
-The final `just perf-guard` run passes every runtime and Lashlang budget. The earlier transactional implementation cloned the complete heap after every instruction; the final staged importer commits atomically without that clone and imports only inline compound values.
+Both reviewers' programs, as named tests in
+`crates/lashlang/tests/value_semantics.rs` and
+`crates/lashlang/src/runtime/tests/continuation_wire_cases.rs`:
 
-The heap-sensitive `large_data` scenario (500 iterations) measured:
+- `optimized_concat_insertion_copies_the_appended_binding` (sol probe 1, across
+  three cells and a snapshot boundary)
+- `optimized_concat_insertion_copies_within_one_cell`
+- `general_concat_copies_the_right_operand_members`
+- `slot_concat_copies_the_right_operand_members`
+- `aliased_root_with_a_nested_container_round_trips` (sol probe 2)
+- `self_insertion_stores_a_copy` (sol probe 3)
+- `accumulated_rows_aliased_to_a_second_root_round_trip` (opus N1)
+- `aliased_accumulator_does_not_observe_later_appends`
+- `descendant_read_into_a_new_binding_is_isolated`
+- `multi_root_program_state_always_decodes`
+- `snapshot_equality_survives_a_round_trip_after_temporaries`
+- `continuation_decode_rejects_inline_compound_heap_members` (sol P0-2)
+- `authored_continuation_fixture_decodes_and_re_encodes_exactly`
+- `accepted_continuation_wire_survives_resume_suspend_and_re_encode`
+- `park_and_resume_is_invisible_to_a_straight_through_run`
+- `park_and_resume_never_exhausts_memory_earlier_than_a_straight_through_run`
+- `heap_backed_state_round_trips_as_an_equal_snapshot` (property test)
+- `rejected_global_patch_leaves_byte_identical_state_and_no_dirty_marks`
+- `rejected_protected_name_patch_leaves_byte_identical_state`
 
-| Mode | Time/iteration | Allocations/iteration | Bytes/iteration |
-| --- | ---: | ---: | ---: |
-| one shot | 6.931 ms | 11,763.644 | 2,329,301.2 |
-| prewarmed one shot | 9.087 ms | 11,763.514 | 2,329,267.6 |
-| compiled execute | 6.048 ms | 9,110.124 | 2,039,797.8 |
-| snapshot | 10.451 ms | 9,697.124 | 2,055,027.8 |
-| phase breakdown | 7.202 ms | 11,910.750 | 2,340,442.7 |
+Three were checked red-side by temporarily restoring the previous behaviour: the
+two rejected-patch regressions fail against the per-key loop, and the round-trip
+property test fails against the layout-sensitive heap equality.
 
-The existing `large_data` byte override is still required: its measured maximum is 2,340,442.7 bytes/iteration, 6.38% above the 2,200,000 default. It is calibrated to 2,400,000 bytes (2.54% measured headroom). The allocation ceiling remains the unchanged 12,000 default, and every other scenario uses the default budgets.
+## Deferred
 
-The final quick runtime profile also measured:
-
-| Scenario | Total median | Total allocated | Lashlang execute median | Lashlang execute allocated |
-| --- | ---: | ---: | ---: | ---: |
-| `rlm_globals` | 43.768 ms | 44,764,326 B | 3.507 ms | 4,549,135 B |
-| `rlm_large_print` | 52.036 ms | 92,914,466 B | 6.819 ms | 23,592,059 B |
-| `rlm_oblique_stack_mix` | 215.115 ms | 277,174,170 B | 140.708 ms | 158,076,833.5 B |
-
-No measured hot path is a greater-than-2x cliff, and no unrelated performance ceiling changed.
-
-## Deferred work
-
-- Rebase and reconcile the independent origin/main RLM v8 collision only in the orchestrator's follow-up round; this branch intentionally remains on its original base.
-- Closures become heap objects in their later campaign layer.
-- The TypeScript dialect can omit Lashlang's insertion-copy lowering to expose reference semantics.
-- General uniqueness analysis, incremental/moving GC, weak references, finalizers, and allocator/RSS metering remain out of scope.
+- Copy-on-write behind identical observable semantics (ADR 0059).
+- A sub-linear bound on ancestor invalidation.
+- Rebasing onto `main` and reconciling the independent RLM v8 collision; this
+  branch stays on its original base.
+- Closures as heap objects; a reference-semantics dialect that omits the
+  isolation lowering.
+- Typed heap restore errors.

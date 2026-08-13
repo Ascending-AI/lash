@@ -36,6 +36,7 @@ pub enum Scenario {
     HeapNestedLoop,
     HeapAllocationChurn,
     HeapDeepChainMutation,
+    HeapComprehensionBuild,
 }
 
 impl Scenario {
@@ -65,6 +66,7 @@ impl Scenario {
         Self::HeapNestedLoop,
         Self::HeapAllocationChurn,
         Self::HeapDeepChainMutation,
+        Self::HeapComprehensionBuild,
     ];
 
     #[allow(dead_code)]
@@ -95,13 +97,14 @@ impl Scenario {
             "heap_nested_loop" => Self::HeapNestedLoop,
             "heap_allocation_churn" => Self::HeapAllocationChurn,
             "heap_deep_chain_mutation" => Self::HeapDeepChainMutation,
+            "heap_comprehension_build" => Self::HeapComprehensionBuild,
             _ => return None,
         })
     }
 
     #[allow(dead_code)]
     pub fn expected_values() -> &'static str {
-        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, heap_list_iteration, heap_nested_loop, heap_allocation_churn, heap_deep_chain_mutation, or all"
+        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, heap_list_iteration, heap_nested_loop, heap_allocation_churn, heap_deep_chain_mutation, heap_comprehension_build, or all"
     }
 }
 
@@ -133,6 +136,7 @@ impl fmt::Display for Scenario {
             Self::HeapNestedLoop => "heap_nested_loop",
             Self::HeapAllocationChurn => "heap_allocation_churn",
             Self::HeapDeepChainMutation => "heap_deep_chain_mutation",
+            Self::HeapComprehensionBuild => "heap_comprehension_build",
         })
     }
 }

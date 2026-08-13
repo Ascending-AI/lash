@@ -459,19 +459,33 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 if self.stack[list_index..]
                     .iter()
                     .any(|value| matches!(value, Value::Projected(_)))
-                    || !matches!(self.stack[list_index], Value::List(_))
                 {
                     return Ok(None);
                 }
-                let item = self.pop_stack()?;
-                let Some(Value::List(items)) = self.stack.last_mut() else {
-                    unreachable!("list append target was checked above");
-                };
-                let values = items.make_mut();
-                if values.len() == values.capacity() {
-                    values.reserve(1);
+                // This opcode only ever appends to a comprehension's own
+                // accumulator, which nothing outside the comprehension can
+                // reach, so appending into its object is unobservable — and it
+                // keeps the accumulation linear instead of rebuilding the list
+                // on every element.
+                match &self.stack[list_index] {
+                    Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
+                        let target = Value::Ref(*id);
+                        let item = self.pop_stack()?;
+                        self.heap.push_list(&target, item)?;
+                    }
+                    Value::List(_) => {
+                        let item = self.pop_stack()?;
+                        let Some(Value::List(items)) = self.stack.last_mut() else {
+                            unreachable!("list append target was checked above");
+                        };
+                        let values = items.make_mut();
+                        if values.len() == values.capacity() {
+                            values.reserve(1);
+                        }
+                        values.push(item);
+                    }
+                    _ => return Ok(None),
                 }
-                values.push(item);
             }
             Instruction::BuildRecord(keys) => {
                 let record = self.drain_record_from_stack(keys)?;
@@ -1000,9 +1014,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.last_value = Some(last_value);
             }
             Instruction::ListAppend => {
-                let item = self.pop_stack()?;
+                let item = materialize_projected_async(self.pop_stack()?).await;
                 let list = self.pop_stack()?;
-                let value = execute_push_builtin_async(list, item).await?;
+                let value = match &list {
+                    Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
+                        self.heap.push_list(&list, item)?
+                    }
+                    _ => execute_push_builtin_async(list, item).await?,
+                };
                 self.stack.push(value);
             }
             Instruction::Unary(op) => {

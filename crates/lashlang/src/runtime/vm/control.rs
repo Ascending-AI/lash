@@ -240,6 +240,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 super::Instruction::AddAssignIndexNumber { .. }
                     | super::Instruction::AddAssignIndexSlotNumber { .. }
                     | super::Instruction::AppendAssign(_)
+                    | super::Instruction::ListAppend
             ) || matches!(
                 instruction,
                 super::Instruction::Binary(BinaryOp::Equal | BinaryOp::NotEqual)
@@ -413,8 +414,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         instruction: super::Instruction,
     ) -> Result<(), RuntimeError> {
-        for value in &mut self.stack {
-            *value = self.heap.export_for_instruction(value)?;
+        match self.stack_operand_window(instruction) {
+            Some(window) => {
+                let start = self.stack.len().saturating_sub(window);
+                for index in start..self.stack.len() {
+                    let exported = self.heap.export_for_instruction(&self.stack[index])?;
+                    self.stack[index] = exported;
+                }
+            }
+            None => {
+                for value in &mut self.stack {
+                    *value = self.heap.export_for_instruction(value)?;
+                }
+            }
         }
         match instruction {
             super::Instruction::LoadField { slot, .. }
@@ -437,6 +449,56 @@ impl<H: ExecutionHost> Vm<'_, H> {
             _ => {}
         }
         Ok(())
+    }
+
+    /// How many operands from the top of the stack this instruction reads.
+    ///
+    /// `None` means "unknown, materialize the whole stack", which is the
+    /// conservative default every opcode not listed here keeps. Listing an
+    /// opcode is a claim about its implementation — that it touches at most that
+    /// many stack values — and it matters because a value left deeper on the
+    /// stack must not be exported: an accumulator sitting under a loop body
+    /// would be rebuilt from its heap object on every instruction, which is
+    /// quadratic in the accumulator's length.
+    ///
+    /// A reference left on the stack is safe to leave there: it is a collection
+    /// root, it serializes into a continuation, and the terminal export walks
+    /// the whole stack.
+    fn stack_operand_window(&self, instruction: super::Instruction) -> Option<usize> {
+        use super::Instruction as I;
+        Some(match instruction {
+            I::PushConst(_)
+            | I::PushNull
+            | I::PushBool(_)
+            | I::PushNumber(_)
+            | I::LoadName(_)
+            | I::StoreConst { .. }
+            | I::Jump(_)
+            | I::IterNext { .. }
+            | I::EndIter
+            | I::ObserveStep
+            | I::AddAssignNumber { .. }
+            | I::AddAssignSlot { .. }
+            | I::SlotNumberBinary { .. }
+            | I::SlotNumberCompare { .. }
+            | I::SlotNumberBinaryCompare { .. }
+            | I::JumpIfSlotNumberCompareFalse { .. }
+            | I::JumpIfSlotNumberBinaryCompareFalse { .. } => 0,
+            I::Field(_)
+            | I::ResultUnwrap
+            | I::ToBool
+            | I::JumpIfFalse(_)
+            | I::JumpIfTrue(_)
+            | I::Unary(_)
+            | I::Pop
+            | I::StoreName(_)
+            | I::AddAssign(_)
+            | I::BeginIter(_) => 1,
+            I::Index | I::Binary(_) | I::JumpIfCompareFalse { .. } => 2,
+            I::BuildTuple(len) | I::BuildList(len) => len,
+            I::BeginRangeIter { argc, .. } => argc,
+            _ => return None,
+        })
     }
 
     fn materialize_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {

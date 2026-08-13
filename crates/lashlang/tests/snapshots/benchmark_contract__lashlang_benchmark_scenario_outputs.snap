@@ -37,6 +37,11 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
   "heap_allocation_churn": {
     "kept": 10
   },
+  "heap_comprehension_build": {
+    "doubled": 800,
+    "last": 1598,
+    "tagged": 115
+  },
   "heap_deep_chain_mutation": {
     "counter": 150,
     "first": [

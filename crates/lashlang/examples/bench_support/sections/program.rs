@@ -695,6 +695,19 @@ for n in range(0, 150) {
 finish { counter: tree.level.counters["c"], first: tree.level.rows[0] }
 "#
         }
+        Scenario::HeapComprehensionBuild => {
+            // A comprehension accumulating over a long source list. Appending to
+            // the accumulator must not rebuild it once per element.
+            r#"
+source = []
+for n in range(0, 800) {
+  source = push(source, n)
+}
+doubled = [item + item for item in source]
+tagged = [[item] for item in source if item % 7 == 0]
+finish { doubled: len(doubled), tagged: len(tagged), last: doubled[len(doubled) - 1] }
+"#
+        }
     };
     format!("{BENCH_PROCESS_DECLS}\n{main}")
 }
