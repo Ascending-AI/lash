@@ -71,6 +71,7 @@ let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
     lash::rlm::RlmProtocolPluginConfig::new(
         lash::rlm::ExecutionBound::instructions(1_000_000),
         lash::rlm::ExecutionBound::secs(30),
+        lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
     ),
     std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 )
@@ -106,6 +107,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     lash::rlm::RlmProtocolPluginConfig::new(
         lash::rlm::ExecutionBound::instructions(1_000_000),
         lash::rlm::ExecutionBound::secs(30),
+        lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
     ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 )
