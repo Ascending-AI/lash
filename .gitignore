@@ -63,7 +63,6 @@ autoresearch.html
 .todos.md
 # Local Lash runtime/workbench state and generated captures.
 /agent-workbench-*.png
-/scratchpad/
 
 # insta run-log artifacts (regenerated on every test run)
 *.pending-snap
