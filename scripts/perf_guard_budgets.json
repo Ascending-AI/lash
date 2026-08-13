@@ -151,8 +151,8 @@
         }
       },
       "queued_work_claim_stress": {
-        "total_alloc_bytes_max": 22066000,
-        "steady_state_turn_alloc_bytes_max": 1242000,
+        "total_alloc_bytes_max": 13833000,
+        "steady_state_turn_alloc_bytes_max": 611000,
         "total_ms_max": 44.025,
         "phases": {
           "queued_work.abandon_join_claim": 0.962,
