@@ -1048,7 +1048,10 @@ impl RlmExecutionState {
 pub(crate) fn capture_scratch_files_for_testing(
     files: Vec<(String, Vec<u8>)>,
 ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-    let mut state = RlmExecutionState::new()?;
+    // Production construction names its dialect; this testing-feature helper
+    // captures files for the Lashlang engine, which is what it did before the
+    // dialect became explicit.
+    let mut state = RlmExecutionState::for_engine("lashlang")?;
     for (path, body) in files {
         state.write_scratch_file_for_testing(&path, &body)?;
     }
