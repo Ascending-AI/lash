@@ -5,9 +5,7 @@
 //! The VM is the consumer side of the compiler/vm split: it never writes
 //! `Instruction`s, only reads them. Cross-module helpers it relies on
 //! (`read_field*`, `eval_binary_values`, `apply_format_async`,
-//! `to_json_async`, …) currently live in `mod.rs` and will move to their
-//! proper homes (`access.rs`, `ops.rs`, `format.rs`, `json.rs`) in
-//! Stage 6.
+//! `to_json_async`, …) remain in `mod.rs` until the Stage 6 module split.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -44,9 +42,9 @@ use super::value::ProjectedValue;
 use super::{
     Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap, HeapObject,
     ImageValue, Instruction, InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
-    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, ProfileAccumulator,
-    ProfileReport, ProjectedBindings, ResourceHandle, RuntimeError, State, Value,
-    add_assign_index_number, add_values, as_number, assign_path, eval_binary_values,
+    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, PersistedRoots,
+    ProfileAccumulator, ProfileReport, ProjectedBindings, ResourceHandle, RuntimeError, State,
+    Value, add_assign_index_number, add_values, as_number, assign_path, eval_binary_values,
     eval_compare_values, eval_number_binary_values, eval_number_compare_values,
     eval_number_numeric_binary_value, execute_compiled_format, execute_compiled_format_direct,
     execute_compiled_format_one_number_compact_direct, execute_intrinsic,
@@ -1598,3 +1596,4 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 include!("functions.rs");
 include!("assignment.rs");
 include!("iteration.rs");
+include!("roots.rs");

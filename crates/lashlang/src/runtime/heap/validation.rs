@@ -43,16 +43,6 @@ impl<'a> PersistedRoots<'a> {
         self.transient.push(value);
         self
     }
-
-    pub(crate) fn transient_all(
-        &mut self,
-        values: impl IntoIterator<Item = &'a Value>,
-    ) -> &mut Self {
-        for value in values {
-            self.transient(value);
-        }
-        self
-    }
 }
 
 /// What holds a heap object: a named durable root, or a member of one object.

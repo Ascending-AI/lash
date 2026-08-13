@@ -607,31 +607,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn heap_roots(&self) -> Vec<Value> {
-        let mut roots = self.stack.clone();
-        roots.extend(self.last_value.iter().cloned());
-        roots.extend(self.slots.values.iter().flatten().cloned());
-        roots.extend(self.slots.extras.values().cloned());
-        for iterator in &self.iter_stack {
-            if let super::IterCursor::List { values, .. } = &iterator.cursor {
-                roots.push(Value::List(values.clone()));
-            }
-            roots.extend(iterator.restore.previous.iter().cloned());
-        }
-        for frame in &self.frames {
-            roots.extend(frame.slots.values.iter().flatten().cloned());
-            roots.extend(frame.slots.extras.values().cloned());
-            for iterator in &frame.iter_stack {
-                if let super::IterCursor::List { values, .. } = &iterator.cursor {
-                    roots.push(Value::List(values.clone()));
-                }
-                roots.extend(iterator.restore.previous.iter().cloned());
-            }
-            if let super::ReturnTarget::Map(callback) = &frame.return_target {
-                roots.push(callback.function.clone());
-                roots.extend(callback.items.iter().cloned());
-                roots.extend(callback.results.iter().cloned());
-            }
-        }
+        let mut roots = Vec::new();
+        super::visit_vm_roots(self, &mut roots);
         roots
     }
 }

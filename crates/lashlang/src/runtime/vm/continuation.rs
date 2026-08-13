@@ -722,60 +722,7 @@ mod continuation_serde {
 /// they borrow without owning.
 fn continuation_forest_roots(continuation: &VmContinuation) -> PersistedRoots<'_> {
     let mut roots = PersistedRoots::default();
-    if continuation.active_function.is_none() {
-        for (index, value) in continuation.slots.iter().enumerate() {
-            if let Some(value) = value {
-                roots.durable(format!("slot {index}"), value);
-            }
-        }
-        for (name, value) in continuation.globals.iter() {
-            roots.durable(format!("global `{name}`"), value);
-        }
-    } else if let Some(root_frame) = continuation
-        .frame_stack
-        .iter()
-        .find(|frame| frame.function.is_none())
-    {
-        for (index, value) in root_frame.slots.iter().enumerate() {
-            if let Some(value) = value {
-                roots.durable(format!("root frame slot {index}"), value);
-            }
-        }
-        for (name, value) in root_frame.globals.iter() {
-            roots.durable(format!("root frame global `{name}`"), value);
-        }
-    }
-    for (depth, iterator) in continuation.iterator_stack.iter().enumerate() {
-        if let Some(value) = iterator.restore_value.as_ref() {
-            roots.durable(format!("iterator {depth} restore value"), value);
-        }
-        if let VmIteratorCursor::List { values, .. } = &iterator.cursor {
-            roots.transient_all(values.iter());
-        }
-    }
-    roots.transient_all(continuation.operand_stack.iter());
-    roots.transient_all(continuation.last_value.iter());
-    for frame in &continuation.frame_stack {
-        roots.transient_all(frame.slots.iter().flatten());
-        roots.transient_all(frame.globals.values());
-        for iterator in &frame.iterator_stack {
-            roots.transient_all(iterator.restore_value.iter());
-            if let VmIteratorCursor::List { values, .. } = &iterator.cursor {
-                roots.transient_all(values.iter());
-            }
-        }
-        if let VmFrameReturnContinuation::Map {
-            function,
-            items,
-            results,
-            ..
-        } = &frame.return_target
-        {
-            roots.transient(function);
-            roots.transient_all(items.iter());
-            roots.transient_all(results.iter());
-        }
-    }
+    visit_vm_roots(continuation, &mut roots);
     roots
 }
 

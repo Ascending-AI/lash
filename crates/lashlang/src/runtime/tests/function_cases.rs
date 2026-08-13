@@ -235,6 +235,88 @@ async fn effect_suspension_inside_a_user_function_with_heap_argument_round_trips
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
+    let callee_body = Expr::Block(vec![
+        assign("local_list", Expr::List(vec![variable("list_arg")])),
+        assign(
+            "local_record",
+            Expr::Record(vec![("record".into(), variable("record_arg"))]),
+        ),
+        assign("local_tuple", Expr::Tuple(vec![variable("tuple_arg")])),
+        Expr::Print(Box::new(Expr::Number(1.0))),
+        Expr::Tuple(vec![
+            variable("local_list"),
+            variable("local_record"),
+            variable("local_tuple"),
+        ]),
+    ]);
+    let caller_body = Expr::Block(vec![
+        assign(
+            "caller_local",
+            Expr::Record(vec![("payload".into(), variable("payload"))]),
+        ),
+        call(
+            variable("callee"),
+            vec![
+                Expr::List(vec![Expr::Number(1.0)]),
+                Expr::Record(vec![("value".into(), Expr::Number(2.0))]),
+                Expr::Tuple(vec![Expr::Number(3.0)]),
+            ],
+        ),
+    ]);
+    let program = compile_program_internal(&Program::block(vec![
+        assign(
+            "callee",
+            function(
+                None,
+                &["list_arg", "record_arg", "tuple_arg"],
+                &[],
+                callee_body,
+            ),
+        ),
+        assign(
+            "caller",
+            function(None, &["payload"], &["callee"], caller_body),
+        ),
+        Expr::Finish(Box::new(call(
+            variable("caller"),
+            vec![Expr::List(vec![Expr::Number(9.0)])],
+        ))),
+    ]));
+    let host = Host;
+    let mut vm = continuation_test_vm(&program, &host);
+    vm.suspend_after_effects(1);
+    assert_eq!(
+        vm.run_for_mode().await.expect("suspend in callee"),
+        ExecutionOutcome::Continued
+    );
+    let continuation = vm.suspend().expect("capture caller and callee heaps");
+    assert_eq!(continuation.frame_stack.len(), 2);
+    assert_eq!(
+        round_trip_and_resume(&program, continuation).await,
+        ExecutionOutcome::Finished(Value::Tuple(
+            vec![
+                Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into()),
+                Value::Record(std::sync::Arc::new({
+                    let mut record = Record::new();
+                    record.insert(
+                        "record".to_string(),
+                        Value::Record(std::sync::Arc::new({
+                            let mut nested = Record::new();
+                            nested.insert("value".to_string(), Value::Number(2.0));
+                            nested
+                        })),
+                    );
+                    record
+                })),
+                Value::Tuple(vec![Value::Tuple(vec![Value::Number(3.0)].into())].into()),
+            ]
+            .into()
+        ))
+    );
+}
+
 struct FunctionBoundsHost {
     bounds: ExecutionBounds,
     collect_every_allocation: bool,
