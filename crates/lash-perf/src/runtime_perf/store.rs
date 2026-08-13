@@ -198,7 +198,6 @@ impl RuntimePerfStore {
             claim_fencing_token: 0,
             claim_session_lease_generation: 0,
         });
-        queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         stored
     }
 
@@ -306,7 +305,6 @@ impl RuntimePerfStore {
         let generation = session_execution_lease.fencing_token;
         let now = current_epoch_ms();
         let mut queued = self.queued_work.lock_recover();
-        queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         let claim_available = |entry: &RuntimePerfQueuedBatch| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
         };
@@ -1314,7 +1312,6 @@ impl QueuedWorkStore for RuntimePerfStore {
         let generation = session_execution_lease.fencing_token;
         let now = current_epoch_ms();
         let mut queued = self.queued_work.lock_recover();
-        queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         let queued_work::SelectedBatchPresence {
             requested_ids,
             present_ids,
