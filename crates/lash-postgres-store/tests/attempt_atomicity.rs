@@ -608,11 +608,11 @@ impl lash_core::ToolProvider for Fig1293EchoTools {
         if call.args.get("value") == Some(&serde_json::json!("fail")) {
             return lash_core::ToolResult::err_fmt("fig1293 injected batch failure");
         }
-        if call.args.get("value") == Some(&serde_json::json!("block")) {
-            if FIG1293_BLOCKING_CHILD_RUNS.fetch_add(1, Ordering::SeqCst) == 0 {
-                std::future::pending::<()>().await;
-                unreachable!("FIG-1293 blocking child is dropped by cancellation")
-            }
+        if call.args.get("value") == Some(&serde_json::json!("block"))
+            && FIG1293_BLOCKING_CHILD_RUNS.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            std::future::pending::<()>().await;
+            unreachable!("FIG-1293 blocking child is dropped by cancellation")
         }
         lash_core::ToolResult::ok(serde_json::json!({
             "echo": call.args.get("value").cloned().unwrap_or_default(),

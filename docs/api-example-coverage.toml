@@ -47427,6 +47427,33 @@ disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
 
 [[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ProcessNotVisible"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ProcessNotVisible"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts preserve this process-command refusal across effect-controller serialization and project its stable code without parsing diagnostic text."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ProcessAlreadyTerminal"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ProcessAlreadyTerminal"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts preserve this process-command refusal across effect-controller serialization and project its stable code without parsing diagnostic text."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ProcessNoLongerRetained"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ProcessNoLongerRetained"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts preserve this process-command refusal across effect-controller serialization and project its stable code without parsing diagnostic text."
+
+[[api]]
 symbol = "lash::runtime::RuntimeErrorCode::ProcessRegistryUnavailable"
 kind = "variant"
 availability = "default+all-features"
