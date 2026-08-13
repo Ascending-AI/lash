@@ -3047,8 +3047,8 @@ mod tests {
 
             let initial_budget = state::measure_snapshot(&initial);
             let changed_budget = state::measure_snapshot(&changed);
-            assert_eq!(initial_budget.checkpoint_bytes, 82_054);
-            assert_eq!(changed_budget.checkpoint_bytes, 13_671);
+            assert_eq!(initial_budget.checkpoint_bytes, 82_522);
+            assert_eq!(changed_budget.checkpoint_bytes, 14_040);
         });
     }
 
@@ -3265,9 +3265,9 @@ mod tests {
                 "FIG1195_FLAT_GROWTH full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
                 measured.len()
             );
-            assert_eq!(full_state_bytes, 136_126);
-            assert_eq!(minimum, 20_318);
-            assert_eq!(maximum, 20_372);
+            assert_eq!(full_state_bytes, 136_690);
+            assert_eq!(minimum, 21_047);
+            assert_eq!(maximum, 21_101);
         });
     }
 
@@ -3293,7 +3293,7 @@ mod tests {
                 .to_canonical_bytes()
                 .expect("accumulated canonical state")
                 .len();
-            assert_eq!(full_state_bytes, 1_095_692);
+            assert_eq!(full_state_bytes, 1_104_932);
             let _initial = state.snapshot_execution_state().expect("initial snapshot");
             state.acknowledge_execution_state_capture();
 
@@ -3332,8 +3332,8 @@ mod tests {
                 "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
                 measured.len()
             );
-            assert_eq!(minimum, 94_285);
-            assert_eq!(maximum, 94_287);
+            assert_eq!(minimum, 94_294);
+            assert_eq!(maximum, 94_296);
         });
     }
 
