@@ -1001,21 +1001,15 @@ impl RlmExecutionState {
         if patch.is_empty() {
             return Ok(());
         }
-        let before = self
-            .rlm
-            .globals()
-            .iter()
-            .map(|(name, _)| name.to_string())
-            .collect::<BTreeSet<_>>();
-        apply_global_defaults(&mut self.rlm, patch, protected_names)
+        // The state commits the whole batch or none of it, so the dirty
+        // bookkeeping is recorded from what the commit reports rather than
+        // reconstructed afterwards. A rejected patch leaves both untouched.
+        let inserted = apply_global_defaults(&mut self.rlm, patch, protected_names)
             .map_err(SessionError::Protocol)?;
-        self.dirty_globals.extend(
-            self.rlm
-                .globals()
-                .iter()
-                .map(|(name, _)| name.to_string())
-                .filter(|name| !before.contains(name)),
-        );
+        if inserted.is_empty() {
+            return Ok(());
+        }
+        self.dirty_globals.extend(inserted);
         self.root_dirty = true;
         Ok(())
     }

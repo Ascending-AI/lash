@@ -695,24 +695,37 @@ fn trace_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLanguageExecution
     lash_lashlang_runtime::trace_lashlang_main_map(artifact)
 }
 
+/// Applies a `set_default` patch as one transaction.
+///
+/// Every key is checked before any of them is applied, and the accepted
+/// operations then go to the state as a single batch. A rejected patch — a
+/// protected or reserved name anywhere in it — therefore leaves the state
+/// exactly as it was, instead of committing the defaults that happened to come
+/// first while the caller's dirty tracking records nothing.
 fn apply_global_defaults(
     rlm: &mut FlowState,
     patch: &lash_rlm_types::RlmGlobalsPatchPluginBody,
     protected_names: &BTreeSet<String>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     if patch.set_default.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    for (key, value) in &patch.set_default {
+    for key in patch.set_default.keys() {
         if is_reserved_global_name(key) || protected_names.contains(key) {
             return Err(format!(
                 "`{key}` is a read-only projected host binding; choose a different Lashlang variable name for `set_default`"
             ));
         }
-        rlm.set_default(key.clone(), json_to_flow_value(value.clone()))
-            .map_err(|error| error.to_string())?;
     }
-    Ok(())
+    let outcome = rlm
+        .patch_globals(patch.set_default.iter().map(|(key, value)| {
+            lashlang::GlobalPatch::SetDefault {
+                name: key.clone(),
+                value: json_to_flow_value(value.clone()),
+            }
+        }))
+        .map_err(|error| error.to_string())?;
+    Ok(outcome.inserted)
 }
 
 fn is_reserved_global_name(key: &str) -> bool {
@@ -1049,6 +1062,7 @@ mod tests {
             lashlang::ExecutionBounds::new(
                 lashlang::ExecutionBound::instructions(1_000_000),
                 lashlang::ExecutionBound::secs(30),
+                lashlang::ExecutionBound::Unbounded,
             ),
         )
         .await
@@ -1078,6 +1092,7 @@ mod tests {
                 lashlang::ExecutionBounds::new(
                     lashlang::ExecutionBound::instructions(1),
                     lashlang::ExecutionBound::Unbounded,
+                    lashlang::ExecutionBound::Unbounded,
                 ),
             )
             .await;
@@ -1105,6 +1120,7 @@ mod tests {
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::new(
                     lashlang::ExecutionBound::instructions(1),
+                    lashlang::ExecutionBound::Unbounded,
                     lashlang::ExecutionBound::Unbounded,
                 ),
             )
@@ -2668,6 +2684,99 @@ mod tests {
     }
 
     #[test]
+    fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_marks() {
+        block_on(async {
+            let projected = ProjectedBindings::new();
+            let mut state = RlmExecutionState::new().expect("state");
+            let setup = lashlang::compile("seed = [{ nested: [1] }]").expect("compile setup");
+            execute_with_projected(&setup, &mut state.rlm, &projected)
+                .await
+                .expect("execute setup");
+            let before = state
+                .rlm
+                .snapshot()
+                .to_canonical_bytes()
+                .expect("encode pre-patch state");
+            let dirty_before = state.execution_state_dirty();
+
+            // A deterministically ordered patch whose first key is acceptable
+            // and whose second is the reserved binding. Applying keys one at a
+            // time committed `a_good` and then failed, leaving a mutation no
+            // dirty mark accounted for.
+            let error = state
+                .patch_globals(
+                    &lash_rlm_types::RlmGlobalsPatchPluginBody {
+                        set_default: serde_json::Map::from_iter([
+                            ("a_good".to_string(), serde_json::json!(["kept"])),
+                            ("history".to_string(), serde_json::json!(["nope"])),
+                        ]),
+                    },
+                    &BTreeSet::new(),
+                )
+                .expect_err("a reserved name must reject the whole patch");
+            assert!(error.to_string().contains("history"));
+
+            assert!(
+                state.rlm.globals().get("a_good").is_none(),
+                "no key from a rejected patch may be committed"
+            );
+            assert_eq!(
+                state
+                    .rlm
+                    .snapshot()
+                    .to_canonical_bytes()
+                    .expect("encode post-patch state"),
+                before,
+                "a rejected patch must leave the state byte-identical"
+            );
+            assert_eq!(
+                state.execution_state_dirty(),
+                dirty_before,
+                "a rejected patch must not mark the execution state dirty"
+            );
+        });
+    }
+
+    #[test]
+    fn rejected_protected_name_patch_leaves_byte_identical_state() {
+        block_on(async {
+            let projected = ProjectedBindings::new();
+            let mut state = RlmExecutionState::new().expect("state");
+            let setup = lashlang::compile("seed = [1]").expect("compile setup");
+            execute_with_projected(&setup, &mut state.rlm, &projected)
+                .await
+                .expect("execute setup");
+            let before = state
+                .rlm
+                .snapshot()
+                .to_canonical_bytes()
+                .expect("encode pre-patch state");
+
+            let protected = BTreeSet::from(["docs".to_string()]);
+            state
+                .patch_globals(
+                    &lash_rlm_types::RlmGlobalsPatchPluginBody {
+                        set_default: serde_json::Map::from_iter([
+                            ("a_good".to_string(), serde_json::json!(1)),
+                            ("docs".to_string(), serde_json::json!(2)),
+                        ]),
+                    },
+                    &protected,
+                )
+                .expect_err("a protected name must reject the whole patch");
+
+            assert_eq!(
+                state
+                    .rlm
+                    .snapshot()
+                    .to_canonical_bytes()
+                    .expect("encode post-patch state"),
+                before
+            );
+        });
+    }
+
+    #[test]
     fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_restore() {
         block_on(async {
             let projected = ProjectedBindings::new();
@@ -3257,12 +3366,20 @@ mod tests {
                 "FIG1195_SHORT_BINDING_FLOOR commit_bytes={commit_bytes} leaves={}",
                 changed.components.len()
             );
-            assert_eq!(changed.components.len(), 0);
-            // 200 leaves would charge ~200 root refs plus ~200 manifest rows on
-            // every commit. Plain values use the compact tree representation,
-            // so the pre-heap inline-root ceiling remains appropriate.
             assert!(
-                commit_bytes < 34 * 1024,
+                changed.components.is_empty(),
+                "a changed short binding must not mint a leaf"
+            );
+            // The property under test is the assertion above: no leaf is minted,
+            // so 200 short bindings cost no root references and no manifest rows.
+            // The byte bound below is a generous sanity ceiling on top of that —
+            // the measured commit is about 33 KiB, and a regression that started
+            // minting leaves or writing a per-binding component would blow past
+            // 64 KiB long before it approached it. A tight byte assert here
+            // would fail on any harmless change to the payload strings without
+            // telling us anything the leaf-count assertion does not.
+            assert!(
+                commit_bytes < 64 * 1024,
                 "many short bindings must keep the per-commit floor low: {commit_bytes}"
             );
         });

@@ -148,8 +148,8 @@ impl ExecutionBounds {
         lashlang::ExecutionBounds::new(
             self.instruction_budget.into_engine(),
             self.deadline.into_engine(),
+            self.memory_limit.into_engine(),
         )
-        .with_memory_limit(self.memory_limit.into_engine())
     }
 }
 

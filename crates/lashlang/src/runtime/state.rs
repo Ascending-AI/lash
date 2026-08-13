@@ -421,6 +421,15 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
         let runtime_globals = snapshot.runtime_globals.clone();
         let root_values = runtime_globals.values().cloned().collect::<Vec<_>>();
         heap.collect(root_values.iter());
+        // The decoder refuses roots that share an object; deep isolation makes
+        // that unreachable, so the writer checks it too. A violation then fails
+        // here, at the encode that introduced it, rather than in another process
+        // at a later cold restore.
+        debug_assert!(
+            heap.validate_isolated_roots(runtime_globals.iter()).is_ok(),
+            "snapshot roots must not share heap objects: {:?}",
+            heap.validate_isolated_roots(runtime_globals.iter())
+        );
         let mut roots = runtime_globals.iter().collect::<Vec<_>>();
         roots.sort_unstable_by_key(|(name, _)| *name);
         Ok(Self {

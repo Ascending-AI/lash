@@ -223,19 +223,27 @@ pub(crate) fn json_to_flow_value(value: Value) -> FlowValue {
     }
 }
 
+/// Resolves every projected reference held in the session's globals.
+///
+/// The rehydrated bindings are committed as one batch: the turn's whole
+/// rehydration costs one heap copy and one collection rather than one of each
+/// per key, and a rehydration that cannot be committed leaves the globals as
+/// they were.
 pub(crate) async fn rehydrate_projected_globals(
     rlm: &mut FlowState,
     projection_resolver: Arc<dyn ProjectionResolver>,
 ) -> Result<(), String> {
     let keys = rlm.globals().keys().map(str::to_string).collect::<Vec<_>>();
+    let mut patch = Vec::new();
     for key in keys {
         if let Some(mut value) = rlm.globals().get(&key).cloned()
             && rehydrate_projected_value(&mut value, Arc::clone(&projection_resolver)).await?
         {
-            rlm.insert_global(key, value)
-                .map_err(|error| error.to_string())?;
+            patch.push(lashlang::GlobalPatch::Insert { name: key, value });
         }
     }
+    rlm.patch_globals(patch)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 

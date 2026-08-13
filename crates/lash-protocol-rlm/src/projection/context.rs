@@ -306,13 +306,18 @@ pub(crate) fn prune_protected_bindings(rlm: &mut FlowState, protected_names: &BT
     );
 }
 
+/// Removes the named bindings in one transaction.
+///
+/// Pruning is one heap copy and one collection for the whole set rather than
+/// one of each per name.
 pub(crate) fn prune_projected_binding_names<'a>(
     rlm: &mut FlowState,
     names: impl IntoIterator<Item = &'a str>,
 ) {
-    for key in names {
-        rlm.remove_global(key);
-    }
+    rlm.patch_globals(names.into_iter().map(|name| lashlang::GlobalPatch::Remove {
+        name: name.to_string(),
+    }))
+    .expect("removing bindings cannot exceed the heap bound");
 }
 
 fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {

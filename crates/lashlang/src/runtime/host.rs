@@ -1,9 +1,6 @@
 use crate::{HostRequirementsRef, LashlangExecutionCallSite, ModuleRef, ProcessRef};
 
-use super::{
-    DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, ExecutionScratch, ProfileReport, ProjectedBindings, Record,
-    RuntimeFailure, Value,
-};
+use super::{ExecutionScratch, ProfileReport, ProjectedBindings, Record, RuntimeFailure, Value};
 use crate::LashlangExecutionObservation;
 use lash_sansio::sync::MutexExt;
 use std::future::Future;
@@ -240,14 +237,20 @@ pub struct ExecutionBounds {
 }
 
 impl ExecutionBounds {
+    /// Builds a bound set.
+    ///
+    /// All three limits are stated: a host that does not decide how much
+    /// logical memory an execution may hold has not finished configuring it,
+    /// and a silent default here would be a bound nobody chose.
     pub const fn new(
         instruction_budget: ExecutionBound<std::num::NonZeroU64>,
         deadline: ExecutionBound<Duration>,
+        memory_limit: ExecutionBound<std::num::NonZeroU64>,
     ) -> Self {
         Self {
             instruction_budget,
             deadline,
-            memory_limit: ExecutionBound::instructions(DEFAULT_HEAP_LOGICAL_BYTE_LIMIT),
+            memory_limit,
         }
     }
 
@@ -260,8 +263,11 @@ impl ExecutionBounds {
     }
 
     pub const fn unbounded() -> Self {
-        Self::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded)
-            .with_memory_limit(ExecutionBound::Unbounded)
+        Self::new(
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+        )
     }
 }
 

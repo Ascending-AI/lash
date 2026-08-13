@@ -528,6 +528,7 @@ async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters()
         bounds: ExecutionBounds::new(
             ExecutionBound::instructions(602),
             ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
         ),
     };
     assert!(matches!(
@@ -539,6 +540,7 @@ async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters()
         bounds: ExecutionBounds::new(
             ExecutionBound::Unbounded,
             ExecutionBound::millis(0),
+            ExecutionBound::Unbounded,
         ),
     };
     assert!(matches!(

@@ -428,6 +428,12 @@ impl Heap {
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })
     }
 
+    /// Allocates one object directly.
+    ///
+    /// Production allocation goes through the staged paths — `import_values`
+    /// and `isolate_value` — which charge a whole batch before committing any of
+    /// it. This single-object form is only used to build heaps in tests.
+    #[cfg(test)]
     pub(crate) fn allocate(&mut self, object: HeapObject) -> Result<Value, RuntimeError> {
         let logical_bytes = object.logical_bytes();
         let next_live = self.live_logical_bytes.saturating_add(logical_bytes);
@@ -479,48 +485,12 @@ impl Heap {
         Value::Ref(id)
     }
 
-    pub(crate) fn import(&mut self, value: Value) -> Result<Value, RuntimeError> {
-        if let Some(identity) = compound_identity(&value)
-            && let Some(id) = self.boundary_id(identity)
-        {
-            return Ok(Value::Ref(id));
-        }
-        match value {
-            Value::Tuple(values) => {
-                let values = values
-                    .into_vec()
-                    .into_iter()
-                    .map(|value| self.import(value))
-                    .collect::<Result<_, _>>()?;
-                self.allocate(HeapObject::Tuple(values))
-            }
-            Value::List(values) => {
-                let values = values
-                    .into_vec()
-                    .into_iter()
-                    .map(|value| self.import(value))
-                    .collect::<Result<_, _>>()?;
-                self.allocate(HeapObject::List(values))
-            }
-            Value::Record(record) => {
-                let mut imported = record_with_capacity(record.len());
-                for entry in record.entries.iter() {
-                    imported.insert_symbolized(
-                        entry.symbol,
-                        entry.name.clone(),
-                        self.import(entry.value.clone())?,
-                    );
-                }
-                self.allocate(HeapObject::Record(Box::new(imported)))
-            }
-            Value::Ref(id) => {
-                self.get(id)?;
-                Ok(Value::Ref(id))
-            }
-            value => Ok(value),
-        }
-    }
-
+    /// Imports inline compounds, allocating one object per compound.
+    ///
+    /// This is the only import path: the whole batch is staged and charged
+    /// before any of it is committed, so a batch that would cross the memory
+    /// bound leaves the heap byte-identical instead of stranding the objects it
+    /// already charged for.
     pub(crate) fn import_values(&mut self, values: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
         let mut next_id = self.next_id;
         let mut staged = Vec::new();
@@ -986,8 +956,9 @@ impl Heap {
         // store. A reference has already been isolated by the lowering that
         // produced it; an inline compound is isolated here so it can never enter
         // a container while another root still holds the same object.
-        let item = if matches!(item, Value::Ref(_)) {
-            self.import(item)?
+        let item = if let Value::Ref(id) = item {
+            self.get(id)?;
+            item
         } else {
             self.isolate_value(&item)?
         };
