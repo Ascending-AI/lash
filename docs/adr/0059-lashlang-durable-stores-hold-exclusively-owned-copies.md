@@ -68,6 +68,17 @@ Applying the validator to the encoders as well means a violation fails at the
 write that introduced it rather than at a later cold restore in another process,
 and cannot reach durable storage at all.
 
+The transient side of that rule rests on a property of the language rather than
+of the heap: assignment in Lashlang is a statement, so no durable store can run
+while operands are pending, and a borrowed handle on the stack cannot outlive
+the store that created it. Two changes would break it — making assignment an
+expression, so that `f(x = [1], x)` puts a store between two live operands, or
+adding an opcode that writes a slot while unrelated operands are still on the
+stack. The heap layer does not detect either: it would keep accepting the
+duplicate as a transient borrow. A parse-level test pins the statement property;
+an opcode that wanted to violate the second would have to declare itself in the
+instruction heap plan, which is where someone would have to notice.
+
 One recursive enumerator answers child discovery for allocation bookkeeping,
 reverse parent edges, mark, sweep, wire validation and root traversal, so no
 consumer can see a shallower answer than another.

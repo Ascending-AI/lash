@@ -453,3 +453,58 @@ async fn a_store_allocates_one_object_per_live_object() {
         );
     }
 }
+
+/// A concatenation that runs out of memory partway leaves the accumulator
+/// exactly as it was.
+///
+/// Copying and appending one member at a time meant a bound trip midway left
+/// the accumulator holding part of the right operand — and since the state that
+/// survives a failure is the state that gets persisted, that half-applied
+/// concatenation was durable, and encoded and decoded like any other.
+#[tokio::test(flavor = "current_thread")]
+async fn a_rejected_concat_leaves_the_accumulator_untouched() {
+    let setup = compile_source("acc = [0]\nother = [[1], [2], [3]]").expect("setup should compile");
+    let extend = compile_source("acc = acc + other").expect("extension should compile");
+
+    let mut state = State::new();
+    execute_compiled(&setup, &mut state, &Host)
+        .await
+        .expect("seed the accumulator");
+    let before = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("seeded state should encode");
+    let seeded_bytes = {
+        let snapshot = state.snapshot();
+        let mut probe = State::from_snapshot(snapshot);
+        let (_, heap) = probe.take_runtime();
+        heap.live_logical_bytes()
+    };
+
+    // Enough room for part of the extension, not all of it.
+    let host = HeapConformanceHost {
+        stress_gc: false,
+        memory_limit: ExecutionBound::logical_bytes(seeded_bytes + 100),
+    };
+    let error = execute_compiled(&extend, &mut state, &host)
+        .await
+        .expect_err("the extension must exhaust the bound");
+    assert!(
+        matches!(error, RuntimeError::MemoryLimitExceeded { .. }),
+        "unexpected failure: {error:?}"
+    );
+
+    assert_eq!(
+        state.globals().get("acc"),
+        Some(&Value::List(vec![Value::Number(0.0)].into())),
+        "a rejected extension must not leave members behind"
+    );
+    assert_eq!(
+        state
+            .snapshot()
+            .to_canonical_bytes()
+            .expect("post-failure state should encode"),
+        before,
+        "a rejected extension must leave the state byte-identical"
+    );
+}

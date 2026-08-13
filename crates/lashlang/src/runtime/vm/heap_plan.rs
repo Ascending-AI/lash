@@ -29,26 +29,37 @@ pub(super) enum StackExport {
     Top(usize),
 }
 
-/// Whether a slot is read or mutated through, which decides whether its
-/// materialization may keep the boundary cache.
+/// Which slots an instruction needs exported, and whether it reads them or
+/// mutates through them — which decides whether the materialization may keep
+/// the boundary cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SlotExport {
-    Read,
-    Mutate,
+    /// No slot is read: the opcode works on the stack, or on heap references
+    /// directly.
+    None,
+    Read(usize),
+    Mutate(usize),
+    /// Export every slot read-only. The conservative default, for the same
+    /// reason `StackExport::All` is: an opcode nobody declared may read any
+    /// slot, and a heap reference reaching a boundary that expects a tree is
+    /// how `format("{0}", xs)` came to take the process down. Being
+    /// conservative on one axis and permissive on the other would have let the
+    /// next undeclared slot reader reproduce it quietly.
+    All,
 }
 
 /// Everything one instruction needs from heap-backed state before it runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct InstructionHeapPlan {
     pub(super) stack: StackExport,
-    pub(super) slots: [Option<(usize, SlotExport)>; 1],
+    pub(super) slots: SlotExport,
 }
 
 impl InstructionHeapPlan {
     const fn stack(stack: StackExport) -> Self {
         Self {
             stack,
-            slots: [None],
+            slots: SlotExport::None,
         }
     }
 
@@ -59,12 +70,12 @@ impl InstructionHeapPlan {
     }
 
     const fn with_read_slot(mut self, slot: usize) -> Self {
-        self.slots[0] = Some((slot, SlotExport::Read));
+        self.slots = SlotExport::Read(slot);
         self
     }
 
     const fn with_mutable_slot(mut self, slot: usize) -> Self {
-        self.slots[0] = Some((slot, SlotExport::Mutate));
+        self.slots = SlotExport::Mutate(slot);
         self
     }
 }
@@ -127,8 +138,10 @@ pub(super) fn instruction_heap_plan(
             InstructionHeapPlan::stack(Top(2))
         }
 
-        // Opcodes whose operand count is carried in the instruction.
+        // Opcodes whose operand count is carried in the instruction, or in the
+        // table the instruction points at.
         I::BuildTuple(len) | I::BuildList(len) => InstructionHeapPlan::stack(Top(len)),
+        I::BuildRecord(keys) => InstructionHeapPlan::stack(Top(chunk.key_lists[keys].len())),
         I::BeginRangeIter { argc, .. } => InstructionHeapPlan::stack(Top(argc)),
 
         // Slot readers. The fused format opcodes belong here: they read a slot
@@ -166,9 +179,57 @@ pub(super) fn instruction_heap_plan(
         }
         I::AddAssignSlot { .. } => InstructionHeapPlan::heap_native(),
 
-        // Everything else exports the whole stack. Intrinsics read a count the
-        // plan cannot see, effects hand values to the host, and an opcode added
-        // later lands here until someone declares it.
-        _ => InstructionHeapPlan::stack(All),
+        // Every remaining intrinsic reads exactly its argument count from the
+        // stack — that same count is what dispatch uses to find them — and
+        // touches no slot. The three that do carry a slot are declared above.
+        I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op.argc())),
+
+        // Everything else exports the whole stack and every slot: effects hand
+        // values to the host, and an opcode added later lands here until
+        // someone declares it.
+        _ => InstructionHeapPlan {
+            stack: All,
+            slots: SlotExport::All,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Which opcodes fall to the conservative default.
+    ///
+    /// The default exports the whole stack and every slot, which is correct but
+    /// costs more than a declaration. This test names the set so growing it is a
+    /// deliberate act: an opcode that lands here because nobody declared it will
+    /// show up as a change to this list, and an opcode that is expensive to
+    /// leave here can be seen before it is measured.
+    #[test]
+    fn only_effect_shaped_opcodes_use_the_conservative_default() {
+        use crate::runtime::Instruction as I;
+        let program = crate::compile("finish 0").expect("a trivial program compiles");
+        let chunk = &program.chunk;
+        let undeclared = [
+            I::Print,
+            I::Finish,
+            I::SleepFor,
+            I::SleepUntil,
+            I::AwaitHandle,
+            I::AwaitHandleUnwrap,
+            I::CancelHandle,
+            I::WrapTypeLiteral,
+            I::ProcessYield,
+            I::ProcessWake,
+            I::ProcessFail,
+        ];
+        for (index, instruction) in undeclared.into_iter().enumerate() {
+            let plan = instruction_heap_plan(instruction, chunk);
+            assert_eq!(
+                (plan.stack, plan.slots),
+                (StackExport::All, SlotExport::All),
+                "undeclared opcode {index} should use the conservative default"
+            );
+        }
     }
 }

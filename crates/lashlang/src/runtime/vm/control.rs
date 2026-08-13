@@ -417,10 +417,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
         }
-        for (slot, export) in plan.slots.into_iter().flatten() {
-            match export {
-                SlotExport::Read => self.materialize_slot(slot)?,
-                SlotExport::Mutate => self.materialize_mutable_slot(slot)?,
+        match plan.slots {
+            SlotExport::None => {}
+            SlotExport::Read(slot) => self.materialize_slot(slot)?,
+            SlotExport::Mutate(slot) => self.materialize_mutable_slot(slot)?,
+            SlotExport::All => {
+                for slot in 0..self.slots.values.len() {
+                    self.materialize_slot(slot)?;
+                }
             }
         }
         Ok(())

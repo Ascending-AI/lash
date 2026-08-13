@@ -39,7 +39,7 @@ pub enum Scenario {
     HeapComprehensionBuild,
     HeapVariableConcat,
     HeapShallowChainMutation,
-    HeapDeepChainMutation32,
+    HeapDeepChainMutation24,
 }
 
 impl Scenario {
@@ -72,7 +72,7 @@ impl Scenario {
         Self::HeapComprehensionBuild,
         Self::HeapVariableConcat,
         Self::HeapShallowChainMutation,
-        Self::HeapDeepChainMutation32,
+        Self::HeapDeepChainMutation24,
     ];
 
     #[allow(dead_code)]
@@ -106,14 +106,14 @@ impl Scenario {
             "heap_comprehension_build" => Self::HeapComprehensionBuild,
             "heap_variable_concat" => Self::HeapVariableConcat,
             "heap_shallow_chain_mutation" => Self::HeapShallowChainMutation,
-            "heap_deep_chain_mutation_32" => Self::HeapDeepChainMutation32,
+            "heap_deep_chain_mutation_24" => Self::HeapDeepChainMutation24,
             _ => return None,
         })
     }
 
     #[allow(dead_code)]
     pub fn expected_values() -> &'static str {
-        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, heap_list_iteration, heap_nested_loop, heap_allocation_churn, heap_deep_chain_mutation, heap_comprehension_build, heap_variable_concat, heap_shallow_chain_mutation, heap_deep_chain_mutation_32, or all"
+        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, heap_list_iteration, heap_nested_loop, heap_allocation_churn, heap_deep_chain_mutation, heap_comprehension_build, heap_variable_concat, heap_shallow_chain_mutation, heap_deep_chain_mutation_24, or all"
     }
 }
 
@@ -148,7 +148,7 @@ impl fmt::Display for Scenario {
             Self::HeapComprehensionBuild => "heap_comprehension_build",
             Self::HeapVariableConcat => "heap_variable_concat",
             Self::HeapShallowChainMutation => "heap_shallow_chain_mutation",
-            Self::HeapDeepChainMutation32 => "heap_deep_chain_mutation_32",
+            Self::HeapDeepChainMutation24 => "heap_deep_chain_mutation_24",
         })
     }
 }

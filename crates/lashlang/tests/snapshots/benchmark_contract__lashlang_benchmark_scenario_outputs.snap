@@ -48,7 +48,7 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
       147
     ]
   },
-  "heap_deep_chain_mutation_32": {
+  "heap_deep_chain_mutation_24": {
     "leaf": [
       149
     ]

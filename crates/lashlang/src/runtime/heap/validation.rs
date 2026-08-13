@@ -100,13 +100,18 @@ impl Heap {
     /// whether exporting the value can be done at all.
     ///
     /// Computed without recursion, so measuring a wire that is too deep cannot
-    /// itself overflow the stack.
+    /// itself overflow the stack, and terminating on a cyclic graph, so it
+    /// cannot hang either. Its one caller validates the forest first, which
+    /// rules cycles out — but a measurement that depends on call order for
+    /// termination is one edit away from a decode-time hang, and this one runs
+    /// on attacker-supplied bytes.
     pub(crate) fn max_value_depth(&self, roots: &PersistedRoots<'_>) -> usize {
         let mut object_depth = BTreeMap::<HeapId, usize>::new();
         for start in self.id_to_slot.keys().copied() {
             if object_depth.contains_key(&start) {
                 continue;
             }
+            let mut visiting = BTreeSet::new();
             let mut stack = vec![(start, false)];
             while let Some((id, children_done)) = stack.pop() {
                 if object_depth.contains_key(&id) {
@@ -123,11 +128,16 @@ impl Heap {
                         .max()
                         .unwrap_or(0);
                     object_depth.insert(id, deepest + 1);
+                    visiting.remove(&id);
                     continue;
                 }
+                visiting.insert(id);
                 stack.push((id, true));
                 for child in children {
-                    if !object_depth.contains_key(&child) {
+                    // A child already on the path back to the root closes a
+                    // cycle. Its depth contributes nothing beyond what the
+                    // path already counted, and following it would not end.
+                    if !object_depth.contains_key(&child) && !visiting.contains(&child) {
                         stack.push((child, false));
                     }
                 }
@@ -274,5 +284,43 @@ impl Heap {
                 owner.describe()
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::HeapObject;
+
+    /// Depth measurement terminates on a cyclic graph.
+    ///
+    /// The forest validator rejects cycles before this runs today. This asserts
+    /// the property directly, so the guarantee survives a change to what runs
+    /// first.
+    #[test]
+    fn depth_measurement_terminates_on_a_cycle() {
+        let mut heap = Heap::default();
+        let Value::Ref(first) = heap
+            .allocate(HeapObject::List(Vec::new()))
+            .expect("allocate first")
+        else {
+            unreachable!()
+        };
+        let Value::Ref(second) = heap
+            .allocate(HeapObject::List(vec![Value::Ref(first)]))
+            .expect("allocate second")
+        else {
+            unreachable!()
+        };
+        heap.replace_object(first, HeapObject::List(vec![Value::Ref(second)]))
+            .expect("close the cycle");
+
+        let root = Value::Ref(first);
+        let mut roots = PersistedRoots::default();
+        roots.durable("root", &root);
+        // The measurement is finite and bounded by the number of objects; the
+        // exact value is not meaningful for a graph that cannot be persisted.
+        assert!(heap.max_value_depth(&roots) <= 2);
+        assert!(heap.validate_persisted_forest(&roots).is_err());
     }
 }

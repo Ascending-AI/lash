@@ -383,3 +383,26 @@ async fn arithmetic_on_a_container_binding_names_the_container_type() {
         "error must not leak the heap representation: {message}"
     );
 }
+
+/// The transient-borrow rule leans on assignment being a statement.
+///
+/// A transient holder — an operand, the last-value register, a loop cursor —
+/// may name an object a slot owns, and that is safe because no assignment can
+/// run while operands are pending: an assignment is a statement, so the stack is
+/// empty at every store. If assignment became an expression, `f(x = [1], x)`
+/// would put a durable store between two live operands and the borrow could
+/// outlive what it borrowed from. This pins the language property the heap layer
+/// depends on and does not itself check.
+#[tokio::test(flavor = "current_thread")]
+async fn assignment_is_a_statement_not_an_expression() {
+    for source in [
+        "xs = [1]\nfinish [xs = [2], xs]",
+        "xs = [1]\nfinish len(xs = [2])",
+        "xs = [1]\nys = (xs = [2])\nfinish ys",
+    ] {
+        assert!(
+            compile(source).is_err(),
+            "assignment must not parse as an expression: {source:?}"
+        );
+    }
+}

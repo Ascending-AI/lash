@@ -986,10 +986,76 @@ impl Heap {
             Value::List(values) => values.iter().cloned().collect::<Vec<_>>(),
             _ => return Err(RuntimeError::PushUnsupported),
         };
-        for member in members {
-            let copy = self.isolate_value(&member)?;
-            self.push_list(&Value::Ref(*id), copy)?;
+        self.get(*id)?;
+
+        // The whole extension is staged before any of it is committed. Copying
+        // and appending one member at a time meant a bound trip partway through
+        // left the accumulator holding some of the appended elements — a
+        // half-applied concatenation, durably, since the state that survives the
+        // failure is the one that gets persisted.
+        let mut staging = IsolationStaging {
+            base: self.next_id,
+            objects: Vec::new(),
+            mapping: FxHashMap::default(),
+        };
+        let mut copies = Vec::with_capacity(members.len());
+        for member in &members {
+            copies.push(self.stage_isolation(member, &mut staging)?);
         }
+        let objects = staging
+            .objects
+            .into_iter()
+            .map(|object| object.expect("every reserved isolation ID is filled"))
+            .collect::<Vec<_>>();
+        let object_bytes = objects.iter().fold(0_u64, |total, object| {
+            total.saturating_add(object.logical_bytes())
+        });
+        let member_bytes = copies.iter().fold(0_u64, |total, value| {
+            total.saturating_add(value_logical_bytes(value))
+        });
+        let attempted = self
+            .live_logical_bytes
+            .saturating_add(object_bytes)
+            .saturating_add(member_bytes);
+        if attempted > self.logical_byte_limit {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: self.logical_byte_limit,
+                attempted,
+            });
+        }
+
+        for (offset, object) in objects.into_iter().enumerate() {
+            let logical_bytes = object.logical_bytes();
+            let committed = self.commit_precharged_object(object, logical_bytes);
+            debug_assert_eq!(
+                committed,
+                Value::Ref(HeapId::from_counter(staging.base + offset as u64))
+            );
+        }
+
+        let children = copies.iter().flat_map(value_refs).collect::<Vec<_>>();
+        let slot = self
+            .id_to_slot
+            .get(id)
+            .copied()
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let entry = self.slots[slot]
+            .as_mut()
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let HeapObject::List(values) = &mut entry.object else {
+            return Err(RuntimeError::PushUnsupported);
+        };
+        values.extend(copies);
+        entry.logical_bytes = entry.logical_bytes.saturating_add(member_bytes);
+        self.live_logical_bytes = self.live_logical_bytes.saturating_add(member_bytes);
+        for child in children {
+            let parents = self.parents.entry(child).or_default();
+            if !parents.contains(id) {
+                parents.push(*id);
+            }
+        }
+        self.invalidate_materialized_reaching(*id);
+        self.debug_assert_byte_accounting();
         Ok(Value::Ref(*id))
     }
 
