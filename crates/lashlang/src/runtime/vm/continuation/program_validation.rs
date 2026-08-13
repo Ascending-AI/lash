@@ -63,6 +63,44 @@ pub(super) fn validate_program_continuation(
         }
     }
 
+    for (handler_index, handler) in continuation.handler_stack.iter().enumerate() {
+        let (range, owner) = function_code_range(chunk, handler.frame_function)?;
+        validate_exception_target(
+            handler.handler_instruction_pointer,
+            &range,
+            format!("handler {handler_index}"),
+            &owner,
+        )?;
+        if let Some(finally) = handler.finally_instruction_pointer {
+            validate_exception_target(
+                finally,
+                &range,
+                format!("handler {handler_index} finally"),
+                &owner,
+            )?;
+        }
+    }
+
+    for (finally_index, finally) in continuation.finally_stack.iter().enumerate() {
+        if let VmFinallyCompletionContinuation::Normal {
+            resume_instruction_pointer,
+        } = finally.completion
+        {
+            let (range, owner) = function_code_range(chunk, finally.frame_function)?;
+            if !range.contains(&resume_instruction_pointer)
+                && resume_instruction_pointer != range.end
+            {
+                return Err(ContinuationError::InstructionPointerOutsideCodeRange {
+                    location: format!("finally {finally_index} resume"),
+                    instruction_pointer: resume_instruction_pointer,
+                    owner,
+                    range_start: range.start,
+                    range_end: range.end,
+                });
+            }
+        }
+    }
+
     continuation
         .heap
         .heap
@@ -80,4 +118,22 @@ pub(super) fn validate_program_continuation(
             },
             other => unreachable!("closure validation returned unrelated error: {other}"),
         })
+}
+
+fn validate_exception_target(
+    instruction_pointer: usize,
+    range: &std::ops::Range<usize>,
+    location: String,
+    owner: &str,
+) -> Result<(), ContinuationError> {
+    if range.contains(&instruction_pointer) {
+        return Ok(());
+    }
+    Err(ContinuationError::InstructionPointerOutsideCodeRange {
+        location,
+        instruction_pointer,
+        owner: owner.to_string(),
+        range_start: range.start,
+        range_end: range.end,
+    })
 }

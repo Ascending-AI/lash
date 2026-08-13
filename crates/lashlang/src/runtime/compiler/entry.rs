@@ -914,6 +914,8 @@ impl Compiler {
             | Expr::Function(_)
             | Expr::Call { .. }
             | Expr::Map { .. }
+            | Expr::Try(_)
+            | Expr::Throw(_)
             | Expr::Assign { .. }
             | Expr::For { .. }
             | Expr::While { .. }

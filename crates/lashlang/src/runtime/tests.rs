@@ -943,6 +943,11 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::Call { argc } => format!("call argc={argc}"),
         Instruction::Map => "map_callback".to_string(),
         Instruction::Return => "return".to_string(),
+        Instruction::PushHandler { .. } => "push_handler".to_string(),
+        Instruction::PopHandler => "pop_handler".to_string(),
+        Instruction::EnterFinally { .. } => "enter_finally".to_string(),
+        Instruction::EndFinally => "end_finally".to_string(),
+        Instruction::Throw => "throw".to_string(),
     }
 }
 
@@ -1248,3 +1253,4 @@ include!("tests/async_and_cache_cases.rs");
 include!("tests/continuation_cases.rs");
 include!("tests/continuation_wire_cases.rs");
 include!("tests/function_cases.rs");
+include!("tests/exception_cases.rs");

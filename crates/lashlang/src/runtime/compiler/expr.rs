@@ -292,6 +292,11 @@ impl Compiler {
                 self.compile_expr(function);
                 self.code.push(Instruction::Map);
             }
+            Expr::Try(scope) => self.compile_try_expr(scope),
+            Expr::Throw(value) => {
+                self.compile_expr(value);
+                self.code.push(Instruction::Throw);
+            }
             Expr::Field { target, field } => {
                 if let Expr::Variable(name) = target.as_ref() {
                     let slot = self.push_slot(name);
@@ -448,5 +453,95 @@ impl Compiler {
                 }
             },
         }
+    }
+
+    fn compile_try_expr(&mut self, scope: &crate::ast::TryExpr) {
+        if scope.catch.is_none() && scope.finally.is_none() {
+            self.compile_expr(&scope.body);
+            return;
+        }
+
+        let handler_push = self.code.len();
+        self.code.push(Instruction::PushHandler {
+            handler: usize::MAX,
+            finally: None,
+            catches: scope.catch.is_some(),
+        });
+        self.compile_expr(&scope.body);
+        self.code.push(Instruction::PopHandler);
+
+        let normal_exit = self.code.len();
+        if scope.finally.is_some() {
+            self.code.push(Instruction::EnterFinally {
+                finally: usize::MAX,
+                resume: usize::MAX,
+            });
+        } else {
+            self.code.push(Instruction::Jump(usize::MAX));
+        }
+
+        let catch_ip = self.code.len();
+        let mut catch_cleanup = None;
+        let mut catch_exit = None;
+        if let Some(catch) = &scope.catch {
+            let binding = self.push_slot(&catch.binding);
+            self.code.push(Instruction::StoreName(binding));
+            if scope.finally.is_some() {
+                catch_cleanup = Some(self.code.len());
+                self.code.push(Instruction::PushHandler {
+                    handler: usize::MAX,
+                    finally: None,
+                    catches: false,
+                });
+            }
+            self.compile_expr(&catch.body);
+            if scope.finally.is_some() {
+                self.code.push(Instruction::PopHandler);
+                catch_exit = Some(self.code.len());
+                self.code.push(Instruction::EnterFinally {
+                    finally: usize::MAX,
+                    resume: usize::MAX,
+                });
+            }
+        }
+
+        let finally_ip = self.code.len();
+        if let Some(finally) = &scope.finally {
+            self.compile_expr(finally);
+            self.code.push(Instruction::EndFinally);
+        }
+        let end_ip = self.code.len();
+
+        self.code[handler_push] = Instruction::PushHandler {
+            handler: if scope.catch.is_some() {
+                catch_ip
+            } else {
+                finally_ip
+            },
+            finally: scope.finally.as_ref().map(|_| finally_ip),
+            catches: scope.catch.is_some(),
+        };
+        if scope.finally.is_some() {
+            self.code[normal_exit] = Instruction::EnterFinally {
+                finally: finally_ip,
+                resume: end_ip,
+            };
+            if let Some(catch_cleanup) = catch_cleanup {
+                self.code[catch_cleanup] = Instruction::PushHandler {
+                    handler: finally_ip,
+                    finally: Some(finally_ip),
+                    catches: false,
+                };
+            }
+            if let Some(catch_exit) = catch_exit {
+                self.code[catch_exit] = Instruction::EnterFinally {
+                    finally: finally_ip,
+                    resume: end_ip,
+                };
+            }
+        } else {
+            self.code[normal_exit] = Instruction::Jump(end_ip);
+        }
+        self.clear_const_slots();
     }
 }

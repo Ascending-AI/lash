@@ -866,6 +866,11 @@ impl<'module> Linker<'module> {
                 self.infer_expr_type(function, scope)?;
                 TypeExpr::List(Box::new(TypeExpr::Any))
             }
+            Expr::Try(exception) => self.infer_try_expr_type(exception, scope, expected)?,
+            Expr::Throw(value) => {
+                self.infer_expr_type(value, scope)?;
+                TypeExpr::Any
+            }
             Expr::Field { target, field } => {
                 self.field_type(&self.infer_expr_type(target, scope)?, field, scope.span)?
             }
@@ -883,6 +888,33 @@ impl<'module> Linker<'module> {
                 binary_return_type(*op)
             }
         })
+    }
+
+    fn infer_try_expr_type(
+        &self,
+        exception: &crate::ast::TryExpr,
+        scope: &mut Scope,
+        expected: Option<&TypeExpr>,
+    ) -> Result<TypeExpr, LinkError> {
+        let before = scope.clone();
+        let mut try_scope = before.clone();
+        let body_ty = self.infer_expr_type_expected(&exception.body, &mut try_scope, expected)?;
+        let result_ty = if let Some(catch) = &exception.catch {
+            let mut catch_scope = before.clone();
+            let previous = catch_scope.bind(&catch.binding, any_binding());
+            let catch_ty =
+                self.infer_expr_type_expected(&catch.body, &mut catch_scope, expected)?;
+            catch_scope.restore(&catch.binding, previous);
+            scope.join_branches(try_scope, catch_scope);
+            union_type(vec![body_ty, catch_ty])
+        } else {
+            *scope = try_scope;
+            body_ty
+        };
+        if let Some(finally) = &exception.finally {
+            self.infer_expr_type(finally, scope)?;
+        }
+        Ok(result_ty)
     }
 }
 

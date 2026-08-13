@@ -73,6 +73,10 @@ pub enum RuntimeError {
         "lashlang logical memory limit of {limit} bytes exceeded (allocation would reach {attempted} bytes)"
     )]
     MemoryLimitExceeded { limit: u64, attempted: u64 },
+    /// The host cancelled this VM execution. Cancellation is an execution
+    /// terminal and is never presented to guest handlers.
+    #[error("lashlang execution was cancelled by the host")]
+    HostCancelled,
     /// A heap reference named an object that has already been swept.
     #[error("dangling lashlang heap reference {id}")]
     DanglingHeapReference { id: u64 },
@@ -404,6 +408,56 @@ pub enum RuntimeError {
     /// A context-dependent intrinsic reached a generic path without an explicit arm.
     #[error("context-dependent intrinsic reached generic {context}")]
     ContextDependentIntrinsicMisdispatch { context: &'static str },
+    /// An explicitly thrown value escaped every handler.
+    #[error("uncaught lashlang exception: {value}")]
+    UncaughtException { value: super::Value },
+    /// Bytecode violated the structured handler/finally stack discipline.
+    #[error("invalid lashlang exception state: {reason}")]
+    InvalidExceptionState { reason: &'static str },
+}
+
+impl RuntimeError {
+    /// Terminals which are structurally forbidden from consulting guest
+    /// handlers. This is intentionally the only taxonomy classification used
+    /// by the VM's error exit.
+    pub(crate) fn is_uncatchable_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::InstructionBudgetExceeded { .. }
+                | Self::ExecutionDeadlineExceeded { .. }
+                | Self::MemoryLimitExceeded { .. }
+                | Self::FrameDepthExceeded { .. }
+                | Self::HostCancelled
+        )
+    }
+
+    /// Stable guest-visible identity for a catchable runtime failure.
+    pub fn code(&self) -> String {
+        let debug = format!("{self:?}");
+        debug
+            .split([' ', '{', '('])
+            .next()
+            .unwrap_or("RuntimeError")
+            .to_string()
+    }
+
+    pub(crate) fn is_effect_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::UnwrappedToolResultFailed { .. }
+                | Self::UnwrappedModuleOperationFailed { .. }
+                | Self::ProcessStartFailed { .. }
+                | Self::SleepFailed { .. }
+                | Self::WaitSignalFailed { .. }
+                | Self::SignalRunFailed { .. }
+                | Self::CancelFailed { .. }
+                | Self::ProcessEventFailed { .. }
+                | Self::PrintFailed { .. }
+                | Self::FinishFailed { .. }
+                | Self::FailFailed { .. }
+                | Self::ResourceBatchFailed { .. }
+        )
+    }
 }
 
 impl RuntimeError {
@@ -698,6 +752,7 @@ mod tests {
                 RuntimeError::MemoryLimitExceeded { .. } => {
                     "lashlang logical memory limit exceeded"
                 }
+                RuntimeError::HostCancelled => "lashlang execution was cancelled by the host",
                 RuntimeError::DanglingHeapReference { .. } => "dangling lashlang heap reference",
                 RuntimeError::HeapIdExhausted => {
                     "lashlang heap allocation identity space exhausted"
@@ -915,6 +970,10 @@ mod tests {
                 RuntimeError::MissingLoopState => "missing loop state",
                 RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => {
                     "context-dependent intrinsic reached generic heap planning"
+                }
+                RuntimeError::UncaughtException { .. } => "uncaught lashlang exception: null",
+                RuntimeError::InvalidExceptionState { .. } => {
+                    "invalid lashlang exception state: test"
                 }
             };
 

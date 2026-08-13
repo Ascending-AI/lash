@@ -8,6 +8,11 @@ use thiserror::Error;
 #[path = "artifact_hash_writer.rs"]
 mod hash_writer;
 use hash_writer::HashWriter;
+#[path = "artifact_write_helpers.rs"]
+mod write_helpers;
+use write_helpers::{
+    write_binary_op, write_label_metadata, write_resource_ref, write_unary_expr, write_unary_op,
+};
 
 use crate::ast::{
     AssignPathStep, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause,
@@ -22,7 +27,7 @@ use crate::trigger_manifest::{
 
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v2";
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v2";
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v3";
 
 /// Durability tier of an execution path's wired store or effect host.
 ///
@@ -949,6 +954,26 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
             write_expr(writer, items, normalizer);
             write_expr(writer, function, normalizer);
         }
+        Expr::Try(scope) => {
+            writer.atom("try");
+            write_expr(writer, &scope.body, normalizer);
+            match &scope.catch {
+                Some(catch) => {
+                    writer.atom("catch");
+                    writer.atom(&normalizer.name_token(catch.binding.as_str()));
+                    write_expr(writer, &catch.body, normalizer);
+                }
+                None => writer.atom("no-catch"),
+            }
+            match &scope.finally {
+                Some(finally) => {
+                    writer.atom("finally");
+                    write_expr(writer, finally, normalizer);
+                }
+                None => writer.atom("no-finally"),
+            }
+        }
+        Expr::Throw(value) => write_unary_expr(writer, "throw", value, normalizer),
         Expr::Field { target, field } => {
             writer.atom("field-access");
             write_expr(writer, target, normalizer);
@@ -975,65 +1000,6 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
             write_type(writer, ty);
         }
     }
-}
-
-fn write_label_metadata(writer: &mut HashWriter, label: &LabelMetadata) {
-    writer.atom("label");
-    writer.atom(label.title.as_str());
-    match &label.description {
-        Some(description) => {
-            writer.atom("description");
-            writer.atom(description.as_str());
-        }
-        None => writer.atom("no-description"),
-    }
-}
-
-fn write_unary_expr(
-    writer: &mut HashWriter,
-    tag: &'static str,
-    expr: &Expr,
-    normalizer: &NameNormalizer,
-) {
-    writer.atom(tag);
-    write_expr(writer, expr, normalizer);
-}
-
-fn write_resource_ref(writer: &mut HashWriter, resource: &ResourceRefExpr) {
-    writer.atom("path");
-    writer.usize(resource.path.len());
-    for segment in &resource.path {
-        writer.atom(segment.as_str());
-    }
-    writer.atom("handle");
-    writer.atom(resource.resource_type.as_str());
-    writer.atom(resource.alias.as_str());
-}
-
-fn write_unary_op(writer: &mut HashWriter, op: UnaryOp) {
-    writer.atom(match op {
-        UnaryOp::Negate => "negate",
-        UnaryOp::Not => "not",
-    });
-}
-
-fn write_binary_op(writer: &mut HashWriter, op: BinaryOp) {
-    writer.atom(match op {
-        BinaryOp::Add => "add",
-        BinaryOp::Subtract => "subtract",
-        BinaryOp::Multiply => "multiply",
-        BinaryOp::Divide => "divide",
-        BinaryOp::Modulo => "modulo",
-        BinaryOp::Equal => "equal",
-        BinaryOp::NotEqual => "not-equal",
-        BinaryOp::Less => "less",
-        BinaryOp::LessEqual => "less-equal",
-        BinaryOp::Greater => "greater",
-        BinaryOp::GreaterEqual => "greater-equal",
-        BinaryOp::In => "in",
-        BinaryOp::And => "and",
-        BinaryOp::Or => "or",
-    });
 }
 
 #[derive(Default)]
@@ -1506,6 +1472,30 @@ impl<'program> RequirementsCollector<'program> {
             Expr::Map { items, function } => {
                 self.collect_expr(items, scope);
                 self.collect_expr(function, scope);
+                Some(RequirementBinding::Value)
+            }
+            Expr::Try(exception) => {
+                self.collect_expr(&exception.body, scope);
+                if let Some(catch) = &exception.catch {
+                    let previous =
+                        scope.insert(catch.binding.to_string(), RequirementBinding::Value);
+                    self.collect_expr(&catch.body, scope);
+                    match previous {
+                        Some(previous) => {
+                            scope.insert(catch.binding.to_string(), previous);
+                        }
+                        None => {
+                            scope.remove(catch.binding.as_str());
+                        }
+                    }
+                }
+                if let Some(finally) = &exception.finally {
+                    self.collect_expr(finally, scope);
+                }
+                Some(RequirementBinding::Value)
+            }
+            Expr::Throw(value) => {
+                self.collect_expr(value, scope);
                 Some(RequirementBinding::Value)
             }
             Expr::Field { target, .. } => {

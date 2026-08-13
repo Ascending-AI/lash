@@ -99,6 +99,7 @@ pub(super) fn instruction_heap_plan(
         | I::Call { .. }
         | I::Map
         | I::Return
+        | I::Throw
         | I::BuildTuple(_)
         | I::BuildList(_)
         | I::BuildRecord(_) => InstructionHeapPlan::heap_native(),
@@ -120,7 +121,11 @@ pub(super) fn instruction_heap_plan(
         | I::Jump(_)
         | I::IterNext { .. }
         | I::EndIter
-        | I::ObserveStep => InstructionHeapPlan::stack(Top(0)),
+        | I::ObserveStep
+        | I::PushHandler { .. }
+        | I::PopHandler
+        | I::EnterFinally { .. }
+        | I::EndFinally => InstructionHeapPlan::stack(Top(0)),
 
         // Single-operand opcodes.
         I::Field(_)

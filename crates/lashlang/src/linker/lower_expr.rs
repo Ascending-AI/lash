@@ -118,6 +118,8 @@ impl<'module> Linker<'module> {
             Expr::Function(function) => self.lower_function(function, scope)?,
             Expr::Call { function, args } => self.lower_call(function, args, scope)?,
             Expr::Map { items, function } => self.lower_map(items, function, scope)?,
+            Expr::Try(exception) => self.lower_try_expr(exception, scope)?,
+            Expr::Throw(value) => self.lower_throw_expr(value, scope)?,
             Expr::Field { target, field } => self.lower_field(target, field, scope)?,
             Expr::Index { target, index } => self.lower_index(target, index, scope)?,
             Expr::Unary { op, expr } => self.lower_unary(op, expr, scope)?,
@@ -1057,6 +1059,57 @@ impl<'module> Linker<'module> {
                 right: Box::new(right),
             },
             Some(Binding::Value(binary_return_type(*op))),
+        ))
+    }
+
+    fn lower_try_expr(
+        &self,
+        exception: &crate::ast::TryExpr,
+        scope: &mut Scope,
+    ) -> Result<(Expr, Option<Binding>), LinkError> {
+        let before = scope.clone();
+        let mut try_scope = before.clone();
+        let body = self.lower_expr(&exception.body, &mut try_scope)?.0;
+        let catch = if let Some(catch) = &exception.catch {
+            let mut catch_scope = before.clone();
+            let previous = catch_scope.bind(&catch.binding, any_binding());
+            let body = self.lower_expr(&catch.body, &mut catch_scope)?.0;
+            catch_scope.restore(&catch.binding, previous);
+            scope.join_branches(try_scope, catch_scope);
+            Some(crate::ast::CatchClause {
+                binding: catch.binding.clone(),
+                body: Box::new(body),
+            })
+        } else {
+            *scope = try_scope;
+            None
+        };
+        let finally = exception
+            .finally
+            .as_ref()
+            .map(|finally| {
+                self.lower_expr(finally, scope)
+                    .map(|value| Box::new(value.0))
+            })
+            .transpose()?;
+        Ok((
+            Expr::Try(Box::new(crate::ast::TryExpr {
+                body: Box::new(body),
+                catch,
+                finally,
+            })),
+            Some(any_binding()),
+        ))
+    }
+
+    fn lower_throw_expr(
+        &self,
+        value: &Expr,
+        scope: &mut Scope,
+    ) -> Result<(Expr, Option<Binding>), LinkError> {
+        Ok((
+            Expr::Throw(Box::new(self.lower_expr(value, scope)?.0)),
+            Some(any_binding()),
         ))
     }
 

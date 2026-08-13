@@ -27,10 +27,10 @@ pub use artifact::{
     global_in_memory_lashlang_artifact_store, host_requirements_for_program,
 };
 pub use ast::{
-    AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, ExprFolder, ExprVisitor,
-    FunctionExpr, LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam,
-    ProcessSignalDecl, ProcessStartExpr, Program, ResourceRefExpr, TypeDecl, TypeExpr, TypeField,
-    UnaryOp, fold_expr_children, format_type_expr, walk_expr,
+    AssignPathStep, AssignTarget, BinaryOp, CatchClause, Declaration, Expr, ExprFolder,
+    ExprVisitor, FunctionExpr, LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam,
+    ProcessSignalDecl, ProcessStartExpr, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr,
+    TypeField, UnaryOp, fold_expr_children, format_type_expr, walk_expr,
 };
 
 /// Names of every builtin accepted by the linker and runtime, in registry order.
@@ -76,6 +76,7 @@ pub use runtime::{
     ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
     ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
     SnapshotDecodeError, State, Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmProfileContinuation,
     VmRunOutcome, compile, compile_ast, compile_linked, compile_linked_process,
     compile_module_artifact_process, compile_process, execute, from_json, prewarm,
@@ -92,7 +93,7 @@ pub use runtime::{
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 4;
+pub const BYTECODE_FORMAT_VERSION: u32 = 5;
 pub use source::{
     CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
     canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,

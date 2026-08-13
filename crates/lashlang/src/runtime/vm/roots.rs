@@ -39,6 +39,28 @@ trait FrameRootView {
     fn map_roots(&self) -> Option<(&Value, &[Value], &[Value])>;
 }
 
+trait FinallyRootView {
+    fn thrown_value(&self) -> Option<&Value>;
+}
+
+impl FinallyRootView for FinallyState {
+    fn thrown_value(&self) -> Option<&Value> {
+        match &self.completion {
+            FinallyCompletion::Throw { value } => Some(value),
+            FinallyCompletion::Normal { .. } => None,
+        }
+    }
+}
+
+impl FinallyRootView for VmFinallyContinuation {
+    fn thrown_value(&self) -> Option<&Value> {
+        match &self.completion {
+            VmFinallyCompletionContinuation::Throw { value } => Some(value),
+            VmFinallyCompletionContinuation::Normal { .. } => None,
+        }
+    }
+}
+
 impl FrameRootView for CallFrame {
     type Iterator = IterState;
 
@@ -103,6 +125,7 @@ impl FrameRootView for VmFrameContinuation {
 trait VmRootView {
     type Iterator: IteratorRootView;
     type Frame: FrameRootView;
+    type Finally: FinallyRootView;
 
     fn has_active_function(&self) -> bool;
     fn slots(&self) -> &[Option<Value>];
@@ -111,11 +134,13 @@ trait VmRootView {
     fn last_value(&self) -> Option<&Value>;
     fn iterators(&self) -> &[Self::Iterator];
     fn frames(&self) -> &[Self::Frame];
+    fn finalizers(&self) -> &[Self::Finally];
 }
 
 impl<H> VmRootView for Vm<'_, H> {
     type Iterator = IterState;
     type Frame = CallFrame;
+    type Finally = FinallyState;
 
     fn has_active_function(&self) -> bool {
         self.active_function.is_some()
@@ -144,11 +169,16 @@ impl<H> VmRootView for Vm<'_, H> {
     fn frames(&self) -> &[Self::Frame] {
         &self.frames
     }
+
+    fn finalizers(&self) -> &[Self::Finally] {
+        &self.finally_stack
+    }
 }
 
 impl VmRootView for VmContinuation {
     type Iterator = VmIteratorContinuation;
     type Frame = VmFrameContinuation;
+    type Finally = VmFinallyContinuation;
 
     fn has_active_function(&self) -> bool {
         self.active_function.is_some()
@@ -176,6 +206,10 @@ impl VmRootView for VmContinuation {
 
     fn frames(&self) -> &[Self::Frame] {
         &self.frame_stack
+    }
+
+    fn finalizers(&self) -> &[Self::Finally] {
+        &self.finally_stack
     }
 }
 
@@ -245,6 +279,11 @@ fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl VmRootVisit
     }
     if let Some(value) = view.last_value() {
         visitor.transient(value);
+    }
+    for finally in view.finalizers() {
+        if let Some(value) = finally.thrown_value() {
+            visitor.transient(value);
+        }
     }
     for (depth, iterator) in view.iterators().iter().enumerate() {
         if let Some(value) = iterator.restore_value() {

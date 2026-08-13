@@ -219,11 +219,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         if !self.heap_initialized {
             if let Err(error) = self.heapify_vm_state() {
-                return Err(VmTrap {
-                    error,
-                    instruction_ip: self.ip.min(self.chunk.code.len().saturating_sub(1)),
-                    span: None,
-                });
+                let instruction_ip = self.ip.min(self.chunk.code.len().saturating_sub(1));
+                self.route_runtime_error(error, instruction_ip, None)?;
             }
             self.heap_initialized = true;
         }
@@ -232,11 +229,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 && self.ip == self.chunk.functions[function].end_ip
             {
                 if let Err(error) = self.return_from_function() {
-                    return Err(VmTrap {
-                        error,
-                        instruction_ip: self.ip.saturating_sub(1),
-                        span: None,
-                    });
+                    self.route_runtime_error(error, self.ip.saturating_sub(1), None)?;
                 }
                 continue;
             }
@@ -245,11 +238,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             };
             let instruction_ip = self.ip;
             if let Err(error) = self.materialize_instruction_operands(instruction) {
-                return Err(VmTrap {
-                    error,
-                    instruction_ip,
-                    span: None,
-                });
+                self.route_runtime_error(error, instruction_ip, None)?;
+                continue;
             }
             // Under stress collection the scope opens before every instruction,
             // not just before the ones a list said could allocate. Any
@@ -281,11 +271,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .iter()
                         .any(|frame| matches!(frame.return_target, super::ReturnTarget::Map(_)))
                     {
-                        return Err(VmTrap {
-                            error: RuntimeError::EffectInBuiltinCallback,
+                        self.route_runtime_error(
+                            RuntimeError::EffectInBuiltinCallback,
                             instruction_ip,
-                            span: None,
-                        });
+                            None,
+                        )?;
+                        continue;
                     }
                     self.active_execution_elapsed += active_started.elapsed();
                     if let Err(error) = self.enforce_execution_bounds() {
@@ -304,11 +295,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             if result.is_ok()
                 && let Err(error) = self.heapify_vm_state()
             {
-                return Err(VmTrap {
-                    error,
-                    instruction_ip,
-                    span: None,
-                });
+                self.route_runtime_error(error, instruction_ip, None)?;
+                continue;
             }
             if let Some((tag, start)) = profile {
                 self.record_instruction_profile(tag, start.elapsed().as_nanos());
@@ -331,15 +319,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 Ok(None) => {}
                 Err(error) => {
                     let span = self.pending_error_span.take();
-                    return self.finish_run_loop(
-                        active_started,
-                        Err(VmTrap {
-                            error,
-                            instruction_ip,
-                            span,
-                        }),
-                        instruction_ip,
-                    );
+                    match self.route_runtime_error(error, instruction_ip, span) {
+                        Ok(()) => continue,
+                        Err(trap) => {
+                            return self.finish_run_loop(active_started, Err(trap), instruction_ip);
+                        }
+                    }
                 }
             }
             if stop_after_effect && completed_effect {
@@ -399,6 +384,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     fn enforce_execution_bounds(&self) -> Result<(), RuntimeError> {
+        // This is the structural taxonomy boundary: every error returned from
+        // here is an uncatchable execution terminal, and callers return it
+        // directly without consulting the handler stack.
+        if self.host.is_cancelled() {
+            return Err(RuntimeError::HostCancelled);
+        }
         let bounds = self.host.execution_bounds();
         if let ExecutionBound::Bounded(limit) = bounds.instruction_budget
             && self.instructions_executed > limit.get()
@@ -421,6 +412,32 @@ impl<H: ExecutionHost> Vm<'_, H> {
             });
         }
         Ok(())
+    }
+
+    fn route_runtime_error(
+        &mut self,
+        error: RuntimeError,
+        instruction_ip: usize,
+        span: Option<Span>,
+    ) -> Result<(), VmTrap> {
+        if !error.is_uncatchable_terminal() && self.has_exception_scope() {
+            match self.throw_runtime_error(&error, instruction_ip) {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(terminal) => {
+                    return Err(VmTrap {
+                        error: terminal,
+                        instruction_ip,
+                        span,
+                    });
+                }
+            }
+        }
+        Err(VmTrap {
+            error,
+            instruction_ip,
+            span,
+        })
     }
 
     /// Exports whatever this instruction's heap plan says it reads.

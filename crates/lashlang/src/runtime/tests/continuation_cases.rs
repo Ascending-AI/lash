@@ -314,6 +314,8 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         globals: Record::new(),
         iterator_stack: Vec::new(),
         frame_stack: Vec::new(),
+        handler_stack: Vec::new(),
+        finally_stack: Vec::new(),
         occurrence_counters: Default::default(),
         mode: ExecutionMode::Process,
         profile: None,

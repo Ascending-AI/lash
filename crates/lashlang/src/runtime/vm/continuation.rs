@@ -4,7 +4,13 @@ use thiserror::Error;
 use super::super::{ExecutionBound, HeapObject, HeapRestoreWire, PersistedRoots};
 use super::*;
 
-pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 2;
+mod types;
+pub use types::{
+    ContinuationError, VmFinallyCompletionContinuation, VmFinallyContinuation,
+    VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor, VmProfileContinuation,
+};
+
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
@@ -68,6 +74,8 @@ pub struct VmContinuation {
     pub globals: Record,
     pub iterator_stack: Vec<VmIteratorContinuation>,
     pub(crate) frame_stack: Vec<VmFrameContinuation>,
+    pub handler_stack: Vec<VmHandlerContinuation>,
+    pub finally_stack: Vec<VmFinallyContinuation>,
     pub occurrence_counters: std::collections::BTreeMap<String, u64>,
     pub mode: ExecutionMode,
     pub profile: Option<VmProfileContinuation>,
@@ -123,68 +131,6 @@ pub(crate) enum VmFrameReturnContinuation {
         )]
         results: Vec<Value>,
     },
-}
-
-impl<'de> Deserialize<'de> for VmContinuation {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Wire {
-            format_version: u32,
-            instruction_pointer: usize,
-            active_function: Option<u32>,
-            #[serde(deserialize_with = "continuation_serde::deserialize_values")]
-            operand_stack: Vec<Value>,
-            #[serde(deserialize_with = "continuation_serde::deserialize_optional_value")]
-            last_value: Option<Value>,
-            #[serde(deserialize_with = "continuation_serde::deserialize_slots")]
-            slots: Vec<Option<Value>>,
-            projected_slots: Vec<bool>,
-            #[serde(deserialize_with = "continuation_serde::deserialize_record")]
-            globals: Record,
-            iterator_stack: Vec<VmIteratorContinuation>,
-            frame_stack: Vec<VmFrameContinuation>,
-            occurrence_counters: std::collections::BTreeMap<String, u64>,
-            mode: ExecutionMode,
-            profile: Option<VmProfileContinuation>,
-            pending_error_span: Option<Span>,
-            instructions_executed: u64,
-            active_execution_elapsed: std::time::Duration,
-            #[serde(deserialize_with = "continuation_serde::deserialize_heap")]
-            heap: VmHeapContinuation,
-        }
-
-        let wire = Wire::deserialize(deserializer)?;
-        if wire.format_version != VM_CONTINUATION_FORMAT_VERSION {
-            return Err(serde::de::Error::custom(format!(
-                "continuation format version {} is incompatible with version {}",
-                wire.format_version, VM_CONTINUATION_FORMAT_VERSION
-            )));
-        }
-        let continuation = Self {
-            format_version: wire.format_version,
-            instruction_pointer: wire.instruction_pointer,
-            active_function: wire.active_function,
-            operand_stack: wire.operand_stack,
-            last_value: wire.last_value,
-            slots: wire.slots,
-            projected_slots: wire.projected_slots,
-            globals: wire.globals,
-            iterator_stack: wire.iterator_stack,
-            frame_stack: wire.frame_stack,
-            occurrence_counters: wire.occurrence_counters,
-            mode: wire.mode,
-            profile: wire.profile,
-            pending_error_span: wire.pending_error_span,
-            instructions_executed: wire.instructions_executed,
-            active_execution_elapsed: wire.active_execution_elapsed,
-            heap: wire.heap,
-        };
-        validate_continuation(&continuation).map_err(serde::de::Error::custom)?;
-        Ok(continuation)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -243,129 +189,6 @@ impl VmContinuation {
 impl Default for VmHeapContinuation {
     fn default() -> Self {
         Self::new(Heap::default())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct VmIteratorContinuation {
-    pub cursor: VmIteratorCursor,
-    pub binding_slot: usize,
-    #[serde(
-        serialize_with = "continuation_serde::serialize_optional_value",
-        deserialize_with = "continuation_serde::deserialize_optional_value"
-    )]
-    pub restore_value: Option<Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum VmIteratorCursor {
-    List {
-        #[serde(
-            serialize_with = "continuation_serde::serialize_values",
-            deserialize_with = "continuation_serde::deserialize_values"
-        )]
-        values: Vec<Value>,
-        next_index: usize,
-    },
-    Range {
-        next: i64,
-        end: i64,
-        step: i64,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct VmProfileContinuation {
-    pub instruction_counts: Vec<u64>,
-    pub instruction_times: Vec<u128>,
-    pub builtin_counts: Vec<u64>,
-    pub builtin_times: Vec<u128>,
-}
-
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-pub enum ContinuationError {
-    #[error("continuation format version {found} is incompatible with version {expected}")]
-    FormatVersionMismatch { expected: u32, found: u32 },
-    #[error("continuation function index exceeds the durable u32 index space")]
-    FunctionIndexOverflow,
-    #[error("continuation closure function index {index} is not present in the compiled program")]
-    UnknownFunction { index: u32 },
-    #[error("continuation closure function {index} requires {expected} capture(s), found {actual}")]
-    ClosureCaptureCountMismatch {
-        index: u32,
-        expected: usize,
-        actual: usize,
-    },
-    #[error("cannot capture VM continuation: `{variant}` value at {location} is not serializable")]
-    UnserializableValue {
-        location: String,
-        variant: &'static str,
-    },
-    #[error(
-        "continuation {location} instruction pointer {instruction_pointer} is outside {owner} code range {range_start}..{range_end}"
-    )]
-    InstructionPointerOutsideCodeRange {
-        location: String,
-        instruction_pointer: usize,
-        owner: String,
-        range_start: usize,
-        range_end: usize,
-    },
-    #[error(
-        "continuation frame {frame} return instruction pointer {instruction_pointer} is not immediately after a call site"
-    )]
-    InvalidReturnSite {
-        frame: usize,
-        instruction_pointer: usize,
-    },
-    #[error("continuation with an active function must have a root-owned bottom frame")]
-    MissingRootFrame,
-    #[error("continuation has {actual} slots but program requires {expected}")]
-    SlotCountMismatch { expected: usize, actual: usize },
-    #[error(
-        "continuation iterator {iterator} binds slot {binding_slot}, but only {slot_count} slots exist"
-    )]
-    IteratorBindingOutOfBounds {
-        iterator: usize,
-        binding_slot: usize,
-        slot_count: usize,
-    },
-    #[error(
-        "continuation frame {frame} iterator {iterator} binds slot {binding_slot}, but only {slot_count} slots exist"
-    )]
-    FrameIteratorBindingOutOfBounds {
-        frame: usize,
-        iterator: usize,
-        binding_slot: usize,
-        slot_count: usize,
-    },
-    #[error("continuation iterator {iterator} has a zero range step")]
-    ZeroRangeStep { iterator: usize },
-    #[error("continuation frame {frame} iterator {iterator} has a zero range step")]
-    FrameZeroRangeStep { frame: usize, iterator: usize },
-    #[error("continuation profile shape is incompatible with this VM")]
-    ProfileShapeMismatch,
-    #[error("lashlang instruction budget of {limit} instructions was already exceeded")]
-    InstructionBudgetExceeded { limit: u64 },
-    #[error("lashlang frame depth limit of {limit} frames was already exceeded")]
-    FrameDepthExceeded { limit: u64 },
-    #[error("lashlang active-execution deadline of {limit_ms}ms was already exceeded")]
-    ExecutionDeadlineExceeded { limit_ms: u128 },
-    #[error(
-        "lashlang logical memory limit of {limit} bytes was already exceeded by {live} live bytes"
-    )]
-    MemoryLimitExceeded { limit: u64, live: u64 },
-}
-
-impl ContinuationError {
-    pub fn is_execution_bound_exhausted(&self) -> bool {
-        matches!(
-            self,
-            Self::InstructionBudgetExceeded { .. }
-                | Self::FrameDepthExceeded { .. }
-                | Self::ExecutionDeadlineExceeded { .. }
-                | Self::MemoryLimitExceeded { .. }
-        )
     }
 }
 
@@ -933,6 +756,64 @@ fn validate_continuation(continuation: &VmContinuation) -> Result<(), Continuati
             validate_heap_references(&continuation.heap.heap, results)?;
         }
     }
+    for (index, handler) in continuation.handler_stack.iter().enumerate() {
+        let Some((owner_function, iterator_count)) =
+            continuation_frame_owner(continuation, handler.frame_depth)
+        else {
+            return Err(ContinuationError::HandlerFrameDepthOutOfBounds {
+                handler: index,
+                frame_depth: handler.frame_depth,
+                frame_count: continuation.frame_stack.len(),
+            });
+        };
+        if owner_function != handler.frame_function {
+            return Err(ContinuationError::HandlerFrameIdentityMismatch {
+                handler: index,
+                frame_depth: handler.frame_depth,
+            });
+        }
+        if handler.operand_stack_depth > continuation.operand_stack.len() {
+            return Err(ContinuationError::HandlerStackDepthOutOfBounds {
+                handler: index,
+                stack_depth: handler.operand_stack_depth,
+                stack_size: continuation.operand_stack.len(),
+            });
+        }
+        if handler.iterator_stack_depth > iterator_count {
+            return Err(ContinuationError::HandlerIteratorDepthOutOfBounds {
+                handler: index,
+                iterator_depth: handler.iterator_stack_depth,
+                iterator_count,
+            });
+        }
+    }
+    for (index, finally) in continuation.finally_stack.iter().enumerate() {
+        let Some((owner_function, _)) = continuation_frame_owner(continuation, finally.frame_depth)
+        else {
+            return Err(ContinuationError::FinallyFrameIdentityMismatch { finally: index });
+        };
+        if owner_function != finally.frame_function {
+            return Err(ContinuationError::FinallyFrameIdentityMismatch { finally: index });
+        }
+        if finally.handler_stack_depth > continuation.handler_stack.len() {
+            return Err(ContinuationError::FinallyHandlerDepthOutOfBounds {
+                finally: index,
+                handler_depth: finally.handler_stack_depth,
+                handler_count: continuation.handler_stack.len(),
+            });
+        }
+        if finally.operand_stack_depth > continuation.operand_stack.len() {
+            return Err(ContinuationError::FinallyStackDepthOutOfBounds {
+                finally: index,
+                stack_depth: finally.operand_stack_depth,
+                stack_size: continuation.operand_stack.len(),
+            });
+        }
+        if let VmFinallyCompletionContinuation::Throw { value } = &finally.completion {
+            validate_value(value, &format!("finally {index} thrown value"))?;
+            validate_heap_reference(&continuation.heap.heap, value)?;
+        }
+    }
     continuation
         .heap
         .heap
@@ -942,6 +823,22 @@ fn validate_continuation(continuation: &VmContinuation) -> Result<(), Continuati
             variant: "invalid heap object graph",
         })?;
     Ok(())
+}
+
+fn continuation_frame_owner(
+    continuation: &VmContinuation,
+    frame_depth: usize,
+) -> Option<(Option<u32>, usize)> {
+    if frame_depth == continuation.frame_stack.len() {
+        return Some((
+            continuation.active_function,
+            continuation.iterator_stack.len(),
+        ));
+    }
+    continuation
+        .frame_stack
+        .get(frame_depth)
+        .map(|frame| (frame.function, frame.iterator_stack.len()))
 }
 
 fn validate_heap_references(heap: &Heap, values: &[Value]) -> Result<(), ContinuationError> {
@@ -1121,6 +1018,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             iter_stack: Vec::new(),
             active_function: None,
             frames: Vec::new(),
+            handlers: Vec::new(),
+            finally_stack: Vec::new(),
             lashlang_execution_occurrences: FxHashMap::default(),
             profile: None,
             validation_plans: FxHashMap::default(),
@@ -1154,6 +1053,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             iter_stack: std::mem::take(&mut scratch.iter_stack),
             active_function: None,
             frames: Vec::new(),
+            handlers: Vec::new(),
+            finally_stack: Vec::new(),
             lashlang_execution_occurrences: FxHashMap::default(),
             profile: None,
             validation_plans: FxHashMap::default(),
@@ -1183,6 +1084,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
         for (key, value) in self.slots.extras.iter() {
             validate_value(value, &format!("global `{key}`"))?;
+        }
+        for (index, finally) in self.finally_stack.iter().enumerate() {
+            if let FinallyCompletion::Throw { value } = &finally.completion {
+                validate_value(value, &format!("finally {index} thrown value"))?;
+            }
         }
 
         let iterator_stack = self
@@ -1227,6 +1133,53 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 return_target,
             });
         }
+        let handler_stack = self
+            .handlers
+            .iter()
+            .map(|handler| {
+                Ok(VmHandlerContinuation {
+                    handler_instruction_pointer: handler.handler_ip,
+                    finally_instruction_pointer: handler.finally_ip,
+                    catches: handler.catches,
+                    frame_depth: handler.frame_depth,
+                    frame_function: handler
+                        .frame_function
+                        .map(u32::try_from)
+                        .transpose()
+                        .map_err(|_| ContinuationError::FunctionIndexOverflow)?,
+                    operand_stack_depth: handler.stack_depth,
+                    iterator_stack_depth: handler.iterator_depth,
+                })
+            })
+            .collect::<Result<Vec<_>, ContinuationError>>()?;
+        let finally_stack = self
+            .finally_stack
+            .iter()
+            .map(|finally| {
+                Ok(VmFinallyContinuation {
+                    completion: match &finally.completion {
+                        FinallyCompletion::Normal { resume_ip } => {
+                            VmFinallyCompletionContinuation::Normal {
+                                resume_instruction_pointer: *resume_ip,
+                            }
+                        }
+                        FinallyCompletion::Throw { value } => {
+                            VmFinallyCompletionContinuation::Throw {
+                                value: value.clone(),
+                            }
+                        }
+                    },
+                    handler_stack_depth: finally.handler_depth,
+                    frame_depth: finally.frame_depth,
+                    frame_function: finally
+                        .frame_function
+                        .map(u32::try_from)
+                        .transpose()
+                        .map_err(|_| ContinuationError::FunctionIndexOverflow)?,
+                    operand_stack_depth: finally.stack_depth,
+                })
+            })
+            .collect::<Result<Vec<_>, ContinuationError>>()?;
 
         let continuation = VmContinuation {
             format_version: VM_CONTINUATION_FORMAT_VERSION,
@@ -1243,6 +1196,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             globals: self.slots.extras.clone(),
             iterator_stack,
             frame_stack,
+            handler_stack,
+            finally_stack,
             occurrence_counters: self
                 .lashlang_execution_occurrences
                 .iter()
@@ -1353,6 +1308,39 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             .into_iter()
             .map(iterator_from_continuation)
             .collect();
+        let handlers = continuation
+            .handler_stack
+            .into_iter()
+            .map(|handler| ExceptionHandler {
+                handler_ip: handler.handler_instruction_pointer,
+                finally_ip: handler.finally_instruction_pointer,
+                catches: handler.catches,
+                frame_depth: handler.frame_depth,
+                frame_function: handler.frame_function.map(|index| index as usize),
+                stack_depth: handler.operand_stack_depth,
+                iterator_depth: handler.iterator_stack_depth,
+            })
+            .collect();
+        let finally_stack = continuation
+            .finally_stack
+            .into_iter()
+            .map(|finally| FinallyState {
+                completion: match finally.completion {
+                    VmFinallyCompletionContinuation::Normal {
+                        resume_instruction_pointer,
+                    } => FinallyCompletion::Normal {
+                        resume_ip: resume_instruction_pointer,
+                    },
+                    VmFinallyCompletionContinuation::Throw { value } => {
+                        FinallyCompletion::Throw { value }
+                    }
+                },
+                handler_depth: finally.handler_stack_depth,
+                frame_depth: finally.frame_depth,
+                frame_function: finally.frame_function.map(|index| index as usize),
+                stack_depth: finally.operand_stack_depth,
+            })
+            .collect();
         let frames = continuation
             .frame_stack
             .into_iter()
@@ -1402,6 +1390,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             iter_stack,
             active_function,
             frames,
+            handlers,
+            finally_stack,
             lashlang_execution_occurrences: continuation.occurrence_counters.into_iter().collect(),
             profile,
             validation_plans: FxHashMap::default(),
@@ -1448,6 +1438,8 @@ mod tests {
             globals: Record::new(),
             iterator_stack: Vec::new(),
             frame_stack: Vec::new(),
+            handler_stack: Vec::new(),
+            finally_stack: Vec::new(),
             occurrence_counters: Default::default(),
             mode: ExecutionMode::Process,
             profile: None,

@@ -226,6 +226,11 @@ pub enum Expr {
         items: Box<Expr>,
         function: Box<Expr>,
     },
+    /// AST-only structured exception scope. The parser intentionally has no
+    /// production for this node; dialects construct it directly.
+    Try(Box<TryExpr>),
+    /// AST-only explicit throw. The thrown value is transferred unchanged.
+    Throw(Box<Expr>),
     Field {
         target: Box<Expr>,
         field: AstString,
@@ -254,6 +259,21 @@ pub struct FunctionExpr {
     pub params: Vec<AstString>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captures: Vec<AstString>,
+    pub body: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TryExpr {
+    pub body: Box<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catch: Option<CatchClause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finally: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CatchClause {
+    pub binding: AstString,
     pub body: Box<Expr>,
 }
 
@@ -361,6 +381,16 @@ impl Expr {
                 buffer.push(items);
                 buffer.push(function);
             }
+            Expr::Try(scope) => {
+                buffer.push(&scope.body);
+                if let Some(catch) = &scope.catch {
+                    buffer.push(&catch.body);
+                }
+                if let Some(finally) = &scope.finally {
+                    buffer.push(finally);
+                }
+            }
+            Expr::Throw(value) => buffer.push(value),
             Expr::Field { target, .. } => buffer.push(target),
             Expr::Index { target, index } => {
                 buffer.push(target);
@@ -556,6 +586,17 @@ where
             items: Box::new(folder.fold_expr(*items)),
             function: Box::new(folder.fold_expr(*function)),
         },
+        Expr::Try(scope) => Expr::Try(Box::new(TryExpr {
+            body: Box::new(folder.fold_expr(*scope.body)),
+            catch: scope.catch.map(|catch| CatchClause {
+                binding: catch.binding,
+                body: Box::new(folder.fold_expr(*catch.body)),
+            }),
+            finally: scope
+                .finally
+                .map(|finally| Box::new(folder.fold_expr(*finally))),
+        })),
+        Expr::Throw(value) => Expr::Throw(Box::new(folder.fold_expr(*value))),
         Expr::Field { target, field } => Expr::Field {
             target: Box::new(folder.fold_expr(*target)),
             field,
