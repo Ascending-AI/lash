@@ -14,7 +14,9 @@ use lash_lashlang_runtime::{
 
 use super::registration::register_rlm_protocol_plugin;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
-use crate::dialect::{LashlangDialect, LashlangDialectServices, RlmDialect, RlmDialectRegistry};
+use crate::dialect::{
+    LashlangDialect, LashlangDialectServices, RlmDialect, RlmDialectRegistry, TypescriptDialect,
+};
 use crate::driver::SharedPromptUsage;
 use crate::executor::RlmLashlangExecutionTraceConfig;
 use crate::projection::{ProjectionRegistry, ProjectionResolver};
@@ -315,17 +317,20 @@ impl PluginFactory for RlmProtocolPluginFactory {
         )
         .with_plugin_extensions(&ctx.extensions)
         .map_err(|err| PluginError::Registration(err.to_string()))?;
+        let services = LashlangDialectServices {
+            projection_resolver: Arc::clone(&self.projection_resolver),
+            artifact_store: Arc::clone(&self.artifact_store),
+            deferred_tool_resolver: self.deferred_tool_resolver.clone(),
+            execution_trace_config: self.lashlang_execution_trace_config.clone(),
+            execution_bounds: config.execution_bounds(),
+        };
         let dialect: Arc<dyn RlmDialect> = Arc::new(LashlangDialect::new(
-            lashlang_surface,
-            LashlangDialectServices {
-                projection_resolver: Arc::clone(&self.projection_resolver),
-                artifact_store: Arc::clone(&self.artifact_store),
-                deferred_tool_resolver: self.deferred_tool_resolver.clone(),
-                execution_trace_config: self.lashlang_execution_trace_config.clone(),
-                execution_bounds: config.execution_bounds(),
-            },
+            lashlang_surface.clone(),
+            services.clone(),
         ));
-        let dialect_registry = RlmDialectRegistry::new([Arc::clone(&dialect)]);
+        let typescript: Arc<dyn RlmDialect> =
+            Arc::new(TypescriptDialect::new(lashlang_surface, services));
+        let dialect_registry = RlmDialectRegistry::new([Arc::clone(&dialect), typescript]);
         Ok(Arc::new(RlmProtocolPlugin {
             config,
             dialect,

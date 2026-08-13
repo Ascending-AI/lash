@@ -1279,6 +1279,7 @@ fn collect_printed_images_inner<'a>(
                 .await?;
             }
             FlowValue::Null
+            | FlowValue::Undefined
             | FlowValue::Bool(_)
             | FlowValue::Number(_)
             | FlowValue::String(_)

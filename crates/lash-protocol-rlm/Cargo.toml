@@ -24,6 +24,7 @@ workspace = true
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
+lash-typescript = { workspace = true }
 lashlang = { workspace = true }
 lash-rlm-types = { workspace = true }
 async-trait = { workspace = true }

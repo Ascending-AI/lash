@@ -1,4 +1,5 @@
 mod lashlang;
+mod typescript;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
 pub(crate) use lashlang::{LashlangDialect, LashlangDialectServices};
+pub(crate) use typescript::TypescriptDialect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CellTags {
@@ -176,17 +178,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_returns_typed_error_for_unregistered_language() {
-        let registry = RlmDialectRegistry::new(Vec::new());
-        let error = match registry.resolve("typescript") {
-            Ok(_) => panic!("unregistered language resolved"),
-            Err(error) => error,
-        };
+    fn registry_resolves_registered_typescript_language() {
+        let dialect: Arc<dyn RlmDialect> = Arc::new(TypescriptDialect::new(
+            lash_lashlang_runtime::LashlangSurface::default(),
+            LashlangDialectServices {
+                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+                artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+        ));
+        let registry = RlmDialectRegistry::new([dialect]);
+
         assert_eq!(
-            error,
-            DialectRegistryError::Unregistered {
-                language: "typescript".to_string()
-            }
+            registry
+                .resolve("typescript")
+                .expect("typescript is registered")
+                .language_id(),
+            "typescript"
         );
     }
 }

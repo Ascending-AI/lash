@@ -43,17 +43,25 @@ impl RlmRuntimeState {
 
     #[cfg(test)]
     pub(super) fn new_lashlang_for_tests() -> Result<Self, SessionError> {
+        let services = crate::dialect::LashlangDialectServices {
+            projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+            artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+            deferred_tool_resolver: None,
+            execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+            execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+        };
         let dialect: Arc<dyn RlmDialect> = Arc::new(crate::dialect::LashlangDialect::new(
             lash_lashlang_runtime::LashlangSurface::default(),
-            crate::dialect::LashlangDialectServices {
-                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
-                deferred_tool_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-            },
+            services.clone(),
         ));
-        Self::new(RlmDialectRegistry::new([Arc::clone(&dialect)]), dialect)
+        let typescript: Arc<dyn RlmDialect> = Arc::new(crate::dialect::TypescriptDialect::new(
+            lash_lashlang_runtime::LashlangSurface::default(),
+            services,
+        ));
+        Self::new(
+            RlmDialectRegistry::new([Arc::clone(&dialect), typescript]),
+            dialect,
+        )
     }
 
     pub(super) async fn projected_binding_prompt_contributions(
@@ -495,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_code_rejects_an_unregistered_language_before_execution() {
+    fn execute_code_rejects_a_registered_inactive_language_before_execution() {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -512,12 +520,12 @@ mod tests {
                         },
                     )
                     .await
-                    .expect_err("unregistered language must be rejected");
+                    .expect_err("inactive language must be rejected");
 
                 assert!(matches!(
                     error,
                     SessionError::Protocol(message)
-                        if message == "RLM language `typescript` is not registered"
+                        if message == "RLM language `typescript` is registered but session language `lashlang` is pinned"
                 ));
             });
     }
