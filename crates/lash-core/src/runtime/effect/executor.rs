@@ -101,9 +101,12 @@ impl ProcessTurnCancellation {
     }
 }
 
-/// Conformance hook invoked after a process side effect and before durable
-/// outcome recording.
-#[doc(hidden)]
+/// Observer invoked after a process side effect and before durable outcome
+/// recording.
+///
+/// This is public for **effect-host implementors** and
+/// **conformance-suite embedders** that must model a host crash in that exact
+/// interval.
 pub type ProcessOutcomeObserver = Arc<dyn Fn(&ProcessEffectOutcome) + Send + Sync + 'static>;
 
 pub struct ProcessLocalExecution {
@@ -353,11 +356,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    /// Installs a conformance-only observer after a process side effect has
-    /// completed but before a durable controller receives the outcome to
-    /// record. Panicking from the observer models a host crash in that exact
-    /// interval.
-    #[doc(hidden)]
+    /// Installs an observer after a process side effect has completed but
+    /// before a durable controller receives the outcome to record.
+    ///
+    /// This is an **effect-host implementor** and **conformance-suite
+    /// embedder** seam. Panicking from the observer models a host crash in
+    /// that exact interval.
     pub fn with_process_outcome_observer(mut self, observer: ProcessOutcomeObserver) -> Self {
         if let RuntimeEffectLocalExecutorState::Process(execution) = &mut self.state {
             execution.outcome_observer = Some(observer);
@@ -365,8 +369,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    /// Removes and returns the conformance-only process outcome observer.
-    #[doc(hidden)]
+    /// Removes and returns the process outcome observer.
+    ///
+    /// This is public for **effect-host implementors** that transfer local
+    /// execution into a durable controller while preserving the conformance
+    /// fault seam.
     pub fn take_process_outcome_observer(&mut self) -> Option<ProcessOutcomeObserver> {
         match &mut self.state {
             RuntimeEffectLocalExecutorState::Process(execution) => {

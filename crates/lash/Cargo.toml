@@ -71,6 +71,7 @@ lash-standard-plugins = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
+sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 rmp-serde = { workspace = true }
 serde_bytes = { workspace = true }
 sha2 = { workspace = true }

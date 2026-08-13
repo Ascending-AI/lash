@@ -703,7 +703,9 @@ impl crate::Clock for FrozenToolCoordinatorClock {
 
 /// Execute one opted-in provider through the production attempt coordinator,
 /// intent drain, and model-return projection against supplied durable services.
-#[doc(hidden)]
+///
+/// This is public for **conformance-suite embedders** that compare the same
+/// provider and intent contract across durable backends.
 pub async fn coordinate_tool_provider_with_services(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,

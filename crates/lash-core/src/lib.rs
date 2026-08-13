@@ -898,9 +898,9 @@ pub use store::{TurnId, WorkClaim, WorkCompletion};
 
 pub use runtime::{
     CheckpointClaimSet, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
-    ProcessEventSemanticsSpec, RuntimeCheckpointComponents, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    ProcessEventSemanticsSpec, ProcessOutcomeObserver, RuntimeCheckpointComponents,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
     RuntimeScope, RuntimeSessionState, ToolAttemptLaunch,
 };

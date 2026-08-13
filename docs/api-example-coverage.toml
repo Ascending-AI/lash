@@ -46625,6 +46625,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectLocalExecutor::take_process_outcome_observer"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectLocalExecutor::take_process_outcome_observer"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts that transfer a local process side effect into durable outcome recording while preserving the conformance fault seam."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::sleep"
 kind = "function"
 availability = "default+all-features"
@@ -46668,6 +46677,15 @@ aliases = ["lash_core::RuntimeEffectLocalExecutor::with_turn_cancel_scope"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectLocalExecutor::with_turn_cancel_scope. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectLocalExecutor::with_process_outcome_observer"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectLocalExecutor::with_process_outcome_observer"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: conformance-suite embedders that inject a crash after a local process side effect and before its durable outcome is recorded."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome"
@@ -66030,6 +66048,14 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::ProcessOutcomeObserver"
+kind = "type_alias"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: effect-host implementors and conformance-suite embedders that preserve the fault boundary between local process side effects and durable outcome recording."
 
 [[api]]
 symbol = "lash_core::ProcessRunOutcome"

@@ -15,6 +15,8 @@ use super::harness::{
     run_agent_turn_scenario_without_success_assertions,
 };
 #[cfg(feature = "rlm")]
+use super::process_parent_atomicity::agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres;
+#[cfg(feature = "rlm")]
 use super::transcript::agent_scenario_transcript;
 #[cfg(feature = "rlm")]
 use lash_core::llm::types::LlmUsage;
@@ -106,6 +108,11 @@ const TUPLE_VALUES_AS_JSON_ARRAYS: AgentScenarioCoverage = agent_scenario_covera
     "tuple values finish as json arrays",
     "Facade final values preserve tuple-to-JSON array projection."
 );
+const POSTGRES_PROCESS_PARENT_ATOMICITY: AgentScenarioCoverage = agent_scenario_coverage!(
+    agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres,
+    "PostgreSQL process-parent atomicity",
+    "Facade worker, Standard plugin, Lashlang process graph, and durable PostgreSQL ParentEnd fault recovery."
+);
 
 const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
     FOREGROUND_LABELED_TOOL_CALL,
@@ -121,11 +128,12 @@ const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
     FAILED_CHILD_PRESERVES_GRAPH,
     PARALLEL_SPAWN_AND_JOIN,
     TUPLE_VALUES_AS_JSON_ARRAYS,
+    POSTGRES_PROCESS_PARENT_ATOMICITY,
 ];
 
 #[test]
 fn agent_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 13);
+    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 14);
     let mut names = BTreeSet::new();
     for coverage in AGENT_SCENARIO_COVERAGE {
         #[cfg(feature = "rlm")]
