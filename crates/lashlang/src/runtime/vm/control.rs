@@ -489,19 +489,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .filter_map(|(index, iterator)| (!iterator.heapified).then_some(index))
             .collect::<Vec<_>>();
         let scan_extras = !self.extras_heapified;
+        // Durable holders come first so a transient holder of the same tree can
+        // reuse what they imported rather than allocating a second object.
         let mut values = Vec::new();
-        values.extend(
-            self.stack
-                .iter()
-                .filter(|value| needs_heap_import(value))
-                .cloned(),
-        );
-        values.extend(
-            self.last_value
-                .iter()
-                .filter(|value| needs_heap_import(value))
-                .cloned(),
-        );
         values.extend(
             self.slots
                 .values
@@ -521,6 +511,30 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         for index in &pending_iterators {
             let iterator = &self.iter_stack[*index];
+            values.extend(
+                iterator
+                    .restore
+                    .previous
+                    .iter()
+                    .filter(|value| needs_heap_import(value))
+                    .cloned(),
+            );
+        }
+        let durable_count = values.len();
+        values.extend(
+            self.stack
+                .iter()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
+        values.extend(
+            self.last_value
+                .iter()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
+        for index in &pending_iterators {
+            let iterator = &self.iter_stack[*index];
             if let super::IterCursor::List {
                 values: iterator_values,
                 ..
@@ -533,26 +547,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .cloned(),
                 );
             }
-            values.extend(
-                iterator
-                    .restore
-                    .previous
-                    .iter()
-                    .filter(|value| needs_heap_import(value))
-                    .cloned(),
-            );
         }
 
         if !values.is_empty() {
-            let imported = self.heap.import_values(values);
+            let imported = self.heap.import_values(values, durable_count);
             self.heap.end_allocation_scope();
             let mut imported = imported?.into_iter();
-            for value in &mut self.stack {
-                replace_imported_value(value, &mut imported);
-            }
-            if let Some(value) = &mut self.last_value {
-                replace_imported_value(value, &mut imported);
-            }
             for value in self.slots.values.iter_mut().flatten() {
                 replace_imported_value(value, &mut imported);
             }
@@ -562,18 +562,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
             for index in &pending_iterators {
-                let iterator = &mut self.iter_stack[*index];
+                if let Some(value) = &mut self.iter_stack[*index].restore.previous {
+                    replace_imported_value(value, &mut imported);
+                }
+            }
+            for value in &mut self.stack {
+                replace_imported_value(value, &mut imported);
+            }
+            if let Some(value) = &mut self.last_value {
+                replace_imported_value(value, &mut imported);
+            }
+            for index in &pending_iterators {
                 if let super::IterCursor::List {
                     values: iterator_values,
                     ..
-                } = &mut iterator.cursor
+                } = &mut self.iter_stack[*index].cursor
                 {
                     for value in iterator_values.make_mut() {
                         replace_imported_value(value, &mut imported);
                     }
-                }
-                if let Some(value) = &mut iterator.restore.previous {
-                    replace_imported_value(value, &mut imported);
                 }
             }
             debug_assert!(imported.next().is_none());

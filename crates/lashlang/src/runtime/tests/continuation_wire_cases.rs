@@ -412,3 +412,32 @@ async fn continuation_decode_accepts_transient_duplication() {
         serde_json::from_str(wire).expect("transient duplication must be accepted");
     assert_eq!(continuation.operand_stack.len(), 1);
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "diagnostic probe for allocation churn; run explicitly"]
+async fn allocation_churn_probe() {
+    for source in [
+        "xs = [[1]]\nfinish 0",
+        "xs = [1]\nfinish 0",
+        "xs = { a: [1] }\nfinish 0",
+        "xs = []\nxs = push(xs, [1])\nfinish 0",
+        "a = [1]\nxs = [a]\nfinish 0",
+        "xs = [[1]]\nys = xs\nfinish 0",
+    ] {
+        let program = compile_source(source).expect("compile");
+        let mut state = State::new();
+        execute_compiled(&program, &mut state, &Host)
+            .await
+            .expect("run");
+        let (globals, mut heap) = state.take_runtime();
+        let before = heap.objects_in_id_order().count();
+        let roots = globals.values().cloned().collect::<Vec<_>>();
+        heap.collect(roots.iter());
+        println!(
+            "{source:?} allocations={} objects_before_collect={} live_objects={}",
+            heap.allocations(),
+            before,
+            heap.objects_in_id_order().count()
+        );
+    }
+}

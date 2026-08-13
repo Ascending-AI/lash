@@ -406,12 +406,36 @@ impl Heap {
     /// before any of it is committed, so a batch that would cross the memory
     /// bound leaves the heap byte-identical instead of stranding the objects it
     /// already charged for.
-    pub(crate) fn import_values(&mut self, values: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
+    pub(crate) fn import_values(
+        &mut self,
+        values: Vec<Value>,
+        durable_count: usize,
+    ) -> Result<Vec<Value>, RuntimeError> {
         let mut next_id = self.next_id;
         let mut staged = Vec::new();
         let mut imported = Vec::with_capacity(values.len());
-        for value in values {
-            imported.push(self.stage_import(value, &mut next_id, &mut staged)?);
+        // One tree can be held in two places at once — a store leaves the value
+        // in its slot and in the last-value register — and importing it twice
+        // used to allocate the object twice, so every literal store cost two
+        // objects and left one for the collector. A transient holder may point
+        // at the object a durable one owns, so the second import of the same
+        // tree reuses the first. Durable values never reuse: two of them naming
+        // one object is the sharing this heap refuses.
+        let mut first_import = FxHashMap::<(u8, usize), Value>::default();
+        for (index, value) in values.into_iter().enumerate() {
+            let identity = compound_identity(&value);
+            if index >= durable_count
+                && let Some(identity) = identity
+                && let Some(existing) = first_import.get(&identity)
+            {
+                imported.push(existing.clone());
+                continue;
+            }
+            let staged_value = self.stage_import(value, &mut next_id, &mut staged)?;
+            if let Some(identity) = identity {
+                first_import.entry(identity).or_insert(staged_value.clone());
+            }
+            imported.push(staged_value);
         }
         let staged_bytes = staged.iter().fold(0_u64, |total, (_, object)| {
             total.saturating_add(object.logical_bytes())

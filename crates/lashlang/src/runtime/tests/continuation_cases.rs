@@ -701,9 +701,10 @@ async fn indexed_add_exact_limit_succeeds_and_one_byte_over_preserves_state() {
     let mut grown = Record::new();
     grown.insert("a-long-new-key".to_string(), Value::Number(1.0));
     let grown_record_bytes = HeapObject::Record(Box::new(grown)).logical_bytes();
-    // The cell transition heapifies the persisted empty record and preserves
-    // one isolated pre-update copy while the indexed store is in flight.
-    let exact_limit = empty_record_bytes + grown_record_bytes;
+    // The cell transition heapifies the persisted empty record once and grows
+    // that same object in place, so the peak is the grown record rather than a
+    // pre-update copy plus the grown one.
+    let exact_limit = grown_record_bytes;
     assert!(exact_limit > empty_record_bytes);
 
     let mut exact = State::new();
