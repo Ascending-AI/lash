@@ -238,9 +238,11 @@ impl StandardShell {
     /// Launch a Detached Command (ADR 0019): double-fork/setsid it out of the
     /// worker's process group, retain no PTY or process-map entry, register the
     /// launch as an Externally-Owned row, and complete it IMMEDIATELY with the
-    /// launch identity as a `Success` value. The row is a terminal audit fact
-    /// from birth — never a running claim — and lash will not track, signal, or
-    /// stop the process afterward; the host/OS owns it.
+    /// launch identity as a `Success` value. There are deliberately two durable
+    /// rows: the unobserved OwnerBound launcher is the exactly-once execution
+    /// receipt, while the `:detached` ExternallyOwned row is the model-facing
+    /// terminal audit record. Lash will not track, signal, or stop the process
+    /// afterward; the host/OS owns it.
     async fn detach_command_process(
         &self,
         params: &StartCommandParams,
@@ -261,12 +263,16 @@ impl StandardShell {
 
         // Validate the complete durable launch context before starting host
         // work. The audit row is registered only after a successful exec.
-        let launch = match self.runtime.spawn_detached(
-            &params.cmd,
-            &params.workdir,
-            params.login,
-            &params.shell_path,
-        ) {
+        let launch = match self
+            .runtime
+            .spawn_detached(
+                params.cmd.clone(),
+                params.workdir.clone(),
+                params.login,
+                params.shell_path.clone(),
+            )
+            .await
+        {
             Ok(launch) => launch,
             Err(failure) => return ToolResult::failure(*failure),
         };

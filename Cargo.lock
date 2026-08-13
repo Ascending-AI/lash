@@ -1006,6 +1006,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
+ "lash-core",
  "lash-plugin-mcp",
  "lash-postgres-store",
  "lash-provider-openai",

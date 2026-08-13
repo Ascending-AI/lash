@@ -49,24 +49,6 @@ pub trait StaticToolExecute: Send + Sync + 'static {
         }
     }
 
-    /// Opt one fixed tool id into deterministic process-replay orchestration.
-    #[doc(hidden)]
-    fn supports_orchestration_context(&self, _tool_id: &ToolId) -> bool {
-        false
-    }
-
-    /// Execute an opted-in fixed tool with the orchestration-only context.
-    #[doc(hidden)]
-    async fn execute_orchestration(
-        &self,
-        call: lash_core::facade_support::OrchestratingToolCall<'_>,
-    ) -> ToolResult {
-        ToolResult::err_fmt(format!(
-            "orchestration execution is unavailable for tool `{}`",
-            call.name
-        ))
-    }
-
     /// Optional argument-preparation hook, mirroring
     /// [`ToolProvider::prepare_tool_call`]. Defaults to the identity transform.
     async fn prepare_tool_call(
@@ -169,16 +151,5 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
 
     async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
         self.executor.execute_attempt(call).await
-    }
-
-    fn supports_orchestration_context(&self, tool_id: &ToolId) -> bool {
-        self.executor.supports_orchestration_context(tool_id)
-    }
-
-    async fn execute_orchestration(
-        &self,
-        call: lash_core::facade_support::OrchestratingToolCall<'_>,
-    ) -> ToolResult {
-        self.executor.execute_orchestration(call).await
     }
 }

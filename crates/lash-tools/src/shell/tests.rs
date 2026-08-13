@@ -944,7 +944,13 @@ mod tests {
     async fn spawn_detached_is_untracked_and_survives_teardown() {
         let runtime = ShellRuntime::new().with_cwd("/");
         let launch = runtime
-            .spawn_detached("sleep 300", std::path::Path::new("/"), false, "bash")
+            .spawn_detached(
+                "sleep 300".to_string(),
+                std::path::PathBuf::from("/"),
+                false,
+                "bash".to_string(),
+            )
+            .await
             .expect("spawn detached");
         // A Detached Command is never inserted into the tracked map, so the
         // teardown group-kill can never reach it (ADR 0019).
@@ -1141,6 +1147,80 @@ mod tests {
                 refusal: lash_core::ToolIntentRefusalReason::CommandFailed { code, .. },
                 ..
             }] if code == "process_not_visible"
+        ));
+    }
+
+    #[tokio::test]
+    async fn write_stdin_projects_the_recorded_pruned_target_discriminator() {
+        let shell = StandardShell::new().with_cwd("/");
+        let definition = shell
+            .tool_definitions()
+            .into_iter()
+            .find(|definition| definition.name() == "write_stdin")
+            .expect("shell.write definition");
+        let provider = Arc::new(shell_provider(shell));
+        let service = Arc::new(TestProcessService::default());
+        let registry = service.registry();
+        register_signal_target(registry.as_ref(), "pruned-production").await;
+        registry
+            .complete_process(
+                "pruned-production",
+                lash_core::ProcessAwaitOutput::Success {
+                    value: json!({"pid": 1234}),
+                    control: None,
+                },
+                lash_core::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("terminalize target before pruning");
+        let (_, cursor) = registry
+            .processes_changed_since(lash_core::ProcessChangeCursor::initial(), 100)
+            .await
+            .expect("read terminal change cursor");
+        let report = registry
+            .prune_terminal_processes(
+                u64::MAX,
+                None,
+                lash_core::ProjectionWatermark::UpTo(cursor),
+            )
+            .await
+            .expect("prune terminal target");
+        assert_eq!(report.pruned_processes, 1);
+
+        let scope = lash_core::ScopedEffectController::shared(
+            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+            lash_core::ExecutionScope::turn("test-session", "write-pruned-turn"),
+        )
+        .expect("build production-shaped intent controller");
+        let processes: Arc<dyn lash_core::ProcessService> = service;
+        let completed = lash_core::testing::conformance::coordinate_tool_provider_with_services(
+            scope,
+            processes,
+            "test-session",
+            definition.clone(),
+            provider,
+            PreparedToolCall::from_parts(
+                "write-pruned-call",
+                definition.id().clone(),
+                definition.name(),
+                json!({"process_id": "pruned-production", "chars": "hello\n"}),
+                None,
+                serde_json::Value::Null,
+            ),
+        )
+        .await
+        .expect("coordinate pruned shell.write target");
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &completed.output.outcome else {
+            panic!("pruned-target refusal must replace the optimistic projection");
+        };
+        assert_eq!(failure.code, "process_no_longer_retained");
+        assert!(matches!(
+            completed.intent_outcomes.as_slice(),
+            [lash_core::ToolIntentExecutionOutcome::Refused {
+                refusal: lash_core::ToolIntentRefusalReason::CommandFailed { code, .. },
+                ..
+            }] if code == "process_no_longer_retained"
         ));
     }
 

@@ -457,20 +457,31 @@ fn project_recorded_intent_outcomes(
     output: &mut crate::ToolCallOutput,
     outcomes: &[crate::ToolIntentExecutionOutcome],
 ) {
-    if let Some(crate::ToolIntentExecutionOutcome::Refused { refusal, .. }) = outcomes
-        .iter()
-        .find(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Refused { .. }))
-    {
-        let (code, message) = match refusal {
-            crate::ToolIntentRefusalReason::CommandFailed { code, message } => {
-                (code.clone(), message.clone())
+    // Only a refusal produced while executing a declared intent can supersede
+    // the provider's optimistic output. Batch-admission refusals describe the
+    // intent protocol itself and stay in the typed intent-outcome stream.
+    if let Some(crate::ToolIntentExecutionOutcome::Refused {
+        refusal: crate::ToolIntentRefusalReason::CommandFailed { code, message },
+        ..
+    }) = outcomes.iter().find(|outcome| {
+        matches!(
+            outcome,
+            crate::ToolIntentExecutionOutcome::Refused {
+                refusal: crate::ToolIntentRefusalReason::CommandFailed { .. },
+                ..
             }
-            refusal => (refusal.code().to_string(), format!("{refusal:?}")),
-        };
+        )
+    }) {
+        // ADR 0042 deliberately seals the ToolAttempt terminal before draining
+        // intents. Its optimistic provider value is therefore immutable; the
+        // child process-command journal row is the authoritative refusal, and
+        // this turn projection plus `intent_outcomes` expose that evidence.
+        // Rewriting the completed parent row here would break journal-first
+        // settlement and append-only replay.
         *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
             crate::ToolFailureClass::Unavailable,
-            code,
-            message,
+            code.clone(),
+            message.clone(),
         ));
         return;
     }
@@ -494,6 +505,57 @@ fn project_recorded_intent_outcomes(
     };
     object.insert("sequence".to_string(), serde_json::json!(sequence));
     *value = crate::ToolValue::from(projected);
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+
+    fn refusal(reason: crate::ToolIntentRefusalReason) -> crate::ToolIntentExecutionOutcome {
+        crate::ToolIntentExecutionOutcome::Refused {
+            identity: None,
+            intent_index: 0,
+            kind: crate::ToolIntentKind::SignalProcess,
+            refusal: reason,
+        }
+    }
+
+    #[test]
+    fn command_refusal_projects_its_typed_code_and_message() {
+        let mut output = crate::ToolCallOutput::success(serde_json::json!("optimistic"));
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[refusal(crate::ToolIntentRefusalReason::CommandFailed {
+                code: "process_not_visible".to_string(),
+                message: "process is outside the invoking session".to_string(),
+            })],
+        );
+
+        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("intent command refusal must supersede optimistic success")
+        };
+        assert_eq!(failure.code, "process_not_visible");
+        assert_eq!(failure.message, "process is outside the invoking session");
+    }
+
+    #[test]
+    fn protocol_admission_refusal_does_not_rewrite_provider_output() {
+        let mut output = crate::ToolCallOutput::success(serde_json::json!("provider-terminal"));
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[refusal(
+                crate::ToolIntentRefusalReason::CountBudgetExceeded {
+                    actual: 33,
+                    maximum: 32,
+                },
+            )],
+        );
+
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!("provider-terminal")
+        );
+    }
 }
 
 fn runtime_failure_outcome(

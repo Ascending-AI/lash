@@ -83,7 +83,15 @@ pub mod facade_support {
         SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainError,
         SelectedQueuedWorkDrainOutcome, SelectedQueuedWorkDrainRefusalCause,
     };
-    pub use crate::tool_provider::{OrchestratingToolCall, OrchestrationContext};
+    pub use crate::tool_provider::orchestration::OrchestrationContext;
+    /// Recover the restricted workflow context for a runtime-selected,
+    /// first-party orchestration call. Leaf providers always receive `None`;
+    /// no provider can opt a new tool id into this path.
+    pub fn first_party_orchestration_context<'run>(
+        context: &crate::ToolContext<'run>,
+    ) -> Option<OrchestrationContext<'run>> {
+        OrchestrationContext::from_tool_context(context)
+    }
     /// Build the core-level tool-registry projection through the same plugin
     /// composition path used for runtime sessions.
     pub fn build_core_tool_registry(
@@ -943,7 +951,6 @@ pub use tool_intent::{
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptResult, ToolIntent, ToolIntents,
     ToolResultDone, derive_tool_intent_identity,
 };
-pub(crate) use tool_provider::OrchestrationContext;
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall, PreparedToolBatch,
     PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,

@@ -23,13 +23,13 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
     let started = context.clock.now();
     let tool_name = prepared.tool_name.clone();
     let args = prepared.args.clone();
-    let orchestration_context = crate::OrchestrationContext::from_tool_context(
-        tool_context.with_prepared_payload(prepared.prepared_payload.clone()),
-    );
-    let result = std::panic::AssertUnwindSafe(context.tools.execute_orchestration_by_id(
+    let tool_context = tool_context
+        .with_prepared_payload(prepared.prepared_payload.clone())
+        .with_first_party_orchestration();
+    let result = std::panic::AssertUnwindSafe(context.tools.execute_by_id(
         &prepared.tool_id,
         &prepared.args,
-        &orchestration_context,
+        &tool_context,
     ))
     .catch_unwind()
     .await

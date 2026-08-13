@@ -347,7 +347,27 @@ impl ShellRuntime {
     /// or process-map entry, so it will never track, signal, or stop it again;
     /// the returned identity is the whole of what lash retains. Because the child
     /// is its own session leader, its pgid equals its pid.
-    pub(crate) fn spawn_detached(
+    pub(crate) async fn spawn_detached(
+        &self,
+        command: String,
+        workdir: PathBuf,
+        login: bool,
+        shell_path: String,
+    ) -> ShellResult<DetachedLaunch> {
+        let runtime = self.clone();
+        tokio::task::spawn_blocking(move || {
+            runtime.spawn_detached_blocking(&command, &workdir, login, &shell_path)
+        })
+        .await
+        .map_err(|error| {
+            shell_io_failure(
+                "spawn_detached_command_failed",
+                format!("Detached launcher task failed: {error}"),
+            )
+        })?
+    }
+
+    fn spawn_detached_blocking(
         &self,
         command: &str,
         workdir: &Path,
@@ -364,19 +384,12 @@ impl ShellRuntime {
             .stderr(Stdio::null());
 
         #[cfg(unix)]
-        let (read_fd, write_fd) = {
-            let mut fds = [0_i32; 2];
-            if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == -1 {
-                return Err(shell_io_failure(
-                    "spawn_detached_command_failed",
-                    format!(
-                        "Failed to create detached launch identity pipe: {}",
-                        std::io::Error::last_os_error()
-                    ),
-                ));
-            }
-            (fds[0], fds[1])
-        };
+        let (read_fd, write_fd) = detached_identity_pipe().map_err(|error| {
+            shell_io_failure(
+                "spawn_detached_command_failed",
+                format!("Failed to create detached launch identity pipe: {error}"),
+            )
+        })?;
 
         #[cfg(unix)]
         unsafe {
@@ -902,6 +915,27 @@ impl ShellRuntime {
             }
         }
     }
+}
+
+#[cfg(unix)]
+fn detached_identity_pipe() -> std::io::Result<(libc::c_int, libc::c_int)> {
+    let mut fds = [0_i32; 2];
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    for fd in fds {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } == -1
+        {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                libc::close(fds[0]);
+                libc::close(fds[1]);
+            }
+            return Err(error);
+        }
+    }
+    Ok((fds[0], fds[1]))
 }
 
 async fn wait_for_pipe_readers(handles: &mut Vec<tokio::task::JoinHandle<()>>) {

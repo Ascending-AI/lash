@@ -92,8 +92,14 @@ pub enum RuntimeErrorCode {
     PostgresEffectJournalRetirement,
     QueuedWork,
     ProcessPanicked,
+    /// ADR 0051 effect-host implementor diagnostic for a process-command
+    /// refusal whose target is outside the invoking session's visible set.
     ProcessNotVisible,
+    /// ADR 0051 effect-host implementor diagnostic for a write or cancellation
+    /// refused because the recorded target is already terminal.
     ProcessAlreadyTerminal,
+    /// ADR 0051 effect-host implementor diagnostic for a process-command
+    /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
     ProcessRegistryUnavailable,
     ProcessSignalWaitCancelled,

@@ -41,7 +41,7 @@ impl RlmSubagentToolsProvider {
     /// crate) is what re-supplies the live parent provider, gives the child
     /// durability, and makes it recoverable — the same generic path every other
     /// background session turn takes.
-    async fn spawn_agent(
+    async fn execute_orchestration(
         &self,
         _args: &Value,
         context: &lash_core::facade_support::OrchestrationContext<'_>,
@@ -204,27 +204,19 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         let result = match call.name {
-            "spawn_agent" => Err(
-                "spawn_agent executes only through the process-replay orchestration shape"
-                    .to_string(),
-            ),
+            "spawn_agent" => {
+                let Some(context) =
+                    lash_core::facade_support::first_party_orchestration_context(call.context)
+                else {
+                    return finalise_tool_result(Err(
+                        "spawn_agent executes only through the first-party process-replay path"
+                            .to_string(),
+                    ));
+                };
+                self.execute_orchestration(call.args, &context).await
+            }
             "submit_error" => return rlm_support::submit_error_tool_result(call.args),
             other => Err(format!("Unknown tool: {other}")),
-        };
-        finalise_tool_result(result)
-    }
-
-    fn supports_orchestration_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id.as_str() == "tool:spawn_agent"
-    }
-
-    async fn execute_orchestration(
-        &self,
-        call: lash_core::facade_support::OrchestratingToolCall<'_>,
-    ) -> ToolResult {
-        let result = match call.name {
-            "spawn_agent" => self.spawn_agent(call.args, call.context).await,
-            other => Err(format!("Unknown orchestrating tool: {other}")),
         };
         finalise_tool_result(result)
     }

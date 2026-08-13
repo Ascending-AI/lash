@@ -26,8 +26,9 @@ The implementation law has two provider shapes:
 > process shape. If you only need to cause it, return an intent.
 
 Leaf providers receive `AttemptContext` and execute as one opaque recorded
-attempt. First-party facade components may opt in per tool id through the
-private orchestration seam; their body never enters `coordinate_tool_invocation`
+attempt. Core privately marks only the two reserved first-party tool ids,
+`tool:batch` and `tool:spawn_agent`, for the private orchestration seam; no
+external provider can opt in. Their bodies never enter `coordinate_tool_invocation`
 and has no enclosing `ToolAttempt`. The body is authored process-replay code,
 so every journal command it issues is a direct child of the enclosing process
 invocation. `ExecCode`, runtime-owned `batch`, and `spawn_agent` use that replay

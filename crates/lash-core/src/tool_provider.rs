@@ -13,7 +13,7 @@ use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolResult};
 mod attachments;
 mod direct_completion;
 mod dispatch;
-mod orchestration;
+pub(crate) mod orchestration;
 mod process;
 pub(crate) mod process_events;
 mod session;
@@ -22,7 +22,7 @@ mod triggers;
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
-pub use orchestration::{OrchestratingToolCall, OrchestrationContext};
+pub(crate) use orchestration::is_first_party_orchestration_tool;
 pub use process::ToolSessionProcessAdmin;
 pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;
@@ -234,7 +234,11 @@ impl<'run> AttemptContext<'run> {
     }
     /// Return the recorded process execution environment for a leaf intent
     /// that starts a tool- or engine-backed process.
-    #[doc(hidden)]
+    ///
+    /// This accessor is part of ADR 0051's protocol and process-engine
+    /// implementor class: a leaf [`ToolProvider`] declaring `StartProcess`
+    /// must copy the captured environment into the durable request instead of
+    /// rebuilding it from mutable host state.
     pub fn process_execution_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
         self.execution_env_spec.clone()
     }
@@ -330,6 +334,7 @@ pub struct ToolContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
+    pub(crate) first_party_orchestration: bool,
 }
 
 #[derive(Clone)]
@@ -542,6 +547,7 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
+            first_party_orchestration: false,
         }
     }
 }
@@ -590,6 +596,7 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
+            first_party_orchestration: self.first_party_orchestration,
         })
     }
 
@@ -641,6 +648,11 @@ impl<'run> ToolContext<'run> {
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     ) -> ToolContextBuilder<'run> {
         ToolContextBuilder::from_dispatch(dispatch)
+    }
+
+    pub(crate) fn with_first_party_orchestration(mut self) -> Self {
+        self.first_party_orchestration = true;
+        self
     }
 
     /// Exposes session id to protocol and process-engine implementors while preparing or executing
@@ -1335,45 +1347,6 @@ pub trait ToolProvider: Send + Sync + 'static {
             )));
         };
         self.execute_attempt(AttemptToolCall {
-            name: &manifest.name,
-            args,
-            context,
-        })
-        .await
-    }
-    /// Whether this tool id uses authored process-replay execution instead of
-    /// the recorded attempt coordinator.
-    #[doc(hidden)]
-    fn supports_orchestration_context(&self, _tool_id: &ToolId) -> bool {
-        false
-    }
-    /// Execute an opted-in tool body as deterministic process-replay code.
-    #[doc(hidden)]
-    async fn execute_orchestration(&self, call: OrchestratingToolCall<'_>) -> ToolResult {
-        ToolResult::failure(crate::ToolFailure {
-            class: crate::ToolFailureClass::Unavailable,
-            code: "tool_orchestration_context_not_implemented".to_string(),
-            message: format!(
-                "tool `{}` has not implemented the orchestration context signature",
-                call.name
-            ),
-            source: crate::ToolFailureSource::Runtime,
-            retry: crate::ToolRetryDisposition::Never,
-            raw: None,
-        })
-    }
-    /// Resolve an opted-in orchestrating tool by stable catalog identity.
-    #[doc(hidden)]
-    async fn execute_orchestration_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &OrchestrationContext<'_>,
-    ) -> ToolResult {
-        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
-        };
-        self.execute_orchestration(OrchestratingToolCall {
             name: &manifest.name,
             args,
             context,

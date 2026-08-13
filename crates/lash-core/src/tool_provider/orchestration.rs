@@ -2,21 +2,6 @@ use super::ToolContext;
 use crate::ToolManifest;
 use crate::plugin::PluginError;
 
-/// Per-call inputs handed to an orchestrating provider body.
-///
-/// Unlike a leaf attempt call, this is executed by the enclosing process
-/// replay code and is never wrapped in a `ToolAttempt` effect. Journaled
-/// operations issued through [`OrchestrationContext`] are therefore ordinary,
-/// ordinal-safe children of that process replay.
-///
-/// This is a doc-hidden first-party facade-support seam, not host API.
-#[doc(hidden)]
-pub struct OrchestratingToolCall<'a> {
-    pub name: &'a str,
-    pub args: &'a serde_json::Value,
-    pub context: &'a OrchestrationContext<'a>,
-}
-
 /// Sealed process-replay environment for the rare tool body that must await
 /// durable work before it can return.
 ///
@@ -25,8 +10,8 @@ pub struct OrchestratingToolCall<'a> {
 /// I/O, or leave a journaled action un-awaited.
 ///
 /// This is a doc-hidden first-party facade-support seam; runtime internals
-/// construct it and first-party provider bodies receive it through
-/// [`OrchestratingToolCall`].
+/// construct it and first-party provider bodies can recover it only from a
+/// runtime-marked invocation of one of the two reserved orchestration ids.
 #[derive(Clone)]
 #[doc(hidden)]
 pub struct OrchestrationContext<'run> {
@@ -34,14 +19,10 @@ pub struct OrchestrationContext<'run> {
 }
 
 impl<'run> OrchestrationContext<'run> {
-    pub(crate) fn from_tool_context(context: ToolContext<'run>) -> Self {
-        Self { context }
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
-    pub fn __for_testing(context: ToolContext<'run>) -> Self {
-        Self::from_tool_context(context)
+    pub(crate) fn from_tool_context(context: &ToolContext<'run>) -> Option<Self> {
+        context.first_party_orchestration.then(|| Self {
+            context: context.clone(),
+        })
     }
 
     pub fn session_id(&self) -> &str {
@@ -132,4 +113,8 @@ impl<'run> OrchestrationContext<'run> {
             .call_tool_batch(calls)
             .await
     }
+}
+
+pub(crate) fn is_first_party_orchestration_tool(tool_id: &crate::ToolId) -> bool {
+    matches!(tool_id.as_str(), "tool:batch" | "tool:spawn_agent")
 }

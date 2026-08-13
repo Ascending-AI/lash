@@ -164,22 +164,17 @@ impl ToolProvider for StandardProtocolTools {
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        ToolResult::err_fmt(format_args!(
-            "tool `{}` requires process-replay orchestration",
-            call.name
-        ))
-    }
-
-    fn supports_orchestration_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id.as_str() == "tool:batch"
-    }
-
-    async fn execute_orchestration(
-        &self,
-        call: lash_core::facade_support::OrchestratingToolCall<'_>,
-    ) -> ToolResult {
         match call.name {
-            "batch" => execute_batch_tool_call(call).await,
+            "batch" => {
+                let Some(context) =
+                    lash_core::facade_support::first_party_orchestration_context(call.context)
+                else {
+                    return ToolResult::err_fmt(
+                        "batch requires the first-party process-replay path",
+                    );
+                };
+                execute_orchestration(call.args, &context).await
+            }
             _ => ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
         }
     }
@@ -192,10 +187,10 @@ struct BatchCallSpec {
     parameters: Value,
 }
 
-async fn execute_batch_tool_call(
-    call: lash_core::facade_support::OrchestratingToolCall<'_>,
+async fn execute_orchestration(
+    args: &Value,
+    context: &lash_core::facade_support::OrchestrationContext<'_>,
 ) -> ToolResult {
-    let args = call.args;
     let specs = match parse_batch_specs(args) {
         Ok(specs) => specs,
         Err(err) => return err,
@@ -215,7 +210,7 @@ async fn execute_batch_tool_call(
             }));
             continue;
         }
-        let Some(manifest) = call.context.callable_tool_manifest(&spec.tool) else {
+        let Some(manifest) = context.callable_tool_manifest(&spec.tool) else {
             let error = format!("Tool '{}' is unavailable in this session", spec.tool);
             immediate_outcomes.push(serde_json::json!({
                 "index": spec.index,
@@ -231,7 +226,7 @@ async fn execute_batch_tool_call(
             ToolInvocation::new(
                 format!(
                     "{}:{:02}",
-                    call.context.tool_call_id().unwrap_or("batch"),
+                    context.tool_call_id().unwrap_or("batch"),
                     spec.index
                 ),
                 manifest.id,
@@ -240,8 +235,7 @@ async fn execute_batch_tool_call(
         ));
     }
 
-    let mut parallel_outcomes = call
-        .context
+    let mut parallel_outcomes = context
         .call_tool_batch(
             parallel_specs
                 .iter()

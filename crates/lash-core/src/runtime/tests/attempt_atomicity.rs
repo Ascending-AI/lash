@@ -27,6 +27,13 @@
 //! [`sentinel_allows_no_undeclared_crossing_from_inside_an_attempt`] fails the
 //! moment any capability reaches the controller from inside an attempt without
 //! a declared row, whether or not anyone wrote a law for it.
+//!
+//! ADR 0044 deletion evidence: the former `MIGRATED_TOOL_ROUTES` law compared a
+//! hand-written route table only with an expectation copied from that same
+//! table, so deleting or changing a shipped provider route left it green. Its
+//! properties now belong to production-observing owners: leaf-intent laws in
+//! the shipped shell/process providers, first-party orchestration frame laws,
+//! the PostgreSQL/Restate crash-redrive laws, and the facade Agent Scenario.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

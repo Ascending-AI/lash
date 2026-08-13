@@ -215,11 +215,6 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
             .is_some_and(|index| self.providers[index].supports_attempt_context(tool_id))
     }
 
-    fn supports_orchestration_context(&self, tool_id: &ToolId) -> bool {
-        self.provider_index_for_id(tool_id)
-            .is_some_and(|index| self.providers[index].supports_orchestration_context(tool_id))
-    }
-
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.provider_index_for_id(tool_id)
             .is_some_and(|index| self.providers[index].attempt_may_defer(tool_id))
@@ -238,20 +233,6 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         };
         self.providers[provider_idx]
             .execute_attempt_by_id(tool_id, args, context)
-            .await
-    }
-
-    async fn execute_orchestration_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::OrchestrationContext<'_>,
-    ) -> ToolResult {
-        let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
-        };
-        self.providers[provider_idx]
-            .execute_orchestration_by_id(tool_id, args, context)
             .await
     }
 
@@ -335,10 +316,6 @@ impl ToolSourceExecutor for ToolProviderSource {
         self.provider.supports_attempt_context(tool_id)
     }
 
-    fn supports_orchestration_context(&self, tool_id: &ToolId) -> bool {
-        self.provider.supports_orchestration_context(tool_id)
-    }
-
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.provider.attempt_may_defer(tool_id)
     }
@@ -351,17 +328,6 @@ impl ToolSourceExecutor for ToolProviderSource {
     ) -> crate::ToolAttemptResult {
         self.provider
             .execute_attempt_by_id(tool_id, args, context)
-            .await
-    }
-
-    async fn execute_orchestration_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::OrchestrationContext<'_>,
-    ) -> ToolResult {
-        self.provider
-            .execute_orchestration_by_id(tool_id, args, context)
             .await
     }
 
