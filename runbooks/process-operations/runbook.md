@@ -41,6 +41,38 @@ artifacts are the backend truth for this judged runbook.
    return typed ordinal-tier refusals; drive those operations from explicit process steps or use
    the host rail exercised by this runbook. `processes.list` remains available, and PostgreSQL's
    key-addressed effect tier retains all process commands.
+7. **Parent teardown is a typed durable plan, not terminal-state cleanup.** A terminal parent may
+   retain multiple ordered `ParentEnd` commands. Each command must record a literal
+   `ToolIntentParentEndOutcome`; a crash after the child side effect, between commands, or before
+   plan clear must redrive without duplicating the child event. Concurrent startup scans may
+   race, but only one durable cancellation may remain for each child.
+
+## FIG-1292 parent-end atomicity preflight
+
+Before a live process-operations judgment, run the focused laws against a disposable PostgreSQL
+database with the production-required gate enabled:
+
+```sh
+LASH_POSTGRES_DATABASE_URL=<disposable-url> LASH_REQUIRE_POSTGRES=1 \
+  cargo test -p lash-postgres-store --test process_parent_atomicity --locked \
+  -- --nocapture --test-threads=1
+cargo test -p lash-restate \
+  restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit \
+  --locked -- --nocapture --test-threads=1
+```
+
+The PostgreSQL law must reach the public durable worker path for both segmented Lashlang and
+`ToolCall` parents. It must retain two literal cancel actions at terminal commit, survive the
+side-effect/outcome and outcome/plan-clear crash intervals, tolerate another actor cancelling a
+child, settle concurrent startup scans, and make a post-clear redrive issue no command. The
+Restate law must replay a committed tool-intent batch, crash after the first child cancellation
+but before its typed outcome is journaled, and then record both literal command frames and both
+literal `Cancelled` outcomes exactly once.
+
+**Fail if:** PostgreSQL is skipped, either law uses a private registration runner, expected
+identities or outcomes are derived from observed production values, the pending plan clears
+before every action is durably represented, or any redrive appends a second
+`process.cancel_requested` event.
 
 ## Phase 0 — Boot and establish durable geometry
 

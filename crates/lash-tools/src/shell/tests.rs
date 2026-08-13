@@ -107,6 +107,20 @@ mod tests {
             self.start_from_request(session_id, request, scope).await
         }
 
+        async fn finish_recorded_intent_parent(
+            &self,
+            _session_id: &str,
+            _identity: lash_core::ToolIntentIdentity,
+            _process_id: String,
+            _policy: lash_core::ProcessParentEndPolicy,
+            _reason: String,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ToolIntentParentEndOutcome, PluginError> {
+            Err(PluginError::Session(
+                "recorded parent end is unavailable in this shell fixture".to_string(),
+            ))
+        }
+
         async fn start_from_request(
             &self,
             session_id: &str,

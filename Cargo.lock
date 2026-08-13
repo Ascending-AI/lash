@@ -2151,6 +2151,7 @@ dependencies = [
  "hmac",
  "lash-core",
  "lash-lashlang-runtime",
+ "lash-protocol-standard",
  "lash-sansio",
  "lash-sqlite-store",
  "lashlang",

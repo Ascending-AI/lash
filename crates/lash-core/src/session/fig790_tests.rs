@@ -194,6 +194,32 @@ impl crate::ProcessService for EffectBackedProcessService {
         ))
     }
 
+    async fn finish_recorded_intent_parent(
+        &self,
+        _session_id: &str,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
+        match self
+            .execute(
+                scope,
+                crate::ProcessCommand::ParentEnd {
+                    identity,
+                    process_id,
+                    policy,
+                    reason,
+                },
+            )
+            .await?
+        {
+            crate::ProcessEffectOutcome::ParentEnd { outcome } => Ok(*outcome),
+            _ => unreachable!("parent-end command returns parent-end outcome"),
+        }
+    }
+
     async fn start(
         &self,
         _session_id: &str,

@@ -1259,6 +1259,20 @@ impl crate::ProcessService for MockSessionManager {
         Ok(crate::ProcessHandleSummary::from_record(record))
     }
 
+    async fn finish_recorded_intent_parent(
+        &self,
+        _session_id: &str,
+        _identity: crate::ToolIntentIdentity,
+        _process_id: String,
+        _policy: crate::ProcessParentEndPolicy,
+        _reason: String,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
+        Err(PluginError::Session(
+            "recorded parent-end commands are unavailable in this mock".to_string(),
+        ))
+    }
+
     async fn start(
         &self,
         _session_id: &str,

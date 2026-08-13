@@ -6812,26 +6812,135 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
         self.calls.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolAttemptResult::done(
             lash_core::ToolResultDone::ok(serde_json::json!({"started": true})),
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
-                lash_core::StartProcessIntent {
-                    session_id: call.context.session_id().to_string(),
-                    request: lash_core::ProcessStartRequest::new(
-                        "restate-parent-end-child",
-                        ProcessInput::Engine {
-                            kind: "restate-parent-end-law".to_string(),
-                            payload: serde_json::json!({"source": "restate-parent-end-law"}),
-                        },
-                        lash_core::RecoveryDisposition::Rerunnable,
-                        lash_core::ProcessOriginator::host_scoped("restate-parent-end-law"),
-                    )
-                    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-                        lash_core::PluginOptions::default(),
-                        lash_core::testing::mock_session_policy(),
-                    )),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
-                },
-            ))]),
+            lash_core::ToolIntents::v1(
+                ["first", "second"]
+                    .into_iter()
+                    .map(|child| {
+                        lash_core::ToolIntent::StartProcess(Box::new(
+                            lash_core::StartProcessIntent {
+                                session_id: call.context.session_id().to_string(),
+                                request: lash_core::ProcessStartRequest::new(
+                                    format!("restate-parent-end-child-{child}"),
+                                    ProcessInput::Engine {
+                                        kind: "restate-parent-end-law".to_string(),
+                                        payload: serde_json::json!({
+                                            "source": "restate-parent-end-law",
+                                            "child": child,
+                                        }),
+                                    },
+                                    lash_core::RecoveryDisposition::Rerunnable,
+                                    lash_core::ProcessOriginator::host_scoped(
+                                        "restate-parent-end-law",
+                                    ),
+                                )
+                                .with_env_spec(
+                                    lash_core::ProcessExecutionEnvSpec::new(
+                                        lash_core::PluginOptions::default(),
+                                        lash_core::testing::mock_session_policy(),
+                                    ),
+                                ),
+                                on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
+                            },
+                        ))
+                    })
+                    .collect(),
+            ),
         )
+    }
+}
+
+#[derive(Default)]
+struct RestateParentEndFaultState {
+    crash_before_record_remaining: AtomicUsize,
+    crash_after_recorded_parent_end: AtomicUsize,
+    recorded_parent_end_count: AtomicUsize,
+    completed_local_side_effects: AtomicUsize,
+    frames: Mutex<Vec<RuntimeEffectEnvelope>>,
+    outcomes: Mutex<Vec<lash_core::ToolIntentParentEndOutcome>>,
+}
+
+struct RestateParentEndFaultController {
+    inner: RestateRuntimeEffectController<'static, Arc<ReplayableRecordingContext>>,
+    state: Arc<RestateParentEndFaultState>,
+}
+
+impl AwaitEventResolver for RestateParentEndFaultController {
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        self.inner.replay_ownership()
+    }
+
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        self.inner.journal_addressing()
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.inner.allows_process_lifetime_completion_keys()
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for RestateParentEndFaultController {
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        let is_parent_end = matches!(
+            &envelope.command,
+            RuntimeEffectCommand::Process { command }
+                if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+        );
+        if is_parent_end {
+            self.state.frames.lock_recover().push(envelope.clone());
+        }
+        let crash_before_record = is_parent_end
+            && self
+                .state
+                .crash_before_record_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok();
+        let outcome = if crash_before_record {
+            let state = Arc::clone(&self.state);
+            self.inner
+                .execute_effect(
+                    envelope,
+                    local_executor.with_process_outcome_observer(Arc::new(move |outcome| {
+                        assert!(matches!(outcome, ProcessEffectOutcome::ParentEnd { .. }));
+                        state
+                            .completed_local_side_effects
+                            .fetch_add(1, Ordering::SeqCst);
+                        panic!(
+                            "injected crash after Restate ParentEnd side effect and before outcome recording"
+                        );
+                    })),
+                )
+                .await
+        } else {
+            self.inner.execute_effect(envelope, local_executor).await
+        };
+        if let Ok(RuntimeEffectOutcome::Process {
+            result: ProcessEffectOutcome::ParentEnd { outcome },
+        }) = &outcome
+        {
+            self.state.outcomes.lock_recover().push((**outcome).clone());
+            let recorded = self
+                .state
+                .recorded_parent_end_count
+                .fetch_add(1, Ordering::SeqCst)
+                + 1;
+            let crash_after = self
+                .state
+                .crash_after_recorded_parent_end
+                .load(Ordering::SeqCst);
+            if crash_after != 0 && recorded == crash_after {
+                panic!(
+                    "injected crash after a Restate ParentEnd outcome and before the next command"
+                );
+            }
+        }
+        outcome
     }
 }
 
@@ -6939,6 +7048,33 @@ async fn run_restate_replay_turn(
         )
         .await
         .expect("run replay test turn")
+}
+
+async fn run_restate_replay_turn_with_parent_end_fault(
+    runtime: &mut lash_core::facade_support::LashRuntime,
+    context: Arc<ReplayableRecordingContext>,
+    state: Arc<RestateParentEndFaultState>,
+    session_id: &str,
+    turn_id: &str,
+) -> lash_core::facade_support::AssembledTurn {
+    let scope = durable_turn_scope(session_id, turn_id);
+    let inner: RestateRuntimeEffectController<'static, Arc<ReplayableRecordingContext>> =
+        RestateRuntimeEffectController::new(context);
+    let scoped_effect_controller = ScopedEffectController::shared(
+        Arc::new(RestateParentEndFaultController { inner, state }),
+        scope,
+    )
+    .expect("shared Restate parent-end fault controller");
+    runtime
+        .stream_turn(
+            replay_test_input(turn_id),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                scoped_effect_controller,
+            ),
+        )
+        .await
+        .expect("run replay test turn with ParentEnd fault")
 }
 
 #[tokio::test]
@@ -7213,6 +7349,149 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
     );
 
     context.start_replay_allowing_journal_extension();
+    let mut parent_end_fault_replay = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy.clone(),
+        initial_state.clone(),
+        host.clone(),
+        Arc::clone(&runtime_store),
+        plugin_factories.clone(),
+        Some(Arc::clone(&process_registry)),
+    )
+    .await;
+    let fault_state = Arc::new(RestateParentEndFaultState::default());
+    fault_state
+        .crash_before_record_remaining
+        .store(1, Ordering::SeqCst);
+    let fault_context = Arc::clone(&context);
+    let task_fault_state = Arc::clone(&fault_state);
+    let fault_result = tokio::spawn(async move {
+        run_restate_replay_turn_with_parent_end_fault(
+            &mut parent_end_fault_replay,
+            fault_context,
+            task_fault_state,
+            session_id,
+            turn_id,
+        )
+        .await
+    })
+    .await;
+    let crashed = fault_result.expect_err("crash after the first Restate ParentEnd side effect");
+    assert!(crashed.is_panic());
+    assert_eq!(
+        fault_state
+            .completed_local_side_effects
+            .load(Ordering::SeqCst),
+        1,
+        "the Restate fault lands after the first side effect and before its outcome record"
+    );
+    assert_eq!(
+        fault_state.outcomes.lock_recover().as_slice(),
+        [],
+        "the crash prevents the first typed Restate outcome from returning"
+    );
+    assert_eq!(
+        fault_state
+            .frames
+            .lock_recover()
+            .iter()
+            .map(|envelope| serde_json::json!({
+                "replay_key": envelope.invocation.replay_key(),
+                "command": &envelope.command,
+            }))
+            .collect::<Vec<_>>(),
+        vec![serde_json::json!({
+            "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d:parent-end:process:parent-end:tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+            "command": {
+                "type": "process",
+                "command": {
+                    "op": "parent_end",
+                    "identity": {
+                        "session_id": "restate-parent-end-replay",
+                        "execution_scope_id": "restate-parent-end-turn-1",
+                        "tool_call_id": "restate-parent-end-call",
+                        "intent_index": 0,
+                        "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d"
+                    },
+                    "process_id": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                    "policy": "cancel",
+                    "reason": "recorded start intent parent ended with cancel policy"
+                }
+            }
+        })]
+    );
+    let after_interval_crash = context.recorded_runtime_effect_envelopes();
+    assert_eq!(
+        after_interval_crash
+            .iter()
+            .filter(|(_, envelope)| matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            ))
+            .count(),
+        0,
+        "the interrupted first ParentEnd has no Restate outcome record"
+    );
+
+    context.start_replay_allowing_journal_extension();
+    let mut between_commands_replay = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy.clone(),
+        initial_state.clone(),
+        host.clone(),
+        Arc::clone(&runtime_store),
+        plugin_factories.clone(),
+        Some(Arc::clone(&process_registry)),
+    )
+    .await;
+    let between_commands_state = Arc::new(RestateParentEndFaultState::default());
+    between_commands_state
+        .crash_after_recorded_parent_end
+        .store(1, Ordering::SeqCst);
+    let between_commands_context = Arc::clone(&context);
+    let task_between_commands_state = Arc::clone(&between_commands_state);
+    let crashed = tokio::spawn(async move {
+        run_restate_replay_turn_with_parent_end_fault(
+            &mut between_commands_replay,
+            between_commands_context,
+            task_between_commands_state,
+            session_id,
+            turn_id,
+        )
+        .await
+    })
+    .await
+    .expect_err("crash after the first Restate outcome and before the second command");
+    assert!(crashed.is_panic());
+    assert_eq!(
+        between_commands_state.outcomes.lock_recover().as_slice(),
+        [lash_core::ToolIntentParentEndOutcome::Cancelled {
+            identity: lash_core::ToolIntentIdentity {
+                session_id: "restate-parent-end-replay".to_string(),
+                execution_scope_id: "restate-parent-end-turn-1".to_string(),
+                tool_call_id: "restate-parent-end-call".to_string(),
+                intent_index: 0,
+                replay_key: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+            },
+            process_id: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+        }]
+    );
+    assert_eq!(
+        context
+            .recorded_runtime_effect_envelopes()
+            .iter()
+            .filter(|(_, envelope)| matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            ))
+            .count(),
+        1,
+        "the between-command crash records only the first ParentEnd outcome"
+    );
+
+    context.start_replay_allowing_journal_extension();
     let mut replay = replay_test_runtime_with_plugins_and_registry(
         session_id,
         policy,
@@ -7243,8 +7522,118 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
         })
         .count();
     assert_eq!(
-        parent_end_frames, 1,
-        "redrive reconstructs and journals exactly one parent-end command"
+        parent_end_frames, 2,
+        "redrive journals both ParentEnd commands"
+    );
+    let literal_parent_end_frames = after
+        .iter()
+        .filter(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            )
+        })
+        .map(|(_, envelope)| {
+            serde_json::json!({
+                "replay_key": envelope.invocation.replay_key(),
+                "command": &envelope.command,
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        literal_parent_end_frames,
+        vec![
+            serde_json::json!({
+                "replay_key": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c:parent-end:process:parent-end:tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c",
+                "command": {
+                    "type": "process",
+                    "command": {
+                        "op": "parent_end",
+                        "identity": {
+                            "session_id": "restate-parent-end-replay",
+                            "execution_scope_id": "restate-parent-end-turn-1",
+                            "tool_call_id": "restate-parent-end-call",
+                            "intent_index": 1,
+                            "replay_key": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c"
+                        },
+                        "process_id": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c",
+                        "policy": "cancel",
+                        "reason": "recorded start intent parent ended with cancel policy"
+                    }
+                }
+            }),
+            serde_json::json!({
+                "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d:parent-end:process:parent-end:tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                "command": {
+                    "type": "process",
+                    "command": {
+                        "op": "parent_end",
+                        "identity": {
+                            "session_id": "restate-parent-end-replay",
+                            "execution_scope_id": "restate-parent-end-turn-1",
+                            "tool_call_id": "restate-parent-end-call",
+                            "intent_index": 0,
+                            "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d"
+                        },
+                        "process_id": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                        "policy": "cancel",
+                        "reason": "recorded start intent parent ended with cancel policy"
+                    }
+                }
+            }),
+        ]
+    );
+    let recorded = context.records.lock_recover().clone();
+    let literal_parent_end_outcomes = after
+        .iter()
+        .filter(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            )
+        })
+        .map(|(name, _)| {
+            let recorded: RecordedRuntimeEffect = serde_json::from_slice(
+                recorded
+                    .get(name)
+                    .expect("recorded Restate ParentEnd bytes"),
+            )
+            .expect("decode recorded Restate ParentEnd");
+            let Ok(RuntimeEffectOutcome::Process {
+                result: ProcessEffectOutcome::ParentEnd { outcome },
+            }) = recorded.outcome
+            else {
+                panic!("Restate ParentEnd frame stored another outcome")
+            };
+            *outcome
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        literal_parent_end_outcomes,
+        vec![
+            lash_core::ToolIntentParentEndOutcome::Cancelled {
+                identity: lash_core::ToolIntentIdentity {
+                    session_id: "restate-parent-end-replay".to_string(),
+                    execution_scope_id: "restate-parent-end-turn-1".to_string(),
+                    tool_call_id: "restate-parent-end-call".to_string(),
+                    intent_index: 1,
+                    replay_key: "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c".to_string(),
+                },
+                process_id: "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c".to_string(),
+            },
+            lash_core::ToolIntentParentEndOutcome::Cancelled {
+                identity: lash_core::ToolIntentIdentity {
+                    session_id: "restate-parent-end-replay".to_string(),
+                    execution_scope_id: "restate-parent-end-turn-1".to_string(),
+                    tool_call_id: "restate-parent-end-call".to_string(),
+                    intent_index: 0,
+                    replay_key: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+                },
+                process_id: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+            },
+        ]
     );
     let processes = process_registry
         .list_processes(&lash_core::ProcessListFilter {
@@ -7253,25 +7642,29 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
         })
         .await
         .expect("list Restate parent-end processes");
-    let child = processes
+    let children = processes
         .iter()
-        .find(|record| {
+        .filter(|record| {
             matches!(
                 record.input.as_ref(),
                 ProcessInput::Engine { kind, payload }
                     if kind == "restate-parent-end-law"
-                        && payload == &serde_json::json!({"source": "restate-parent-end-law"})
+                        && payload.get("source")
+                            == Some(&serde_json::json!("restate-parent-end-law"))
             )
         })
-        .unwrap_or_else(|| panic!("find Restate parent-end child in {processes:?}"));
-    let cancel_count = process_registry
-        .events_after(&child.id, 0)
-        .await
-        .expect("read Restate parent-end child events")
-        .into_iter()
-        .filter(|event| event.event_type == "process.cancel_requested")
-        .count();
-    assert_eq!(cancel_count, 1, "Cancel applies exactly once after redrive");
+        .collect::<Vec<_>>();
+    assert_eq!(children.len(), 2, "find both Restate parent-end children");
+    for child in children {
+        let cancel_count = process_registry
+            .events_after(&child.id, 0)
+            .await
+            .expect("read Restate parent-end child events")
+            .into_iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count();
+        assert_eq!(cancel_count, 1, "Cancel applies exactly once after redrive");
+    }
 }
 
 /// FIG-460: a dropped suspended handler leaves its advisory lease live, but a

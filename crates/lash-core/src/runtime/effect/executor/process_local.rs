@@ -10,8 +10,9 @@ impl ProcessLocalExecution {
             process_work_driver,
             turn_cancellation,
             effect_controller,
+            outcome_observer,
         } = self;
-        match command {
+        let outcome = match command {
             ProcessCommand::Start {
                 registration,
                 observers,
@@ -221,7 +222,11 @@ impl ProcessLocalExecution {
                     wake_delivery: result.wake_delivery.map(Box::new),
                 })
             }
+        };
+        if let (Ok(outcome), Some(observer)) = (&outcome, outcome_observer) {
+            observer(outcome);
         }
+        outcome
     }
 }
 

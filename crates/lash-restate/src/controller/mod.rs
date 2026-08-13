@@ -947,10 +947,12 @@ async fn execute_restate_process_command<'ctx, C>(
 where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
+    let mut local_executor = local_executor;
+    let outcome_observer = local_executor.take_process_outcome_observer();
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
     let turn_cancellation = execution.turn_cancellation;
-    match command {
+    let outcome = match command {
         ProcessCommand::Start {
             registration,
             observers,
@@ -1223,7 +1225,11 @@ where
                 wake_delivery: result.wake_delivery.map(Box::new),
             })
         }
+    };
+    if let (Ok(outcome), Some(observer)) = (&outcome, outcome_observer) {
+        observer(outcome);
     }
+    outcome
 }
 
 async fn signal_ordinal_for_event(

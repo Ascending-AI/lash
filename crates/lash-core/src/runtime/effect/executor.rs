@@ -101,11 +101,17 @@ impl ProcessTurnCancellation {
     }
 }
 
+/// Conformance hook invoked after a process side effect and before durable
+/// outcome recording.
+#[doc(hidden)]
+pub type ProcessOutcomeObserver = Arc<dyn Fn(&ProcessEffectOutcome) + Send + Sync + 'static>;
+
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work_driver: Option<crate::ProcessWorkDriver>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
+    pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
 #[allow(private_interfaces)]
@@ -347,6 +353,29 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Installs a conformance-only observer after a process side effect has
+    /// completed but before a durable controller receives the outcome to
+    /// record. Panicking from the observer models a host crash in that exact
+    /// interval.
+    #[doc(hidden)]
+    pub fn with_process_outcome_observer(mut self, observer: ProcessOutcomeObserver) -> Self {
+        if let RuntimeEffectLocalExecutorState::Process(execution) = &mut self.state {
+            execution.outcome_observer = Some(observer);
+        }
+        self
+    }
+
+    /// Removes and returns the conformance-only process outcome observer.
+    #[doc(hidden)]
+    pub fn take_process_outcome_observer(&mut self) -> Option<ProcessOutcomeObserver> {
+        match &mut self.state {
+            RuntimeEffectLocalExecutorState::Process(execution) => {
+                execution.outcome_observer.take()
+            }
+            _ => None,
+        }
+    }
+
     /// Binds process registry and optional work-driver services for effect-host implementors
     /// executing process effects inline.
     pub fn processes(
@@ -359,6 +388,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 process_work_driver,
                 turn_cancellation: None,
                 effect_controller: None,
+                outcome_observer: None,
             }),
             replay_trace: None,
         }
