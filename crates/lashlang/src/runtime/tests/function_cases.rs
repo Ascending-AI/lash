@@ -28,6 +28,15 @@ fn function(name: Option<&str>, params: &[&str], captures: &[&str], body: Expr) 
     }))
 }
 
+fn format_call(template: &str, args: Vec<Expr>) -> Expr {
+    let mut all_args = vec![Expr::String(template.into())];
+    all_args.extend(args);
+    Expr::BuiltinCall {
+        name: "format".into(),
+        args: all_args,
+    }
+}
+
 fn factorial_program(n: f64) -> Program {
     let recursive = call(
         variable("factorial"),
@@ -534,6 +543,136 @@ async fn caller_and_callee_iterators_round_trip_and_corrupt_frames_fail_closed()
     assert!(matches!(
         Vm::resume_from(zero_step, &program, &host),
         Err(ContinuationError::FrameZeroRangeStep { .. })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn vm_into_globals_omits_top_level_and_nested_closures_without_panicking() {
+    let program = compile_program_internal(&Program::block(vec![
+        assign("ordinary", Expr::Number(7.0)),
+        assign("closure", function(None, &[], &[], Expr::Null)),
+        assign("nested", Expr::List(vec![variable("closure")])),
+    ]));
+    let host = Host;
+    let mut state = State::new();
+    let mut vm = Vm::from_state(&program, &mut state, &host).expect("install fresh state");
+    vm.run_for_mode().await.expect("populate globals");
+    let globals = vm.into_globals().expect("materialize ordinary globals");
+    assert_eq!(globals.get("ordinary"), Some(&Value::Number(7.0)));
+    assert_eq!(globals.get("closure"), None);
+    assert_eq!(globals.get("nested"), None);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn compiled_format_uses_template_arity_for_scalar_heap_and_closure_arguments() {
+    let scalar_program = compile_program_internal(&Program::block(vec![
+        assign(
+            "render",
+            function(
+                None,
+                &["left", "right"],
+                &[],
+                format_call("{}:{}", vec![variable("left"), variable("right")]),
+            ),
+        ),
+        Expr::Finish(Box::new(call(
+            variable("render"),
+            vec![Expr::Number(1.0), Expr::Number(2.0)],
+        ))),
+    ]));
+    assert!(scalar_program.chunk.code.iter().any(|instruction| matches!(
+        instruction,
+        Instruction::Intrinsic(IntrinsicOp::FormatCompiled(index))
+            if *index < scalar_program.chunk.format_templates[*index].argc
+    )));
+    assert_eq!(
+        execute_compiled(&scalar_program, &mut State::new(), &Host)
+            .await
+            .expect("format scalar arguments"),
+        ExecutionOutcome::Finished(Value::String("1:2".into()))
+    );
+
+    let heap_program = compile_program_internal(&Program::block(vec![
+        assign(
+            "filler",
+            function(
+                None,
+                &["value"],
+                &[],
+                format_call("{}", vec![Expr::List(vec![variable("value")])]),
+            ),
+        ),
+        assign(
+            "render",
+            function(
+                None,
+                &["value"],
+                &[],
+                format_call("{}", vec![Expr::List(vec![variable("value")])]),
+            ),
+        ),
+        Expr::Finish(Box::new(call(
+            variable("render"),
+            vec![Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])],
+        ))),
+    ]));
+    assert!(heap_program.chunk.code.iter().any(|instruction| matches!(
+        instruction,
+        Instruction::Intrinsic(IntrinsicOp::FormatCompiled(index))
+            if *index == heap_program.chunk.format_templates[*index].argc
+    )));
+    assert_eq!(
+        execute_compiled(&heap_program, &mut State::new(), &Host)
+            .await
+            .expect("format heap argument"),
+        ExecutionOutcome::Finished(Value::String("[[1,2]]".into()))
+    );
+
+    let closure_program = compile_program_internal(&Program::block(vec![
+        assign(
+            "filler_one",
+            function(
+                None,
+                &["value"],
+                &[],
+                format_call("{}", vec![Expr::List(vec![variable("value")])]),
+            ),
+        ),
+        assign(
+            "filler_two",
+            function(
+                None,
+                &["value"],
+                &[],
+                format_call("{}", vec![variable("value")]),
+            ),
+        ),
+        assign(
+            "render",
+            function(
+                None,
+                &["value"],
+                &[],
+                format_call("{}", vec![Expr::List(vec![variable("value")])]),
+            ),
+        ),
+        assign("value", function(None, &[], &[], Expr::Null)),
+        Expr::Finish(Box::new(call(variable("render"), vec![variable("value")]))),
+    ]));
+    assert!(
+        closure_program
+            .chunk
+            .code
+            .iter()
+            .any(|instruction| matches!(
+                instruction,
+                Instruction::Intrinsic(IntrinsicOp::FormatCompiled(index))
+                    if *index > closure_program.chunk.format_templates[*index].argc
+            ))
+    );
+    assert!(matches!(
+        execute_compiled(&closure_program, &mut State::new(), &Host).await,
+        Err(RuntimeError::FunctionValueAtHostBoundary)
     ));
 }
 

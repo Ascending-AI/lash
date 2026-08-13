@@ -448,36 +448,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    pub(super) fn materialize_vm_state(&mut self) -> Result<(), RuntimeError> {
-        for value in &mut self.stack {
-            *value = self.heap.export_for_instruction(value)?;
-        }
-        if let Some(value) = &mut self.last_value {
-            *value = self.heap.export_for_instruction(value)?;
-        }
-        for value in self.slots.values.iter_mut().flatten() {
-            *value = self.heap.export_for_instruction(value)?;
-        }
-        for entry in &mut self.slots.extras.entries {
-            entry.value = self.heap.export_for_instruction(&entry.value)?;
-        }
-        for iterator in &mut self.iter_stack {
-            if let super::IterCursor::List { values, .. } = &mut iterator.cursor {
-                let materialized = values
-                    .iter()
-                    .map(|value| self.heap.export_for_instruction(value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                *values = materialized.into();
-            }
-            if let Some(value) = &mut iterator.restore.previous {
-                *value = self.heap.export_for_instruction(value)?;
-            }
-            iterator.heapified = false;
-        }
-        self.extras_heapified = false;
-        Ok(())
-    }
-
     /// Imports every inline compound left in VM state into the heap.
     ///
     /// This runs after each instruction, so its cost has to be proportional to

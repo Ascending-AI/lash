@@ -1002,7 +1002,7 @@ fn format_template_snapshot(chunk: &Chunk, index: usize) -> String {
 }
 
 fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
-    let argc = op.argc();
+    let argc = op.fixed_argc().unwrap_or(0);
     match op {
         IntrinsicOp::Len => format!("intrinsic len argc={argc}"),
         IntrinsicOp::Empty => format!("intrinsic empty argc={argc}"),

@@ -1,5 +1,8 @@
 impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Builds a VM from authored globals for an externally driven execution.
+    ///
+    /// Restored closure metadata is checked against `program` before the state
+    /// is removed from its owner.
     pub fn from_state(
         program: &'a CompiledProgram,
         state: &mut State,

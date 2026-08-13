@@ -432,8 +432,8 @@ impl Instruction {
 }
 
 impl IntrinsicOp {
-    pub(crate) fn argc(self) -> usize {
-        match self {
+    pub(crate) fn fixed_argc(self) -> Option<usize> {
+        Some(match self {
             IntrinsicOp::Len
             | IntrinsicOp::Empty
             | IntrinsicOp::Keys
@@ -469,11 +469,11 @@ impl IntrinsicOp {
             | IntrinsicOp::Format(argc)
             | IntrinsicOp::Range(argc)
             | IntrinsicOp::InvalidArity { argc, .. }
-            | IntrinsicOp::Unknown { argc, .. }
-            | IntrinsicOp::FormatCompiled(argc) => argc,
-            IntrinsicOp::FormatCompiledSlotNumber { .. }
-            | IntrinsicOp::FormatCompiledSlotNumberBinary { .. } => 0,
-        }
+            | IntrinsicOp::Unknown { argc, .. } => argc,
+            IntrinsicOp::FormatCompiled(_)
+            | IntrinsicOp::FormatCompiledSlotNumber { .. }
+            | IntrinsicOp::FormatCompiledSlotNumberBinary { .. } => return None,
+        })
     }
 
     pub(crate) fn profile_tag(self) -> BuiltinProfileTag {

@@ -83,6 +83,9 @@ pub(super) fn instruction_heap_plan(
     use Instruction as I;
     use StackExport::Top;
 
+    // Keep this match exhaustive. Compile-time failure is the guard that makes
+    // every new opcode author declare its heap boundary explicitly; a catch-all
+    // would silently restore the old conservative default and hide omissions.
     match instruction {
         // Isolation and in-place container mutation consume heap references as
         // they are: exporting them would be the copy these opcodes exist to
@@ -95,7 +98,10 @@ pub(super) fn instruction_heap_plan(
         | I::MakeClosure { .. }
         | I::Call { .. }
         | I::Map
-        | I::Return => InstructionHeapPlan::heap_native(),
+        | I::Return
+        | I::BuildTuple(_)
+        | I::BuildList(_)
+        | I::BuildRecord(_) => InstructionHeapPlan::heap_native(),
         I::StoreName(_) => InstructionHeapPlan::heap_native(),
         // These export the operands they need through the heap themselves.
         I::AddAssignIndexNumber { .. } | I::AddAssignIndexSlotNumber { .. } => {
@@ -133,8 +139,6 @@ pub(super) fn instruction_heap_plan(
 
         // Opcodes whose operand count is carried in the instruction, or in the
         // table the instruction points at.
-        I::BuildTuple(len) | I::BuildList(len) => InstructionHeapPlan::stack(Top(len)),
-        I::BuildRecord(keys) => InstructionHeapPlan::stack(Top(chunk.key_lists[keys].len())),
         I::BeginRangeIter { argc, .. } => InstructionHeapPlan::stack(Top(argc)),
         I::ResourceCall { argc, .. } | I::ResourceCallUnwrap { argc, .. } => {
             InstructionHeapPlan::stack(Top(argc + 1))
@@ -196,10 +200,16 @@ pub(super) fn instruction_heap_plan(
         }
         I::AddAssignSlot { .. } => InstructionHeapPlan::heap_native(),
 
+        I::Intrinsic(IntrinsicOp::FormatCompiled(template)) => {
+            InstructionHeapPlan::stack(Top(chunk.format_templates[template].argc))
+        }
+
         // Every remaining intrinsic reads exactly its argument count from the
         // stack — that same count is what dispatch uses to find them — and
         // touches no slot. The three that do carry a slot are declared above.
-        I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op.argc())),
+        I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op
+            .fixed_argc()
+            .expect("context-dependent intrinsics have explicit heap plans"))),
     }
 }
 

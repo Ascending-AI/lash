@@ -536,6 +536,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let items = match items {
                     Value::List(values) | Value::Tuple(values) => values
                         .iter()
+                        // This is the one isolation boundary: each callback
+                        // borrows its already-independent item.
                         .map(|value| self.heap.isolate_value(value))
                         .collect::<Result<Vec<_>, _>>()?,
                     value => {
@@ -548,7 +550,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 if items.is_empty() {
                     self.stack.push(Value::List(Vec::new().into()));
                 } else {
-                    let first = self.heap.isolate_value(&items[0])?;
+                    let first = items[0].clone();
                     let callback = MapCallback {
                         function: function.clone(),
                         items,
@@ -1425,7 +1427,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             _ => {
-                let argc = op.argc();
+                let argc = op
+                    .fixed_argc()
+                    .expect("context-dependent intrinsics dispatch above");
                 let start = self
                     .stack
                     .len()
@@ -1520,10 +1524,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
     }
 
-    pub fn into_globals(mut self) -> Record {
-        self.materialize_vm_state()
-            .expect("completed lashlang VM state must export to tree values");
-        self.slots.into_globals(&self.chunk.slot_names)
+    /// Materializes host-visible globals, omitting any entire binding that
+    /// contains a function value at any depth.
+    pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
+        let runtime_globals = self.slots.into_globals(&self.chunk.slot_names);
+        super::state::materialize_runtime_globals(&runtime_globals, &mut self.heap)
     }
 
     pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {

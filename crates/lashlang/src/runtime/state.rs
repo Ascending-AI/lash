@@ -212,24 +212,31 @@ impl State {
         runtime_globals: Record,
         mut heap: Heap,
     ) -> Result<(), RuntimeError> {
-        let mut globals = record_with_capacity(runtime_globals.len());
-        for entry in runtime_globals.entries.iter() {
-            match heap.export_for_instruction(&entry.value) {
-                Ok(value) => {
-                    globals.insert_symbolized(entry.symbol, entry.name.clone(), value);
-                }
-                // Function values remain VM-private heap objects. They persist
-                // in `runtime_globals` and snapshots, but are deliberately
-                // absent from the host-facing materialized globals view.
-                Err(RuntimeError::FunctionValueAtHostBoundary) => {}
-                Err(error) => return Err(error),
-            }
-        }
+        let globals = materialize_runtime_globals(&runtime_globals, &mut heap)?;
         self.globals = globals;
         self.runtime_globals = runtime_globals;
         self.heap = heap;
         Ok(())
     }
+}
+
+pub(super) fn materialize_runtime_globals(
+    runtime_globals: &Record,
+    heap: &mut Heap,
+) -> Result<Record, RuntimeError> {
+    let mut globals = record_with_capacity(runtime_globals.len());
+    for entry in runtime_globals.entries.iter() {
+        match heap.export_for_instruction(&entry.value) {
+            Ok(value) => {
+                globals.insert_symbolized(entry.symbol, entry.name.clone(), value);
+            }
+            // Function values remain VM-private heap objects. A closure at any
+            // depth omits the whole global rather than leaking a partial tree.
+            Err(RuntimeError::FunctionValueAtHostBoundary) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(globals)
 }
 
 #[derive(Clone, Debug, Default)]

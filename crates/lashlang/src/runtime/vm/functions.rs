@@ -121,7 +121,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 callback.results.push(self.heap.isolate_value(&result)?);
                 if let Some(item) = callback.items.get(callback.next_index).cloned() {
                     callback.next_index += 1;
-                    let item = self.heap.isolate_value(&item)?;
                     let function = callback.function.clone();
                     // Each builtin-initiated frame push has the same unit cost
                     // as an explicit `Call` opcode.
