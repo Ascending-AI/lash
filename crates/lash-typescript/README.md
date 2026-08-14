@@ -148,12 +148,16 @@ one unit on the `=`:
 | statement block `{ … }` | 1 | 27 |
 | `if (…) { … }` / `while (…) { … }` block | 2 (keyword + brace) | 13 |
 | `else if` branch | 1 | 25 |
-| label `a:` | 1 | 27 |
 | `as` / `satisfies` cast, type operator (`keyof`, `readonly`, …) | 1 | 26 |
 | flat statement sequence | 0 | unbounded |
 
 A 26-interpolation template and a 26-link call chain are the practical ceilings
 worth knowing; both reject at 27 with `TS_SOURCE_NESTING_LIMIT`.
+
+Forms the dialect excludes are charged too, and reject on their own terms once
+the budget lets them through — a labelled statement is `TS_LABEL_UNSUPPORTED`,
+never an accepted construct. They are charged because the budget protects the
+parser, which reads them, not the dialect, which refuses them.
 
 A template hole costs a unit for the same reason a `+` term does: a template
 lowers into a left-nested concatenation chain, so its holes deepen the tree
