@@ -158,9 +158,9 @@ These are the only intentional deviations for the accepted v1 surface. They are 
 6. Lone UTF-16 surrogates are not representable by the v1 UTF-8 value model. Literals reject statically as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; two further shapes produce one only at runtime and reject there as `TS_LONE_SURROGATE_UNSUPPORTED` — splitting a string containing an astral character into units, and indexing into one. Both are catchable TypeScript exceptions.
 7. Negative and other non-index array writes reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; non-negative out-of-range writes retain ECMAScript hole-extension behavior.
 8. Identifiers starting with `__typescript_` are reserved for the lowerer's generated bindings and reject as `TS_RESERVED_IDENTIFIER`.
+9. `console.log` is host-defined rather than ECMA-262 and prints ECMA `ToString` of each argument, so `console.log({a: 1})` prints `[object Object]` where Node's inspector prints `{ a: 1 }`.
 10. A block-scoped binding that shadows an outer name of the same spelling is lowered to a generated slot, which is the one place a `__typescript_` name can appear in persisted globals. It is dead by any turn boundary and the dialect filters the reserved prefix out of the bound-variables prompt, so it is never rendered.
 11. Mutually recursive function declarations reject as `TS_MUTUAL_RECURSION_UNSUPPORTED` with the cycle named. This is item 3's deferral seen from the front end: the only v1 lowering for the shape builds a durable-rooted heap cycle, so the shape fails closed at compile time instead of at the durability boundary.
-9. `console.log` is host-defined rather than ECMA-262 and prints ECMA `ToString` of each argument, so `console.log({a: 1})` prints `[object Object]` where Node's inspector prints `{ a: 1 }`.
 
 No reviewed semantic divergence was moved into this register.
 

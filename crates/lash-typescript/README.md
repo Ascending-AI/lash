@@ -92,6 +92,13 @@ language semantics:
 - `console.log` is host-defined rather than ECMA-262, and prints ECMA
   `ToString` of each argument. Node's inspector formatting is not reproduced:
   `console.log({a: 1})` prints `[object Object]` where Node prints `{ a: 1 }`.
+- A block-scoped binding whose name shadows one already in scope is lowered to
+  a generated slot, so that the inner binding cannot overwrite the outer one.
+  At root that slot is a runtime global, which makes it the one place a
+  `__typescript_` name appears in persisted session state. It is dead by any
+  turn boundary and the dialect filters the reserved prefix out of the
+  bound-variables prompt, so it is never shown; a block binding that shadows
+  nothing keeps the name its author wrote.
 
 No other semantic deviation is intentionally accepted for an operation in the
 surface above.
@@ -115,12 +122,18 @@ still open (`if (1)` on its own line), when the previous token opens an operand
 leading `.` or `+`), because none of those is a statement end. A trailing `//`
 comment does not suppress the release.
 
-The families the budget charges are the recursive productions of the accepted
-grammar — prefix, infix, postfix, delimiter, statement form. `src/adapter/
-nesting.rs` argues why that list is exhaustive and `tests/depth_guard.rs` turns
-the argument into a generative regression: every family, and mixed combinations
-of them, repeated to 100,000 in a child process on the 2 MiB stack contract,
-must return `TS_SOURCE_NESTING_LIMIT` and exit cleanly.
+The families the budget charges are the recursive productions of **the grammar
+SWC parses** — all of TypeScript, not the subset this dialect accepts, because
+the preflight runs before the parser and a production rejected later still
+recurses in it. They are prefix, infix, postfix, delimiter and statement form,
+the last including labelled statements. `src/adapter/nesting.rs` argues why the
+list is exhaustive; `tests/depth_guard.rs` turns the argument into a generative
+regression — every family and mixed combinations of them, repeated to 100,000
+in a child process on the 2 MiB stack contract, inline and one per line, must
+return `TS_SOURCE_NESTING_LIMIT` and exit cleanly. `tests/grammar_coverage.rs`
+cross-checks the list mechanically: an exhaustive match over SWC's own AST node
+kinds that stops compiling when SWC gains a variant, and a deterministic fuzzer
+whose sources are parsed inside a child process where an abort fails the test.
 
 Measured ceilings inside a single `const x = …;` statement, which itself spends
 one unit on the `=`:
@@ -135,6 +148,8 @@ one unit on the `=`:
 | statement block `{ … }` | 1 | 27 |
 | `if (…) { … }` / `while (…) { … }` block | 2 (keyword + brace) | 13 |
 | `else if` branch | 1 | 25 |
+| label `a:` | 1 | 27 |
+| `as` / `satisfies` cast, type operator (`keyof`, `readonly`, …) | 1 | 26 |
 | flat statement sequence | 0 | unbounded |
 
 A 26-interpolation template and a 26-link call chain are the practical ceilings
