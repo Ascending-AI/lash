@@ -135,6 +135,16 @@ cross-checks the list mechanically: an exhaustive match over SWC's own AST node
 kinds that stops compiling when SWC gains a variant, and a deterministic fuzzer
 whose sources are parsed inside a child process where an abort fails the test.
 
+The budget depends on a second property besides charging the right productions:
+the preflight's lexer has to agree with SWC's about where each token ends, since
+a charge gated on "the previous token was an identifier" is disarmed by an
+identifier that was cut in half. Identifier scanning therefore treats every byte
+at or above `0x80` as an identifier character, walks `\uXXXX` and `\u{…}`
+identifier escapes, and stops at U+2028/U+2029, which end a line here as they do
+in ECMAScript. That classification over-approximates `ID_Continue` deliberately;
+`src/adapter/nesting.rs` argues why over-approximating is the safe direction,
+and both standing guards carry lexical-fidelity cases.
+
 Measured ceilings inside a single `const x = …;` statement, which itself spends
 one unit on the `=`:
 
