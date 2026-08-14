@@ -26,6 +26,15 @@ repos:
         files: '\.rs$'
         pass_filenames: false
 
+      # Mirrors CI Lint "Lint GitHub workflows" — GitHub rejects schema-invalid
+      # workflow files that plain YAML parsing accepts.
+      - id: actionlint
+        name: actionlint
+        language: system
+        entry: actionlint -no-color
+        files: '^\.github/workflows/.*\.ya?ml$'
+        pass_filenames: true
+
       # Mirrors CI Lint "Check production file-size budget".
       - id: file-size-budget
         name: production file-size budget
