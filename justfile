@@ -284,9 +284,13 @@ runtime-persistence-soak cases='256':
 cross-backend-store-soak cases='64' seed='852':
   LASH_REQUIRE_POSTGRES=1 LASH_CROSS_BACKEND_CASES="{{cases}}" LASH_CROSS_BACKEND_SEED="{{seed}}" cargo test -p lash-sim --locked --test cross_backend_store_differential generated_cross_backend_surface_differential_agrees -- --nocapture
 
+# The Lashlang iteration counts are part of the gate, not a speed knob: the
+# cache-mode budgets in scripts/perf_guard_budgets.json are per-iteration costs
+# of a fixed setup, so they only hold at the count they were calibrated at.
+# Keep both counts equal to the ones perf.yml and release.yml run.
 perf-guard:
   python3 "{{repo}}/scripts/profile_runtime.py" --profile quick --release --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/runtime-local.json"
-  python3 "{{repo}}/scripts/profile_lashlang.py" --iterations 500 --profile-iterations 500 --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/lashlang-local.json"
+  python3 "{{repo}}/scripts/profile_lashlang.py" --iterations 2500 --profile-iterations 2500 --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/lashlang-local.json"
 
 release-version-test:
   python3 "{{repo}}/scripts/test_release_version.py"
