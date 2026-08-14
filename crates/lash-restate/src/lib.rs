@@ -96,8 +96,8 @@ pub use durable_wait::{
 };
 pub use effect_host::RestateEffectHost;
 pub use ingress::{
-    RestateAdminClient, RestateConnection, RestateConnectionConfig, RestateHttpError,
-    RestateIngressClient, RestateInvocationId, RestateInvocationStatus,
+    DeploymentOpenInvocations, RestateAdminClient, RestateConnection, RestateConnectionConfig,
+    RestateHttpError, RestateIngressClient, RestateInvocationId, RestateInvocationStatus,
 };
 pub use process::{
     LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,

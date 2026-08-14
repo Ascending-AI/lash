@@ -587,8 +587,18 @@ impl RestateAdminClient {
             .collect::<Vec<_>>()
             .join(" OR ");
         self.query_json(&format!(
-            "SELECT id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure FROM sys_invocation WHERE status IN ('pending', 'ready', 'running', 'backing-off', 'suspended') AND ({service_filter}) ORDER BY modified_at DESC"
+            "SELECT id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure, pinned_deployment_id FROM sys_invocation WHERE status IN ('pending', 'ready', 'running', 'backing-off', 'suspended') AND ({service_filter}) ORDER BY modified_at DESC"
         ))
+        .await
+    }
+
+    /// Count open Restate invocations grouped by their pinned deployment.
+    pub async fn open_invocations_by_deployment(
+        &self,
+    ) -> Result<Vec<DeploymentOpenInvocations>, RestateHttpError> {
+        self.query_json(
+            "SELECT pinned_deployment_id, COUNT(1) as open_count FROM sys_invocation WHERE status IN ('pending', 'ready', 'running', 'backing-off', 'suspended') GROUP BY pinned_deployment_id",
+        )
         .await
     }
 
@@ -664,6 +674,8 @@ pub struct RestateInvocationStatus {
     pub target: String,
     pub target_service_name: String,
     #[serde(default)]
+    pub pinned_deployment_id: Option<String>,
+    #[serde(default)]
     pub target_service_key: Option<String>,
     pub target_handler_name: String,
     pub status: String,
@@ -687,6 +699,69 @@ impl RestateInvocationStatus {
 
     pub fn completed_successfully(&self) -> bool {
         self.status == "completed" && self.completion_result.as_deref() == Some("success")
+    }
+}
+
+/// Number of open Restate invocations associated with one deployment.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct DeploymentOpenInvocations {
+    #[serde(default)]
+    pub pinned_deployment_id: Option<String>,
+    pub open_count: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DeploymentOpenInvocations, RestateInvocationStatus};
+
+    #[test]
+    fn invocation_status_deserializes_captured_rows_with_and_without_deployment() {
+        let pinned: RestateInvocationStatus = serde_json::from_str(
+            r#"{
+                "id": "invocation-1",
+                "target": "service/handler",
+                "target_service_name": "service",
+                "pinned_deployment_id": "deployment-a",
+                "target_service_key": null,
+                "target_handler_name": "handler",
+                "status": "running",
+                "completion_result": null,
+                "completion_failure": null
+            }"#,
+        )
+        .expect("pinned invocation row should deserialize");
+        assert_eq!(pinned.pinned_deployment_id.as_deref(), Some("deployment-a"));
+
+        let legacy: RestateInvocationStatus = serde_json::from_str(
+            r#"{
+                "id": "invocation-2",
+                "target": "service/handler",
+                "target_service_name": "service",
+                "target_handler_name": "handler",
+                "status": "pending"
+            }"#,
+        )
+        .expect("row without a deployment column should deserialize");
+        assert_eq!(legacy.pinned_deployment_id, None);
+    }
+
+    #[test]
+    fn deployment_counts_deserialize_unpinned_rows_without_filtering_them() {
+        let rows: Vec<DeploymentOpenInvocations> = serde_json::from_str(
+            r#"[
+                {"pinned_deployment_id": "deployment-a", "open_count": 2},
+                {"pinned_deployment_id": null, "open_count": 1}
+            ]"#,
+        )
+        .expect("deployment count rows should deserialize");
+
+        assert_eq!(
+            rows[0].pinned_deployment_id.as_deref(),
+            Some("deployment-a")
+        );
+        assert_eq!(rows[0].open_count, 2);
+        assert_eq!(rows[1].pinned_deployment_id, None);
+        assert_eq!(rows[1].open_count, 1);
     }
 }
 fn format_restate_url(base_url: &str, path: &str) -> String {
