@@ -274,3 +274,44 @@ fn generated_binding_namespace_is_reserved() {
         Value::Number(7.0)
     );
 }
+
+#[test]
+fn named_function_expressions_bind_their_own_name() {
+    // ECMA binds a function expression's name inside its own body, which is how
+    // the classic self-recursive function expression works.
+    assert_eq!(
+        finished(
+            "const g = function self(n: number): number { if (n <= 0) { return 0; } return self(n - 1); }; finish(g(4));"
+        ),
+        Value::Number(0.0)
+    );
+    assert_eq!(
+        finished(
+            "const fact = function inner(n: number): number { if (n <= 1) { return 1; } return n * inner(n - 1); }; finish(fact(5));"
+        ),
+        Value::Number(120.0)
+    );
+    // The name is scoped to the body and does not escape into the enclosing
+    // scope, and it does not shadow an enclosing binding of the same name.
+    assert_eq!(
+        lash_typescript::compile(
+            "const g = function self(n: number): number { return n; }; finish(self(1));"
+        )
+        .expect_err("the expression name is not visible outside its body")
+        .code,
+        lash_typescript::DiagnosticCode::UnknownBinding
+    );
+    assert_eq!(
+        finished(
+            "const outer = 3; const g = function outer2(n: number): number { return n + outer; }; finish(g(1));"
+        ),
+        Value::Number(4.0)
+    );
+    // The generated namespace is reserved on this path too.
+    assert_eq!(
+        lash_typescript::compile("const g = function __typescript_h(): number { return 1; };")
+            .expect_err("a generated-namespace expression name must reject")
+            .code,
+        lash_typescript::DiagnosticCode::ReservedIdentifier
+    );
+}
