@@ -957,7 +957,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         "noIdToolCompleted": no_id_tool_completed_event,
         "noIdCodeCompleted": no_id_code_completed_event,
     });
-    let evidence_scenarios = provider_execution_evidence_scenarios().await;
+    let evidence_scenarios = Box::pin(provider_execution_evidence_scenarios()).await;
 
     // RLM's printed-image projection can commit more than one stored image
     // part on a single message. Feed that production projection to the browser
