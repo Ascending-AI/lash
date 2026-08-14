@@ -101,27 +101,44 @@ surface above.
 The 28 is a budget in units, not a count of visible levels: it is cumulative
 across delimiters *and* operators, so an apparent level often costs two units.
 Every open delimiter costs one unit until it closes; every nested recursive
-operator or statement form costs one unit until its statement ends. A statement
-boundary — `;`, `,`, the `}` that closes a statement block, or a newline in
-automatic-semicolon-insertion position — releases the operator run it
+operator or statement form costs one unit until its statement ends; and every
+postfix tail — a call, a subscript, a member step, a tagged template — costs one
+unit that survives the tail closing, because the tail leaves the tree one level
+deeper than it found it.
+
+A statement boundary — `;`, `,`, the `}` that closes a statement block, or a
+newline in automatic-semicolon-insertion position — releases the operator run it
 terminates, so a flat sequence of statements stays one level deep however long
 it runs, punctuated or not. A newline releases nothing while a statement form is
-still open (`if (1)` on its own line) or when the next token continues the
-expression (a leading `.` or `+`), because neither is a statement end.
+still open (`if (1)` on its own line), when the previous token opens an operand
+(`typeof` on its own line), or when the next token continues the expression (a
+leading `.` or `+`), because none of those is a statement end. A trailing `//`
+comment does not suppress the release.
+
+The families the budget charges are the recursive productions of the accepted
+grammar — prefix, infix, postfix, delimiter, statement form. `src/adapter/
+nesting.rs` argues why that list is exhaustive and `tests/depth_guard.rs` turns
+the argument into a generative regression: every family, and mixed combinations
+of them, repeated to 100,000 in a child process on the 2 MiB stack contract,
+must return `TS_SOURCE_NESTING_LIMIT` and exit cleanly.
 
 Measured ceilings inside a single `const x = …;` statement, which itself spends
 one unit on the `=`:
 
 | Form | Cost per level | Max nesting |
 | --- | ---: | ---: |
-| grouping `(…)`, array `[…]`, object `{a: …}`, call `f(…)` | 1 | 26 |
+| grouping `(…)`, array `[…]`, object `{a: …}`, nested call `f(f(…))` | 1 | 26 |
 | prefix operator (`!`, `typeof`, unary `-`) | 1 | 26 |
 | member step `.a`, ternary `?:`, template hole `${…}` | 1 | 26 |
+| postfix chain link (`f(1)(1)…`, `a[0][0]…`) | 1 | 26 |
 | binary chain term (`1 + 1 + …`) | 1 | 27 |
 | statement block `{ … }` | 1 | 27 |
 | `if (…) { … }` / `while (…) { … }` block | 2 (keyword + brace) | 13 |
 | `else if` branch | 1 | 25 |
 | flat statement sequence | 0 | unbounded |
+
+A 26-interpolation template and a 26-link call chain are the practical ceilings
+worth knowing; both reject at 27 with `TS_SOURCE_NESTING_LIMIT`.
 
 A template hole costs a unit for the same reason a `+` term does: a template
 lowers into a left-nested concatenation chain, so its holes deepen the tree
