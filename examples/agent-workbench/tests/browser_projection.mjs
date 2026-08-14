@@ -26,6 +26,20 @@ assert.ok(
   multiAttachmentMessage,
   "LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE must come from the Rust projection gate",
 );
+const turnEvents = JSON.parse(
+  process.env.LASH_WORKBENCH_TURN_EVENTS ?? "null",
+);
+assert.ok(
+  turnEvents,
+  "LASH_WORKBENCH_TURN_EVENTS must come from the Rust projection gate",
+);
+const durableToolTranscript = JSON.parse(
+  process.env.LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT ?? "null",
+);
+assert.ok(
+  durableToolTranscript,
+  "LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT must come from a committed Rust trajectory",
+);
 
 function expectedSubscriptionIdDetail(value) {
   const prefix = "trigger-subscription:v2:sha256:";
@@ -60,6 +74,1102 @@ function markedSource(begin, end) {
   assert.ok(block, `production ${begin} block is missing`);
   return block;
 }
+
+function dispatchTurnEvent(event) {
+  const calls = [];
+  const dispatchContext = {
+    __LASH_WORKBENCH_TURN_EVENT_HOOK__(hooked) {
+      calls.push(["hook", hooked]);
+    },
+    renderStreamingUsage(usage, turnId) {
+      calls.push(["usage", usage, turnId]);
+    },
+    renderError(message, options) {
+      calls.push(["error", message, options]);
+    },
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TURN_EVENT_DISPATCH", "WORKBENCH_TURN_EVENT_DISPATCH")}
+     handleTurnEvent(${JSON.stringify(event)}, "turn-dispatch-test");`,
+    dispatchContext,
+  );
+  return JSON.parse(JSON.stringify(calls));
+}
+
+test("streaming usage dispatches the cumulative provider counters", () => {
+  assert.deepEqual(dispatchTurnEvent(turnEvents.usage), [
+    ["hook", turnEvents.usage],
+    ["usage", turnEvents.usage.cumulative, "turn-dispatch-test"],
+  ]);
+});
+
+test("ordinary provider errors do not dispatch retryable client errors", () => {
+  assert.deepEqual(dispatchTurnEvent(turnEvents.error), [
+    ["hook", turnEvents.error],
+  ]);
+});
+
+test("provider failure settles to the same durable row for sender and observer", () => {
+  function projectPage(lastRequest) {
+    function element(tagName) {
+      return {
+        tagName,
+        className: "",
+        textContent: "",
+        children: [],
+        parentNode: null,
+        append(...children) {
+          for (const child of children) {
+            if (typeof child !== "string") this.appendChild(child);
+          }
+        },
+        appendChild(child) {
+          this.children.push(child);
+          child.parentNode = this;
+          return child;
+        },
+        closest() { return null; },
+      };
+    }
+
+    const timeline = element("timeline");
+    const page = {
+      Set,
+      document: { createElement: element },
+      timeline,
+      projectionState: createWorkbenchProjectionState(),
+      renderedProductEvents: new Set(),
+      renderedMessages: new Set(),
+      lastRequest,
+      assistantDraft: null,
+      assistantDraftTurnId: null,
+      assistantDraftText: "",
+      assistantDraftChunks: [],
+      reasoning: null,
+      reasoningChunks: [],
+      pendingCodeBlock: null,
+      pendingTools: [],
+      __LASH_WORKBENCH_TURN_EVENT_HOOK__() {},
+      clearEmpty() {},
+      clearRetryStatus() {},
+      markStreamingUsageSettled() {},
+      appendTool() {},
+      roleLabel(role) { return role; },
+      setMessageBody(body, _role, text) { body.textContent = text; },
+      renderMessageAttachments() {},
+      scrollToEnd() {},
+      renderIngressReceipt() {},
+      setBusy() {},
+      refreshUsage() {},
+    };
+    vm.runInNewContext(
+      `${markedSource("WORKBENCH_MESSAGE_RENDER", "WORKBENCH_MESSAGE_RENDER")}
+       ${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
+       ${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+       ${markedSource("WORKBENCH_TURN_EVENT_DISPATCH", "WORKBENCH_TURN_EVENT_DISPATCH")}
+       ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
+       handleTurnEvent(${JSON.stringify(turnEvents.error)}, "provider-failure-turn");
+       this.transientCount = timeline.children.length;
+       applyProductEvent({
+         event_id: "provider-failure-message",
+         sequence: 1,
+         type: "message",
+         message: {
+           id: "provider-failure-message",
+           role: "event",
+           text: "turn could not be completed",
+           attachments: []
+         }
+       });
+       applyProductEvent({
+         event_id: "provider-failure-done",
+         sequence: 2,
+         type: "done",
+         turn_id: "provider-failure-turn",
+         outcome: "completed"
+       });`,
+      page,
+    );
+    return {
+      transientCount: page.transientCount,
+      rows: timeline.children.map((row) => ({
+        className: row.className,
+        text: row.children[1].textContent,
+        controls: row.children[1].children.length,
+      })),
+    };
+  }
+
+  const sender = projectPage({ url: "/api/turn", payload: { text: "sent here" } });
+  const observer = projectPage(null);
+  assert.deepEqual(sender, {
+    transientCount: 0,
+    rows: [{
+      className: "message event",
+      text: "turn could not be completed",
+      controls: 0,
+    }],
+  });
+  assert.deepEqual(observer, sender);
+});
+
+test("second-turn streaming usage stays session-monotonic and equals settlement", () => {
+  const usageTotal = { textContent: "", title: "" };
+  const usageBreakdown = { textContent: "", title: "" };
+  const usageContext = { Intl, Map, Number, usageTotal, usageBreakdown };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
+     ${markedSource("WORKBENCH_USAGE_PROJECTION", "WORKBENCH_USAGE_PROJECTION")}
+     const readings = [];
+     const record = () => readings.push({
+       total: usageTotal.textContent,
+       breakdown: usageBreakdown.textContent,
+       detail: usageBreakdown.title,
+       ledger: usageTotal.title
+     });
+     renderUsage({ entry_count: 2, usage: {
+       input_tokens: 40,
+       cache_read_input_tokens: 10,
+       cache_write_input_tokens: 5,
+       output_tokens: 20,
+       reasoning_output_tokens: 2,
+       total_tokens: 75
+     }});
+     record();
+     renderStreamingUsage({
+       input_tokens: 4,
+       cache_read_input_tokens: 3,
+       cache_write_input_tokens: 2,
+       output_tokens: 1,
+       reasoning_output_tokens: 1
+     }, "turn-b");
+     record();
+     renderStreamingUsage({
+       input_tokens: 7,
+       cache_read_input_tokens: 4,
+       cache_write_input_tokens: 3,
+       output_tokens: 6,
+       reasoning_output_tokens: 4
+     }, "turn-b");
+     record();
+     markStreamingUsageSettled("turn-b");
+     renderUsage({ entry_count: 3, usage: {
+       input_tokens: 47,
+       cache_read_input_tokens: 14,
+       cache_write_input_tokens: 8,
+       output_tokens: 26,
+       reasoning_output_tokens: 6,
+       total_tokens: 95
+     }});
+     record();
+     this.readings = readings;`,
+    usageContext,
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(usageContext.readings)), [
+    {
+      total: "75 total",
+      breakdown: "55 in · 20 out",
+      detail: "uncached input 40 · cache read 10 · cache write 5 · reasoning output 2",
+      ledger: "2 source/model ledger entries",
+    },
+    {
+      total: "85 total",
+      breakdown: "64 in · 21 out",
+      detail: "uncached input 44 · cache read 13 · cache write 7 · reasoning output 3",
+      ledger: "2 settled source/model ledger entries · live turn usage included",
+    },
+    {
+      total: "95 total",
+      breakdown: "69 in · 26 out",
+      detail: "uncached input 47 · cache read 14 · cache write 8 · reasoning output 6",
+      ledger: "2 settled source/model ledger entries · live turn usage included",
+    },
+    {
+      total: "95 total",
+      breakdown: "69 in · 26 out",
+      detail: "uncached input 47 · cache read 14 · cache write 8 · reasoning output 6",
+      ledger: "3 source/model ledger entries",
+    },
+  ]);
+});
+
+function runTerminalUsageProjection(body) {
+  const usageTotal = { textContent: "", title: "" };
+  const usageBreakdown = { textContent: "", title: "" };
+  const usageContext = {
+    Intl,
+    Map,
+    Number,
+    Set,
+    usageTotal,
+    usageBreakdown,
+    projectionState: createWorkbenchProjectionState(),
+    renderedProductEvents: new Set(),
+    pendingTools: [],
+    assistantDraft: null,
+    assistantDraftTurnId: null,
+    assistantDraftText: "",
+    assistantDraftChunks: [],
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    reasoning: null,
+    clearRetryStatus() {},
+    appendTool() {},
+    renderMessage() {},
+    renderIngressReceipt() {},
+    setBusy() {},
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
+     ${markedSource("WORKBENCH_USAGE_PROJECTION", "WORKBENCH_USAGE_PROJECTION")}
+     ${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+     ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
+     ${body}`,
+    usageContext,
+  );
+  return {
+    total: usageTotal.textContent,
+    breakdown: usageBreakdown.textContent,
+    ledger: usageTotal.title,
+  };
+}
+
+test("Done then authoritative usage refresh rejects delayed same-turn usage", () => {
+  assert.deepEqual(runTerminalUsageProjection(`
+    function refreshUsage() {
+      renderUsage({ entry_count: 3, usage: {
+        input_tokens: 47,
+        cache_read_input_tokens: 14,
+        cache_write_input_tokens: 8,
+        output_tokens: 26,
+        reasoning_output_tokens: 6
+      }});
+    }
+    renderUsage({ entry_count: 2, usage: {
+      input_tokens: 40,
+      cache_read_input_tokens: 10,
+      cache_write_input_tokens: 5,
+      output_tokens: 20,
+      reasoning_output_tokens: 2
+    }});
+    renderStreamingUsage({
+      input_tokens: 7,
+      cache_read_input_tokens: 4,
+      cache_write_input_tokens: 3,
+      output_tokens: 6,
+      reasoning_output_tokens: 4
+    }, "turn-a");
+    applyProductEvent({
+      event_id: "turn-a-done",
+      sequence: 1,
+      type: "done",
+      turn_id: "turn-a"
+    });
+    renderStreamingUsage({
+      input_tokens: 7,
+      cache_read_input_tokens: 4,
+      cache_write_input_tokens: 3,
+      output_tokens: 6,
+      reasoning_output_tokens: 4
+    }, "turn-a");
+  `), {
+    total: "95 total",
+    breakdown: "69 in · 26 out",
+    ledger: "3 source/model ledger entries",
+  });
+});
+
+test("Done before first usage rejects that turn's delayed first observation", () => {
+  assert.deepEqual(runTerminalUsageProjection(`
+    function refreshUsage() {
+      renderUsage({ entry_count: 2, usage: {
+        input_tokens: 40,
+        cache_read_input_tokens: 10,
+        cache_write_input_tokens: 5,
+        output_tokens: 20,
+        reasoning_output_tokens: 2
+      }});
+    }
+    renderUsage({ entry_count: 2, usage: {
+      input_tokens: 40,
+      cache_read_input_tokens: 10,
+      cache_write_input_tokens: 5,
+      output_tokens: 20,
+      reasoning_output_tokens: 2
+    }});
+    applyProductEvent({
+      event_id: "turn-a-done-before-usage",
+      sequence: 1,
+      type: "done",
+      turn_id: "turn-a"
+    });
+    renderStreamingUsage({
+      input_tokens: 7,
+      cache_read_input_tokens: 4,
+      cache_write_input_tokens: 3,
+      output_tokens: 6,
+      reasoning_output_tokens: 4
+    }, "turn-a");
+  `), {
+    total: "75 total",
+    breakdown: "55 in · 20 out",
+    ledger: "2 source/model ledger entries",
+  });
+});
+
+test("settling one turn preserves another turn's live usage overlay", () => {
+  assert.deepEqual(runTerminalUsageProjection(`
+    function refreshUsage() {
+      renderUsage({ entry_count: 3, usage: {
+        input_tokens: 47,
+        cache_read_input_tokens: 14,
+        cache_write_input_tokens: 8,
+        output_tokens: 26,
+        reasoning_output_tokens: 6
+      }});
+    }
+    renderUsage({ entry_count: 2, usage: {
+      input_tokens: 40,
+      cache_read_input_tokens: 10,
+      cache_write_input_tokens: 5,
+      output_tokens: 20,
+      reasoning_output_tokens: 2
+    }});
+    renderStreamingUsage({
+      input_tokens: 7,
+      cache_read_input_tokens: 4,
+      cache_write_input_tokens: 3,
+      output_tokens: 6,
+      reasoning_output_tokens: 4
+    }, "turn-a");
+    renderStreamingUsage({
+      input_tokens: 4,
+      cache_read_input_tokens: 3,
+      cache_write_input_tokens: 2,
+      output_tokens: 1,
+      reasoning_output_tokens: 1
+    }, "turn-b");
+    applyProductEvent({
+      event_id: "turn-a-done-with-b-live",
+      sequence: 1,
+      type: "done",
+      turn_id: "turn-a"
+    });
+    renderStreamingUsage({
+      input_tokens: 7,
+      cache_read_input_tokens: 4,
+      cache_write_input_tokens: 3,
+      output_tokens: 6,
+      reasoning_output_tokens: 4
+    }, "turn-a");
+  `), {
+    total: "105 total",
+    breakdown: "78 in · 27 out",
+    ledger: "3 settled source/model ledger entries · live turn usage included",
+  });
+});
+
+test("retry reset retracts only superseded partial text and renders retry status", () => {
+  let assistantRemoved = false;
+  const reasoningRemoved = { superseded: false, retained: false };
+  const supersededReasoning = {
+    isConnected: true,
+    pre: { textContent: "superseded reasoning" },
+    querySelector() { return this.pre; },
+    remove() {
+      this.isConnected = false;
+      reasoningRemoved.superseded = true;
+    },
+  };
+  const retainedReasoning = {
+    isConnected: true,
+    pre: { textContent: "retained reasoning" },
+    querySelector() { return this.pre; },
+    remove() {
+      this.isConnected = false;
+      reasoningRemoved.retained = true;
+    },
+  };
+  const retryEvents = [];
+  const projectionContext = {
+    Set,
+    __LASH_WORKBENCH_TURN_EVENT_HOOK__() {},
+    assistantDraft: {
+      innerHTML: "",
+      closest() {
+        return { remove() { assistantRemoved = true; } };
+      },
+    },
+    assistantDraftTurnId: "retry-turn",
+    assistantDraftText: "superseded prose retained prose",
+    assistantDraftChunks: [
+      { correlationId: "prose-superseded", text: "superseded prose " },
+      { correlationId: "prose-retained", text: "retained prose" },
+    ],
+    reasoning: retainedReasoning,
+    reasoningChunks: [
+      { correlationId: "reasoning-superseded", text: "superseded reasoning", node: supersededReasoning },
+      { correlationId: "reasoning-retained", text: "retained reasoning", node: retainedReasoning },
+    ],
+    renderMarkdownBlocks(text) { return `rendered:${text}`; },
+    renderRetryStatus(event) { retryEvents.push(event); },
+    scrollToEnd() {},
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_ASSISTANT_RETRACTION", "WORKBENCH_ASSISTANT_RETRACTION")}
+     ${markedSource("WORKBENCH_REASONING_RETRACTION", "WORKBENCH_REASONING_RETRACTION")}
+     ${markedSource("WORKBENCH_ATTEMPT_RESET", "WORKBENCH_ATTEMPT_RESET")}
+     ${markedSource("WORKBENCH_TURN_EVENT_DISPATCH", "WORKBENCH_TURN_EVENT_DISPATCH")}
+     handleTurnEvent(${JSON.stringify(turnEvents.reset)}, "retry-turn");
+     handleTurnEvent(${JSON.stringify(turnEvents.retry)}, "retry-turn");
+     this.result = {
+       assistantDraftText,
+       assistantDraftChunks,
+       assistantHtml: assistantDraft.innerHTML,
+       reasoningChunks,
+       retainedReasoningText: reasoning.querySelector("pre").textContent
+     };`,
+    projectionContext,
+  );
+
+  assert.equal(assistantRemoved, false);
+  assert.equal(projectionContext.result.assistantDraftText, "retained prose");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(projectionContext.result.assistantDraftChunks)),
+    [{ correlationId: "prose-retained", text: "retained prose" }],
+  );
+  assert.equal(projectionContext.result.assistantHtml, "rendered:retained prose");
+  assert.equal(reasoningRemoved.superseded, true);
+  assert.equal(reasoningRemoved.retained, false);
+  assert.equal(projectionContext.result.retainedReasoningText, "retained reasoning");
+  assert.deepEqual(JSON.parse(JSON.stringify(retryEvents)), [turnEvents.retry]);
+});
+
+test("retry status ownership survives another turn's delayed Done", () => {
+  function element(tagName) {
+    const node = {
+      tagName,
+      className: "",
+      children: [],
+      parentNode: null,
+      textContent: "",
+      isConnected: false,
+      append(...children) {
+        for (const child of children) {
+          if (typeof child !== "string") this.appendChild(child);
+        }
+      },
+      appendChild(child) {
+        this.children.push(child);
+        child.parentNode = this;
+        child.isConnected = true;
+        return child;
+      },
+      remove() {
+        if (this.parentNode) {
+          this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+        }
+        this.parentNode = null;
+        this.isConnected = false;
+      },
+      classList: {
+        add(token) {
+          if (!node.className.split(" ").includes(token)) node.className += ` ${token}`;
+        },
+      },
+    };
+    return node;
+  }
+
+  const timeline = element("timeline");
+  const retryContext = {
+    Set,
+    Map,
+    document: { createElement: element },
+    timeline,
+    retryStatuses: new Map(),
+    projectionState: createWorkbenchProjectionState(),
+    renderedProductEvents: new Set(),
+    pendingTools: [],
+    assistantDraft: null,
+    assistantDraftTurnId: null,
+    assistantDraftText: "",
+    assistantDraftChunks: [],
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    reasoning: null,
+    __LASH_WORKBENCH_TURN_EVENT_HOOK__() {},
+    clearEmpty() {},
+    scrollToEnd() {},
+    markStreamingUsageSettled() {},
+    appendTool() {},
+    renderMessage() {},
+    renderIngressReceipt() {},
+    setBusy() {},
+    refreshUsage() {},
+  };
+  const retryA = { ...turnEvents.retry, reason: "turn A retry" };
+  const retryB = { ...turnEvents.retry, reason: "turn B retry" };
+  const retryBReplacement = { ...retryB, attempt: 2 };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
+     ${markedSource("WORKBENCH_RETRY_STATUS", "WORKBENCH_RETRY_STATUS")}
+     ${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+     ${markedSource("WORKBENCH_TURN_EVENT_DISPATCH", "WORKBENCH_TURN_EVENT_DISPATCH")}
+     ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
+     handleTurnEvent(${JSON.stringify(retryA)}, "turn-a");
+     handleTurnEvent(${JSON.stringify(retryB)}, "turn-b");
+     this.afterBoth = timeline.children.map(node => node.children[1].textContent);
+     handleTurnEvent(${JSON.stringify(retryBReplacement)}, "turn-b");
+     this.afterReplacement = timeline.children.map(node => node.children[1].textContent);
+     applyProductEvent({
+       event_id: "turn-a-delayed-done",
+       sequence: 1,
+       type: "done",
+       turn_id: "turn-a"
+     });
+     this.afterDelayedDone = timeline.children.map(node => node.children[1].textContent);
+     handleTurnEvent({ type: "model_request_started", protocol_iteration: 2 }, "turn-a");
+     this.afterOtherRequest = timeline.children.map(node => node.children[1].textContent);
+     handleTurnEvent({ type: "model_request_started", protocol_iteration: 2 }, "turn-b");
+     this.afterMatchingRequest = timeline.children.length;
+     handleTurnEvent(${JSON.stringify(retryB)}, "turn-b");
+     finishTransientRows("turn-b");
+     this.afterMatchingSettlement = timeline.children.length;`,
+    retryContext,
+  );
+
+  assert.deepEqual([...retryContext.afterBoth], [
+    "provider retry 1 of 3 · turn A retry · waiting 2s",
+    "provider retry 1 of 3 · turn B retry · waiting 2s",
+  ]);
+  assert.deepEqual([...retryContext.afterReplacement], [
+    "provider retry 1 of 3 · turn A retry · waiting 2s",
+    "provider retry 2 of 3 · turn B retry · waiting 2s",
+  ]);
+  assert.deepEqual([...retryContext.afterDelayedDone], [
+    "provider retry 2 of 3 · turn B retry · waiting 2s",
+  ]);
+  assert.deepEqual([...retryContext.afterOtherRequest], [
+    "provider retry 2 of 3 · turn B retry · waiting 2s",
+  ]);
+  assert.equal(retryContext.afterMatchingRequest, 0);
+  assert.equal(retryContext.afterMatchingSettlement, 0);
+});
+
+test("delayed same-turn retry status after Done is ignored without affecting another turn", () => {
+  function element(tagName) {
+    const node = {
+      tagName,
+      className: "",
+      children: [],
+      parentNode: null,
+      textContent: "",
+      append(...children) {
+        for (const child of children) {
+          if (typeof child !== "string") this.appendChild(child);
+        }
+      },
+      appendChild(child) {
+        this.children.push(child);
+        child.parentNode = this;
+        return child;
+      },
+      remove() {
+        if (this.parentNode) {
+          this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+        }
+        this.parentNode = null;
+      },
+      classList: {
+        add(token) {
+          if (!node.className.split(" ").includes(token)) node.className += ` ${token}`;
+        },
+      },
+    };
+    return node;
+  }
+
+  const timeline = element("timeline");
+  const retryContext = {
+    Set,
+    Map,
+    document: { createElement: element },
+    timeline,
+    retryStatuses: new Map(),
+    projectionState: createWorkbenchProjectionState(),
+    renderedProductEvents: new Set(),
+    pendingTools: [],
+    assistantDraft: null,
+    assistantDraftTurnId: null,
+    assistantDraftText: "",
+    assistantDraftChunks: [],
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    reasoning: null,
+    __LASH_WORKBENCH_TURN_EVENT_HOOK__() {},
+    clearEmpty() {},
+    scrollToEnd() {},
+    markStreamingUsageSettled() {},
+    appendTool() {},
+    renderMessage() {},
+    renderIngressReceipt() {},
+    setBusy() {},
+    refreshUsage() {},
+  };
+  const retryA = { ...turnEvents.retry, reason: "late turn A retry" };
+  const retryB = { ...turnEvents.retry, reason: "turn B remains active" };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
+     ${markedSource("WORKBENCH_RETRY_STATUS", "WORKBENCH_RETRY_STATUS")}
+     ${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+     ${markedSource("WORKBENCH_TURN_EVENT_DISPATCH", "WORKBENCH_TURN_EVENT_DISPATCH")}
+     ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
+     handleTurnEvent(${JSON.stringify(retryA)}, "turn-a");
+     handleTurnEvent(${JSON.stringify(retryB)}, "turn-b");
+     applyProductEvent({
+       event_id: "turn-a-done-before-late-retry",
+       sequence: 1,
+       type: "done",
+       turn_id: "turn-a"
+     });
+     handleTurnEvent(${JSON.stringify(retryA)}, "turn-a");
+     this.rows = timeline.children.map(node => node.children[1].textContent);`,
+    retryContext,
+  );
+
+  assert.deepEqual([...retryContext.rows], [
+    "provider retry 1 of 3 · turn B remains active · waiting 2s",
+  ]);
+});
+
+test("tool start and completion remain one nested code-block row", () => {
+  function element(tagName) {
+    const selectors = new Map();
+    const node = {
+      tagName,
+      className: "",
+      children: [],
+      parentNode: null,
+      hidden: false,
+      textContent: "",
+      append(...children) {
+        for (const child of children) {
+          if (typeof child === "string") continue;
+          this.appendChild(child);
+        }
+      },
+      appendChild(child) {
+        if (child.parentNode && child.parentNode !== this) {
+          child.parentNode.children = child.parentNode.children.filter(item => item !== child);
+        }
+        if (!this.children.includes(child)) this.children.push(child);
+        child.parentNode = this;
+        return child;
+      },
+      querySelector(selector) { return selectors.get(selector) ?? null; },
+      setAttribute() {},
+      addEventListener() {},
+      classList: {
+        add(token) {
+          if (!node.className.split(" ").includes(token)) node.className += ` ${token}`;
+        },
+        toggle(token, force) {
+          const tokens = node.className.split(" ").filter(Boolean).filter(item => item !== token);
+          if (force) tokens.push(token);
+          node.className = tokens.join(" ");
+        },
+      },
+    };
+    Object.defineProperty(node, "lastElementChild", {
+      get() { return node.children.at(-1) ?? null; },
+    });
+    Object.defineProperty(node, "innerHTML", {
+      set() {
+        if (node.className.startsWith("tool")) {
+          for (const selector of ["strong", ".badge", ".tool-head span:last-child", ".tool-summary", "pre"]) {
+            selectors.set(selector, element(selector));
+          }
+        }
+        if (node.className.startsWith("code-block")) {
+          for (const selector of ["summary", ".code-source", ".code-output"]) {
+            selectors.set(selector, element(selector));
+          }
+        }
+      },
+    });
+    return node;
+  }
+
+  const timeline = element("timeline");
+  const projectionContext = {
+    Set,
+    __LASH_WORKBENCH_TURN_EVENT_HOOK__() {},
+    document: { createElement: element },
+    timeline,
+    pendingCodeBlock: null,
+    pendingTools: [],
+    clearEmpty() {},
+    clearRetryStatus() {},
+    scrollToEnd() {},
+    refreshWork() {},
+    renderMessage() {},
+    appendReasoning() {},
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TOOL_CODE_PROJECTION", "WORKBENCH_TOOL_CODE_PROJECTION")}
+     ${markedSource("WORKBENCH_TURN_EVENT_DISPATCH", "WORKBENCH_TURN_EVENT_DISPATCH")}
+     ${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}
+     handleTurnEvent(${JSON.stringify(turnEvents.codeStarted)}, "tool-turn");
+     handleTurnEvent(${JSON.stringify(turnEvents.toolStarted)}, "tool-turn");
+     this.startedCount = timeline.children[0].children.filter(child => child.className.startsWith("tool")).length;
+     handleTurnEvent(${JSON.stringify(turnEvents.toolCompleted)}, "tool-turn");
+     handleTurnEvent(${JSON.stringify(turnEvents.codeCompleted)}, "tool-turn");
+     const codeBlock = timeline.children[0];
+     const nestedTools = codeBlock.children.filter(child => child.className.startsWith("tool"));
+     this.result = {
+       nestedCount: nestedTools.length,
+       siblingCount: timeline.children.filter(child => child.className.startsWith("tool")).length,
+       badge: nestedTools[0]?.querySelector(".badge")?.textContent,
+       summary: codeBlock.querySelector("summary").textContent
+     };
+     timeline.children = [];
+     renderStateTranscript({ transcript: [
+       { ...${JSON.stringify(turnEvents.codeCompleted)}, type: "code_block", tools: [${JSON.stringify(turnEvents.toolCompleted)}] }
+     ] });
+     const settledCodeBlock = timeline.children[0];
+     const settledTools = settledCodeBlock.children.filter(child => child.className.startsWith("tool"));
+     this.settledResult = {
+       nestedCount: settledTools.length,
+       siblingCount: timeline.children.filter(child => child.className.startsWith("tool")).length,
+       badge: settledTools[0]?.querySelector(".badge")?.textContent
+     };`,
+    projectionContext,
+  );
+
+  assert.equal(projectionContext.startedCount, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(projectionContext.result)), {
+    nestedCount: 1,
+    siblingCount: 0,
+    badge: "completed",
+    summary: "lashlang completed in 9ms · 1 tool",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(projectionContext.settledResult)), {
+    nestedCount: 1,
+    siblingCount: 0,
+    badge: "completed",
+  });
+});
+
+test("tool start and completion without call id remain one nested row", () => {
+  function element(tagName) {
+    const selectors = new Map();
+    const node = {
+      tagName,
+      className: "",
+      children: [],
+      parentNode: null,
+      hidden: false,
+      textContent: "",
+      append(...children) {
+        for (const child of children) {
+          if (typeof child === "string") continue;
+          this.appendChild(child);
+        }
+      },
+      appendChild(child) {
+        if (child.parentNode && child.parentNode !== this) {
+          child.parentNode.children = child.parentNode.children.filter(item => item !== child);
+        }
+        if (!this.children.includes(child)) this.children.push(child);
+        child.parentNode = this;
+        return child;
+      },
+      querySelector(selector) { return selectors.get(selector) ?? null; },
+      setAttribute() {},
+      addEventListener() {},
+      classList: {
+        add(token) {
+          if (!node.className.split(" ").includes(token)) node.className += ` ${token}`;
+        },
+        toggle(token, force) {
+          const tokens = node.className.split(" ").filter(Boolean).filter(item => item !== token);
+          if (force) tokens.push(token);
+          node.className = tokens.join(" ");
+        },
+      },
+    };
+    Object.defineProperty(node, "lastElementChild", {
+      get() { return node.children.at(-1) ?? null; },
+    });
+    Object.defineProperty(node, "innerHTML", {
+      set() {
+        if (node.className.startsWith("tool")) {
+          for (const selector of ["strong", ".badge", ".tool-head span:last-child", ".tool-summary", "pre"]) {
+            selectors.set(selector, element(selector));
+          }
+        }
+        if (node.className.startsWith("code-block")) {
+          for (const selector of ["summary", ".code-source", ".code-output"]) {
+            selectors.set(selector, element(selector));
+          }
+        }
+      },
+    });
+    return node;
+  }
+
+  const timeline = element("timeline");
+  const projectionContext = {
+    Set,
+    __LASH_WORKBENCH_TURN_EVENT_HOOK__() {},
+    document: { createElement: element },
+    timeline,
+    pendingCodeBlock: null,
+    pendingTools: [],
+    clearEmpty() {},
+    clearRetryStatus() {},
+    scrollToEnd() {},
+    refreshWork() {},
+    renderMessage() {},
+    appendReasoning() {},
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TOOL_CODE_PROJECTION", "WORKBENCH_TOOL_CODE_PROJECTION")}
+     ${markedSource("WORKBENCH_TURN_EVENT_DISPATCH", "WORKBENCH_TURN_EVENT_DISPATCH")}
+     handleTurnEvent(${JSON.stringify(turnEvents.codeStarted)}, "no-id-turn");
+     handleTurnEvent(${JSON.stringify(turnEvents.noIdToolStarted)}, "no-id-turn");
+     handleTurnEvent(${JSON.stringify(turnEvents.noIdToolCompleted)}, "no-id-turn");
+     handleTurnEvent(${JSON.stringify(turnEvents.noIdCodeCompleted)}, "no-id-turn");
+     const codeBlock = timeline.children[0];
+     const nestedTools = codeBlock.children.filter(child => child.className.startsWith("tool"));
+     this.result = {
+       nestedCount: nestedTools.length,
+       siblingCount: timeline.children.filter(child => child.className.startsWith("tool")).length,
+       badge: nestedTools[0]?.querySelector(".badge")?.textContent,
+       summary: codeBlock.querySelector("summary").textContent
+     };`,
+    projectionContext,
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(projectionContext.result)), {
+    nestedCount: 1,
+    siblingCount: 0,
+    badge: "completed",
+    summary: "lashlang completed in 10ms · 1 tool",
+  });
+});
+
+test("Rust durable tool summaries render success, failure, and explicit omission honestly", () => {
+  const codeRow = durableToolTranscript.find((row) => row.id === "durable-tool-trajectory");
+  assert.deepEqual(codeRow.tools, [
+    {
+      kind: "durable_summary",
+      operation: "durable.success",
+      status: "success",
+    },
+    {
+      kind: "durable_summary",
+      operation: "durable.failure",
+      status: "failure",
+    },
+    {
+      kind: "omitted",
+      count: 3,
+    },
+  ]);
+
+  function element(tagName) {
+    const selectors = new Map();
+    const node = {
+      tagName,
+      className: "",
+      children: [],
+      parentNode: null,
+      hidden: false,
+      textContent: "",
+      append(...children) {
+        for (const child of children) {
+          if (typeof child === "string") continue;
+          this.appendChild(child);
+        }
+      },
+      appendChild(child) {
+        this.children.push(child);
+        child.parentNode = this;
+        return child;
+      },
+      querySelector(selector) { return selectors.get(selector) ?? null; },
+      setAttribute() {},
+      addEventListener() {},
+      classList: {
+        add(token) {
+          if (!node.className.split(" ").includes(token)) node.className += ` ${token}`;
+        },
+        toggle(token, force) {
+          const tokens = node.className.split(" ").filter(Boolean).filter(item => item !== token);
+          if (force) tokens.push(token);
+          node.className = tokens.join(" ");
+        },
+      },
+    };
+    Object.defineProperty(node, "innerHTML", {
+      set() {
+        if (node.className.startsWith("tool")) {
+          for (const selector of ["strong", ".badge", ".tool-head span:last-child", ".tool-summary", "pre"]) {
+            selectors.set(selector, element(selector));
+          }
+        }
+        if (node.className.startsWith("code-block")) {
+          for (const selector of ["summary", ".code-source", ".code-output"]) {
+            selectors.set(selector, element(selector));
+          }
+        }
+      },
+    });
+    return node;
+  }
+
+  const timeline = element("timeline");
+  const projectionContext = {
+    Set,
+    document: { createElement: element },
+    timeline,
+    clearEmpty() {},
+    scrollToEnd() {},
+    refreshWork() {},
+    renderMessage() {},
+    appendReasoning() {},
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TOOL_CODE_PROJECTION", "WORKBENCH_TOOL_CODE_PROJECTION")}
+     ${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}
+     renderStateTranscript({ transcript: ${JSON.stringify(durableToolTranscript)} });`,
+    projectionContext,
+  );
+
+  const codeBlock = timeline.children[0];
+  const renderedTools = codeBlock.children.filter((child) => child.className.startsWith("tool"));
+  assert.equal(codeBlock.querySelector("summary").textContent, "lashlang completed · 5 tools · 3 omitted");
+  assert.equal(renderedTools.length, 3);
+  assert.deepEqual(
+    renderedTools.slice(0, 2).map((tool) => ({
+      operation: tool.querySelector("strong").textContent,
+      badge: tool.querySelector(".badge").textContent,
+      availability: tool.querySelector(".tool-head span:last-child").textContent,
+      payload: JSON.parse(tool.querySelector("pre").textContent),
+    })),
+    [
+      {
+        operation: "durable.success",
+        badge: "completed",
+        availability: "durable outcome only",
+        payload: { status: "success" },
+      },
+      {
+        operation: "durable.failure",
+        badge: "failed",
+        availability: "durable outcome only",
+        payload: { status: "failure" },
+      },
+    ],
+  );
+  assert.equal(renderedTools[2].className, "tool omitted");
+  assert.equal(renderedTools[2].textContent, "3 earlier tool calls omitted from durable history");
+});
+
+test("durable failure and postCommand client errors remain distinct rows", async () => {
+  function element(tagName) {
+    const node = {
+      tagName,
+      className: "",
+      textContent: "",
+      children: [],
+      parentNode: null,
+      append(...children) {
+        for (const child of children) {
+          if (typeof child !== "string") this.appendChild(child);
+        }
+      },
+      appendChild(child) {
+        this.children.push(child);
+        child.parentNode = this;
+        return child;
+      },
+      addEventListener(type, callback) {
+        this.listeners ??= {};
+        this.listeners[type] = callback;
+      },
+      closest() { return null; },
+    };
+    return node;
+  }
+
+  const timeline = element("timeline");
+  let fetchCalls = 0;
+  const projectionContext = {
+    Set,
+    document: { createElement: element },
+    timeline,
+    renderedMessages: new Set(),
+    busy: false,
+    resetInFlight: false,
+    lastRequest: null,
+    controller: null,
+    assistantDraft: null,
+    assistantDraftTurnId: null,
+    assistantDraftText: "",
+    assistantDraftChunks: [],
+    reasoning: null,
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    pendingTools: [],
+    AbortController,
+    clearEmpty() {},
+    clearRetryStatus() {},
+    cleanErrorText(message) { return message; },
+    roleLabel(role) { return role; },
+    setMessageBody(body, _role, text) { body.textContent = text; },
+    renderMessageAttachments() {},
+    scrollToEnd() {},
+    renderNote() {},
+    setBusy() {},
+    refreshWork() {},
+    async fetch() {
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        return { ok: false, async text() { return "refused"; } };
+      }
+      throw new TypeError("fetch failed");
+    },
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_MESSAGE_RENDER", "WORKBENCH_MESSAGE_RENDER")}
+     ${markedSource("WORKBENCH_CLIENT_ERROR_RENDER", "WORKBENCH_CLIENT_ERROR_RENDER")}
+     ${markedSource("WORKBENCH_POST_COMMAND", "WORKBENCH_POST_COMMAND")}
+     renderMessage({ id: "turn:failed", role: "event", text: "turn could not be completed", attachments: [] });
+     this.httpFailure = postCommand("/api/turn", { text: "retry HTTP" });`,
+    projectionContext,
+  );
+  await projectionContext.httpFailure;
+  vm.runInNewContext(
+    `this.fetchFailure = postCommand("/api/turn", { text: "retry fetch" });`,
+    projectionContext,
+  );
+  await projectionContext.fetchFailure;
+
+  assert.equal(timeline.children.length, 3);
+  assert.equal(timeline.children[0].className, "message event");
+  assert.equal(timeline.children[0].children[1].textContent, "turn could not be completed");
+  assert.equal(timeline.children[0].children[1].children.length, 0);
+  assert.equal(timeline.children[1].className, "message error");
+  assert.equal(timeline.children[1].children[1].textContent, "request could not be completed");
+  assert.equal(timeline.children[1].children[1].children[1].textContent, "retry turn");
+  assert.equal(timeline.children[2].className, "message error");
+  assert.equal(timeline.children[2].children[1].textContent, "request could not be completed");
+  assert.equal(timeline.children[2].children[1].children[1].textContent, "retry turn");
+});
 
 function snapshot(sessionId, cursor, eventIds = []) {
   return {
@@ -798,6 +1908,8 @@ test("a Done product event behaviorally retracts the provisional draft", () => {
     ],
     pendingTools: [],
     appendTool() {},
+    markStreamingUsageSettled() {},
+    clearRetryStatus() {},
     reasoningChunks: [],
     pendingCodeBlock: {},
     reasoning: {},
@@ -809,7 +1921,8 @@ test("a Done product event behaviorally retracts the provisional draft", () => {
     refreshUsage() {},
   };
   vm.runInNewContext(
-    `${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
+     ${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
      ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
      applyProductEvent({
        event_id: "cancel-done",
@@ -860,6 +1973,8 @@ test("turn A Done does not retract turn B provisional prose", () => {
     ],
     pendingTools: [],
     appendTool() {},
+    markStreamingUsageSettled() {},
+    clearRetryStatus() {},
     reasoningChunks: [],
     pendingCodeBlock: null,
     reasoning: null,
@@ -869,7 +1984,8 @@ test("turn A Done does not retract turn B provisional prose", () => {
     refreshUsage() {},
   };
   vm.runInNewContext(
-    `${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
+     ${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
      ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
      applyProductEvent({
        event_id: "turn-a-done",
@@ -915,6 +2031,8 @@ function doneReducerContext(outcome) {
     assistantDraftChunks: [],
     pendingTools: [],
     appendTool() {},
+    markStreamingUsageSettled() {},
+    clearRetryStatus() {},
     reasoningChunks: [],
     pendingCodeBlock: null,
     reasoning: null,
@@ -927,7 +2045,8 @@ function doneReducerContext(outcome) {
     },
   };
   vm.runInNewContext(
-    `${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
+     ${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
      ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
      applyProductEvent({
        event_id: "refused-turn-done",

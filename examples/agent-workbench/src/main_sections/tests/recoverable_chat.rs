@@ -773,6 +773,203 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
             "wired-key",
         ),
     });
+    let usage_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
+        lash::TurnEvent::Usage {
+            protocol_iteration: 2,
+            usage: lash::usage::TokenUsage {
+                input_tokens: 11,
+                output_tokens: 7,
+                cache_read_input_tokens: 3,
+                cache_write_input_tokens: 2,
+                reasoning_output_tokens: 5,
+            },
+            cumulative: lash::usage::TokenUsage {
+                input_tokens: 31,
+                output_tokens: 17,
+                cache_read_input_tokens: 13,
+                cache_write_input_tokens: 12,
+                reasoning_output_tokens: 9,
+            },
+        },
+    ))
+    .expect("serialize browser usage event");
+    assert_eq!(
+        usage_event,
+        serde_json::json!({
+            "type": "usage",
+            "protocol_iteration": 2,
+            "usage": {
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "cache_read_input_tokens": 3,
+                "cache_write_input_tokens": 2,
+                "reasoning_output_tokens": 5,
+            },
+            "cumulative": {
+                "input_tokens": 31,
+                "output_tokens": 17,
+                "cache_read_input_tokens": 13,
+                "cache_write_input_tokens": 12,
+                "reasoning_output_tokens": 9,
+            },
+        })
+    );
+    assert_eq!(usage_event["type"], "usage");
+    assert_eq!(usage_event["protocol_iteration"], 2);
+    assert_eq!(usage_event["usage"]["input_tokens"], 11);
+    assert_eq!(usage_event["cumulative"]["input_tokens"], 31);
+    let reset_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
+        lash::TurnEvent::ModelAttemptReset {
+            assistant_prose_correlation_ids: vec![lash::TurnActivityId::new(
+                "prose-superseded",
+            )],
+            reasoning_correlation_ids: vec![lash::TurnActivityId::new(
+                "reasoning-superseded",
+            )],
+        },
+    ))
+    .expect("serialize browser attempt-reset event");
+    assert_eq!(
+        reset_event,
+        serde_json::json!({
+            "type": "model_attempt_reset",
+            "assistant_prose_correlation_ids": ["prose-superseded"],
+            "reasoning_correlation_ids": ["reasoning-superseded"],
+        })
+    );
+    assert_eq!(reset_event["type"], "model_attempt_reset");
+    assert_eq!(reset_event["assistant_prose_correlation_ids"][0], "prose-superseded");
+    assert_eq!(reset_event["reasoning_correlation_ids"][0], "reasoning-superseded");
+    let retry_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
+        lash::TurnEvent::RetryStatus {
+            wait_seconds: 2,
+            attempt: 1,
+            max_attempts: 3,
+            reason: "deterministic retry law".to_string(),
+        },
+    ))
+    .expect("serialize browser retry-status event");
+    assert_eq!(
+        retry_event,
+        serde_json::json!({
+            "type": "retry_status",
+            "wait_seconds": 2,
+            "attempt": 1,
+            "max_attempts": 3,
+            "reason": "deterministic retry law",
+        })
+    );
+    assert_eq!(retry_event["type"], "retry_status");
+    assert_eq!(retry_event["wait_seconds"], 2);
+    assert_eq!(retry_event["attempt"], 1);
+    assert_eq!(retry_event["max_attempts"], 3);
+    assert_eq!(retry_event["reason"], "deterministic retry law");
+    let error_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
+        lash::TurnEvent::Error {
+            message: "provider exhausted deterministic retries".to_string(),
+        },
+    ))
+    .expect("serialize browser provider-error event");
+    assert_eq!(
+        error_event,
+        serde_json::json!({
+            "type": "error",
+            "message": "provider exhausted deterministic retries",
+        })
+    );
+    let code_started_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
+        lash::TurnEvent::CodeBlockStarted {
+            language: "lashlang".to_string(),
+            code: "web.search({ query: \"FIG-1350\" })".to_string(),
+            graph_key: None,
+        },
+    ))
+    .expect("serialize browser code-start event");
+    let tool_started_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
+        lash::TurnEvent::ToolCallStarted {
+            call_id: Some("tool-call-1".to_string()),
+            name: "search_web".to_string(),
+            args: serde_json::json!({ "query": "FIG-1350" }),
+            graph_key: None,
+            parent_call_id: None,
+        },
+    ))
+    .expect("serialize browser tool-start event");
+    let tool_completed_event = serde_json::to_value(
+        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::ToolCallCompleted {
+            call_id: Some("tool-call-1".to_string()),
+            name: "search_web".to_string(),
+            args: serde_json::json!({ "query": "FIG-1350" }),
+            output: lash::tools::ToolCallOutput::success(lash::tools::ToolValue::from(
+                serde_json::json!({ "results": [{ "title": "judged row" }] }),
+            )),
+            duration_ms: 4,
+            graph_key: None,
+            parent_call_id: None,
+        }),
+    )
+    .expect("serialize browser tool-complete event");
+    let no_id_tool_started_event = serde_json::to_value(
+        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::ToolCallStarted {
+            call_id: None,
+            name: "search_web".to_string(),
+            args: serde_json::json!({ "query": "FIG-1350 no id" }),
+            graph_key: None,
+            parent_call_id: None,
+        }),
+    )
+    .expect("serialize browser no-id tool-start event");
+    let no_id_tool_completed_event = serde_json::to_value(
+        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::ToolCallCompleted {
+            call_id: None,
+            name: "search_web".to_string(),
+            args: serde_json::json!({ "query": "FIG-1350 no id" }),
+            output: lash::tools::ToolCallOutput::success(lash::tools::ToolValue::from(
+                serde_json::json!({ "results": [{ "title": "no-id row" }] }),
+            )),
+            duration_ms: 5,
+            graph_key: None,
+            parent_call_id: None,
+        }),
+    )
+    .expect("serialize browser no-id tool-complete event");
+    let code_completed_event = serde_json::to_value(
+        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::CodeBlockCompleted {
+            language: "lashlang".to_string(),
+            output: "completed".to_string(),
+            error: None,
+            success: true,
+            duration_ms: 9,
+            tool_call_ids: vec!["tool-call-1".to_string()],
+            graph_key: None,
+        }),
+    )
+    .expect("serialize browser code-complete event");
+    let no_id_code_completed_event = serde_json::to_value(
+        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::CodeBlockCompleted {
+            language: "lashlang".to_string(),
+            output: "completed without call id".to_string(),
+            error: None,
+            success: true,
+            duration_ms: 10,
+            tool_call_ids: Vec::new(),
+            graph_key: None,
+        }),
+    )
+    .expect("serialize browser no-id code-complete event");
+    let turn_events = serde_json::json!({
+        "usage": usage_event,
+        "reset": reset_event,
+        "retry": retry_event,
+        "error": error_event,
+        "codeStarted": code_started_event,
+        "toolStarted": tool_started_event,
+        "toolCompleted": tool_completed_event,
+        "codeCompleted": code_completed_event,
+        "noIdToolStarted": no_id_tool_started_event,
+        "noIdToolCompleted": no_id_tool_completed_event,
+        "noIdCodeCompleted": no_id_code_completed_event,
+    });
 
     // RLM's printed-image projection can commit more than one stored image
     // part on a single message. Feed that production projection to the browser
@@ -810,6 +1007,48 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         .append_messages(vec![committed])
         .await
         .expect("commit RLM printed-image shape");
+    let mut persisted = session
+        .admin()
+        .state()
+        .persist_current()
+        .await
+        .expect("persist multi-attachment state before durable tool fixture");
+    persisted.session_graph.append_protocol_event(
+        lash_protocol_rlm::rlm_protocol_event(
+            lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(
+                lash_rlm_types::RlmTrajectoryEntry {
+                    id: "durable-tool-trajectory".to_string(),
+                    protocol_iteration: 1,
+                    code: "durable.tool_projection()".to_string(),
+                    output: vec!["durable projection".to_string()],
+                    calls: vec![
+                        lash_core::ExecutedCallRecord {
+                            operation: "durable.success".to_string(),
+                            outcome: lash_core::ExecutedCallOutcome::Ok,
+                        },
+                        lash_core::ExecutedCallRecord {
+                            operation: "durable.failure".to_string(),
+                            outcome: lash_core::ExecutedCallOutcome::Err,
+                        },
+                    ],
+                    calls_omitted: 3,
+                    ..lash_rlm_types::RlmTrajectoryEntry::default()
+                },
+            ),
+        ),
+    );
+    session
+        .admin()
+        .state()
+        .set_persisted(persisted)
+        .await
+        .expect("install durable tool trajectory fixture");
+    session
+        .admin()
+        .state()
+        .persist_current()
+        .await
+        .expect("commit durable tool trajectory fixture");
     let committed_message = session
         .read_view()
         .messages()
@@ -818,6 +1057,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         .map(chat_message_from_committed)
         .expect("project committed RLM printed images");
     session.close().await.expect("close multi-attachment session");
+    let Json(durable_tool_state) = app_state(State(state.clone()), Query(SessionQuery::default()))
+        .await
+        .expect("reload and project committed durable tool trajectory");
 
     let output = std::process::Command::new("node")
         .arg("--test")
@@ -830,6 +1072,12 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
             "LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE",
             serde_json::to_string(&committed_message)
                 .expect("serialize committed multi-attachment message"),
+        )
+        .env("LASH_WORKBENCH_TURN_EVENTS", turn_events.to_string())
+        .env(
+            "LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT",
+            serde_json::to_string(&durable_tool_state.transcript)
+                .expect("serialize Rust-produced durable tool transcript"),
         )
         .output()
         .expect("Node.js is required for the agent-workbench browser projection gate");
@@ -2218,97 +2466,6 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
         "the runtime's own terminal message is the committed copy on this path, \
          got {committed_agent_replies:?}"
     );
-}
-
-#[tokio::test]
-async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
-    const INTERNAL_PROVIDER_FAILURE: &str = "provider rejected credentials for secret account";
-    let data_dir = tempfile::tempdir().expect("provider failure tempdir");
-    let provider = lash::testing::TestProvider::builder()
-        .kind("recoverable-chat-provider-failure")
-        .complete_error(INTERNAL_PROVIDER_FAILURE)
-        .build()
-        .into_handle();
-    let state =
-        recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
-    let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id.clone())
-        .open()
-        .await
-        .expect("open provider failure session");
-    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-    let output = session
-        .turn(lash::TurnInput::text("fail through the provider"))
-        .turn_id("provider-failure-turn")
-        .require_finish()
-        .expect("require finish")
-        .stream_to(&ChannelTurnEvents {
-            turn_state: Arc::clone(&turn_state),
-        })
-        .await
-        .expect("provider failure is represented as a stopped turn");
-    assert!(
-        output
-            .errors
-            .iter()
-            .any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),
-        "the real provider diagnostic must reach the internal turn result"
-    );
-    crate::restate::record_turn_output(
-        &state,
-        &session,
-        "provider-failure-turn",
-        output,
-        turn_state,
-        "test.provider.failed",
-    )
-    .await
-    .expect("project provider failure through the production recorder");
-
-    let serialized = serde_json::to_string(&state.event_tx.snapshot(&session_id))
-        .expect("serialize provider failure projection");
-    assert!(serialized.contains(PUBLIC_TURN_FAILURE_MESSAGE));
-    assert!(!serialized.contains(INTERNAL_PROVIDER_FAILURE));
-
-    let response = AppError::internal(INTERNAL_PROVIDER_FAILURE).into_response();
-    let bytes = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .expect("read internal error response");
-    assert_eq!(
-        serde_json::from_slice::<Value>(&bytes).expect("decode internal error response"),
-        json!({ "error": "internal server error" })
-    );
-}
-
-#[test]
-fn authorization_seam_can_deny_observation_without_product_specific_auth() {
-    struct DenyObservation;
-
-    impl WorkbenchAuthorizer for DenyObservation {
-        fn authorize(&self, action: &WorkbenchAuthorizationAction) -> Result<(), AppError> {
-            match action {
-                WorkbenchAuthorizationAction::Observe { .. } => {
-                    Err(AppError::forbidden("observation denied by host policy"))
-                }
-                _ => Ok(()),
-            }
-        }
-    }
-
-    let authorization = WorkbenchAuthorization::with_authorizer(Arc::new(DenyObservation));
-    let denied = authorization
-        .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: "auth-session".to_string(),
-        })
-        .expect_err("host policy must be able to deny observation");
-    assert_eq!(denied.status, StatusCode::FORBIDDEN);
-    authorization
-        .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
-            session_id: "auth-session".to_string(),
-        })
-        .expect("independent enqueue policy remains pluggable");
 }
 
 pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_store(

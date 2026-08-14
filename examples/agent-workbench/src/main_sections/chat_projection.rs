@@ -166,6 +166,30 @@ fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> Vec<Transcri
         .collect()
 }
 
+fn transcript_tool(call: lash_rlm_types::RlmExecutedCall) -> TranscriptTool {
+    let status = match call.outcome {
+        lash_rlm_types::RlmExecutedCallOutcome::Ok => "success",
+        lash_rlm_types::RlmExecutedCallOutcome::Err => "failure",
+    };
+    TranscriptTool::DurableSummary {
+        operation: call.operation,
+        status,
+    }
+}
+
+fn transcript_tools(
+    calls: Vec<lash_rlm_types::RlmExecutedCall>,
+    calls_omitted: usize,
+) -> Vec<TranscriptTool> {
+    let mut tools = calls.into_iter().map(transcript_tool).collect::<Vec<_>>();
+    if calls_omitted > 0 {
+        tools.push(TranscriptTool::Omitted {
+            count: calls_omitted,
+        });
+    }
+    tools
+}
+
 fn transcript_rows_from_committed(
     read_view: &lash::persistence::SessionReadView,
     user_replacements: &BTreeMap<String, ChatMessage>,
@@ -218,6 +242,7 @@ fn transcript_rows_from_committed(
                             output,
                             success: step.error.is_none(),
                             error: step.error,
+                            tools: transcript_tools(step.calls, step.calls_omitted),
                         }]
                     }
                     _ => Vec::new(),

@@ -134,7 +134,11 @@ Configuration is read from `.env` or the process environment:
   `partial-output-failure` (paid partial output followed by a retryable stream failure), `failed-process`
   (starts a Runtime Process that reports a deterministic failure), and `exec-blocked`
   (parks the first foreground Lashlang execution for break-glass practice, then lets the
-  next turn prove recovery). These scenarios make
+  next turn prove recovery), and `tool-value` (calls a dev-only terminal control tool so the
+  live stream carries a deterministic `tool_value`). Rendered-surface gates also use
+  `rendered-surface` (reasoning plus a structured final value), `code-failure` (a failing
+  Lashlang block), and `retry-reset-partial` (partial text, correlated reset, visible retry,
+  then replacement output). These scenarios make
   no provider network calls, print a startup warning, and use the visible
   `dev/failure-paths` model id. Unknown values fail startup.
 
