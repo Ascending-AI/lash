@@ -367,7 +367,7 @@ async fn execute_code_inner(
                 .get_or_compile(code, &host_environment)
                 .map_err(|error| match error {
                     lashlang::LinkedProgramCacheError::Parse(error) => {
-                        lashlang::format_parse_diagnostic(code, &error)
+                        format_rlm_parse_diagnostic(code, &error)
                     }
                     lashlang::LinkedProgramCacheError::Link(error) => {
                         format_rlm_link_diagnostic(code, &error)
