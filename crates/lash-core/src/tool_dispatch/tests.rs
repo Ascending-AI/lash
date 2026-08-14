@@ -893,6 +893,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -945,6 +946,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -1004,6 +1006,7 @@ fn projection_policy_dispatch_context(
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -1196,6 +1199,7 @@ fn lazy_contract_dispatch_context(
     ToolDispatchContext {
         plugins: test_plugins(provider),
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -1255,6 +1259,7 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -1301,6 +1306,7 @@ fn exact_dispatch_context_with_plugins(
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -1428,6 +1434,7 @@ fn pending_dispatch_context(
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -1492,6 +1499,7 @@ fn parallel_dispatch_context(
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),

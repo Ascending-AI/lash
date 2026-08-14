@@ -69,6 +69,14 @@ pub struct ToolRestoreReport {
 pub enum ReconfigureError {
     #[error("validation error: {0}")]
     Validation(String),
+    #[error(
+        "reserved orchestration tool id `{tool_id}` belongs to source `{required_source_id}`, not `{source_id}`"
+    )]
+    ReservedOrchestrationToolId {
+        tool_id: ToolId,
+        source_id: String,
+        required_source_id: &'static str,
+    },
     #[error("unknown tool source: {0}")]
     UnknownSource(String),
     #[error("generation mismatch: expected {expected}, actual {actual}")]

@@ -150,6 +150,7 @@ fn advertised_tool_entries(
             .map(|manifest| manifest_with_compact_contract(source.as_ref(), manifest))
             .collect::<Vec<_>>();
         validate_unique_manifests(&manifests)?;
+        validate_reserved_orchestration_manifests(source_id, &manifests)?;
         for manifest in manifests {
             insert_advertised_entry(
                 &mut advertised,
@@ -161,6 +162,27 @@ fn advertised_tool_entries(
         }
     }
     Ok(advertised)
+}
+
+fn validate_reserved_orchestration_manifests(
+    source_id: &str,
+    manifests: &[ToolManifest],
+) -> Result<(), ReconfigureError> {
+    for manifest in manifests {
+        let Some(required_source_id) =
+            crate::tool_provider::first_party_orchestration_source_id(&manifest.id)
+        else {
+            continue;
+        };
+        if source_id != required_source_id {
+            return Err(ReconfigureError::ReservedOrchestrationToolId {
+                tool_id: manifest.id.clone(),
+                source_id: source_id.to_string(),
+                required_source_id,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn insert_advertised_entry(
@@ -245,6 +267,7 @@ fn resolve_snapshot_id(
         let Some(manifest) = source.resolve_manifest_by_id(id) else {
             continue;
         };
+        validate_reserved_orchestration_manifests(source_id, std::slice::from_ref(&manifest))?;
         if manifest.id != *id {
             return Err(ReconfigureError::Validation(format!(
                 "source `{source_id}` resolved tool id `{id}` with mismatched manifest id `{}`",

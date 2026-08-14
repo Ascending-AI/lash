@@ -22,7 +22,7 @@ mod triggers;
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
-pub(crate) use orchestration::is_first_party_orchestration_tool;
+pub(crate) use orchestration::first_party_orchestration_source_id;
 pub use process::ToolSessionProcessAdmin;
 pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;

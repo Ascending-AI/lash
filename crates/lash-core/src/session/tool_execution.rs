@@ -513,7 +513,9 @@ impl RuntimeExecutionContext<'_> {
             .await;
 
         if child.execution_grant.is_none()
-            && crate::tool_provider::is_first_party_orchestration_tool(&child.call.tool_id)
+            && self
+                .dispatch
+                .is_first_party_orchestration_tool(&child.call.tool_id)
         {
             let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&self.dispatch))
                 .prepared_call(&child.call)
@@ -1306,7 +1308,10 @@ impl RuntimeExecutionContext<'_> {
         let launch =
             match prepare_tool_call_with_context(&dispatch, pending, Some(call_id.clone())).await {
                 ToolPreparationOutcome::Prepared(prepared) => {
-                    if crate::tool_provider::is_first_party_orchestration_tool(&prepared.tool_id) {
+                    if self
+                        .dispatch
+                        .is_first_party_orchestration_tool(&prepared.tool_id)
+                    {
                         let tool_context =
                             crate::ToolContext::from_dispatch(Arc::new(dispatch.clone()))
                                 .prepared_call(&prepared)

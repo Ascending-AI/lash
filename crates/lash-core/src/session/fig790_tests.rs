@@ -391,6 +391,7 @@ fn fig790_process_await_context(
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools: Arc::new(NoopTools),
+        tool_registry: None,
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
         sessions: host.clone(),
         session_lifecycle: host.clone(),

@@ -482,6 +482,7 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools: provider,
+        tool_registry: None,
         tool_catalog: Arc::new(tool_catalog),
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -647,6 +648,7 @@ fn atomic_tool_dispatch_with_provider_and_services<'run>(
     Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog: Arc::new(tool_catalog),
         sessions: host.clone(),
         session_lifecycle,
@@ -1640,7 +1642,7 @@ mod test_protocol_fakes {
 
     pub fn test_standard_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
         vec![Arc::new(TestProtocolFactory {
-            id: "protocol_standard",
+            id: "standard_protocol",
             include_batch: true,
             decode_code_create_options: false,
             session_override: None,
@@ -1654,7 +1656,7 @@ mod test_protocol_fakes {
         code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
     ) -> Arc<dyn PluginFactory> {
         Arc::new(TestProtocolFactory {
-            id: "protocol_standard",
+            id: "standard_protocol",
             include_batch: true,
             decode_code_create_options: false,
             session_override: Some(session),

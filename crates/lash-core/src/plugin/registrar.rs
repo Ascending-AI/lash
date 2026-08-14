@@ -84,7 +84,7 @@ fn register_singleton_hook<H>(
 
 #[derive(Clone, Default)]
 pub(crate) struct PluginContributions {
-    pub(crate) tool_providers: Vec<Arc<dyn ToolProvider>>,
+    pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
     pub(crate) triggers: Vec<crate::TriggerEvent>,
     pub(crate) prompt_contributors: Vec<RegisteredHook<PromptContributor>>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
@@ -538,7 +538,11 @@ impl PluginRegistrar {
                 )));
             }
         }
-        self.contributions.tool_providers.push(provider);
+        push_registered_hook(
+            &mut self.contributions.tool_providers,
+            &self.registering_plugin_id,
+            provider,
+        );
         Ok(())
     }
 

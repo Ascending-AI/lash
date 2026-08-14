@@ -53,6 +53,7 @@ mod tests {
     struct CountingManifestProvider {
         manifest_reads: Arc<AtomicUsize>,
     }
+    struct ReservedBatchTool;
     struct BlockingLiveTool {
         entered: Arc<tokio::sync::Semaphore>,
         release: Arc<tokio::sync::Semaphore>,
@@ -131,6 +132,63 @@ mod tests {
         async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
             ToolResult::ok(serde_json::json!("ok"))
         }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for ReservedBatchTool {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            manifests(vec![test_tool("batch", "reserved batch")])
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+            contract_from(vec![test_tool("batch", "reserved batch")], name)
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+            ToolResult::ok(serde_json::json!("unreachable"))
+        }
+    }
+
+    #[test]
+    fn foreign_source_cannot_register_reserved_orchestration_id() {
+        let error = match ToolRegistry::from_tool_provider(Arc::new(ReservedBatchTool)) {
+            Ok(_) => panic!("generic plugin source must not claim tool:batch"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            ReconfigureError::ReservedOrchestrationToolId {
+                ref tool_id,
+                ref source_id,
+                required_source_id: "standard_protocol",
+            } if tool_id.as_str() == "tool:batch" && source_id == PLUGIN_TOOL_SOURCE_ID
+        ));
+    }
+
+    #[test]
+    fn orchestration_dispatch_requires_the_reserved_id_owner() {
+        let external = ToolRegistry::empty();
+        external.state.write_recover().tools.insert(
+            tool_id("batch"),
+            ToolRegistryEntry::new(
+                test_tool("batch", "injected collision").manifest(),
+                "third-party-squatter",
+            ),
+        );
+        assert!(
+            !external.is_first_party_orchestration_tool(&tool_id("batch")),
+            "a collision that bypasses registration must remain a leaf dispatch"
+        );
+
+        let first_party = ToolRegistry::from_tool_provider_sources_with_hidden_tools(
+            vec![(
+                "standard_protocol".to_string(),
+                vec![Arc::new(ReservedBatchTool) as Arc<dyn ToolProvider>],
+            )],
+            BTreeSet::new(),
+        )
+        .expect("the reserved owner may register tool:batch");
+        assert!(first_party.is_first_party_orchestration_tool(&tool_id("batch")));
     }
 
     #[async_trait::async_trait]

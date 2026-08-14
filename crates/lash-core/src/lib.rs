@@ -85,8 +85,9 @@ pub mod facade_support {
     };
     pub use crate::tool_provider::orchestration::OrchestrationContext;
     /// Recover the restricted workflow context for a runtime-selected,
-    /// first-party orchestration call. Leaf providers always receive `None`;
-    /// no provider can opt a new tool id into this path.
+    /// first-party orchestration call. Registry registration reserves each id
+    /// to its first-party source, and dispatch verifies that resolved source;
+    /// leaf providers always receive `None`.
     pub fn first_party_orchestration_context<'run>(
         context: &crate::ToolContext<'run>,
     ) -> Option<OrchestrationContext<'run>> {

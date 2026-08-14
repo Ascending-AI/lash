@@ -983,6 +983,7 @@ mod tests {
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: Arc::new(NoopTools),
+            tool_registry: None,
             tool_catalog: Arc::new(crate::ToolCatalog::from_tools(
                 vec![tool.manifest()],
                 std::collections::BTreeMap::new(),

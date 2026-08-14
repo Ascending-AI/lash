@@ -115,6 +115,10 @@ impl<'run> OrchestrationContext<'run> {
     }
 }
 
-pub(crate) fn is_first_party_orchestration_tool(tool_id: &crate::ToolId) -> bool {
-    matches!(tool_id.as_str(), "tool:batch" | "tool:spawn_agent")
+pub(crate) fn first_party_orchestration_source_id(tool_id: &crate::ToolId) -> Option<&'static str> {
+    match tool_id.as_str() {
+        "tool:batch" => Some("standard_protocol"),
+        "tool:spawn_agent" => Some("subagents"),
+        _ => None,
+    }
 }

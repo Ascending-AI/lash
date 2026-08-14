@@ -337,6 +337,7 @@ impl Session {
         let dispatch = Arc::new(ToolDispatchContext {
             plugins: Arc::clone(self.plugins()),
             tools: self.tools(),
+            tool_registry: Some(Arc::clone(&self.tool_registry)),
             tool_catalog: self.resolved_tool_catalog(session_id)?,
             sessions,
             session_lifecycle,

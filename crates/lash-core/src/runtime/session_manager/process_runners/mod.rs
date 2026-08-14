@@ -118,6 +118,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
             plugins: Arc::clone(&self.services.current.plugins),
             tools: self.services.current.plugins.tools(),
+            tool_registry: Some(self.services.current.plugins.tool_registry()),
             tool_catalog,
             sessions: services.state_service(),
             session_lifecycle: services.lifecycle_service(),

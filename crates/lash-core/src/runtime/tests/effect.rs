@@ -2087,7 +2087,7 @@ struct EffectControllerTestProtocolFactory {
 
 impl crate::PluginFactory for EffectControllerTestProtocolFactory {
     fn id(&self) -> &'static str {
-        "protocol_standard"
+        "standard_protocol"
     }
 
     fn build(

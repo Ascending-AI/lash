@@ -426,6 +426,7 @@ mod tests {
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools,
+            tool_registry: None,
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),
@@ -570,6 +571,7 @@ mod tests {
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
+            tool_registry: None,
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),
@@ -667,6 +669,7 @@ mod tests {
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
+            tool_registry: None,
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),

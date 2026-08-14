@@ -445,6 +445,7 @@ fn tool_context<'run>(
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools: Arc::new(crate::testing::EmptyToolProvider),
+        tool_registry: None,
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
         sessions: fixtures.host.clone(),
         session_lifecycle: fixtures.host.clone(),

@@ -157,6 +157,7 @@ impl ToolTriggerOutcomeBuffer {
 pub struct ToolDispatchContext<'run> {
     pub plugins: Arc<PluginSession>,
     pub tools: Arc<dyn ToolProvider>,
+    pub(crate) tool_registry: Option<Arc<crate::ToolRegistry>>,
     pub tool_catalog: Arc<ToolCatalog>,
     pub sessions: Arc<dyn SessionStateService>,
     pub session_lifecycle: Arc<dyn SessionLifecycleService>,
@@ -179,6 +180,14 @@ pub struct ToolDispatchContext<'run> {
     pub clock: Arc<dyn crate::Clock>,
 }
 
+impl ToolDispatchContext<'_> {
+    pub(crate) fn is_first_party_orchestration_tool(&self, tool_id: &crate::ToolId) -> bool {
+        self.tool_registry
+            .as_deref()
+            .is_some_and(|registry| registry.is_first_party_orchestration_tool(tool_id))
+    }
+}
+
 impl<'run> ToolDispatchContext<'run> {
     pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {
         crate::ProcessOpScope::new(self.effect_controller.scoped())
@@ -190,6 +199,7 @@ impl<'run> ToolDispatchContext<'run> {
         Some(ToolDispatchContext {
             plugins: Arc::clone(&self.plugins),
             tools: Arc::clone(&self.tools),
+            tool_registry: self.tool_registry.clone(),
             tool_catalog: Arc::clone(&self.tool_catalog),
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),

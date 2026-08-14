@@ -91,15 +91,30 @@ impl ToolRegistry {
                 "Granted tool id `{tool_id}` is missing an explicit tool source"
             )));
         };
-        let source = self
-            .sources
-            .read_recover()
-            .get(source_id)
-            .cloned();
-        let Some(source) = source else {
-            return Err(ToolResult::err_fmt(format_args!(
-                "Tool source `{source_id}` missing for granted tool id `{tool_id}`"
-            )));
+        let sources = self.sources.read_recover();
+        let source = match sources.get(source_id) {
+            Some(source) => Arc::clone(source),
+            None if source_id == PLUGIN_TOOL_SOURCE_ID => {
+                let mut matches = sources
+                    .values()
+                    .filter(|source| source.resolve_manifest_by_id(tool_id).is_some());
+                let Some(source) = matches.next().cloned() else {
+                    return Err(ToolResult::err_fmt(format_args!(
+                        "Tool source `{source_id}` missing for granted tool id `{tool_id}`"
+                    )));
+                };
+                if matches.next().is_some() {
+                    return Err(ToolResult::err_fmt(format_args!(
+                        "Tool source `{source_id}` is ambiguous for granted tool id `{tool_id}`"
+                    )));
+                }
+                source
+            }
+            None => {
+                return Err(ToolResult::err_fmt(format_args!(
+                    "Tool source `{source_id}` missing for granted tool id `{tool_id}`"
+                )));
+            }
         };
         if source.resolve_manifest_by_id(tool_id).is_none() {
             return Err(ToolResult::err_fmt(format_args!(

@@ -17,15 +17,27 @@ impl ToolRegistry {
         Self::from_tool_providers_with_hidden_tools(providers, BTreeSet::new())
     }
 
+    #[cfg(test)]
     pub(crate) fn from_tool_providers_with_hidden_tools(
         providers: Vec<Arc<dyn ToolProvider>>,
         hidden_tool_names: BTreeSet<String>,
     ) -> Result<Self, ReconfigureError> {
+        Self::from_tool_provider_sources_with_hidden_tools(
+            vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), providers)],
+            hidden_tool_names,
+        )
+    }
+
+    pub(crate) fn from_tool_provider_sources_with_hidden_tools(
+        sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
+        hidden_tool_names: BTreeSet<String>,
+    ) -> Result<Self, ReconfigureError> {
         let registry = Self::empty_with_hidden_tools(hidden_tool_names);
-        registry.upsert_source(Arc::new(ToolProviderGroupSource::new(
-            PLUGIN_TOOL_SOURCE_ID,
-            providers,
-        )))?;
+        for (source_id, providers) in sources {
+            registry.upsert_source(Arc::new(ToolProviderGroupSource::new(
+                source_id, providers,
+            )))?;
+        }
         Ok(registry)
     }
 
@@ -49,6 +61,20 @@ impl ToolRegistry {
         self.state
             .read_recover()
             .generation
+    }
+
+    pub(crate) fn is_first_party_orchestration_tool(&self, tool_id: &ToolId) -> bool {
+        let Some(required_source_id) =
+            crate::tool_provider::first_party_orchestration_source_id(tool_id)
+        else {
+            return false;
+        };
+        self.state
+            .read_recover()
+            .tools
+            .get(tool_id)
+            .and_then(|entry| entry.binding.source_id())
+            == Some(required_source_id)
     }
 
     pub(crate) fn export_state(&self) -> ToolState {

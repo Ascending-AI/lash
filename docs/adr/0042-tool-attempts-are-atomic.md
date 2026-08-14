@@ -26,10 +26,13 @@ The implementation law has two provider shapes:
 > process shape. If you only need to cause it, return an intent.
 
 Leaf providers receive `AttemptContext` and execute as one opaque recorded
-attempt. Core privately marks only the two reserved first-party tool ids,
-`tool:batch` and `tool:spawn_agent`, for the private orchestration seam; no
-external provider can opt in. Their bodies never enter `coordinate_tool_invocation`
-and has no enclosing `ToolAttempt`. The body is authored process-replay code,
+attempt. Core reserves `tool:batch` to the `standard_protocol` source and
+`tool:spawn_agent` to the `subagents` source. Registry reconciliation rejects a
+different source's manifest with `ReservedOrchestrationToolId`, and dispatch
+independently requires both the reserved id and its resolved owner before it
+marks the private orchestration context. No external provider can opt in. The
+first-party bodies never enter `coordinate_tool_invocation` and have no
+enclosing `ToolAttempt`. The body is authored process-replay code,
 so every journal command it issues is a direct child of the enclosing process
 invocation. `ExecCode`, runtime-owned `batch`, and `spawn_agent` use that replay
 shape; leaf tools cannot recursively dispatch a batch.
