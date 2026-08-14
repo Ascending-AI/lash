@@ -39,7 +39,7 @@ async fn ingress_core_with_effect_host(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
-        .build()?;
+        .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
     Ok((core, registry))
 }

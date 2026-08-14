@@ -4966,16 +4966,6 @@ impl ReplayableRecordingContext {
             .map(|bytes| serde_json::from_slice(bytes).expect("decode recorded runtime effect"))
     }
 
-    fn recorded_runtime_effect_bytes(&self) -> Vec<(String, Vec<u8>)> {
-        let mut records = self
-            .records
-            .lock_recover()
-            .iter()
-            .map(|(name, bytes)| (name.clone(), bytes.clone()))
-            .collect::<Vec<_>>();
-        records.sort_by(|left, right| left.0.cmp(&right.0));
-        records
-    }
     fn install_process_worker(&self, worker: DurableProcessWorker) {
         *self.process_worker.lock_recover() = Some(worker);
     }
@@ -6658,6 +6648,7 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&process_registry),
+            lash_core::testing::runtime_lease_owner(),
         ),
     ));
 
@@ -7064,6 +7055,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&process_registry),
+            lash_core::testing::runtime_lease_owner(),
         ),
     ));
 
@@ -10239,6 +10231,7 @@ fn process_parent_worker(
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy())
         .with_turn_phase_probe_slot(probe_slot),

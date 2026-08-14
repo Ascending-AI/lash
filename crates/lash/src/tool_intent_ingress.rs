@@ -136,6 +136,42 @@ enum RuntimeDuplicateProbe {
     },
 }
 
+impl crate::LashCore {
+    /// Bind the sanctioned host ingress for durable tool intents to one actual
+    /// session and execution scope.
+    ///
+    /// This is ADR 0051's host-facade class: hosts submit durable leaf-style
+    /// declarations here when no tool attempt owns the call. Tool bodies return
+    /// [`crate::tools::ToolIntents`] instead and never call this front door.
+    pub fn tool_intents(
+        &self,
+        session_id: impl Into<String>,
+        scope: lash_core::ExecutionScope,
+    ) -> crate::Result<ToolIntentIngress> {
+        scope.validate()?;
+        let session_id = session_id.into();
+        if session_id.trim().is_empty() {
+            return Err(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::MissingExecutionScopeId,
+                "tool-intent ingress requires a non-empty session id",
+            )
+            .into());
+        }
+        if let Some(scoped_session) = scope.session_id()
+            && scoped_session != session_id
+        {
+            return Err(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::MissingExecutionScopeId,
+                format!(
+                    "tool-intent ingress session `{session_id}` does not match scope session `{scoped_session}`"
+                ),
+            )
+            .into());
+        }
+        Ok(ToolIntentIngress::new(self.clone(), session_id, scope))
+    }
+}
+
 impl ToolIntentIngress {
     pub(crate) fn new(
         core: crate::LashCore,

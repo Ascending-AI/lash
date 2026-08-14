@@ -166,6 +166,7 @@ pub async fn public_signal_intent_wakes_parked_process(
         crate::LashRuntime::builder(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
+            crate::testing::runtime_lease_owner(),
         )
         .with_session_id(&session_id)
         .with_policy(policy)

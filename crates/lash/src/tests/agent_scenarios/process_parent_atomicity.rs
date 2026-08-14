@@ -453,6 +453,7 @@ fn process_worker(
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(lash_core::testing::mock_session_policy()),
     )

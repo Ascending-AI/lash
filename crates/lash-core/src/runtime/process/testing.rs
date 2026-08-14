@@ -847,7 +847,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         current.expires_at_epoch_ms = 0;
         Ok(ProcessCompletionOutcome::Committed(record.record.clone()))
     }
-
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
@@ -865,7 +864,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         parent_end::complete(self, process_id).await
     }
-
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,

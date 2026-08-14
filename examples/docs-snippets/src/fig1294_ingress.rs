@@ -34,7 +34,10 @@ fn test_core(
         .process_registry(registry)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "docs-fig1294-worker",
+            "docs-fig1294-boot",
+        ))
 }
 
 fn event_intent(session_id: &str) -> lash::tools::ToolIntent {

@@ -58,7 +58,10 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         .process_registry(Arc::clone(&registry) as Arc<dyn lash::process::ProcessRegistry>)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "pg-fig1294-worker",
+            "pg-fig1294-boot",
+        ))
         .expect("build the PostgreSQL host-ingress facade");
     let _session = core
         .session(&session_id)

@@ -560,6 +560,7 @@ async fn public_signal_runtime(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_session_id(SESSION)
         .with_policy(policy.clone())
@@ -863,6 +864,7 @@ async fn fig1293_runtime(
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&registry),
+            lash_core::testing::runtime_lease_owner(),
         ),
     );
     let process_work_driver =
@@ -871,6 +873,7 @@ async fn fig1293_runtime(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
+            lash_core::testing::runtime_lease_owner(),
         )
         .with_session_id("fig1293-restate-migrated-tools")
         .with_policy(policy)

@@ -880,6 +880,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     let mut runtime = lash_core::facade_support::LashRuntime::builder(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
+        lash_core::testing::runtime_lease_owner(),
     )
     .with_session_id("standard-protocol-scenario")
     .with_policy(policy)

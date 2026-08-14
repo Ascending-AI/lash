@@ -542,7 +542,6 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.emit_events_after(&lease.process_id, sink_cursor).await;
         Ok(outcome)
     }
-
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
@@ -556,7 +555,6 @@ impl ProcessRegistry for WatchedProcessRegistry {
     ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
         self.inner.get_pending_parent_end_plan(process_id).await
     }
-
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         self.inner.complete_parent_end_plan(process_id).await
     }

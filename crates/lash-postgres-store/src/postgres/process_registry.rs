@@ -782,7 +782,6 @@ impl ProcessRegistry for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
     }
-
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
@@ -796,11 +795,9 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<Option<lash_core::ProcessParentEndPlan>, PluginError> {
         parent_end::get(&self.pool, process_id).await
     }
-
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         parent_end::complete(&self.pool, process_id).await
     }
-
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,
