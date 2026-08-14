@@ -225,9 +225,24 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 
 // Bound the source's nesting before SWC's recursive-descent parser sees it.
 //
-// SWC overflows the native stack on deep input and aborts the process rather
-// than returning an error, so this scan has to be complete: any recursive
-// production it fails to charge is a shape that takes the host down.
+// **This scan is no longer what keeps the host alive.** It was, for five
+// rounds, and each round it was correct about the axis it modelled while the
+// next abort sat one definition to the side: a grammar family nobody had
+// enumerated, an identifier tokenised differently from SWC, a contextual
+// keyword classified by the wrong predicate. That is what a second
+// implementation of somebody else's lexer costs. The guarantee now rests on
+// arithmetic instead — the source is bounded at `MAX_SOURCE_BYTES` and the
+// parse runs on a stack reserved in proportion to it, with margin over the
+// worst frame cost ever measured; see `parse_stack_size` in this module's
+// parent for the numbers, and `tests/no_abort_guarantee.rs`, which runs every
+// shape that ever aborted with this scan switched off.
+//
+// What the scan is for now is the diagnostic. `TS_SOURCE_NESTING_LIMIT` with
+// source-level wording is a far better answer to a deeply nested cell than a
+// parser-depth error or a successful parse of something unreadable, and a cheap
+// pre-parse rejection keeps a pathological cell from costing a full parse. So
+// the argument below still matters and the guards still enforce it — a missing
+// charge is now a quality regression rather than a dead process.
 //
 // **The grammar this argues over is the one SWC parses — all of TypeScript —
 // not the subset the dialect accepts.** That distinction is the whole point.

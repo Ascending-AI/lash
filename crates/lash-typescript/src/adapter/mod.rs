@@ -185,10 +185,15 @@ pub(crate) enum LogicalOp {
 /// reservation below finite. 64 KiB is roughly 1 600 lines of TypeScript.
 pub const MAX_SOURCE_BYTES: usize = 64 * 1024;
 
-/// Stack reserved before any source-proportional allowance. It covers the
-/// parser's fixed frames and the conversion and lowering that follow, both of
-/// which are bounded by the adapter's own depth counter and the shared AST's
-/// nesting limit rather than by the source.
+/// Stack reserved before any source-proportional allowance.
+///
+/// It covers the parser's fixed frames and everything downstream of the parse,
+/// which is bounded independently of the source: [`Adapter`] refuses to convert
+/// past [`MAX_SOURCE_NESTING_DEPTH`], so the normalized tree it produces is at
+/// most that deep, the lowerer walks that tree, and `lashlang` then rejects any
+/// shared AST deeper than its own `MAX_AST_NESTING_DEPTH`. Only the parse and
+/// the drop of its output scale with the source, which is what the allowance
+/// below pays for.
 const PARSE_STACK_BASE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Parser stack reserved per source byte.

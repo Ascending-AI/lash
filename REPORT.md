@@ -178,7 +178,7 @@ Duplicates are retained to keep provenance counts executable: the 310 rows carry
 These are the only intentional deviations for the accepted v1 surface. They are runtime-system or representation constraints, not alternate silent semantics:
 
 1. Existing instruction, wall-clock, logical-memory, and call-frame limits may terminate execution with typed VM bound errors.
-2. TypeScript source nesting is limited to 28 and rejects as `TS_SOURCE_NESTING_LIMIT`.
+2. TypeScript source nesting is limited to 28 budget units and rejects as `TS_SOURCE_NESTING_LIMIT`, and a cell is limited to 64 KiB of source, rejecting as `TS_SOURCE_TOO_LARGE`. The size bound is a runtime-system constraint: it is what makes the parse-stack reservation finite, and so what makes stack exhaustion arithmetically unreachable.
 3. Cyclic heap objects reject at durable capture. Shared acyclic identity is preserved; cycle-capable durable graph encoding is deferred.
 4. Mutable lexical captures reject as `TS_MUTABLE_CAPTURE_UNSUPPORTED` on both reads and writes until durable lexical cells exist. Immutable captures and mutation through captured object references work.
 5. The host boundary is JSON-shaped: object properties holding `undefined` are omitted, array elements become `null`, and incoming JSON cannot manufacture `undefined`.

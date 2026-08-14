@@ -50,6 +50,9 @@ language semantics:
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
+- A TypeScript cell is capped at **64 KiB** of source and rejects with
+  `TS_SOURCE_TOO_LARGE`. The bound is what makes the parse-stack reservation
+  finite, and 64 KiB is roughly 1 600 lines — far more than a cell should be.
 - TypeScript source nesting is capped at **28 budget units** and rejects with
   `TS_SOURCE_NESTING_LIMIT`. The cap is pinned on a 2 MiB stack; it protects both
   SWC parsing and adapter conversion, and it binds before the shared AST's own
@@ -134,6 +137,27 @@ return `TS_SOURCE_NESTING_LIMIT` and exit cleanly. `tests/grammar_coverage.rs`
 cross-checks the list mechanically: an exhaustive match over SWC's own AST node
 kinds that stops compiling when SWC gains a variant, and a deterministic fuzzer
 whose sources are parsed inside a child process where an abort fails the test.
+
+### Why parsing cannot exhaust the stack
+
+The nesting budget is not what makes this safe. SWC parses by recursive descent
+and aborts the process on stack exhaustion rather than returning an error, and
+five review rounds showed that a hand-written pre-parse scan cannot be relied on
+to agree with SWC about every shape — each round's guard was right about the axis
+it modelled and the next abort sat just outside it.
+
+So the guarantee is arithmetic. A nesting level costs at least two source bytes,
+the worst frame cost measured across every shape that ever aborted is 19 552
+bytes per level, and the parse runs on a thread reserving 8 MiB plus 40 000 bytes
+per source byte — over four times the worst case, on a source that cannot exceed
+64 KiB. The reservation is address space, not memory: pages commit when touched,
+and an ordinary cell touches a few hundred kilobytes. `tests/no_abort_guarantee.rs`
+demonstrates it by disabling the nesting preflight entirely and running every
+shape that aborted in any round through what remains.
+
+The preflight stays for the diagnostic: `TS_SOURCE_NESTING_LIMIT` with
+source-level wording beats a parser-depth error, and rejecting before the parse
+keeps a pathological cell cheap.
 
 The budget depends on a second property besides charging the right productions:
 the preflight's lexer has to agree with SWC's about where each token ends, since
