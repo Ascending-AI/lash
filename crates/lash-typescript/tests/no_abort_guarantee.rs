@@ -45,7 +45,8 @@ fn abort_corpus() -> Vec<(String, String)> {
     // still thousands of levels, and orders of magnitude past the 200 that
     // originally aborted. The distinct-label shape below carries the full bound.
     let duplicate_label_limit = 8 * 1024;
-    let mut corpus = Vec::new();
+    // Grouped by the review round that found each shape.
+    let mut corpus: Vec<(String, String)> = Vec::with_capacity(32);
     // Round 1: prefix operators, ternary and binary chains, delimiters.
     corpus.push(("round1-not".into(), fill("finish(", "!", "1);", "")));
     corpus.push((
