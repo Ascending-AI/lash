@@ -38,6 +38,14 @@ only input-ordered results. It now carries the order the leaves settled in, and
 the VM selects the reported rejection from that order. See
 [Settlement order](#settlement-order).
 
+Round 2's BLOCK is closed: eleven rulings and the performance addendum, with
+each fixed dialect case fed to the node oracle so the corpus — not a
+hand-written test — is what holds the fix down. Two of those rulings changed
+what this report claims rather than what the code does, and one (M4) was
+refuted on evidence: the guarantee it asked for already held, and what was
+missing was a test, which now exists and has been shown to fail when the
+property is broken. See [Round 2 verification closure](#round-2-verification-closure).
+
 ## Delivered surface
 
 ### Durable TypeScript agents
@@ -249,10 +257,14 @@ contract that every host would have to populate — named here rather than faked
 ## Round 2 verification closure
 
 A decisive fresh-eyes verification returned BLOCK with eleven rulings and a
-performance addendum. Every one is closed below. Per the standing rule, each
-fixed dialect case also landed in the checked-in oracle corpus, which is the
-permanent gate; the hand-written test is the diagnosis, the corpus row is the
-guard.
+performance addendum. Every one is closed below. Per the standing rule, every
+fixed case the oracle can express also landed in the checked-in corpus, which
+is the permanent gate: the hand-written test is the diagnosis, the corpus row
+is the guard. The corpus is expression-level, so H1, H3, M1, M3 and H2 are
+node-checked there (`map` and padding had no rows at all before this round and
+now have eight); M2 is a statement-form rejection, which the
+expression oracle cannot carry, so it is pinned in `agent_surface.rs`
+(`for_of_bodies_reject_aliasing_the_iterable`) instead.
 
 | Ruling | What it was | Red | Fix |
 | --- | --- | --- | --- |
@@ -264,8 +276,8 @@ guard.
 | M3 | `replaceAll` expanded `$&`, `` $` `` and `$'` against a truncated slice rather than the whole string | `22695d10b` | `525a47e7e` |
 | M4 | Ruled DELIVER: carry true settlement through the pending-await phase. **The premise was refuted on evidence — see below.** | — | `78f7e9cef` |
 | M5 | The register's instance inventory was hand-maintained and had fallen nine methods behind the allowlist, telling guests that `slice` rejects when it does not | — | `cdb15d32f` |
-| L1 | Two `just perf-guard` rows in this report contradicted each other | — | this commit |
-| L2 | The quoted oracle SHA-256 was stale | — | this commit |
+| L1 | Two `just perf-guard` rows in this report contradicted each other | — | the final report commit |
+| L2 | The quoted oracle SHA-256 was stale | — | the final report commit |
 | L3 | The batch-error path claimed input order for a batch that never ran | — | `cdb15d32f` |
 | L4 | No test resumed a process suspended inside `for…of` | — | `cdb15d32f` |
 | perf addendum | Ruled fix, not recalibrate: the compiled-process cache built its owned key — three cloned strings — before the lookup, so every hit paid an allocation for a value it dropped | — | `cdb15d32f` |
@@ -310,6 +322,12 @@ agent-surface-specific limits are:
 
 - General async functions reject; v1 accepts top-level await and a static
   process definition's async `run` literal.
+- `map` accepts a callback written as a literal at the call site with one or
+  two parameters, matching ECMA's `(value, index)`. A callback passed by name,
+  built dynamically, or declaring a third `array` parameter rejects as
+  `TS_METHOD_UNSUPPORTED` rather than lowering to something that only
+  resembles it — the VM checks arity exactly, so nothing lowers that cannot
+  run.
 - Promise aggregates accept array literals containing top-level tool promises
   and resolved values. Nested aggregates, non-array iterables, and process or
   timer promises inside an aggregate reject.
@@ -359,12 +377,17 @@ model success rate.
 ## Verification
 
 All commands used `CARGO_TARGET_DIR=/workspace/.cargo-target-lash-fig-1305`
-where Cargo was involved.
+where Cargo was involved. The canonical workspace run was taken with
+nothing else touching that target directory: an earlier attempt overlapped with
+the rustdoc and coverage gates and produced a phantom `can't find crate for
+lash` failure in the `docs-snippets` doctest, which passed on its own and
+passed again in the serialized run. Shared-target contamination is a known
+hazard here and a concurrent battery is not evidence either way.
 
 | Gate | Result |
 | --- | --- |
 | `cargo check --workspace --all-targets --locked` | PASS |
-| `cargo test --workspace --locked` | PASS; full unit, integration, property, UI, trybuild, simulation, conformance, and doctest suite |
+| `cargo test --workspace --locked` | PASS; 252 suites, 0 failures — full unit, integration, property, UI, trybuild, simulation, conformance, and doctest suite, run serialized |
 | `cargo nextest run` (lashlang, typescript, core, protocol-rlm, lashlang-runtime) | PASS; 2 241 tests |
 | `just perf-guard` | Runtime leg PASS. Lashlang leg: **155 budget failures at the recipe's 500 iterations, against 162 on the base `1532794d9` — no metric fails here that does not already fail on the base**, so this work regresses nothing and repairs seven. At 2 500 iterations the same head is **fully green, 0 failures, with no budget-table edit**: the 45 overages reported in round 1 were the eager compiled-process cache key, and fixing it removed them. The 500-iteration remainder is warmup-dominated (overages fall from 1 459 vs 336 at 500 to nothing at 2 500) and is pre-existing; recalibrating that recipe is owned separately. |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS |
@@ -373,8 +396,10 @@ where Cargo was involved.
 | `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry files |
 | `bash scripts/check-rustdoc.sh` | PASS; 602 public items documented, 0 missing |
 | `python3 scripts/check_test_quarantines.py` | PASS |
-| `python3 scripts/check_api_example_coverage.py` | PASS; 8,074 entries |
+| `python3 scripts/check_api_example_coverage.py` | PASS; 8,106 entries (run unpiped, exit code checked) |
 | `bash scripts/check-production-file-size.sh` | PASS; main executor reduced to 1,588 lines |
+| `cargo test -p lash-typescript --test differential_oracle` | PASS; 340 node-checked rows, corpus regenerated byte-identically |
+| `python3 scripts/release_notes.py check-pr --range 1532794d9..HEAD` | PASS; every user-facing commit categorized |
 | `git diff --check 1532794d93606940121c3dcff88ac9ad088ddd3e..HEAD` | PASS |
 | `cargo test -p lashlang --locked` | PASS; 464 unit tests and all package integrations |
 | `cargo test -p lash-typescript --locked` | PASS; all 15 agent-surface tests plus dialect, differential, ECMA, fluency, rejection, safety, and conformance suites |
