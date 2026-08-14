@@ -1292,3 +1292,47 @@ mod rejection_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod settlement_order_journal_tests {
+    use super::*;
+
+    /// A journal entry written before settlement order existed must be refused.
+    ///
+    /// This is the whole reason the field carries no serde default: an
+    /// aggregate that rejects with its first *settled* rejection cannot tell a
+    /// defaulted input order from a recorded one, so replaying an older entry
+    /// as input order would silently reintroduce the bug the order fixes.
+    #[test]
+    fn a_tool_batch_outcome_without_settlement_order_fails_closed() {
+        let legacy = serde_json::json!({
+            "kind": "tool_batch",
+            "launches": [],
+        });
+        let decoded = serde_json::from_value::<RuntimeEffectOutcome>(legacy);
+        assert!(
+            decoded.is_err(),
+            "an outcome without settlement order must not decode: {decoded:?}"
+        );
+    }
+
+    /// A current entry round-trips with its order intact.
+    #[test]
+    fn a_tool_batch_outcome_round_trips_its_settlement_order() {
+        let outcome = RuntimeEffectOutcome::ToolBatch {
+            launches: Vec::new(),
+            triggers: Vec::new(),
+            settlement_order: vec![2, 0, 1],
+        };
+        let encoded = serde_json::to_string(&outcome).expect("outcome encodes");
+        let decoded =
+            serde_json::from_str::<RuntimeEffectOutcome>(&encoded).expect("outcome decodes");
+        let RuntimeEffectOutcome::ToolBatch {
+            settlement_order, ..
+        } = decoded
+        else {
+            panic!("decoded the wrong outcome kind");
+        };
+        assert_eq!(settlement_order, vec![2, 0, 1]);
+    }
+}

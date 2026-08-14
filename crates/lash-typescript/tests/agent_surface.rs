@@ -869,3 +869,125 @@ fn promise_all_settled_stays_input_ordered_under_out_of_order_settlement() {
         "allSettled keeps input order even when leaf 1 settled first: {rendered}"
     );
 }
+
+/// A host that reports an order that is not an ordering of its own results
+/// must be refused, not read as input order.
+struct MalformedSettlementHost;
+
+impl ExecutionHost for MalformedSettlementHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+                ResourceOperationBatchResult::settled_in_order(
+                    batch
+                        .operations
+                        .iter()
+                        .map(|_| ResourceOperationResult::Error(ExecutionHostError::new("boom")))
+                        .collect(),
+                    // Two leaves, but the same one named twice.
+                    vec![1, 1],
+                ),
+            )),
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unexpected malformed ability")),
+        }
+    }
+}
+
+#[test]
+fn a_settlement_order_that_is_not_a_permutation_fails_closed() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(
+        "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
+        &environment,
+    )
+    .expect("Promise.all should link");
+    let error = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &MalformedSettlementHost,
+    ))
+    .expect_err("a malformed settlement order is refused");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("settled positions"),
+        "the refusal names the settlement order: {rendered}"
+    );
+}
+
+/// Selecting by settlement order must be a pure function of the journaled
+/// result: replaying the same recorded batch selects the same reason, with no
+/// re-sampling of anything.
+#[test]
+fn the_selected_rejection_is_replay_deterministic() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(
+        "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
+        &environment,
+    )
+    .expect("Promise.all should link");
+    let compiled = lash_typescript::compile_linked(&linked);
+    let mut reasons = Vec::new();
+    for _ in 0..8 {
+        let error = futures::executor::block_on(lashlang::execute(
+            &compiled,
+            &mut State::new(),
+            &FirstSettledRejectionHost,
+        ))
+        .expect_err("a rejected aggregate fails the program");
+        reasons.push(error.to_string());
+    }
+    let first = &reasons[0];
+    assert!(
+        first.contains("early-B"),
+        "the recorded order selects the early rejection: {first}"
+    );
+    assert!(
+        reasons.iter().all(|reason| reason == first),
+        "replaying the same journaled order selects the same reason every time: {reasons:?}"
+    );
+}
+
+/// Lashlang's own aggregates keep selecting in input order: the settlement
+/// metadata is present but the dialect never asked to be ordered by it.
+#[test]
+fn lashlang_aggregates_still_select_in_input_order() {
+    let environment = two_leaf_web_environment();
+    let program = lashlang::parse(
+        "let results = await [web.fetch({ url: 'a' })?, web.fetch({ url: 'b' })?]\nfinish results",
+    );
+    let program = program.expect("PROBE: lashlang aggregate parses");
+    let linked = lashlang::LinkedModule::link(program, &environment)
+        .expect("PROBE: lashlang aggregate links");
+    let compiled =
+        lashlang::compile_linked_with_dialect(&linked, lashlang::CompilationDialect::Lashlang);
+    let error = futures::executor::block_on(lashlang::execute(
+        &compiled,
+        &mut State::new(),
+        &FirstSettledRejectionHost,
+    ))
+    .expect_err("a rejected aggregate fails the program");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("late-A"),
+        "lashlang keeps input-order selection: {rendered}"
+    );
+}
+
+/// Settlement order is consumed inside a single `perform` and never persisted,
+/// so the durable continuation and snapshot formats must be untouched by this
+/// change. If a later change does put batch state in a continuation, this pin
+/// is the reminder that the format versions have to move with it.
+#[test]
+fn settlement_order_does_not_reach_the_continuation_format() {
+    assert_eq!(
+        lashlang::LASHLANG_SNAPSHOT_VERSION,
+        4,
+        "the snapshot format does not carry batch settlement state"
+    );
+    assert_eq!(
+        lashlang::LASHLANG_VM_ABI_VERSION,
+        "lashlang-vm-abi-v5",
+        "the compiled-batch selection rule moved the VM ABI"
+    );
+}
