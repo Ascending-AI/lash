@@ -422,3 +422,103 @@ fn independent_processes_dump_identical_typescript_continuations() {
 
     assert_eq!(probe(), probe());
 }
+
+/// Every program the dialect accepts must survive the durability boundary and
+/// must never publish a generated binding into the session's global surface.
+mod durability {
+    use super::*;
+
+    /// Programs that exercise the whole accepted binding surface, each one
+    /// suspended at a `print` effect and snapshotted the way an RLM session
+    /// does between turns.
+    const DURABLE_CORPUS: &[&str] = &[
+        "const shared = { value: 1 }; const alias = shared; print('x'); finish(`${alias.value}`);",
+        "function fact(n: number): number { if (n <= 1) { return 1; } return fact(n - 1) * n; } print('x'); finish(`${fact(5)}`);",
+        "const top = 9; function outerFn(): number { function innerFn(): number { return top; } return innerFn(); } print('x'); finish(`${outerFn()}`);",
+        "const base = 10; const outer = () => { const inner = () => base; return inner; }; print('x'); finish(`${outer()()}`);",
+        "const items = [1, 2, 3]; const total = items.length; print('x'); finish(`${total}`);",
+        "const g = (n: number): number => n + 1; const h = (n: number): number => g(n) * 2; print('x'); finish(`${h(3)}`);",
+    ];
+
+    fn suspend_and_snapshot(source: &str) -> Vec<String> {
+        futures::executor::block_on(async move {
+            let program = lash_typescript::compile(source)
+                .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
+            let mut state = State::new();
+            let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
+            assert_eq!(
+                vm.run_process_until_effect().await.expect("run to print"),
+                VmRunOutcome::EffectCompleted,
+                "{source}"
+            );
+            // The continuation across an effect boundary must encode.
+            let continuation = vm
+                .suspend()
+                .unwrap_or_else(|error| panic!("suspend `{source}`: {error}"));
+            serde_json::to_vec(&continuation).expect("encode continuation");
+            loop {
+                match vm
+                    .run_process_until_effect()
+                    .await
+                    .unwrap_or_else(|error| panic!("finish `{source}`: {error}"))
+                {
+                    VmRunOutcome::EffectCompleted => {}
+                    VmRunOutcome::Complete(_) => break,
+                }
+            }
+            drop(vm);
+            // The between-turn snapshot must encode too.
+            let snapshot = state.snapshot();
+            snapshot
+                .to_canonical_bytes()
+                .unwrap_or_else(|error| panic!("snapshot `{source}`: {error}"));
+            snapshot
+                .globals()
+                .iter()
+                .map(|(name, _)| name.to_string())
+                .collect::<Vec<_>>()
+        })
+    }
+
+    #[test]
+    fn accepted_programs_suspend_and_snapshot() {
+        for source in DURABLE_CORPUS {
+            suspend_and_snapshot(source);
+        }
+    }
+
+    #[test]
+    fn no_generated_binding_reaches_the_global_surface() {
+        for source in DURABLE_CORPUS {
+            for name in suspend_and_snapshot(source) {
+                assert!(
+                    !name.starts_with("__typescript"),
+                    "generated binding `{name}` leaked into the globals of `{source}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mutually_recursive_declarations_reject_before_they_can_be_persisted() {
+        // v1 cannot durably encode the heap cycle these declarations require,
+        // so the rejection is static — never a persistence failure later.
+        for source in [
+            "function isEven(n: number): boolean { if (n === 0) { return true; } return isOdd(n - 1); } function isOdd(n: number): boolean { if (n === 0) { return false; } return isEven(n - 1); } print('x'); finish(`${isEven(4)}`);",
+            "function a(n: number): number { if (n === 0) { return 0; } return b(n - 1); } function b(n: number): number { return c(n); } function c(n: number): number { return 1 + a(n); } finish(`${a(3)}`);",
+            "function shell(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(`${shell(5)}`);",
+        ] {
+            let error = lash_typescript::compile(source)
+                .expect_err("mutually recursive declarations must reject statically");
+            assert_eq!(
+                error.code,
+                lash_typescript::DiagnosticCode::MutualRecursionUnsupported,
+                "{source}"
+            );
+            assert!(
+                error.to_string().contains(" -> "),
+                "the diagnostic must name the cycle: {error}"
+            );
+        }
+    }
+}
