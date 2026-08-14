@@ -54,6 +54,7 @@ use std::time::Duration;
 
 mod endpoint_protocol;
 mod process_tool_replay;
+mod replay_corpus;
 mod tool_context_conformance;
 use endpoint_protocol::{
     encode_call_replay, encode_captured_run_and_call_replay,
@@ -4576,6 +4577,41 @@ impl ReplayableRecordingContext {
             .collect::<Vec<_>>();
         envelopes.sort_by(|left, right| left.0.cmp(&right.0));
         envelopes
+    }
+
+    fn recorded_runtime_effects(
+        &self,
+    ) -> std::collections::BTreeMap<String, RecordedRuntimeEffect> {
+        self.records
+            .lock_recover()
+            .iter()
+            .map(|(effect_name, bytes)| {
+                let recorded =
+                    serde_json::from_slice(bytes).expect("decode recorded runtime effect");
+                (effect_name.clone(), recorded)
+            })
+            .collect()
+    }
+
+    fn install_recorded_runtime_effects(
+        &self,
+        records: std::collections::BTreeMap<String, RecordedRuntimeEffect>,
+    ) {
+        *self.records.lock_recover() = records
+            .into_iter()
+            .map(|(effect_name, recorded)| {
+                let bytes = serde_json::to_vec(&recorded)
+                    .expect("encode installed recorded runtime effect");
+                (effect_name, bytes)
+            })
+            .collect();
+    }
+
+    fn recorded_runtime_effect(&self, effect_name: &str) -> Option<RecordedRuntimeEffect> {
+        self.records
+            .lock_recover()
+            .get(effect_name)
+            .map(|bytes| serde_json::from_slice(bytes).expect("decode recorded runtime effect"))
     }
 
     fn install_process_worker(&self, worker: DurableProcessWorker) {

@@ -1,0 +1,18 @@
+{
+  "scenario": "sleep-envelope",
+  "recorded_at_git_sha": "d4b977555215e2e603254097ab5ff85c175f2f36",
+  "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
+  "records": {
+    "lash:sleep:test": {
+      "envelope": {
+        "json": "{\"invocation\":{\"scope\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":0,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"sleep:test\",\"kind\":\"sleep\"},\"replay\":{\"key\":\"sleep:test\"}},\"command\":{\"type\":\"sleep\",\"duration_ms\":1}}",
+        "hash": "6ab7d118215f13f6f374352828025dc4711834d1049041b1a0f594ff74bc7276"
+      },
+      "outcome": {
+        "Ok": {
+          "type": "sleep"
+        }
+      }
+    }
+  }
+}
