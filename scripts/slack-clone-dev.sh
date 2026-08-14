@@ -283,7 +283,11 @@ wait_registered() {
 
 build_binaries() {
   log "building slack-clone"
-  cargo build -p slack-clone
+  local -a feature_args=()
+  if [[ "${SLACK_CLONE_E2E_PROVIDER:-}" == "scripted-v1" ]]; then
+    feature_args=(--features e2e)
+  fi
+  cargo build -p slack-clone --locked "${feature_args[@]}"
 }
 
 stop_one() {
@@ -331,7 +335,8 @@ run_up() {
 
   # The bot also loads a repo-root .env itself, so only warn when neither source
   # can supply a key — a false alarm here reads as a real failure.
-  if [[ -z "${OPENROUTER_API_KEY:-}" ]] \
+  if [[ "${SLACK_CLONE_E2E_PROVIDER:-}" != "scripted-v1" ]] \
+    && [[ -z "${OPENROUTER_API_KEY:-}" ]] \
     && ! grep -qs '^[[:space:]]*OPENROUTER_API_KEY=' "$repo_root/.env"; then
     log "OPENROUTER_API_KEY is set neither in the environment nor in .env;"
     log "the bot will exit on boot. The platform alone is still usable at $platform_url."

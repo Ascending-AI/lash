@@ -89,6 +89,7 @@ jobs:
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
           python3 scripts/test_confidence_gate_ci_contract.py
+          python3 scripts/test_slack_clone_full_host_e2e_contract.py
           python3 scripts/test_release_notes.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
@@ -111,6 +112,7 @@ jobs:
         run: |
           cargo check -p lash-protocol-rlm --features testing --locked
           cargo check -p agent-workbench --locked
+          cargo check -p slack-clone --all-targets --features e2e --locked
 
       - name: Check lash-runtime feature boundary
         run: |
@@ -277,6 +279,7 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
+          cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
 
       - name: Check Restate handler panic boundary
         run: python3 scripts/check-restate-handler-panics.py
@@ -696,31 +699,43 @@ jobs:
             recipe: agent-service-restate-e2e
             node: false
             artifact: none
+            browser: false
             runner: blacksmith-4vcpu-ubuntu-2404
           - name: agent-workbench
             recipe: agent-workbench-restate-e2e
             node: false
             artifact: none
+            browser: false
             runner: blacksmith-8vcpu-ubuntu-2404
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
             node: true
             artifact: none
+            browser: false
             runner: blacksmith-2vcpu-ubuntu-2404
           - name: process-operations
             recipe: process-operations-e2e
             node: false
             artifact: process-operations
+            browser: false
             runner: blacksmith-16vcpu-ubuntu-2404
           - name: version-bump-recreation
             recipe: version-bump-recreation-e2e
             node: false
             artifact: version-bump-recreation
+            browser: false
             runner: blacksmith-8vcpu-ubuntu-2404
           - name: session-lease-triage
             recipe: session-lease-triage-e2e
             node: false
             artifact: session-lease-triage
+            browser: false
+            runner: blacksmith-8vcpu-ubuntu-2404
+          - name: slack-clone-full-host
+            recipe: slack-clone-full-host-e2e
+            node: false
+            artifact: none
+            browser: true
             runner: blacksmith-8vcpu-ubuntu-2404
 
     steps:
@@ -754,6 +769,14 @@ jobs:
           cache: npm
           cache-dependency-path: examples/workflow-graph-roundtrip/frontend/package-lock.json
 
+      - name: Install uv
+        if: matrix.browser
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Install Chromium for Playwright
+        if: matrix.browser
+        run: uv run --with playwright==1.62.0 playwright install --with-deps chromium
+
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
 
@@ -764,6 +787,7 @@ jobs:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
           LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
           LASH_SESSION_LEASE_ARTIFACT_DIR: target/functional-e2e-artifacts/session-lease-triage
+          LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: just ${{ matrix.recipe }}
 
       - name: Upload functional E2E failure artifacts
@@ -772,6 +796,14 @@ jobs:
         with:
           name: functional-e2e-${{ matrix.artifact }}-attempt-${{ github.run_attempt }}
           path: target/functional-e2e-artifacts/${{ matrix.artifact }}
+          if-no-files-found: warn
+
+      - name: Upload slack-clone full-host E2E failure artifacts
+        if: failure() && matrix.browser
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: slack-clone-full-host-e2e-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/slack-clone-full-host-e2e
           if-no-files-found: warn
 
   restate-postgres-workers:
