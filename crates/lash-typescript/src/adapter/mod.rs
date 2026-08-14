@@ -1104,16 +1104,59 @@ impl PreviousToken {
             Self::None | Self::OtherWord => false,
         }
     }
+
+    /// Whether this token can be the last one of a statement, which is the
+    /// precondition for automatic semicolon insertion at a following newline.
+    fn can_end_statement(self) -> bool {
+        match self {
+            Self::OtherWord | Self::ExpressionPrefixWord => true,
+            Self::Byte(byte) => matches!(byte, b')' | b']' | b'}') || byte.is_ascii_alphanumeric(),
+            Self::None => false,
+        }
+    }
+}
+
+/// Whether a token can continue the expression on the previous line, which is
+/// what suppresses automatic semicolon insertion. Erring towards "continues"
+/// only keeps the budget accumulating, which is the safe direction.
+fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
+    if let Some(word) = word {
+        return matches!(word, "in" | "instanceof");
+    }
+    matches!(
+        byte,
+        b'.' | b','
+            | b')'
+            | b']'
+            | b'}'
+            | b';'
+            | b':'
+            | b'?'
+            | b'+'
+            | b'-'
+            | b'*'
+            | b'/'
+            | b'%'
+            | b'<'
+            | b'>'
+            | b'='
+            | b'&'
+            | b'|'
+            | b'^'
+            | b'('
+            | b'['
+    )
 }
 
 // Keep one cumulative lexical budget before SWC sees the source. Each open
 // delimiter and each recursively nested operator/statement form consumes one
 // unit; operator counts from outer delimiter frames remain active while the
-// scanner visits an inner expression. A statement boundary — `;`, `,`, or the
-// `}` that closes a statement block — releases the operator run it terminates,
-// so a flat sequence of statement forms stays one level deep. The adapter
-// repeats the guard with one shared counter for statement and expression
-// conversion.
+// scanner visits an inner expression. A statement boundary — `;`, `,`, the `}`
+// that closes a statement block, or a newline in automatic-semicolon-insertion
+// position — releases the operator run it terminates, so a flat sequence of
+// statement forms stays one level deep whether or not it is punctuated. The
+// adapter repeats the guard with one shared counter for statement and
+// expression conversion.
 fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
     let bytes = source.as_bytes();
     let mut mode = ScanMode::Code;
@@ -1121,6 +1164,13 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
     let mut frames = Vec::new();
     let mut current_operators = 0usize;
     let mut previous = PreviousToken::None;
+    // A newline that could end a statement; the following token decides whether
+    // it actually did.
+    let mut pending_statement_end = false;
+    // Statement forms whose controlled statement has not been reached yet. A
+    // newline cannot end a statement while one is open: `if (1)` is not a
+    // complete statement however the line breaks.
+    let mut open_statement_forms = 0usize;
     let mut index = 0usize;
 
     while index < bytes.len() {
@@ -1131,6 +1181,28 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                 // `None` leaves the previous significant token in place, so
                 // whitespace and comments never change how a `{` is classified.
                 let mut scanned = Some(PreviousToken::Byte(byte));
+                if pending_statement_end && !byte.is_ascii_whitespace() {
+                    let word = if is_identifier_start(byte) {
+                        let mut end = index;
+                        while bytes
+                            .get(end + 1)
+                            .is_some_and(|byte| is_identifier_continue(*byte))
+                        {
+                            end += 1;
+                        }
+                        Some(&source[index..=end])
+                    } else {
+                        None
+                    };
+                    let comment = byte == b'/' && matches!(next, Some(b'/') | Some(b'*'));
+                    if !comment {
+                        pending_statement_end = false;
+                        if !continues_previous_statement(byte, word) {
+                            current_operators = 0;
+                            open_statement_forms = 0;
+                        }
+                    }
+                }
                 match (byte, next) {
                     (b'/', Some(b'/')) => {
                         mode = ScanMode::LineComment;
@@ -1205,12 +1277,18 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                         match closed {
                             // A statement block ends every statement form that
                             // introduced it, so the next statement starts over.
-                            Some(SourceDelimiter::StatementBrace) => current_operators = 0,
+                            Some(SourceDelimiter::StatementBrace) => {
+                                current_operators = 0;
+                                open_statement_forms = 0;
+                            }
                             Some(SourceDelimiter::TemplateExpression) => mode = ScanMode::Template,
                             _ => {}
                         }
                     }
-                    (b';' | b',', _) => current_operators = 0,
+                    (b';' | b',', _) => {
+                        current_operators = 0;
+                        open_statement_forms = 0;
+                    }
                     _ if is_identifier_start(byte) => {
                         let start = index;
                         while bytes
@@ -1223,6 +1301,9 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                         if is_recursive_operator_word(word) {
                             increment_source_operators(&frames, &mut current_operators, start)?;
                         }
+                        if is_statement_form_word(word) {
+                            open_statement_forms += 1;
+                        }
                         scanned = Some(if is_expression_prefix_word(word) {
                             PreviousToken::ExpressionPrefixWord
                         } else {
@@ -1232,6 +1313,20 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                     _ if is_recursive_operator_start(byte) => {
                         increment_source_operators(&frames, &mut current_operators, index)?;
                         index += recursive_operator_extra_bytes(bytes, index);
+                    }
+                    (b'\n' | b'\r', _) => {
+                        // Automatic semicolon insertion ends the statement here
+                        // unless the next token continues the expression, and
+                        // only where a statement can actually end.
+                        if previous.can_end_statement()
+                            && open_statement_forms == 0
+                            && frames.last().is_none_or(|frame: &SourceNestingFrame| {
+                                frame.delimiter == SourceDelimiter::StatementBrace
+                            })
+                        {
+                            pending_statement_end = true;
+                        }
+                        scanned = None;
                     }
                     _ if byte.is_ascii_whitespace() => scanned = None,
                     _ => {}
@@ -1270,6 +1365,10 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                     previous = PreviousToken::OtherWord;
                 } else if byte == b'$' && next == Some(b'{') {
                     index += 1;
+                    // A template lowers to a left-nested concatenation chain, so
+                    // each hole deepens the tree the same way a `+` term does
+                    // and has to keep drawing on the budget after it closes.
+                    increment_source_operators(&frames, &mut current_operators, index)?;
                     enter_source_delimiter(
                         &mut frames,
                         &mut current_operators,
@@ -1377,6 +1476,12 @@ fn is_recursive_operator_word(word: &str) -> bool {
             | "with"
             | "yield"
     )
+}
+
+/// Statement keywords that introduce a controlled statement, so the statement
+/// is not complete until that inner statement is.
+fn is_statement_form_word(word: &str) -> bool {
+    matches!(word, "if" | "while" | "for" | "do" | "with" | "else")
 }
 
 /// Words after which a `{` can only open an object literal, never a block.
