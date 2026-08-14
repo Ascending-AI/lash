@@ -42,3 +42,11 @@ JSON.parse('[1e400,2]')[0]
 JSON.parse('{"a":"caf\u00e9","n":1e400}').a
 JSON.parse('{"a":"caf\u00e9"}').a
 JSON.stringify(JSON.parse('{"o":{"__lash_json_f64_overflow_sign__":1},"n":1e400}').o)
+JSON.stringify([1,2,3].map(x => x * 2))
+JSON.stringify(['a','b'].map(s => s + '!'))
+JSON.stringify([10,20,30].map((v, i) => v + i))
+JSON.stringify([].map(x => x))
+JSON.stringify([1,2].map((v, i) => [i, v]))
+'5'.padStart(3, '0')
+'5'.padEnd(3, '*')
+'abcd'.padStart(2, '0')

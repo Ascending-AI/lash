@@ -330,3 +330,11 @@ findings	41	accept	"'abc'.replace('b', '[$&]')"	"a[b]c"	-
 findings	42	accept	"JSON.parse('{\"a\":\"caf\\u00e9\",\"n\":1e400}').a"	"café"	-
 findings	43	accept	"JSON.parse('{\"a\":\"caf\\u00e9\"}').a"	"café"	-
 findings	44	accept	"JSON.stringify(JSON.parse('{\"o\":{\"__lash_json_f64_overflow_sign__\":1},\"n\":1e400}').o)"	"{\"__lash_json_f64_overflow_sign__\":1}"	-
+findings	45	accept	"JSON.stringify([1,2,3].map(x => x * 2))"	"[2,4,6]"	-
+findings	46	accept	"JSON.stringify(['a','b'].map(s => s + '!'))"	"[\"a!\",\"b!\"]"	-
+findings	47	accept	"JSON.stringify([10,20,30].map((v, i) => v + i))"	"[10,21,32]"	-
+findings	48	accept	"JSON.stringify([].map(x => x))"	"[]"	-
+findings	49	accept	"JSON.stringify([1,2].map((v, i) => [i, v]))"	"[[0,1],[1,2]]"	-
+findings	50	accept	"'5'.padStart(3, '0')"	"005"	-
+findings	51	accept	"'5'.padEnd(3, '*')"	"5**"	-
+findings	52	accept	"'abcd'.padStart(2, '0')"	"abcd"	-
