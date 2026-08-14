@@ -255,6 +255,31 @@ fn with_retry_ladder(
         if let Some(delay_ms) = attempt.delay_ms {
             line.push_str(&format!("; retry after {delay_ms} ms"));
         }
+        if let Some(evidence) = &attempt.execution_evidence {
+            let facts = [
+                evidence
+                    .served_model
+                    .as_deref()
+                    .map(|value| format!("model={value}")),
+                evidence
+                    .provider_response_id
+                    .as_deref()
+                    .map(|value| format!("response={value}")),
+                evidence
+                    .provider_finish_reason
+                    .as_deref()
+                    .map(|value| format!("finish={value}")),
+                evidence
+                    .reasoning_output_tokens
+                    .map(|value| format!("reasoning_tokens={value}")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+            if !facts.is_empty() {
+                line.push_str(&format!("; {}", facts.join("; ")));
+            }
+        }
         line
     }));
     format!("{summary}\n{}", lines.join("\n"))

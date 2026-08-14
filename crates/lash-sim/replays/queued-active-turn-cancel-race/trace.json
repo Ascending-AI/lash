@@ -3631,25 +3631,25 @@
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
               "input_tokens": 6,
-              "output_tokens": 4,
-              "reasoning_output_tokens": 1,
-              "total_tokens": 10
+              "output_tokens": 3,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 9
             },
             "total_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
               "input_tokens": 6,
-              "output_tokens": 4,
-              "reasoning_output_tokens": 1,
-              "total_tokens": 10
+              "output_tokens": 3,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 9
             },
             "turn_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
               "input_tokens": 6,
-              "output_tokens": 4,
-              "reasoning_output_tokens": 1,
-              "total_tokens": 10
+              "output_tokens": 3,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 9
             },
             "usage_event_count": 1,
             "usage_event_cumulative_totals": [
@@ -3657,9 +3657,9 @@
                 "cache_read_input_tokens": 0,
                 "cache_write_input_tokens": 0,
                 "input_tokens": 6,
-                "output_tokens": 4,
-                "reasoning_output_tokens": 1,
-                "total_tokens": 10
+                "output_tokens": 3,
+                "reasoning_output_tokens": 0,
+                "total_tokens": 9
               }
             ],
             "usage_events_monotonic": true
@@ -5209,25 +5209,25 @@
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
               "input_tokens": 12,
-              "output_tokens": 8,
-              "reasoning_output_tokens": 2,
-              "total_tokens": 20
+              "output_tokens": 6,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 18
             },
             "total_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
               "input_tokens": 6,
-              "output_tokens": 4,
-              "reasoning_output_tokens": 1,
-              "total_tokens": 10
+              "output_tokens": 3,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 9
             },
             "turn_usage": {
               "cache_read_input_tokens": 0,
               "cache_write_input_tokens": 0,
               "input_tokens": 6,
-              "output_tokens": 4,
-              "reasoning_output_tokens": 1,
-              "total_tokens": 10
+              "output_tokens": 3,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 9
             },
             "usage_event_count": 1,
             "usage_event_cumulative_totals": [
@@ -5235,9 +5235,9 @@
                 "cache_read_input_tokens": 0,
                 "cache_write_input_tokens": 0,
                 "input_tokens": 6,
-                "output_tokens": 4,
-                "reasoning_output_tokens": 1,
-                "total_tokens": 10
+                "output_tokens": 3,
+                "reasoning_output_tokens": 0,
+                "total_tokens": 9
               }
             ],
             "usage_events_monotonic": true

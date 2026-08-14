@@ -32,12 +32,12 @@
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Google scripted answer.\"}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":3,\"thoughtsTokenCount\":1}}}"
+      "data": "{\"response\":{\"responseId\":\"google-evidence-1\",\"modelVersion\":\"gemini-3.1-pro-served\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Google scripted answer.\"}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":3,\"thoughtsTokenCount\":0}}}"
     },
     {
       "at": 21,
       "event": "sse",
-      "data": "{\"response\":{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":3,\"thoughtsTokenCount\":1}}}"
+      "data": "{\"response\":{\"responseId\":\"google-evidence-1\",\"modelVersion\":\"gemini-3.1-pro-served\",\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":3,\"thoughtsTokenCount\":0}}}"
     },
     { "at": 22, "event": "end" }
   ],

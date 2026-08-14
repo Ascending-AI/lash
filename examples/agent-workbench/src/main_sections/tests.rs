@@ -39,6 +39,8 @@ mod tests {
 
     include!("tests/mail_payload.rs");
     include!("tests/commit_budget.rs");
+    include!("tests/provider_execution_evidence.rs");
+    include!("tests/remote_execution_evidence.rs");
     include!("tests/recoverable_chat.rs");
     include!("tests/recoverable_chat_failures.rs");
     include!("tests/continue_as_projection.rs");

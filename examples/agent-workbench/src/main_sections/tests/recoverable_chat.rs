@@ -759,20 +759,7 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
 async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/browser_projection.mjs");
-    let trigger_identities = serde_json::json!({
-        "session_a": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("session-a"),
-            "derived/v2/content-address",
-        ),
-        "session_b": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("session-b"),
-            "derived/v2/content-address",
-        ),
-        "wired": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("wired-session"),
-            "wired-key",
-        ),
-    });
+    let trigger_identities = browser_projection_trigger_identities();
     let usage_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
         lash::TurnEvent::Usage {
             protocol_iteration: 2,
@@ -970,6 +957,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         "noIdToolCompleted": no_id_tool_completed_event,
         "noIdCodeCompleted": no_id_code_completed_event,
     });
+    let evidence_events = provider_execution_evidence_events().await;
 
     // RLM's printed-image projection can commit more than one stored image
     // part on a single message. Feed that production projection to the browser
@@ -1078,6 +1066,11 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
             "LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT",
             serde_json::to_string(&durable_tool_state.transcript)
                 .expect("serialize Rust-produced durable tool transcript"),
+        )
+        .env(
+            "LASH_WORKBENCH_EXECUTION_EVIDENCE_EVENTS",
+            serde_json::to_string(&evidence_events)
+                .expect("serialize provider evidence remote events"),
         )
         .output()
         .expect("Node.js is required for the agent-workbench browser projection gate");
@@ -1558,7 +1551,9 @@ async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
         StreamItem::Message { message } => {
             message.text != never_committed && !message.id.starts_with("workbench-user:")
         }
-        StreamItem::TurnInput { .. } | StreamItem::Done { .. } => true,
+        StreamItem::TurnInput { .. }
+        | StreamItem::ModelCallRecorded { .. }
+        | StreamItem::Done { .. } => true,
     }));
 }
 
@@ -2251,7 +2246,9 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                 StreamItem::Message { message } => {
                     Some((message.id.clone(), message.role.clone(), message.text.clone()))
                 }
-                StreamItem::TurnInput { .. } | StreamItem::Done { .. } => None,
+                StreamItem::TurnInput { .. }
+                | StreamItem::ModelCallRecorded { .. }
+                | StreamItem::Done { .. } => None,
             })
             .collect::<Vec<_>>(),
         vec![(

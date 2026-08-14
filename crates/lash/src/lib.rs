@@ -359,16 +359,17 @@ pub mod remote {
     pub mod llm {
         pub use lash_remote_protocol::llm::{
             RemoteAttachmentRef, RemoteAttachmentSource, RemoteAttachmentTypeMetadata,
-            RemoteDiagnostic, RemoteExecutionEvidence,
+            RemoteAttemptOutcome, RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
             RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationDisposition,
-            RemoteGenerationOptionDisposition, RemoteGenerationOptions, RemoteLlmContentBlock,
-            RemoteLlmMessage, RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmRequest,
-            RemoteLlmRequestScope, RemoteLlmResponse, RemoteLlmRole, RemoteLlmTerminalReason,
-            RemoteLlmToolChoice, RemoteLlmToolSpec, RemoteModelCapability, RemoteModelIntent,
+            RemoteGenerationOptionDisposition, RemoteGenerationOptions, RemoteLlmCallRecord,
+            RemoteLlmContentBlock, RemoteLlmMessage, RemoteLlmOutputPart, RemoteLlmOutputSpec,
+            RemoteLlmRequest, RemoteLlmRequestScope, RemoteLlmResponse, RemoteLlmRole,
+            RemoteLlmTerminalReason, RemoteLlmToolChoice, RemoteLlmToolSpec, RemoteModelCapability,
+            RemoteModelIntent, RemoteNormalizedError, RemoteProtocolPosition,
             RemoteProviderFailureKind, RemoteProviderFileScope, RemoteProviderMetadata,
             RemoteProviderReasoningReplay, RemoteProviderReplayMeta, RemoteReasoningCapability,
             RemoteReasoningDisableEncoding, RemoteReasoningEncoding, RemoteReasoningSelection,
-            RemoteResponseTextMeta, RemoteSchemaProjectionOverride,
+            RemoteResponseTextMeta, RemoteRetryDecision, RemoteSchemaProjectionOverride,
         };
     }
 

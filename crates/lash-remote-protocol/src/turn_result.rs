@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ensure_protocol_version;
+use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::llm::{RemoteLlmTerminalReason, RemoteProviderFailureKind};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::turn_control::RemoteTurnCancellationEvidence;
@@ -31,6 +32,8 @@ pub struct RemoteTurnResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<RemoteToolCallSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub llm_calls: Vec<RemoteLlmCallRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issues: Vec<RemoteTurnIssue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub activities: Vec<RemoteTurnActivity>,
@@ -52,6 +55,9 @@ impl RemoteTurnResult {
         }
         if let Some(cancellation) = self.cancellation.as_ref() {
             cancellation.validate()?;
+        }
+        for record in &self.llm_calls {
+            validate_llm_call_record(record)?;
         }
         for activity in &self.activities {
             if activity.protocol_version != self.protocol_version {

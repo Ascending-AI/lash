@@ -137,6 +137,7 @@ impl GoogleOAuthProvider {
                 })
                 .unwrap_or_default();
             let terminal_reason = Self::terminal_reason_from_value(&value, &parts);
+            let execution_evidence = Self::execution_evidence_from_value(&value);
             return Ok(LlmResponse {
                 full_text,
                 parts,
@@ -146,7 +147,7 @@ impl GoogleOAuthProvider {
                 provider_usage,
                 request_body,
                 http_summary: Some(format!("HTTP POST {}", url)),
-                execution_evidence: None,
+                execution_evidence,
                 generation_disposition,
                 response_metadata: response_metadata.into_metadata(),
             });
@@ -155,6 +156,7 @@ impl GoogleOAuthProvider {
         let mut full = String::new();
         let mut usage = LlmUsage::default();
         let mut provider_usage: Option<Value> = None;
+        let mut execution_evidence: Option<ExecutionEvidence> = None;
         let mut output_parts: Vec<LlmOutputPart> = Vec::new();
         let mut tool_call_parts: Vec<LlmOutputPart> = Vec::new();
         let mut finish_event: Option<Value> = None;
@@ -174,6 +176,7 @@ impl GoogleOAuthProvider {
                 let mut text_deltas = Vec::new();
                 let mut reasoning_deltas = Vec::new();
                 let prev_usage = usage.clone();
+                let prev_execution_evidence = execution_evidence.clone();
                 let first_new_tool_call = tool_call_parts.len();
                 Self::process_sse_event_with_text_parts(
                     raw,
@@ -183,6 +186,7 @@ impl GoogleOAuthProvider {
                         reasoning_deltas: &mut reasoning_deltas,
                         usage: &mut usage,
                         provider_usage: &mut provider_usage,
+                        execution_evidence: &mut execution_evidence,
                         tool_call_parts: Some(&mut tool_call_parts),
                         output_parts: Some(&mut output_parts),
                         finish_event: &mut finish_event,
@@ -203,6 +207,14 @@ impl GoogleOAuthProvider {
                     if provider_usage.is_some() {
                         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                             provider_usage: provider_usage.clone(),
+                            execution_evidence: (execution_evidence != prev_execution_evidence)
+                                .then(|| execution_evidence.clone())
+                                .flatten(),
+                            ..Default::default()
+                        }));
+                    } else if execution_evidence != prev_execution_evidence {
+                        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                            execution_evidence: execution_evidence.clone(),
                             ..Default::default()
                         }));
                     }
@@ -245,7 +257,7 @@ impl GoogleOAuthProvider {
                 provider_usage: provider_usage.clone(),
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {url} (stream)")),
-                execution_evidence: None,
+                execution_evidence: execution_evidence.clone(),
                 generation_disposition,
                 response_metadata: response_metadata.metadata(),
             }
@@ -299,7 +311,7 @@ impl GoogleOAuthProvider {
             provider_usage,
             request_body,
             http_summary: Some(format!("HTTP POST {}", url)),
-            execution_evidence: None,
+            execution_evidence,
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
         })

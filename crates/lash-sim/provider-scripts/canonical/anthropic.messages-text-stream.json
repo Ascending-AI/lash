@@ -32,7 +32,7 @@
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":7,\"output_tokens\":0}}}"
+      "data": "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_anthropic_evidence_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514-served\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":7,\"output_tokens\":0,\"output_tokens_details\":{\"thinking_tokens\":0}}}}"
     },
     {
       "at": 21,

@@ -594,6 +594,17 @@
       overflow-wrap: anywhere;
     }
 
+    .execution-scorecard {
+      margin: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      font: 11px/1.45 var(--mono);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
     /* ─── center ─── */
 
     .main {
@@ -2068,6 +2079,8 @@
         <div class="status-row"><span>session</span><span id="sessionId">connecting…</span></div>
         <div class="status-row"><span>usage</span><span id="usageTotal">0 total</span></div>
         <div class="status-row"><span>tokens</span><span id="usageBreakdown">0 in · 0 out</span></div>
+        <div class="status-row"><span>execution evidence</span></div>
+        <pre id="executionScorecard" class="execution-scorecard" aria-live="polite">no provider facts yet</pre>
         <button id="newSessionTab" class="ghost-btn" type="button" title="Open an isolated session in a second tab">new session tab</button>
       </div>
     </aside>
@@ -2288,6 +2301,7 @@
     const sessionId = document.getElementById("sessionId");
     const usageTotal = document.getElementById("usageTotal");
     const usageBreakdown = document.getElementById("usageBreakdown");
+    const executionScorecard = document.getElementById("executionScorecard");
     const triggerRegistrations = document.getElementById("triggerRegistrations");
     const triggerCount = document.getElementById("triggerCount");
     const newSessionTab = document.getElementById("newSessionTab");
@@ -2357,6 +2371,55 @@
       return authoritative ? false : currentBusy;
     }
     // END WORKBENCH_PROJECTION_STATE
+
+    // BEGIN WORKBENCH_EXECUTION_SCORECARD
+    function createExecutionScorecardState() {
+      return new Map();
+    }
+
+    function applyExecutionScorecardRecord(state, record) {
+      if (!record?.call_id) return;
+      state.set(record.call_id, record);
+    }
+
+    function executionScorecardText(state) {
+      const lines = [];
+      const records = [...state.values()].sort((left, right) =>
+        left.call_id < right.call_id ? -1 : left.call_id > right.call_id ? 1 : 0
+      );
+      for (const record of records) {
+        for (const attempt of record.attempts || []) {
+          const evidence = attempt.evidence;
+          if (!evidence) continue;
+          const facts = [
+            evidence.served_model && `model ${evidence.served_model}`,
+            evidence.provider_response_id && `response ${evidence.provider_response_id}`,
+            evidence.provider_finish_reason && `finish ${evidence.provider_finish_reason}`,
+            evidence.reasoning_output_tokens !== undefined
+              && `reasoning ${evidence.reasoning_output_tokens}`,
+          ].filter(Boolean);
+          lines.push(`${record.call_id} #${attempt.ordinal} ${attempt.outcome} · ${facts.join(" · ")}`);
+        }
+      }
+      return lines.join("\n") || "no provider facts yet";
+    }
+
+    function renderExecutionScorecard(state, target) {
+      target.textContent = executionScorecardText(state);
+    }
+
+    function rebuildExecutionScorecard(state, events, target) {
+      state.clear();
+      for (const event of events || []) {
+        if (event.type === "model_call_recorded") {
+          applyExecutionScorecardRecord(state, event.record);
+        }
+      }
+      renderExecutionScorecard(state, target);
+    }
+    // END WORKBENCH_EXECUTION_SCORECARD
+
+    const executionScorecardState = createExecutionScorecardState();
 
     // BEGIN WORKBENCH_SHELL_AVAILABILITY
     /* "idle" and "no turns yet" are claims about the session; the shell can only
@@ -3413,6 +3476,7 @@
     // END WORKBENCH_TRANSIENT_SETTLEMENT
 
     // BEGIN WORKBENCH_TURN_EVENT_DISPATCH
+    // BEGIN WORKBENCH_TURN_EVENT_REDUCER
     function handleTurnEvent(event, turnId) {
       globalThis.__LASH_WORKBENCH_TURN_EVENT_HOOK__?.(event, turnId);
       if (event.type === "model_request_started") clearRetryStatus(turnId);
@@ -3422,6 +3486,10 @@
       if (event.type === "reasoning_delta") appendReasoning(event.text, event.correlation_id, turnId);
       if (event.type === "model_attempt_reset") resetModelAttempt(event);
       if (event.type === "retry_status") renderRetryStatus(event, turnId);
+      if (event.type === "model_call_recorded") {
+        applyExecutionScorecardRecord(executionScorecardState, event.record);
+        renderExecutionScorecard(executionScorecardState, executionScorecard);
+      }
       if (event.type === "code_block_started") startCodeBlock(event, turnId);
       if (event.type === "code_block_completed") completeCodeBlock(event, turnId);
       if (event.type === "tool_call_started") appendStartedTool(event, turnId);
@@ -3430,6 +3498,7 @@
       if (event.type === "tool_value") appendAssistantText(renderTerminalValue(event.value), null, turnId);
       if (event.type === "usage") renderStreamingUsage(event.cumulative, turnId);
     }
+    // END WORKBENCH_TURN_EVENT_REDUCER
     // END WORKBENCH_TURN_EVENT_DISPATCH
 
     // BEGIN WORKBENCH_POST_COMMAND
@@ -3594,6 +3663,7 @@
       }
     }
 
+    // BEGIN WORKBENCH_REMOTE_STREAM_RECOVERY
     function parseStreamLine(line) {
       if (!line.trim()) return;
       try {
@@ -3624,6 +3694,10 @@
       );
       if (event.type === "message") renderMessage(event.message);
       if (event.type === "turn_input") renderIngressReceipt(event.receipt);
+      if (event.type === "model_call_recorded") {
+        applyExecutionScorecardRecord(executionScorecardState, event.record);
+        renderExecutionScorecard(executionScorecardState, executionScorecard);
+      }
       if (event.type === "done") {
         finishTransientRows(event.turn_id);
         setBusy(false, "ready");
@@ -3649,6 +3723,7 @@
       if (item.type === "terminal_replacement") {
         projectionState.observationCursor =
           item.cursor || item.event?.cursor || projectionState.observationCursor;
+        handleObservation(item.event);
         finishTransientRows(item.event?.turn_id);
         recoverTerminalReplacement();
       }
@@ -3699,6 +3774,7 @@
         "the turn settled; reload to restore the final transcript"
       );
     }
+    // END WORKBENCH_REMOTE_STREAM_RECOVERY
 
     function stopTurn() {
       if (controller) controller.abort();
@@ -4513,6 +4589,11 @@
       renderUsage(state.usage);
       renderQueuedWork(state.queued_work || []);
       renderStateTranscript(state);
+      rebuildExecutionScorecard(
+        executionScorecardState,
+        state.product_events?.events,
+        executionScorecard
+      );
       for (const pending of state.pending_turn_inputs || []) {
         const textItem = (pending.input?.items || []).find(item => item.Text?.text);
         renderIngressReceipt({

@@ -197,6 +197,8 @@ pub fn runtime_script_value_for_text(
                 1,
                 json!({
                     "response": {
+                        "responseId": "google-evidence-1",
+                        "modelVersion": "gemini-3.1-pro-served",
                         "candidates": [
                             {
                                 "content": {
@@ -211,7 +213,7 @@ pub fn runtime_script_value_for_text(
                         "usageMetadata": {
                             "promptTokenCount": 6,
                             "candidatesTokenCount": 3,
-                            "thoughtsTokenCount": 1,
+                            "thoughtsTokenCount": 0,
                         }
                     }
                 }),
@@ -448,4 +450,47 @@ where
     T: LlmHttpTransport + 'static,
 {
     transport.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::ProviderWireEvent;
+
+    fn sse_payload(event: &ProviderWireEvent) -> Value {
+        let ProviderWireEvent::Sse { data, .. } = event else {
+            panic!("expected scripted SSE event");
+        };
+        serde_json::from_str(data).expect("scripted SSE payload is JSON")
+    }
+
+    #[test]
+    fn generated_google_partial_fixture_preserves_identity_and_explicit_zero_reasoning() {
+        let script = live_failure_script(GOOGLE_OAUTH, 2).expect("Google partial fixture");
+        let payload = sse_payload(&script.timeline[1]);
+        assert_eq!(
+            payload.pointer("/response/responseId"),
+            Some(&json!("google-evidence-1"))
+        );
+        assert_eq!(
+            payload.pointer("/response/modelVersion"),
+            Some(&json!("gemini-3.1-pro-served"))
+        );
+        assert_eq!(
+            payload.pointer("/response/usageMetadata/thoughtsTokenCount"),
+            Some(&json!(0))
+        );
+    }
+
+    #[test]
+    fn generated_openai_fixture_does_not_carry_google_identity_fields() {
+        let script = runtime_script_value_for_text(OPENAI, "answer").expect("OpenAI fixture");
+        let payload = sse_payload(
+            &ProviderWireScript::from_json_str(&script.to_string())
+                .expect("valid OpenAI fixture")
+                .timeline[4],
+        );
+        assert!(payload.pointer("/response/responseId").is_none());
+        assert!(payload.pointer("/response/modelVersion").is_none());
+    }
 }

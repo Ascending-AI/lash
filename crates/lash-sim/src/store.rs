@@ -618,7 +618,7 @@ impl ModelStore {
                 let (input_tokens, output_tokens, reasoning_output_tokens) = match provider_kind {
                     "openai" => (5, 2, 0),
                     "anthropic" => (7, 4, 0),
-                    "google_oauth" => (6, 4, 1),
+                    "google_oauth" => (6, 3, 0),
                     _ => (0, 0, 0),
                 };
                 let usage = |multiplier: i64| {

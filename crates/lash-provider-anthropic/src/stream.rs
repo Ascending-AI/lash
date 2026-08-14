@@ -63,6 +63,9 @@ pub(crate) struct StreamState {
     /// carries the cumulative output counters, so the raw blocks are
     /// shallow-merged rather than last-wins.
     pub(crate) provider_usage: Option<Value>,
+    /// Provider-reported identity, served model, reasoning-token presence,
+    /// and terminal reason accumulated across split SSE events.
+    pub(crate) execution_evidence: Option<ExecutionEvidence>,
     pub(crate) stop_reason: Option<String>,
     pub(crate) message_started: bool,
     pub(crate) message_stopped: bool,
@@ -79,6 +82,30 @@ fn merge_raw_usage(provider_usage: &mut Option<Value>, next: &Value) {
         }
         _ => *provider_usage = Some(next.clone()),
     }
+}
+
+fn merge_execution_evidence(accumulated: &mut Option<ExecutionEvidence>, next: ExecutionEvidence) {
+    if next == ExecutionEvidence::default() {
+        return;
+    }
+    let current = accumulated.get_or_insert_with(ExecutionEvidence::default);
+    current.served_model = next.served_model.or(current.served_model.take());
+    current.provider_response_id = next
+        .provider_response_id
+        .or(current.provider_response_id.take());
+    current.reasoning_output_tokens = next
+        .reasoning_output_tokens
+        .or(current.reasoning_output_tokens);
+    current.provider_finish_reason = next
+        .provider_finish_reason
+        .or(current.provider_finish_reason.take());
+}
+
+fn reasoning_output_tokens(usage: &Value) -> Option<u64> {
+    usage
+        .get("output_tokens_details")
+        .and_then(|details| details.get("thinking_tokens"))
+        .and_then(Value::as_u64)
 }
 
 fn parse_event(raw: &str) -> Option<Value> {
@@ -154,7 +181,26 @@ impl AnthropicProvider {
         match kind.as_str() {
             "message_start" => {
                 state.message_started = true;
-                if let Some(usage) = event.get("message").and_then(|m| m.get("usage")) {
+                let message = event.get("message").unwrap_or(&Value::Null);
+                let usage = message.get("usage");
+                merge_execution_evidence(
+                    &mut state.execution_evidence,
+                    ExecutionEvidence {
+                        served_model: message
+                            .get("model")
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string),
+                        provider_response_id: message
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string),
+                        reasoning_output_tokens: usage.and_then(reasoning_output_tokens),
+                        ..ExecutionEvidence::default()
+                    },
+                );
+                if let Some(usage) = usage {
                     state.usage = Self::parse_usage(usage);
                     merge_raw_usage(&mut state.provider_usage, usage);
                     if let Some(tx) = stream_events
@@ -166,6 +212,7 @@ impl AnthropicProvider {
                 if let Some(tx) = stream_events {
                     tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                         provider_usage: state.provider_usage.clone(),
+                        execution_evidence: state.execution_evidence.clone(),
                         ..Default::default()
                     }));
                 }
@@ -286,6 +333,13 @@ impl AnthropicProvider {
                             tx.send(LlmStreamEvent::Usage(state.usage.clone()));
                         }
                     }
+                    merge_execution_evidence(
+                        &mut state.execution_evidence,
+                        ExecutionEvidence {
+                            reasoning_output_tokens: reasoning_output_tokens(usage),
+                            ..ExecutionEvidence::default()
+                        },
+                    );
                 }
                 if let Some(stop) = event
                     .get("delta")
@@ -293,16 +347,18 @@ impl AnthropicProvider {
                     .and_then(|v| v.as_str())
                 {
                     state.stop_reason = Some(stop.to_string());
+                    merge_execution_evidence(
+                        &mut state.execution_evidence,
+                        ExecutionEvidence {
+                            provider_finish_reason: Some(stop.to_string()),
+                            ..ExecutionEvidence::default()
+                        },
+                    );
                 }
                 if let Some(tx) = stream_events {
                     tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                         provider_usage: state.provider_usage.clone(),
-                        execution_evidence: state.stop_reason.clone().map(|reason| {
-                            ExecutionEvidence {
-                                provider_finish_reason: Some(reason),
-                                ..Default::default()
-                            }
-                        }),
+                        execution_evidence: state.execution_evidence.clone(),
                         ..Default::default()
                     }));
                 }

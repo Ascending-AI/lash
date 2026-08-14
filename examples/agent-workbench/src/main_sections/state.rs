@@ -400,6 +400,10 @@ enum StreamItem {
     TurnInput {
         receipt: TurnInputReceipt,
     },
+    ModelCallRecorded {
+        turn_id: String,
+        record: lash_remote_protocol::RemoteLlmCallRecord,
+    },
     Done {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_id: Option<String>,
@@ -685,6 +689,7 @@ impl SessionEventRegistry {
                 ..
             } => active_turn_ids.contains(turn_id),
             StreamItem::TurnInput { .. }
+            | StreamItem::ModelCallRecorded { .. }
             | StreamItem::Done {
                 turn_id: None,
                 ..

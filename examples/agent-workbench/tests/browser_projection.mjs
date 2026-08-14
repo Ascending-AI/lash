@@ -22,6 +22,14 @@ assert.ok(
 const multiAttachmentMessage = JSON.parse(
   process.env.LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE ?? "null",
 );
+const executionEvidenceEvents = JSON.parse(
+  process.env.LASH_WORKBENCH_EXECUTION_EVIDENCE_EVENTS ?? "null",
+);
+assert.equal(
+  executionEvidenceEvents?.length,
+  2,
+  "execution evidence must come from the Rust provider-to-remote gate",
+);
 assert.ok(
   multiAttachmentMessage,
   "LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE must come from the Rust projection gate",
@@ -1184,6 +1192,115 @@ function snapshot(sessionId, cursor, eventIds = []) {
     },
   };
 }
+
+test("remote cursor replay, gap recovery, and terminal replacement converge on the rendered execution scorecard", async () => {
+  const target = { textContent: "" };
+  const snapshots = [];
+  const scorecardContext = {
+    Map,
+    Set,
+    executionScorecard: target,
+    projectionState: { observationCursor: null },
+    appliedObservationEvents: new Set(),
+    finishTransientRows() {},
+    beginStateRecovery() { return {}; },
+    async fetchStateSnapshot() { return snapshots.shift(); },
+    markShellChannel() {},
+    shellAvailability: {},
+    recoveryResponseIsCurrent() { return true; },
+    renderShellStatus() {},
+    scheduleStateRetry() {},
+    renderError() {},
+    snapshotFailureReason(error) { return String(error); },
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+     this.executionScorecardState = createExecutionScorecardState();
+     ${markedSource("WORKBENCH_TURN_EVENT_REDUCER", "WORKBENCH_TURN_EVENT_REDUCER")}
+     ${markedSource("WORKBENCH_REMOTE_STREAM_RECOVERY", "WORKBENCH_REMOTE_STREAM_RECOVERY")}`,
+    scorecardContext,
+  );
+  scorecardContext.applyStateSnapshot = state => {
+    scorecardContext.rebuildExecutionScorecard(
+      scorecardContext.executionScorecardState,
+      state.product_events?.events,
+      target,
+    );
+  };
+  const googleEvent = executionEvidenceEvents[0];
+  const anthropicEvent = executionEvidenceEvents[1];
+  const google = googleEvent.activity.record;
+  const anthropic = anthropicEvent.activity.record;
+
+  const googleLine = JSON.stringify({ type: "observation", event: googleEvent });
+  scorecardContext.handleObservationStreamLine(googleLine);
+  scorecardContext.handleObservationStreamLine(googleLine);
+  assert.equal(
+    target.textContent,
+    "google-call #1 completed · model gemini-3.1-pro-served · response google-evidence-1 · finish STOP · reasoning 0",
+    "replaying the same remote cursor must not duplicate a scorecard row",
+  );
+
+  snapshots.push({
+    product_events: {
+      events: [{ type: "model_call_recorded", record: anthropic }],
+    },
+  });
+  scorecardContext.handleObservationStreamLine(JSON.stringify({
+    type: "replay_gap",
+    gap: { latest_cursor: "gap-recovery" },
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(
+    target.textContent,
+    "anthropic-call #1 completed · model claude-sonnet-4-20250514-served · response msg_anthropic_evidence_1 · finish end_turn · reasoning 0",
+    "an authoritative product snapshot replaces rows after a replay gap",
+  );
+
+  snapshots.push({
+    product_events: {
+      events: [
+        { type: "model_call_recorded", record: anthropic },
+        { type: "model_call_recorded", record: google },
+      ],
+    },
+  });
+  scorecardContext.handleObservationStreamLine(JSON.stringify({
+    type: "terminal_replacement",
+    cursor: "terminal-replacement",
+    event: googleEvent,
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(
+    target.textContent,
+    [
+      "anthropic-call #1 completed · model claude-sonnet-4-20250514-served · response msg_anthropic_evidence_1 · finish end_turn · reasoning 0",
+      "google-call #1 completed · model gemini-3.1-pro-served · response google-evidence-1 · finish STOP · reasoning 0",
+    ].join("\n"),
+    "a terminal replacement event converges with the authoritative scorecard",
+  );
+});
+
+test("execution scorecard ordering is locale-independent for arbitrary call ids", () => {
+  const target = { textContent: "" };
+  const scorecardContext = { Map };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+     this.scorecard = createExecutionScorecardState();`,
+    scorecardContext,
+  );
+  for (const call_id of ["a-call", "!call", "A-call"]) {
+    scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
+      call_id,
+      attempts: [{ ordinal: 1, outcome: "completed", evidence: { reasoning_output_tokens: 0 } }],
+    });
+  }
+  scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
+  assert.deepEqual(
+    target.textContent.split("\n").map(line => line.split(" #", 1)[0]),
+    ["!call", "A-call", "a-call"],
+  );
+});
 
 test("a snapshot overtaken by a live event cannot erase its row", () => {
   const projection = createWorkbenchProjectionState();

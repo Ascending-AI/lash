@@ -12,10 +12,10 @@ pub(crate) use lash_core::llm::transport::{
     ProviderFailureKind, known_attachment_acceptors, unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
-    AttachmentSource, GenerationDisposition, GenerationOptionDisposition, LlmContentBlock,
-    LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
-    LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
-    ProviderReplayMeta, ResponseTextMeta,
+    AttachmentSource, ExecutionEvidence, GenerationDisposition, GenerationOptionDisposition,
+    LlmContentBlock, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole,
+    LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
+    ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta,
 };
 pub(crate) use lash_core::provider::{
     Provider, ProviderComponents, ProviderFactory, ProviderOptions, ReasoningDisableEncoding,
@@ -49,6 +49,7 @@ pub(crate) struct SseTextPartSink<'a> {
     pub reasoning_deltas: &'a mut Vec<String>,
     pub usage: &'a mut LlmUsage,
     pub provider_usage: &'a mut Option<Value>,
+    pub execution_evidence: &'a mut Option<ExecutionEvidence>,
     pub tool_call_parts: Option<&'a mut Vec<LlmOutputPart>>,
     pub output_parts: Option<&'a mut Vec<LlmOutputPart>>,
     pub finish_event: &'a mut Option<Value>,

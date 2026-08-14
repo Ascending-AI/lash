@@ -90,7 +90,10 @@ fn product_user_rows(state: &AppState, session_id: &str) -> Vec<(String, String)
             StreamItem::Message { message } if message.role == "user" => {
                 Some((message.id, message.text))
             }
-            StreamItem::Message { .. } | StreamItem::TurnInput { .. } | StreamItem::Done { .. } => {
+            StreamItem::Message { .. }
+            | StreamItem::TurnInput { .. }
+            | StreamItem::ModelCallRecorded { .. }
+            | StreamItem::Done { .. } => {
                 None
             }
         })
@@ -107,7 +110,10 @@ fn product_event_rows(state: &AppState, session_id: &str) -> Vec<(String, String
             StreamItem::Message { message } if message.role == "event" => {
                 Some((message.id, message.text))
             }
-            StreamItem::Message { .. } | StreamItem::TurnInput { .. } | StreamItem::Done { .. } => {
+            StreamItem::Message { .. }
+            | StreamItem::TurnInput { .. }
+            | StreamItem::ModelCallRecorded { .. }
+            | StreamItem::Done { .. } => {
                 None
             }
         })
@@ -122,7 +128,9 @@ fn product_ingress_receipts(state: &AppState, session_id: &str) -> Vec<TurnInput
         .into_iter()
         .filter_map(|event| match event.item {
             StreamItem::TurnInput { receipt } => Some(receipt),
-            StreamItem::Message { .. } | StreamItem::Done { .. } => None,
+            StreamItem::Message { .. }
+            | StreamItem::ModelCallRecorded { .. }
+            | StreamItem::Done { .. } => None,
         })
         .collect()
 }
@@ -980,7 +988,9 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
         .into_iter()
         .filter_map(|event| match event.item {
             StreamItem::Done { turn_id, outcome } => Some((turn_id, outcome)),
-            StreamItem::Message { .. } | StreamItem::TurnInput { .. } => None,
+            StreamItem::Message { .. }
+            | StreamItem::TurnInput { .. }
+            | StreamItem::ModelCallRecorded { .. } => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(

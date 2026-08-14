@@ -828,6 +828,32 @@ fn observer_audit_and_fork_selector_types_round_trip() {
 
 #[test]
 fn remote_turn_result_maps_core_semantics() {
+    let call_record = lash_core::LlmCallRecord {
+        call_id: lash_core::LlmCallId("llm-call-1".to_string()),
+        label: Some("scorecard".to_string()),
+        attempts: vec![lash_core::AttemptRecord {
+            ordinal: 1,
+            started_at: 1_700_000_000_000,
+            duration: std::time::Duration::from_millis(12),
+            outcome: lash_core::AttemptOutcome::Completed,
+            protocol_position: lash_core::ProtocolPosition::TerminalObserved,
+            retry_budget_consumed: false,
+            retry_decision: None,
+            error: None,
+            evidence: Some(lash_core::ExecutionEvidence {
+                served_model: Some("served-model".to_string()),
+                provider_response_id: Some("provider-response-1".to_string()),
+                reasoning_output_tokens: Some(0),
+                provider_finish_reason: Some("STOP".to_string()),
+                ..lash_core::ExecutionEvidence::default()
+            }),
+            generation_disposition: None,
+            usage: Some(lash_core::llm::types::LlmUsage {
+                output_tokens: 2,
+                ..lash_core::llm::types::LlmUsage::default()
+            }),
+        }],
+    };
     let turn = lash_core::facade_support::AssembledTurn {
         state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -867,7 +893,7 @@ fn remote_turn_result_maps_core_semantics() {
                 reasoning_output_tokens: 0,
             },
         }],
-        llm_calls: Vec::new(),
+        llm_calls: vec![call_record.clone()],
         tool_calls: vec![lash_core::ToolCallRecord {
             call_id: Some("exec-call".to_string()),
             tool: "lookup".to_string(),
@@ -888,10 +914,28 @@ fn remote_turn_result_maps_core_semantics() {
     assert_eq!(remote.tool_calls.len(), 1);
     assert_eq!(remote.tool_calls[0].call_id.as_deref(), Some("exec-call"));
     assert_eq!(remote.tool_calls[0].tool_name, "lookup");
+    assert_eq!(remote.llm_calls[0].call_id, "llm-call-1");
+    let evidence = remote.llm_calls[0].attempts[0]
+        .evidence
+        .as_ref()
+        .expect("attempt evidence crosses the remote result boundary");
+    assert_eq!(evidence.served_model.as_deref(), Some("served-model"));
+    assert_eq!(evidence.reasoning_output_tokens, Some(0));
     assert!(matches!(
         &remote.tool_calls[0].outcome,
         RemoteToolCallOutcome::Success(value) if value == &serde_json::json!({ "ok": true })
     ));
+
+    let activity = RemoteTurnActivity::from_core(
+        9,
+        lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {
+            record: call_record,
+        }),
+    );
+    let RemoteTurnEvent::ModelCallRecorded { record } = activity.event else {
+        panic!("model-call ledger becomes a typed remote activity");
+    };
+    assert_eq!(record.attempts[0].evidence.as_ref(), Some(evidence));
 }
 
 #[test]

@@ -79,6 +79,7 @@ dependencies = [
  "lash-restate",
  "lash-rlm-types",
  "lash-runtime",
+ "lash-sim",
  "lash-sqlite-store",
  "lash-standard-plugins",
  "lash-subagents",
