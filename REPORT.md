@@ -1,49 +1,68 @@
-# FIG-1304 dual-review fix report
+# FIG-1304 review fix report
 
 Branch: `samuel-fig-1304`
 
 Implementation baseline: `e3b073423` (reviewed FIG-1303 head)
 
-Fix-round baseline: `bf704079b`
+Round-1 fix baseline: `bf704079b` — a pre-rebase SHA, retained for provenance only. The branch was rebased onto `93874e275`; the reachable branch history is `218a580d7..HEAD`, and every commit cited in the ledgers below is an ancestor of the head.
 
-Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
+Round-2 fix baseline: `13e31367e` (decisive fresh-eyes verification, verdict BLOCK)
+
+Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed, and all ten findings from the decisive verification round are closed. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
 
 This layer is still a **pure calculator**. A TypeScript cell has no tool calls, no `await`, and no deferred tool resolution. Rendered tool signatures are synchronous descriptions for FIG-1305; they do not make tools executable here.
 
 ## Finding ledger
 
-Each row identifies the committed failing regression and the commit that made it green. Shared commits contain separate focused tests for every item in their row.
+Each row identifies the committed failing regression and the commit that made it green. Shared commits contain separate focused tests for every item in their row. Every SHA below is reachable from the branch head; the round-1 ledger's original SHAs were pre-rebase and have been re-pointed at their rebased equivalents.
 
 | # | Finding and final behavior | Red commit | Fix commit |
 | ---: | --- | --- | --- |
-| 1 | Resume derives reference semantics from the compiled dialect; a non-aliased first suspension does not prevent later TypeScript aliasing. | `eb47763e2` | `42ec07fd7` |
-| 2 | Lashlang refuses an authored TypeScript marker and any shared graph, regardless of the wire marker; failures are typed. | `eb47763e2` | `42ec07fd7` |
-| 3 | `State::reference_semantics` is derived per program and no longer sticks historically. | `eb47763e2` | `42ec07fd7` |
-| 4 | Missing, out-of-range, and negative reads produce `undefined`; non-negative writes extend arrays with holes; negative/non-index writes reject without element corruption. | `0749b7c2f` | `6b2dfae1a` |
-| 5 | `typeof` distinguishes heap objects, arrays, and functions, while an unresolved operand returns `"undefined"`. | `0749b7c2f` | `6b2dfae1a` |
-| 6 | Loose equality follows the recursive boolean-to-number rule, including `null == false` being false. | `0749b7c2f` | `6b2dfae1a` |
-| 7 | TypeScript Number-to-String uses shortest round trips and ECMA exponent thresholds/formatting without changing Lashlang formatting. | `0749b7c2f` | `6b2dfae1a` |
-| 8 | String-to-Number rejects Rust-only spellings and handles signed prefixes and arbitrarily large hexadecimal input per ECMA. | `0749b7c2f` | `6b2dfae1a` |
-| 9 | TypeScript `split` and `join` use dialect-specific ECMA conversion, including empty separators and recursive array conversion. | `0749b7c2f` | `6b2dfae1a` |
-| 10 | String/array `.length`, `NaN`, and `Infinity` are supported with UTF-16 string length. | `0749b7c2f` | `6b2dfae1a` |
-| 11 | String relational comparison orders UTF-16 code units. | `0749b7c2f` | `6b2dfae1a` |
-| 12 | Lone-surrogate literals reject as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; no lossy U+FFFD conversion occurs. | `0749b7c2f` | `6b2dfae1a` |
-| 13 | A TypeScript `this` parameter is erased and does not affect runtime arity or binding. | `0749b7c2f` | `6b2dfae1a` |
-| 14 | Both reads and writes of captured mutable bindings reject as `TS_MUTABLE_CAPTURE_UNSUPPORTED`. | `1eb18993e` | `e42be1caa` |
-| 15 | Catch bodies have their own mangled lexical scope and cannot overwrite enclosing slots. | `1eb18993e` | `e42be1caa` |
-| 16 | Unresolved identifiers and `arguments` reject statically as `TS_UNKNOWN_BINDING`; only `typeof unresolved` is legal. | `1eb18993e` | `e42be1caa` |
-| 17 | Assignment to an undeclared name rejects statically and cannot create an implicit durable global. | `1eb18993e` | `e42be1caa` |
-| 18 | Hoisted function declarations see top-level lexical bindings regardless of source order, including the README captured-object example and later-`const` captures. | `1eb18993e`, `6eed7d3fc` | `e42be1caa`, `4f9c240ce` |
-| 19 | Lexical bindings named `print`, `finish`, or `console` win over host interception. | `1eb18993e` | `e42be1caa` |
-| 20 | Source nesting is guarded before SWC/adapter recursion and reports `TS_SOURCE_NESTING_LIMIT` under the 2 MiB stack contract. | `77e266297` | `01d331c26` |
-| 21 | A checked-in Node v25.2.1 differential table permanently covers both review corpora and the fix findings. | `98cb57028` | `614c5ce85` |
-| 22 | The README/deviation register, structural diagnostics, `console.log` arity, and signature rendering now describe and enforce the real surface. | `2ee5e66ed` | `6a0b14ec9` |
+| 1 | Resume derives reference semantics from the compiled dialect; a non-aliased first suspension does not prevent later TypeScript aliasing. | `dae8b09f3` | `f3c783ac0` |
+| 2 | Lashlang refuses an authored TypeScript marker and any shared graph, regardless of the wire marker; failures are typed. | `dae8b09f3` | `f3c783ac0` |
+| 3 | `State::reference_semantics` is derived per program and no longer sticks historically. | `dae8b09f3` | `f3c783ac0` |
+| 4 | Missing, out-of-range, and negative reads produce `undefined`; non-negative writes extend arrays with holes; negative/non-index writes reject without element corruption. | `4e5ab8591` | `497737278` |
+| 5 | `typeof` distinguishes heap objects, arrays, and functions, while an unresolved operand returns `"undefined"`. | `4e5ab8591` | `497737278` |
+| 6 | Loose equality follows the recursive boolean-to-number rule, including `null == false` being false. | `4e5ab8591` | `497737278` |
+| 7 | TypeScript Number-to-String uses shortest round trips and ECMA exponent thresholds/formatting without changing Lashlang formatting. | `4e5ab8591` | `497737278` |
+| 8 | String-to-Number rejects Rust-only spellings and handles signed prefixes and arbitrarily large hexadecimal input per ECMA. | `4e5ab8591` | `497737278` |
+| 9 | TypeScript `split` and `join` use dialect-specific ECMA conversion, including empty separators and recursive array conversion. | `4e5ab8591` | `497737278` |
+| 10 | String/array `.length`, `NaN`, and `Infinity` are supported with UTF-16 string length. | `4e5ab8591` | `497737278` |
+| 11 | String relational comparison orders UTF-16 code units. | `4e5ab8591` | `497737278` |
+| 12 | Lone-surrogate literals reject as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; no lossy U+FFFD conversion occurs. | `4e5ab8591` | `497737278` |
+| 13 | A TypeScript `this` parameter is erased and does not affect runtime arity or binding. | `4e5ab8591` | `497737278` |
+| 14 | Both reads and writes of captured mutable bindings reject as `TS_MUTABLE_CAPTURE_UNSUPPORTED`. | `c334216ff` | `03aec52ef` |
+| 15 | Catch bodies have their own mangled lexical scope and cannot overwrite enclosing slots. | `c334216ff` | `03aec52ef` |
+| 16 | Unresolved identifiers and `arguments` reject statically as `TS_UNKNOWN_BINDING`; only `typeof unresolved` is legal. | `c334216ff` | `03aec52ef` |
+| 17 | Assignment to an undeclared name rejects statically and cannot create an implicit durable global. | `c334216ff` | `03aec52ef` |
+| 18 | Hoisted function declarations see top-level lexical bindings regardless of source order, including the README captured-object example and later-`const` captures. | `c334216ff`, `04a3dd981` | `03aec52ef`, `a0156878d` |
+| 19 | Lexical bindings named `print`, `finish`, or `console` win over host interception. | `c334216ff` | `03aec52ef` |
+| 20 | Source nesting is guarded before SWC/adapter recursion and reports `TS_SOURCE_NESTING_LIMIT` under the 2 MiB stack contract. | `457b6f5de` | `a5747ebc4` |
+| 21 | A checked-in Node v25.2.1 differential table permanently covers both review corpora and the fix findings. | `de1b3c94d` | `3f5b2d21c` |
+| 22 | The README/deviation register, structural diagnostics, `console.log` arity, and signature rendering now describe and enforce the real surface. | `7c90c79fd` | `bd72cfb63` |
 
-Auxiliary verification repairs are `26fb6e42b` (synchronous signature docs assertion), `864cf5a73` and `ab5dba80e` (strict-lint style), and `dcde899c6` (remove one redundant Lashlang test so its established package count remains 461). None changes the accepted language contract.
+### Round 2 — decisive fresh-eyes verification
+
+The verification round returned BLOCK on two P0 defects and eight smaller findings. Each is closed below with its own red-then-green pair.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| P0-1 | Delimiter-free source nesting (`!`, unary `-`, `typeof`, `?:`, binary chains) no longer reaches SWC's recursive parser: one cumulative budget bounds every recursive source shape and returns `TS_SOURCE_NESTING_LIMIT`. Child-process regressions cover all five operator classes at 10k plus the original 10k-paren shape. | `1c51ef8fa` | `4cae4e930` |
+| P0-1b | That preflight initially accumulated statement keywords across sibling statements, so 28 flat `if`/`while` statements falsely rejected. Braces are now classified as statement blocks or object literals, and a statement boundary releases the operator run it terminates. | `c5d198ae9` | `599a424d3` |
+| P0-2 | Closure capture is transitive: a binding owned two or more function levels out is registered on every enclosing frame between the owner and the use site. | `2ec936167` | `c62c1089a` |
+| P1-3 | Mutually recursive and nested hoisted function declarations are accepted. Each cycle routes through one generated frame record; a nested declaration may read an enclosing function's bindings regardless of source order. | `4721fe8f9`, `d4d70c372` | `e788601b9` |
+| P1-4 | Source identifiers starting with `__typescript_` reject with the new `TS_RESERVED_IDENTIFIER`, so a user name can never clobber a generated binding — including a durable root global. | `bd0813712` | `e82e5e6d7` |
+| P2-5 | `ToNumber(String)` trims the literal ECMA-262 `StrWhiteSpace` set rather than Rust's `White_Space` property: ZWNBSP is whitespace, NEL is not. | `06a596efb` | `978645dd5` |
+| P2-6 | Both shape-dependent lone-surrogate runtime rejections (`split('')` and string indexing on astral characters, `TS_LONE_SURROGATE_UNSUPPORTED`) are registered and carry oracle rows. | `06a596efb` | `b49499b7e` |
+| P3-7 | Ledger SHAs re-pointed at reachable commits. | — | this report |
+| P3-8 | The exclusion list names compound assignment operators and the arity-1 restriction on mapped String methods, each backed by an executable rejection test. | — | `b49499b7e` |
+| P3-10 | The oracle's distinct-expression count is stated wherever its row count is cited. | — | `b49499b7e` |
+
+The optional register line on `console.log` versus Node's inspector formatting landed with `b49499b7e`. Auxiliary repairs are `a2bdf3b3d` (strict-lint style) and, from round 1, `074b24b3e` (synchronous signature docs assertion), `db4201eb7` and `ea8ca2aeb` (strict-lint style), and `67de889dd` (remove one redundant Lashlang test so its established package count remains 461). None changes the accepted language contract.
 
 ## Review conflict resolution
 
-Item 14 was resolved by executing the competing claim, not by compromise. The exact Opus assign-only capture repro was committed in `1eb18993e` and failed before the fix: a write to an outer `let` silently targeted a function-local slot. Therefore the Opus finding was correct and the sol-sub conclusion that no hole existed was incorrect for that shape. Commit `e42be1caa` applies the same ownership check to reads and writes and returns `TS_MUTABLE_CAPTURE_UNSUPPORTED` in both paths.
+Item 14 was resolved by executing the competing claim, not by compromise. The exact Opus assign-only capture repro was committed in `c334216ff` and failed before the fix: a write to an outer `let` silently targeted a function-local slot. Therefore the Opus finding was correct and the sol-sub conclusion that no hole existed was incorrect for that shape. Commit `03aec52ef` applies the same ownership check to reads and writes and returns `TS_MUTABLE_CAPTURE_UNSUPPORTED` in both paths.
 
 ## Design decisions
 
@@ -59,7 +78,13 @@ Free `console.log` accepts zero or more arguments. Each argument receives ECMA `
 
 ### Source nesting
 
-The effective v1 TypeScript source-nesting budget is **28 levels**. Level 28 compiles and executes on a 2 MiB child-thread stack; level 29 rejects as `TS_SOURCE_NESTING_LIMIT`. The adapter performs an iterative delimiter preflight before SWC and maintains explicit conversion counters. A 10,000-parenthesis child-process regression proves named-diagnostic-not-abort behavior. Block lowering was flattened enough to make 28 the pinned source-level budget rather than exposing the shared AST's internal per-node cost.
+The effective v1 TypeScript source-nesting budget is **28 levels, cumulative and shared**. It is one budget, not several independent ones: every open delimiter (`(`, `[`, `{`, and a template hole) and every nested recursive operator or statement form draws on the same 28 units. Recursive forms are the prefix operators (`!`, `~`, unary `+`/`-`, `typeof`, `void`, `delete`, `new`, `await`, `yield`), the binary, ternary and member operators, and the statement keywords (`if`, `while`, `do`, `for`, `in`, `instanceof`, `with`). Operator counts from an enclosing delimiter frame stay active while the scanner visits an inner expression, so mixed nesting can no longer reach a multiple of the nominal cap the way three independent delimiter counters allowed. A statement boundary — `;`, `,`, or the `}` that closes a statement block — releases the operator run it terminates, so a flat sequence of statements is one level deep however long it runs; a brace-free chain such as `if (1) if (1) …` still accumulates and rejects. The adapter enforces the same 28 with one shared counter across statement and expression conversion.
+
+Level 28 compiles and executes on a 2 MiB child-thread stack; level 29 rejects as `TS_SOURCE_NESTING_LIMIT`. Child-process regressions across six shapes — 10,000 parentheses and 10,000 each of `!`, unary `-`, `typeof`, `?:`, and `+` chains — prove named-diagnostic-not-abort behavior; before the fix the last five aborted the process with a SIGABRT stack overflow at roughly 1.6 KB of source. Block lowering was flattened enough to make 28 the pinned source-level budget rather than exposing the shared AST's internal per-node cost.
+
+### Mutual recursion
+
+Closures capture by value, so no emission order can satisfy a cycle of hoisted declarations that reference each other. Each strongly connected component of the declaration graph gets one generated frame record: the members capture the record instead of their peers and rebind those peers out of it on entry, so a peer value is read when the member runs rather than when it is built. The rebinding lands in the member's own frame slot under the name the body already lowered, so peers used as values, and peers reached from closures nested inside a member, work without rewriting the body. Acyclic declarations keep the original topological emission and are unchanged.
 
 ### Tool signatures and structural diagnostics
 
@@ -71,15 +96,15 @@ The continuation marker is a persistence requirement and lower bound, not VM ide
 
 ## Differential oracle
 
-`crates/lash-typescript/tests/differential/expectations.tsv` contains 304 committed rows plus its header:
+`crates/lash-typescript/tests/differential/expectations.tsv` contains 310 committed rows plus its header:
 
 | Provenance | Rows |
 | --- | ---: |
 | Opus review corpus | 163 |
 | sol-sub review corpus | 124 |
-| Combined fix findings | 17 |
+| Combined fix findings | 23 |
 
-Duplicates are retained to keep provenance counts executable. `generate.mjs` stamps and requires Node `v25.2.1`; regeneration is a deliberate reviewed action, never part of an ordinary test run. Accepted rows compare observable output, static rejections compare their named diagnostic, and the unrepresentable array-property write compares its named runtime rejection.
+Duplicates are retained to keep provenance counts executable: the 310 rows carry **237 distinct expressions**, so the table's effective corner coverage is that of 237 behaviours, not 310. Regeneration under Node v25.2.1 after the round-2 additions is byte-identical to the committed table apart from the six new rows. `generate.mjs` stamps and requires Node `v25.2.1`; regeneration is a deliberate reviewed action, never part of an ordinary test run. Accepted rows compare observable output, static rejections compare their named diagnostic, and the unrepresentable array-property write compares its named runtime rejection.
 
 ## Honest deviation register
 
@@ -90,14 +115,16 @@ These are the only intentional deviations for the accepted v1 surface. They are 
 3. Cyclic heap objects reject at durable capture. Shared acyclic identity is preserved; cycle-capable durable graph encoding is deferred.
 4. Mutable lexical captures reject as `TS_MUTABLE_CAPTURE_UNSUPPORTED` on both reads and writes until durable lexical cells exist. Immutable captures and mutation through captured object references work.
 5. The host boundary is JSON-shaped: object properties holding `undefined` are omitted, array elements become `null`, and incoming JSON cannot manufacture `undefined`.
-6. Lone UTF-16 surrogates are not representable by the v1 UTF-8 value model and reject as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`.
+6. Lone UTF-16 surrogates are not representable by the v1 UTF-8 value model. Literals reject statically as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; two further shapes produce one only at runtime and reject there as `TS_LONE_SURROGATE_UNSUPPORTED` — splitting a string containing an astral character into units, and indexing into one. Both are catchable TypeScript exceptions.
 7. Negative and other non-index array writes reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; non-negative out-of-range writes retain ECMAScript hole-extension behavior.
+8. Identifiers starting with `__typescript_` are reserved for the lowerer's generated bindings and reject as `TS_RESERVED_IDENTIFIER`.
+9. `console.log` is host-defined rather than ECMA-262 and prints ECMA `ToString` of each argument, so `console.log({a: 1})` prints `[object Object]` where Node's inspector prints `{ a: 1 }`.
 
 No reviewed semantic divergence was moved into this register.
 
 ## Compatibility and identity evidence
 
-The Opus seven-program corpus was compiled independently from base `e3b073423` and fix-round head `dcde899c6`. For every program, module refs, host-requirements refs, raw `ModuleArtifact::to_store_bytes()` output, and normalized first-effect continuation bytes matched. The concatenated identity records on both sides have SHA-256:
+The Opus seven-program corpus was compiled independently from base `e3b073423` and fix-round head `67de889dd`. For every program, module refs, host-requirements refs, raw `ModuleArtifact::to_store_bytes()` output, and normalized first-effect continuation bytes matched. The concatenated identity records on both sides have SHA-256:
 
 `b76f7578d37928ac4c8b044f62b7bbedd40e0079c114627b428063efa8dc603d`
 
@@ -105,7 +132,7 @@ The continuation comparison removes only `active_execution_elapsed` (pre-existin
 
 ## Gate results
 
-Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR=/workspace/.cargo-target-lash-fig-1304` where applicable.
+Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR=/workspace/.cargo-target-lash-fig-1304` where applicable. The table below is the round-2 battery, rerun in full on the final tree.
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
@@ -120,13 +147,17 @@ Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR
 | `python3 scripts/check_api_example_coverage.py` | PASS | 8,065 API coverage entries satisfied. |
 | `just perf-guard` | PASS | 297 Lashlang perf results and 1 profile result; runtime and stack budgets passed. |
 | `bash scripts/check-production-file-size.sh` | PASS | Production and test/support files remain within repository budgets. |
-| `git diff --check bf704079b..HEAD` | PASS | No whitespace errors before the final report commit. |
-| `cargo test -p lash-typescript --locked` | PASS | Unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites passed. |
-| Committed Node differential table | PASS | All 304 rows match the checked Node v25.2.1 expectations or named rejection. |
+| `git diff --check 93874e275..HEAD` | PASS | No whitespace errors across the whole branch before the final report commit. |
+| `cargo test -p lash-typescript --locked` | PASS | 109 tests across unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites (94 before round 2). |
+| Committed Node differential table | PASS | All 310 rows match the checked Node v25.2.1 expectations or named rejection; regeneration under Node v25.2.1 reproduces the committed file byte for byte. |
+| `node crates/lash-typescript/tests/differential/generate.mjs` | PASS | Deliberate regeneration, Node version stamped and enforced by the generator. |
 | Base-vs-head Lashlang byte identity | PASS | Seven of seven raw artifact and normalized continuation records match; combined SHA-256 shown above. |
 | `cargo test -p lashlang --locked` | PASS | 461 unit tests passed, unchanged; all package integration/property/stack tests also passed. |
+| Verifier nesting sweep (2 MiB stack, 9 sources) | PASS | Every shape that previously aborted the process now returns `TS_SOURCE_NESTING_LIMIT`; no abort. |
 
-The first verification pass exposed a stale docs-snippet assertion that still expected `Promise` signatures and two strict-lint style findings. Commits `26fb6e42b`, `864cf5a73`, and `ab5dba80e` corrected them; every affected gate and the full battery were rerun successfully on the corrected tree.
+The first verification pass exposed a stale docs-snippet assertion that still expected `Promise` signatures and two strict-lint style findings. Commits `074b24b3e`, `db4201eb7`, and `ea8ca2aeb` corrected them; every affected gate and the full battery were rerun successfully on the corrected tree. In round 2 the workspace suite exited 0 on the first run; the `lash-sqlite-store` `sqlite_real_turn_crash_matrix` seeded flake recorded by the verifier (P3-9) did not reproduce, and it remains a pre-existing concurrency-load flake unrelated to this layer — no TypeScript or Lashlang code path is involved.
+
+The `ToNumber(String)` whitespace correction lives in `crates/lashlang/src/runtime/javascript.rs`, which is reached only through the `JavaScriptUnary`/`JavaScriptBinary` opcodes the TypeScript lowering emits. No Lashlang program semantics, and no semantic hash, change with it.
 
 ## Explicitly deferred
 
@@ -135,3 +166,7 @@ The first verification pass exposed a stale docs-snippet assertion that still ex
 - Cycle-capable durable graphs and durable mutable lexical cells remain deferred and fail closed as documented above.
 
 No compatibility shim, fallback parser, dual execution path, migration adapter, silent semantic divergence, or `docs/adr/` change was added.
+
+## Round-2 verification note
+
+The round-2 fixes were driven red-first against the verifier's own repros: the nine-source nesting sweep on a 2 MiB stack, the three transitive-capture programs, the two mutual-recursion and nested-declaration programs, and both generated-namespace collisions were each reproduced before any fix and are now permanent regressions. Two of the verifier's findings led further than reported: the round-1 nesting preflight also accumulated statement keywords across sibling statements, so 28 flat `if` statements falsely rejected (closed as P0-1b), and the mutual-recursion fix additionally required nested declarations to see enclosing-function bindings independent of source order.
