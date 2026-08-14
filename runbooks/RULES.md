@@ -18,6 +18,21 @@ CLI operator runbooks live in the lash-cli repository's `runbooks/` directory.
 These are **agent-driven runbooks**, not scripts. Use judgement freely — but never skip a
 scenario's verification gates or the Abort rule below.
 
+## Example coverage matrix
+
+This matrix is the source of truth for the coverage split. **Deterministic CI** means
+the repository's repeatable compile, test, and model-check gates. **Full-host CI** means
+an infrastructure-backed integration leg; it does not imply that a browser journey was
+judged. **Manual judged** is the semantic browser or static-page runbook layer.
+
+| Example | Deterministic CI coverage | Full-host CI coverage | Manual judged coverage |
+| --- | --- | --- | --- |
+| `agent-service` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs `Test workspace shard`. | `Functional E2E (agent-service)` runs `agent-service-restate-e2e`, including the Restate ingress and process-workflow live test; it is not a browser journey. | [`agent-service-branching`](agent-service-branching/runbook.md) and [`tictactoe-full-game`](tictactoe-full-game/runbook.md). |
+| `agent-workbench` | `Test docs + build cache` runs `Check workspace (all targets)` and the package-scoped workbench check; `Test shard ${{ matrix.shard }}/3` runs `Test workspace shard`. | `Functional E2E (agent-workbench)` runs `agent-workbench-restate-e2e` with Restate and Postgres live tests; it is not a browser journey. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. |
+| `docs-snippets` | `Test docs + build cache` runs `Check workspace (all targets)`, which compiles the snippet target, and the docs/API checks. | None. `Publish docs` publishes the checked-in static docs; it does not judge a hosted quickstart journey. | [`docs-quickstart`](docs-quickstart/runbook.md). |
+| `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack package tests. | None. No CI job runs `just slack-clone`, its two-process browser journey, or the real-token MCP client-depth path. | [`slack-clone-bot`](slack-clone-bot/runbook.md) and [`slack-clone-mcp-client-depth`](slack-clone-mcp-client-depth/runbook.md). |
+| `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
+
 ## What you're testing
 
 You are testing the **example app's browser surface**, not the model and not your own
@@ -27,10 +42,13 @@ state produce the observed result. When those surfaces disagree, the run is void
 ## The browser surface (example apps)
 
 Scenarios drive an **example web app** (`examples/agent-service`,
-`examples/agent-workbench`). There is no scripted driver for these — browser automation
-*is* the driver. Use whatever your harness provides: a browser MCP/plugin, Playwright, or
-similar. If nothing is pre-wired, the known-good zero-install path is a PEP 723 Playwright
-script run with `uv`:
+`examples/agent-workbench`, `examples/slack-clone`, and
+`examples/workflow-graph-roundtrip`) or the checked-in docs surface used by
+`docs-quickstart`. There is no scripted driver for these judged surfaces — browser
+automation is the driver, and the docs runbook serves the static page directly. Use
+whatever your harness provides: a browser MCP/plugin, Playwright, or similar. If nothing
+is pre-wired, the known-good zero-install path is a PEP 723 Playwright script run with
+`uv`:
 
 ```python
 # /// script
@@ -44,9 +62,9 @@ from playwright.sync_api import sync_playwright
 `~/.cache/ms-playwright` Chromium (run `playwright install chromium` once if the launch
 reports a missing browser build).
 
-When navigating either example app, use `wait_until="domcontentloaded"` and then an
-explicit waiting assertion such as `expect(locator)` or `wait_for_function` on a row
-count. Never use `wait_until="networkidle"`: the Workbench holds two NDJSON event streams
+When navigating an example app, use `wait_until="domcontentloaded"` and then an explicit
+waiting assertion such as `expect(locator)` or `wait_for_function` on a row count. Never
+use `wait_until="networkidle"`: the Workbench holds two NDJSON event streams
 open and runs periodic API polls, while runbook drivers also poll `/api/state`, so
 network idle is not a reachable readiness condition.
 

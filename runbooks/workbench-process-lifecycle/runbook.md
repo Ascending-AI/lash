@@ -26,7 +26,8 @@ on surrounding model prose.
    change while both original process ids remain visible through `/api/work`. A process
    visible only in a stale screenshot does not pass.
 4. **Completion is durable.** The survivor must reach `completed`, with its terminal event
-   retained in `<data-dir>/processes.db`, after its originating session store is gone.
+   retained in `<data-dir>/processes.db`, after its originating session has been retired
+   from the shared durable catalog.
 5. **Cancel is cooperative and evidenced.** Use the cancellable card's **cancel** button.
    Require a `process.cancel_requested` event followed by a `cancelled` terminal for that
    exact process id. Killing a Restate invocation is not a substitute.
@@ -46,7 +47,8 @@ on surrounding model prose.
   /api/work/{process_id}/cancel`, and `DELETE /api/session` (or the reset control's
   equivalent `POST /api/reset`).
 - Disk truth: `<data-dir>/processes.db` tables `processes`, `process_events`, and
-  `process_observers`; `<data-dir>/lash-sessions/`; `<data-dir>/trace.jsonl` event
+  `process_observers`; the shared SQLite session catalog at
+  `<data-dir>/lash-sessions/durable-core.db`; and `<data-dir>/trace.jsonl` event
   `agent_workbench.reset.restate.session_deleted`, whose report includes the removed
   observer count.
 
@@ -95,15 +97,17 @@ Use the reset/new-session control while capturing its HTTP response, or issue
 `DELETE /api/session` from the browser context. Poll until:
 
 - the rendered and `/api/state` session id changes;
-- the old session's database is absent from `<data-dir>/lash-sessions/`;
+- `<data-dir>/lash-sessions/durable-core.db` remains in place, and a query for the old
+  session id finds no `session_meta` or `session_head` row and exactly one
+  `deleted_sessions` tombstone;
 - the session-deleted trace report reports two removed observers;
 - `process_observers` has no rows for the deleted session;
 - `/api/work` and the rendered work rail still show both original process ids.
 
 The production delete path first revokes the old session's active durable waits and
-allows those turns to settle as typed deleted-session refusals; only then does it remove
-the session store. This ordering lets a suspended turn replay its existing journal while
-ensuring revocation never becomes process-cancellation authority.
+allows those turns to settle as typed deleted-session refusals; only then does it retire
+the old session's catalog rows. This ordering lets a suspended turn replay its existing
+journal while ensuring revocation never becomes process-cancellation authority.
 
 The last item is the judged crown-jewel checkpoint: screenshot the new session identity
 and still-live process cards together as `02-owner-gone-processes-live.png`. Save the API,
@@ -128,9 +132,12 @@ every later turn on it. This phase proves the registration is released by cancel
 
 Do:
 
-1. **Record the disk baseline first.** Save a sorted listing of
-   `<data-dir>/lash-sessions/` as `03b-sessions-before.txt` (`ls -1` output, one entry per
-   line). The delta against this file is what the disk gate scores.
+1. **Record the durable-catalog baseline first.** In
+   `<data-dir>/lash-sessions/durable-core.db`, query row counts for the recorded child
+   session id in `session_meta`, `session_head`, active `graph_nodes`
+   (`tombstoned = 0`), `pending_turn_inputs`, and `queued_work_batches`. Save the
+   normalized result as `03b-sessions-before.json` and require at least one non-zero
+   count; an empty baseline is not evidence that cleanup worked.
 2. In the current session, ask the agent to start a **subagent** that keeps working for
    several minutes (a long-running research/loop prompt), and let it reach a non-terminal
    card in the work rail. Capture its process id **and its child session id** as
@@ -143,8 +150,9 @@ Do:
    in its event tail (`03b-subagent-cancel-receipt.json`).
 4. Without resetting the session, send a normal follow-up turn in the same session and
    start a **second** subagent.
-5. **Record the disk delta.** Save the sorted listing again as `03b-sessions-after.txt`
-   and the `diff 03b-sessions-before.txt 03b-sessions-after.txt` output as
+5. **Record the durable-catalog delta.** After the cancelled child has settled, query the
+   same tables for the same child id and save the normalized result as
+   `03b-sessions-after.json`; save the before/after row-count diff as
    `03b-sessions-delta.txt`.
 
 Expect:
@@ -153,12 +161,18 @@ Expect:
   fail or hang instead;
 - the second subagent reaches a non-terminal card and then a terminal state, proving the
   parent's managed-turn registry admitted new child work after the cancellation;
-- **disk gate (objective):** `03b-sessions-delta.txt` contains **no** entry for the
-  cancelled subagent's recorded child session id. Added entries for the *second*
-  subagent's child session are expected and pass; an entry naming the cancelled child id
-  is a fail, because the parent could not close it. Quote the recorded child session id
-  and the matching delta lines when scoring — an unquoted "looked clean" does not pass;
-- the trace contains `managed_turn.admission` with `outcome=admitted` for the second
+- **durable-catalog gate (objective):** `03b-sessions-before.json` proves the query saw
+  the recorded child session, and `03b-sessions-after.json` has zero rows for that id in
+  all five listed tables. Runtime-internal child session ids are reclaimed without a
+  `deleted_sessions` tombstone, so the absence of that tombstone is expected and is not
+  the cleanup gate. Quote the child id and the before/after counts when scoring — an
+  unquoted "looked clean" does not pass;
+- capture the workbench logs with debug-level records enabled: `managed_turn.admission`
+  and `managed_turn.release` are emitted by `tracing::debug!`, so an info-only log does
+  not prove their absence. The records are log evidence, not a guaranteed event in the
+  default `trace.jsonl` sink; if debug logging was not captured, mark this gate
+  unverifiable and Abort rather than infer from silence. Then require
+  `managed_turn.admission` with `outcome=admitted` for the second
   subagent and `managed_turn.release` with `outcome=released, reason=dropped` for the
   cancelled one. A `managed_turn.admission` with `outcome=denied` and reason
   "already has a running turn" after the cancellation is the exact FIG-884 regression.
@@ -186,11 +200,11 @@ container are gone.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Processes started | two named non-terminal ids agree in rail, API, and store | | `01-two-running-processes.png`, `01-running-*.json` |
-| Owner deleted | new rendered/API session id; old store/observer rows gone | | `02-owner-gone-processes-live.png`, `02-after-delete-*.json` |
+| Owner deleted | new rendered/API session id; old session has no live catalog rows, its host-facing tombstone is present, and observer rows are gone | | `02-owner-gone-processes-live.png`, `02-after-delete-*.json` |
 | Runtime independence | both original ids remain live in rail and `/api/work` after delete | | `02-owner-gone-processes-live.png`, API/trace report |
 | Global cancel | exact id accepted; `cancel_requested` then cancelled | | `03-orphan-cancelled.png`, `03-cancel-receipt.json`, store events |
 | Session survives a cancelled background session turn (FIG-884) | after cancelling a subagent, a follow-up turn answers and a second subagent runs; `managed_turn.release` released, no `already has a running turn` denial | | `03b-subagent-running.png`, `03b-subagent-cancel-receipt.json`, `03b-session-still-usable.png`, trace |
-| Cancelled child session left no orphan on disk (FIG-884) | `03b-sessions-delta.txt` names no entry for the recorded cancelled child session id (quote both) | | `03b-subagent-running.json` (child session id), `03b-sessions-before.txt`, `03b-sessions-after.txt`, `03b-sessions-delta.txt` |
+| Cancelled child session left no durable-catalog rows (FIG-884) | `03b-sessions-before.json` has a non-zero baseline for the recorded child id; `03b-sessions-after.json` has zero rows for that id in all five cleanup tables | | `03b-subagent-running.json` (child session id), `03b-sessions-before.json`, `03b-sessions-after.json`, `03b-sessions-delta.txt` |
 | Survivor completion | completed terminal and finish marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
 

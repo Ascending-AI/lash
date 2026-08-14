@@ -52,7 +52,8 @@ The model plays O however it likes — do not gate on which cell it picks or its
 - **Backend truth**: `GET /api/chats`, `GET /api/chats/{id}/messages`,
   `GET /api/chats/{id}/board` → `{cells, turn, legal_moves, status, winner}`.
 - **Disk** (under the data dir): `app.db` (chats/messages/boards),
-  `lash-sessions/` (durable lash session stores), `trace.jsonl` (turn/tool trace).
+  `lash-sessions/durable-core.db` (the shared durable Lash catalog), and
+  `trace.jsonl` (turn/tool trace).
 
 ## Phase 0 — Boot and pre-flight
 
@@ -126,7 +127,8 @@ ply screenshot — expected, keep both names for the scorecard).
   authoritative per-execution marker is the `protocol_step` record
   (`plugin_id: "rlm_protocol"`, an `RlmTrajectoryEntry` payload containing
   `board.play(...)`); count those.
-- `lash-sessions/` holds the chat's durable session store (non-empty `.db`).
+- `lash-sessions/durable-core.db` holds the shared durable session catalog; the chat's
+  rows are keyed by its session id rather than stored in a per-session database file.
 
 ## Phase 5 — Teardown and score
 

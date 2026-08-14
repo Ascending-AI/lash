@@ -55,7 +55,7 @@ structure rather than exact assistant wording.
   pill, and Stop control.
 - HTTP truth: `GET /api/state`, `POST /api/turn`, and `POST /api/turn/input` with
   `{ "text": "...", "ingress": "active_turn" | "next_turn" }`.
-- Disk truth: `<data-dir>/lash-sessions/*.db`, table `pending_turn_inputs`, and
+- Disk truth: `<data-dir>/lash-sessions/durable-core.db`, table `pending_turn_inputs`, and
   `<data-dir>/trace.jsonl` events named `agent_workbench.turn_input.enqueued` and
   `turn_input.completed`.
 - The deterministic companion gate is `just agent-workbench-restate-e2e`. It proves the
