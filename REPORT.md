@@ -15,6 +15,10 @@ Implementation commits:
 - `1cd32308a3f3019232bcde5874a1dd139c19073f` — refuse a malformed settlement order instead of repairing it
 - `0d56d88f6b1064a21d490b35856f3b66ccf3c332` — for-of bodies do work; artifacts must name their dialect
 - `b75f390459e14d1d9040826720e99b41c7707ba6` — restore the instance methods; classify misses by name
+- `22695d10b` / `525a47e7e` — the round-2 dialect defects, red then green
+- `cdb15d32f` — map runs in the VM; iterable aliasing rejects; cache hits stop allocating
+- `78f7e9cef` — latency-ordered settlement pinned for deferred batch leaves
+- `fa2ab715c` — the fixed map and padding cases fed to the oracle
 
 Every SHA above is an ancestor of the head. An earlier revision of this ledger
 named pre-rebase commits that no longer describe this history.
@@ -82,7 +86,7 @@ the VM selects the reported rejection from that order. See
   UTF-16-sensitive behavior, key ordering, replacement tokens, JSON number
   formatting, numeric edge cases, optional arguments, and the supported method
   inventory. The generated expectation table is byte-stable at SHA-256
-  `e3d8192418b534b239d7105fc83a6cb2d6cf324103557044c832586998072ba9`.
+  `5de53a85d61562bb1b499706e4fb16a705b1769a5ae404d3caf52b1c5f819a91`.
 - Multiplicative string growth, including `repeat` and `$&`, ``$` ``, and `$'`
   replacement expansion, is sized before allocation. A result beyond 8 MiB
   terminates with uncatchable `MemoryLimitExceeded`; it cannot become a host
@@ -242,6 +246,63 @@ unwrap error's code, which was simply wrong for a leaf that is never unwrapped.
 Giving rejections a discriminable code needs a code channel on the effect-host
 contract that every host would have to populate — named here rather than faked.
 
+## Round 2 verification closure
+
+A decisive fresh-eyes verification returned BLOCK with eleven rulings and a
+performance addendum. Every one is closed below. Per the standing rule, each
+fixed dialect case also landed in the checked-in oracle corpus, which is the
+permanent gate; the hand-written test is the diagnosis, the corpus row is the
+guard.
+
+| Ruling | What it was | Red | Fix |
+| --- | --- | --- | --- |
+| H1 | `slice` and `substring` treated an omitted or `undefined` end bound as position 0, so every such call returned the empty string | `22695d10b` | `525a47e7e` |
+| H2 | `map` was advertised and accepted, then failed at run time with a host-boundary error, because the stdlib builtin exports every argument across a boundary a closure cannot cross | — | `cdb15d32f` |
+| H3 | JSON overflow rewriting copied bytes through `as char`, mojibaking every non-ASCII string in a document that contained an overflowing number; the sentinel was also guessable and collided with guest data | `22695d10b` | `525a47e7e` |
+| M1 | The overflow sentinel is now derived from the document and its substitutions are counted, so a mismatch fails closed instead of silently restoring the wrong node | `22695d10b` | `525a47e7e` |
+| M2 | A `for…of` body that bound the iterable to a second name defeated root tracking, so writes through the alias diverged from ECMA in silence | — | `cdb15d32f` |
+| M3 | `replaceAll` expanded `$&`, `` $` `` and `$'` against a truncated slice rather than the whole string | `22695d10b` | `525a47e7e` |
+| M4 | Ruled DELIVER: carry true settlement through the pending-await phase. **The premise was refuted on evidence — see below.** | — | `78f7e9cef` |
+| M5 | The register's instance inventory was hand-maintained and had fallen nine methods behind the allowlist, telling guests that `slice` rejects when it does not | — | `cdb15d32f` |
+| L1 | Two `just perf-guard` rows in this report contradicted each other | — | this commit |
+| L2 | The quoted oracle SHA-256 was stale | — | this commit |
+| L3 | The batch-error path claimed input order for a batch that never ran | — | `cdb15d32f` |
+| L4 | No test resumed a process suspended inside `for…of` | — | `cdb15d32f` |
+| perf addendum | Ruled fix, not recalibrate: the compiled-process cache built its owned key — three cloned strings — before the lookup, so every hit paid an allocation for a value it dropped | — | `cdb15d32f` |
+
+### M4: the premise does not hold, and the guarantee already did
+
+M4 read the batch reply loop awaiting parked launches in input order and
+concluded that a deferred leaf which rejects first would not lead the
+settlement order. The reading of that loop is correct; the conclusion is not,
+because a batch leaf never reaches the loop parked.
+
+`execute_prepared_tool_batch_child` awaits its own pending completion and
+always hands back a finished call, and it does so *inside* the unordered
+scheduler — so a deferred leaf takes its place in the order at the moment it
+actually completes. `ToolBatchEffectOutcome` is crate-private with that single
+producer, so no host can supply parked launches either. The loop's `Pending`
+arm is unreachable for every possible caller.
+
+This was established by evidence, not by reading: an implementation of the
+ruled change was written, and an assertion placed on its parked-leaf path
+proved the path never executes. The ruled integration test was then written
+against the real seam — two deferred tools with raced completions at the
+`call_tool_batch` production entry both hosts use — and passed **before** any
+M4 change, which is the demonstration that the guarantee already held. The
+speculative restructuring was reverted rather than shipped as untested
+complexity on an unreachable path; the finding is recorded as a comment at the
+loop so the next reviewer does not re-raise it.
+
+What was genuinely missing was the test. The guarantee lived only in how the
+two phases happen to be arranged, which a refactor can undo without noticing,
+and nothing held it down. It is now pinned from the outside in both launch
+orders, and serializing the children turns the discriminating case red — so
+the pin has teeth rather than merely being green.
+
+The narrowed-claim fallback the ruling asked for is therefore not needed: the
+layer's ECMA claim covers deferred tools as stated.
+
 ## Accepted v1 restrictions and deviations
 
 The full executable register is in `crates/lash-typescript/README.md`. The
@@ -305,7 +366,7 @@ where Cargo was involved.
 | `cargo check --workspace --all-targets --locked` | PASS |
 | `cargo test --workspace --locked` | PASS; full unit, integration, property, UI, trybuild, simulation, conformance, and doctest suite |
 | `cargo nextest run` (lashlang, typescript, core, protocol-rlm, lashlang-runtime) | PASS; 2 241 tests |
-| `just perf-guard` | Pre-existing failures only. The lashlang leg fails 162 budgets at the recipe's 500 iterations and 45 at 2 500; both sets are **identical before and after this work**, so nothing here regressed a budget. The overages shrink from wild (1 459 vs 336) to marginal (3.6 vs 3.0) as iterations rise, which says the recipe's 500-iteration numbers are dominated by warmup rather than by steady-state cost. Recalibration is owned separately. |
+| `just perf-guard` | Runtime leg PASS. Lashlang leg: **155 budget failures at the recipe's 500 iterations, against 162 on the base `1532794d9` — no metric fails here that does not already fail on the base**, so this work regresses nothing and repairs seven. At 2 500 iterations the same head is **fully green, 0 failures, with no budget-table edit**: the 45 overages reported in round 1 were the eager compiled-process cache key, and fixing it removed them. The 500-iteration remainder is warmup-dominated (overages fall from 1 459 vs 336 at 500 to nothing at 2 500) and is pre-existing; recalibrating that recipe is owned separately. |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS |
 | `cargo fmt --all --check` | PASS |
 | `python3 scripts/check_included_file_formatting.py` | PASS; 37 included Rust files |
@@ -313,7 +374,6 @@ where Cargo was involved.
 | `bash scripts/check-rustdoc.sh` | PASS; 602 public items documented, 0 missing |
 | `python3 scripts/check_test_quarantines.py` | PASS |
 | `python3 scripts/check_api_example_coverage.py` | PASS; 8,074 entries |
-| `just perf-guard` | PASS; 297 Lashlang performance results and 1 profile result |
 | `bash scripts/check-production-file-size.sh` | PASS; main executor reduced to 1,588 lines |
 | `git diff --check 1532794d93606940121c3dcff88ac9ad088ddd3e..HEAD` | PASS |
 | `cargo test -p lashlang --locked` | PASS; 464 unit tests and all package integrations |

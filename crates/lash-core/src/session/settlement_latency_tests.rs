@@ -74,7 +74,7 @@ impl crate::ToolProvider for LatencyProbeTools {
         let controller = Arc::clone(&self.controller);
         let name = call.name.to_string();
         let delay = probe_delay(&name);
-        tokio::spawn(async move {
+        crate::task::spawn(async move {
             tokio::time::sleep(delay).await;
             let resolution = crate::Resolution::Err(crate::runtime::ExternalCompletionError::new(
                 "probe_failed",
