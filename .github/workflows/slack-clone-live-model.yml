@@ -13,7 +13,6 @@ jobs:
     timeout-minutes: 30
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      LASH_SLACK_CLONE_LIVE_E2E_ARTIFACT_DIR: ${{ runner.temp }}/slack-clone-live-model-e2e
       LASH_LIVE_E2E_MAX_SPEND_USD: "2"
 
     steps:
@@ -38,6 +37,8 @@ jobs:
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
 
       - name: Run structural probes and live nonce swap
+        env:
+          LASH_SLACK_CLONE_LIVE_E2E_ARTIFACT_DIR: ${{ runner.temp }}/slack-clone-live-model-e2e
         run: just slack-clone-live-model-e2e
 
       - name: Upload failure artifacts
