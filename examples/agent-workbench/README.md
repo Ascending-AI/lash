@@ -305,9 +305,8 @@ recorded. Recovery must never re-execute an uncertain tool merely to rebuild UI
 state; rebuild from durable snapshots, and make externally visible tool effects
 idempotent or split them into explicit durable process steps.
 
-The workbench is an ordinal-addressed Restate host. Legacy providers using
-`ToolContext` still receive typed refusals for nested process commands. FIG-1291
-leaf providers instead use sealed `AttemptContext` and return versioned
+The workbench is an ordinal-addressed Restate host. Leaf providers use sealed
+`AttemptContext` and return versioned
 `ToolIntents`; Lash records the final attempt before realizing each declaration
 as one journal-first command. `shell.start`/detach, signalling, cancellation,
 and typed process-event emission can therefore migrate to declarations without

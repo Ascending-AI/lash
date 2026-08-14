@@ -1022,32 +1022,6 @@ pub(super) async fn invoke_endpoint_with_named_call_responses<T: serde::Serializ
     .map_err(|_| TerminalError::new("named-call endpoint test timed out"))?
 }
 
-pub(super) async fn invoke_endpoint_with_named_call_and_invocation_responses<
-    T: serde::Serialize,
->(
-    endpoint: &Endpoint,
-    service: &str,
-    handler: &str,
-    key: &str,
-    input: &T,
-    invocation_ids: Vec<String>,
-    responses: Vec<(String, serde_json::Value)>,
-) -> Result<Bytes, TerminalError> {
-    tokio::time::timeout(
-        ENDPOINT_TEST_TIMEOUT,
-        invoke_endpoint_body_with_named_call_responses_unbounded(
-            endpoint,
-            service,
-            handler,
-            encode_invocation_body(key, input)?,
-            invocation_ids,
-            responses,
-        ),
-    )
-    .await
-    .map_err(|_| TerminalError::new("named-call endpoint test timed out"))?
-}
-
 async fn invoke_endpoint_body_with_named_call_responses_unbounded(
     endpoint: &Endpoint,
     service: &str,

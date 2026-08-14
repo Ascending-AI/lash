@@ -342,7 +342,6 @@ pub mod facade_support {
     pub use crate::store::SessionHead;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
-    pub use crate::tool_provider::ToolSessionProcessAdmin;
     pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
     pub use crate::tool_registry::ReconfigureError;
@@ -946,7 +945,8 @@ pub use tool_intent::{
     ToolResultDone, derive_tool_intent_identity,
 };
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall, PreparedToolBatch,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall,
+    InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, PreparedToolBatch,
     PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,
     ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };

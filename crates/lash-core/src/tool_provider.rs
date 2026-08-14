@@ -22,7 +22,7 @@ mod triggers;
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
-pub use process::ToolSessionProcessAdmin;
+pub use process::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
 pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;
 pub use triggers::ToolTriggerClient;
@@ -697,10 +697,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
-    /// Provides process lifecycle operations to tool implementors under the call's session and
-    /// execution scopes.
-    pub fn processes(&self) -> ToolSessionProcessAdmin<'run> {
-        ToolSessionProcessAdmin {
+    pub(crate) fn process_admin(&self) -> InternalProcessAdmin<'run> {
+        InternalProcessAdmin {
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
             processes: Arc::clone(&self.processes),
@@ -1302,9 +1300,23 @@ pub trait ToolProvider: Send + Sync + 'static {
         )))
     }
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult;
-    /// Whether this tool id uses the leaf attempt signature. The legacy
-    /// `ToolContext` path remains only while FIG-1293/1294 migrate and delete
-    /// the remaining orchestrating surfaces in the aggregate cutover.
+    /// Execute an owner-bound internal process body.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class. The
+    /// default preserves legacy pure implementations while exposing durable
+    /// process capabilities only to providers that explicitly override this
+    /// internal-only route.
+    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolResult {
+        self.execute(ToolCall {
+            name: call.name,
+            args: call.args,
+            context: call.context.__tool_context(),
+        })
+        .await
+    }
+    /// Whether this tool id uses the leaf attempt signature. Durable leaf
+    /// behavior must opt in; the legacy `ToolContext` fallback has no process
+    /// administration and is retained only for pure provider implementations.
     fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
         false
     }
@@ -1377,6 +1389,26 @@ pub trait ToolProvider: Send + Sync + 'static {
             return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
         };
         self.execute(ToolCall {
+            name: &manifest.name,
+            args,
+            context,
+        })
+        .await
+    }
+
+    /// Resolve and execute an owner-bound internal process tool by stable id.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &InternalProcessContext<'_>,
+    ) -> ToolResult {
+        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
+            return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
+        };
+        self.execute_internal(InternalProcessToolCall {
             name: &manifest.name,
             args,
             context,

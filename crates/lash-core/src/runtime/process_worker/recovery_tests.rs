@@ -565,12 +565,12 @@ impl crate::ToolProvider for NestedProcessWaitTool {
             RecoveryDisposition::Rerunnable,
             crate::ProcessOriginator::host(),
         );
-        if let Err(err) = call.context.processes().start(request).await {
+        if let Err(err) = call.context.process_admin().start(request).await {
             return crate::ToolResult::err_fmt(format_args!(
                 "failed to start nested process: {err}"
             ));
         }
-        match call.context.processes().await_process(process_id).await {
+        match call.context.process_admin().await_process(process_id).await {
             Ok(ProcessAwaitOutput::Success { .. }) => {
                 crate::ToolResult::ok(serde_json::json!({ "nested": "done" }))
             }

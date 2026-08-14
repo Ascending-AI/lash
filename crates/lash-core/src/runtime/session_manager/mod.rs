@@ -14,9 +14,6 @@ mod process_runners;
 mod turns;
 mod usage;
 
-#[cfg(any(test, feature = "testing"))]
-pub(crate) use process_runners::guard_process_command_in_recorded_body;
-
 pub use direct::DirectCompletionClient;
 pub(in crate::runtime) use usage::ChildUsageEventRelay;
 pub(in crate::runtime::session_manager) use usage::{

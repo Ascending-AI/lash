@@ -52,21 +52,21 @@ impl<'run> OrchestrationContext<'run> {
         &self,
         request: crate::ProcessStartRequest,
     ) -> Result<crate::ProcessHandleSummary, PluginError> {
-        self.context.processes().start(request).await
+        self.context.process_admin().start(request).await
     }
 
     pub async fn await_process(
         &self,
         process_id: &str,
     ) -> Result<crate::ProcessAwaitOutput, PluginError> {
-        self.context.processes().await_process(process_id).await
+        self.context.process_admin().await_process(process_id).await
     }
 
     pub async fn cancel_process(
         &self,
         process_id: &str,
     ) -> Result<crate::ProcessCancelSummary, PluginError> {
-        self.context.processes().cancel(process_id).await
+        self.context.process_admin().cancel(process_id).await
     }
 
     /// Emit one journaled process signal using an author-supplied stable id.
@@ -79,7 +79,7 @@ impl<'run> OrchestrationContext<'run> {
         payload: serde_json::Value,
     ) -> Result<crate::ProcessEvent, PluginError> {
         self.context
-            .processes()
+            .process_admin()
             .signal_with_id(process_id, signal_name, signal_id.into(), payload)
             .await
     }

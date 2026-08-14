@@ -90,10 +90,11 @@ pub(crate) async fn execute_internal_process_tool<'run>(
     let tool_name = prepared.tool_name.clone();
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
-    let result = std::panic::AssertUnwindSafe(context.tools.execute_by_id(
+    let internal_context = crate::InternalProcessContext::new(tool_context);
+    let result = std::panic::AssertUnwindSafe(context.tools.execute_internal_by_id(
         &prepared.tool_id,
         &prepared.args,
-        &tool_context,
+        &internal_context,
     ))
     .catch_unwind()
     .await

@@ -2,8 +2,82 @@ use std::sync::Arc;
 
 use crate::plugin::PluginError;
 
+/// Owner-bound capabilities for an internal durable process body.
+///
+/// This is ADR 0051's protocol and process-engine implementor class. Lash
+/// constructs it only after resolving an `Internal` activation inside process
+/// replay. Leaf tools receive [`crate::AttemptContext`] and orchestration
+/// definitions receive [`crate::OrchestrationContext`] instead.
 #[derive(Clone)]
-pub struct ToolSessionProcessAdmin<'run> {
+pub struct InternalProcessContext<'run> {
+    context: super::ToolContext<'run>,
+}
+
+impl<'run> InternalProcessContext<'run> {
+    pub(crate) fn new(context: super::ToolContext<'run>) -> Self {
+        Self { context }
+    }
+
+    /// Construct the runtime-only context in an integrator test.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn __for_testing(context: &super::ToolContext<'run>) -> Self {
+        Self::new(context.clone())
+    }
+
+    /// Read the session that owns this internal process body.
+    pub fn session_id(&self) -> &str {
+        self.context.session_id()
+    }
+
+    /// Read the durable process id assigned to this internal body.
+    pub fn process_id(&self) -> Option<&str> {
+        self.context.async_process_id()
+    }
+
+    /// Access owner-bound process lifecycle operations.
+    pub fn processes(&self) -> InternalProcessAdmin<'run> {
+        self.context.process_admin()
+    }
+
+    /// Access the current process's event stream.
+    pub fn process_events(&self) -> super::ToolProcessEventClient {
+        self.context.process_events()
+    }
+
+    /// Observe cancellation of the owner-bound process body.
+    pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
+        self.context.cancellation_token()
+    }
+
+    /// Borrow the read-only legacy tool projection for an internal executor's
+    /// pure fallback implementation.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class. The
+    /// returned projection has no process-admin entry point.
+    #[doc(hidden)]
+    pub fn __tool_context(&self) -> &super::ToolContext<'run> {
+        &self.context
+    }
+}
+
+/// Inputs handed to an internal owner-bound process tool.
+///
+/// This is ADR 0051's protocol and process-engine implementor class. Runtime
+/// dispatch constructs it only for `ToolActivation::Internal`; model-facing
+/// and leaf-attempt calls cannot obtain its process capabilities.
+pub struct InternalProcessToolCall<'a> {
+    pub name: &'a str,
+    pub args: &'a serde_json::Value,
+    pub context: &'a InternalProcessContext<'a>,
+}
+
+/// Process lifecycle operations available only to an internal durable body.
+///
+/// This is ADR 0051's protocol and process-engine implementor class. Leaf tool
+/// attempts cannot obtain this value.
+#[derive(Clone)]
+pub struct InternalProcessAdmin<'run> {
     pub(super) session_id: String,
     pub(super) agent_frame_id: crate::AgentFrameId,
     pub(super) processes: Arc<dyn crate::ProcessService>,
@@ -13,7 +87,7 @@ pub struct ToolSessionProcessAdmin<'run> {
     pub(super) execution_env_spec: crate::ProcessExecutionEnvSpec,
 }
 
-impl ToolSessionProcessAdmin<'_> {
+impl InternalProcessAdmin<'_> {
     fn process_scope(&self) -> crate::ProcessOpScope<'_> {
         crate::ProcessOpScope::new(self.effect_controller.scoped())
             .with_parent_invocation(self.parent_invocation.clone())
@@ -25,6 +99,8 @@ impl ToolSessionProcessAdmin<'_> {
     /// [`crate::ProcessService::start_from_request`] path the runtime uses for
     /// every request-shaped process start, so the child is provider-re-supplied,
     /// durable, and recoverable through the worker.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn start(
         &self,
         mut request: crate::ProcessStartRequest,
@@ -54,6 +130,8 @@ impl ToolSessionProcessAdmin<'_> {
     /// Externally-Owned row and immediately completes it with the launch
     /// identity — lash never claims it as running. Only Externally-Owned rows
     /// accept this out-of-band completion.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn complete_external(
         &self,
         process_id: &str,
@@ -70,6 +148,8 @@ impl ToolSessionProcessAdmin<'_> {
     }
 
     /// Await a process started from this session to its terminal output.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn await_process(
         &self,
         process_id: &str,
@@ -86,6 +166,9 @@ impl ToolSessionProcessAdmin<'_> {
             .await
     }
 
+    /// List process handles visible to this internal process body.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn list_handles_filtered(
         &self,
         filter: &crate::ProcessListFilter,
@@ -100,6 +183,9 @@ impl ToolSessionProcessAdmin<'_> {
             .collect())
     }
 
+    /// Cancel a process visible to this internal process body.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn cancel(
         &self,
         process_id: &str,
@@ -110,6 +196,9 @@ impl ToolSessionProcessAdmin<'_> {
             .map(crate::ProcessCancelSummary::from_record)
     }
 
+    /// Signal a process visible to this internal process body.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn signal(
         &self,
         process_id: &str,
@@ -158,8 +247,8 @@ mod tests {
     use crate::ProcessRegistry;
     use crate::runtime::RuntimeEffectControllerHandle;
 
-    fn admin(processes: Arc<dyn crate::ProcessService>) -> ToolSessionProcessAdmin<'static> {
-        ToolSessionProcessAdmin {
+    fn admin(processes: Arc<dyn crate::ProcessService>) -> InternalProcessAdmin<'static> {
+        InternalProcessAdmin {
             session_id: "session".to_string(),
             agent_frame_id: "frame".to_string(),
             processes,

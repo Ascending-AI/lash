@@ -2198,6 +2198,7 @@ mod rebuild_conformance;
 mod rolling_history_persistence;
 #[cfg(feature = "rlm")]
 mod stack_budget;
+mod tool_intent_ingress;
 mod turn_streaming;
 
 /// `SnapshotStore` backs the facade tests, so it owes the displacement contract

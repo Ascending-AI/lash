@@ -73,20 +73,25 @@ struct SessionProcessAdminTools {
 #[async_trait::async_trait]
 impl StaticToolExecute for SessionProcessAdminTools {
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        match call.name {
-            "list_process_handles" => execute_process_list_tool_call(call.context, call.args).await,
-            "cancel_process" if self.include_cancel_process => {
-                execute_process_cancel_tool_call(call.context, call.args).await
-            }
-            _ => ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
-        }
+        ToolResult::err_fmt(format_args!(
+            "process tool `{}` requires the leaf AttemptContext signature",
+            call.name
+        ))
     }
 
     fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id.as_str() == "tool:cancel_process"
+        matches!(
+            tool_id.as_str(),
+            "tool:list_process_handles" | "tool:cancel_process"
+        )
     }
 
     async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
+        if call.name == "list_process_handles" {
+            return done_without_intents(
+                execute_process_list_tool_call(call.context, call.args).await,
+            );
+        }
         if call.name != "cancel_process" || !self.include_cancel_process {
             return done_without_intents(ToolResult::err_fmt(format_args!(
                 "Unknown leaf process tool: {}",
@@ -205,7 +210,7 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
 }
 
 pub async fn execute_process_list_tool_call(
-    context: &lash_core::ToolContext<'_>,
+    context: &lash_core::AttemptContext<'_>,
     args: &Value,
 ) -> ToolResult {
     let filter = match lash_core::ProcessListFilter::decode(args) {
@@ -264,25 +269,6 @@ fn process_list_output_schema() -> Value {
             "additionalProperties": false
         }
     })
-}
-
-pub async fn execute_process_cancel_tool_call(
-    context: &lash_core::ToolContext<'_>,
-    args: &Value,
-) -> ToolResult {
-    let Some(id) = args
-        .get("process_id")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return ToolResult::err_fmt("cancel_process requires `process_id`");
-    };
-    let processes = context.processes();
-    match processes.cancel(id).await {
-        Ok(summary) => ToolResult::ok(serde_json::json!(summary)),
-        Err(err) => ToolResult::err_fmt(err.to_string()),
-    }
 }
 
 #[cfg(test)]

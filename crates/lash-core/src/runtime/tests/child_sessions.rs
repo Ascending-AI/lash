@@ -22,7 +22,7 @@ impl crate::ToolProvider for FirstTurnProcessTool {
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
         match call
             .context
-            .processes()
+            .process_admin()
             .start(crate::ProcessStartRequest::external(
                 "child-first-turn-process",
                 crate::ProcessOriginator::host(),

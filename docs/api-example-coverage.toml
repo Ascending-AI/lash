@@ -28070,69 +28070,6 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::SessionScopeId::new` directly; the gate reaches the same item a second time through `lash_core::SessionScope::id`. Consumer class: core runtime internals -- this function is exercised at crates/lash-core/src/runtime/process/model.rs:682, not by any example, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash::process::ToolSessionProcessAdmin"
-kind = "struct"
-availability = "default+all-features"
-aliases = ["lash_core::tool_provider::process::ToolSessionProcessAdmin"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::process::ToolSessionProcessAdmin` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::ToolContext::processes` because its canonical identity is the lash-core one. Consumer class: core runtime internals -- this type is load-bearing inside its own defining module at crates/lash-core/src/tool_provider/process.rs:16, crates/lash-core/src/tool_provider/process.rs:197 and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
-
-[[api]]
-symbol = "lash::process::ToolSessionProcessAdmin::await_process"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::tool_provider::process::ToolSessionProcessAdmin::await_process"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ToolSessionProcessAdmin::await_process` directly; the gate reaches the same item a second time through `lash_core::ToolContext::processes`. Consumer class: the subagent plugin and this module's own unit test -- this function is exercised at crates/lash-subagents/src/rlm.rs:88 and crates/lash-core/src/tool_provider/process.rs:204, not by any example, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::process::ToolSessionProcessAdmin::cancel"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::tool_provider::process::ToolSessionProcessAdmin::cancel"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ToolSessionProcessAdmin::cancel` directly; the gate reaches the same item a second time through `lash_core::ToolContext::processes`. Consumer class: the first-party process-controls plugin -- this function is exercised at crates/lash-plugin-process-controls/src/lib.rs:235, not by any example, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::process::ToolSessionProcessAdmin::complete_external"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::tool_provider::process::ToolSessionProcessAdmin::complete_external"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ToolSessionProcessAdmin::complete_external` directly; the gate reaches the same item a second time through `lash_core::ToolContext::processes`. Consumer class: the first-party shell tool -- this function is exercised at crates/lash-tools/src/shell/mod.rs:286, not by any example, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::process::ToolSessionProcessAdmin::list_handles_filtered"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::tool_provider::process::ToolSessionProcessAdmin::list_handles_filtered"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ToolSessionProcessAdmin::list_handles_filtered` directly; the gate reaches the same item a second time through `lash_core::ToolContext::processes`. Consumer class: the first-party process-controls plugin -- this function is exercised at crates/lash-plugin-process-controls/src/lib.rs:169, not by any example, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::process::ToolSessionProcessAdmin::signal"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::tool_provider::process::ToolSessionProcessAdmin::signal"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ToolSessionProcessAdmin::signal` directly; the gate reaches the same item a second time through `lash_core::ToolContext::processes`. Consumer class: the first-party shell tool -- this function is exercised at crates/lash-tools/src/shell/mod.rs:475, not by any example, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::process::ToolSessionProcessAdmin::start"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::tool_provider::process::ToolSessionProcessAdmin::start"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ToolSessionProcessAdmin::start` directly; the gate reaches the same item a second time through `lash_core::ToolContext::processes`. Consumer class: the first-party shell tool and the subagent plugin -- this function is exercised at crates/lash-tools/src/shell/mod.rs:281 and crates/lash-subagents/src/rlm.rs:81, not by any example, which is what keeps the row unused."
-
-[[api]]
 symbol = "lash::process::WakeDeliveryConfig"
 kind = "struct"
 availability = "default+all-features"
@@ -54872,15 +54809,6 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
-symbol = "lash::tools::ToolContext::processes"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::ToolContext::processes"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
-
-[[api]]
 symbol = "lash::tools::ToolContext::replay_key"
 kind = "function"
 availability = "default+all-features"
@@ -73471,7 +73399,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome"
+symbol = "lash::tools::ToolIntentExecutionOutcome"
+aliases = ["lash_core::ToolIntentExecutionOutcome"]
 kind = "enum"
 availability = "default+all-features"
 area = "plugins"
@@ -73479,7 +73408,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Executed"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Executed"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Executed"]
 kind = "variant"
 availability = "default+all-features"
 area = "plugins"
@@ -73487,7 +73417,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Executed::identity"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Executed::identity"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Executed::identity"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -73495,7 +73426,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Executed::kind"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Executed::kind"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Executed::kind"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -73503,7 +73435,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Executed::result"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Executed::result"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Executed::result"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -73511,7 +73444,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Refused"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Refused"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Refused"]
 kind = "variant"
 availability = "default+all-features"
 area = "plugins"
@@ -73519,7 +73453,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Refused::identity"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Refused::identity"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Refused::identity"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -73527,7 +73462,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Refused::intent_index"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Refused::intent_index"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Refused::intent_index"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -73535,7 +73471,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Refused::kind"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Refused::kind"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Refused::kind"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -73543,7 +73480,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Refused::refusal"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Refused::refusal"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Refused::refusal"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -73551,7 +73489,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::ProtocolRefused"
+symbol = "lash::tools::ToolIntentExecutionOutcome::ProtocolRefused"
+aliases = ["lash_core::ToolIntentExecutionOutcome::ProtocolRefused"]
 kind = "variant"
 availability = "default+all-features"
 area = "plugins"
@@ -73559,7 +73498,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed empty-batch protocol-version refusal evidence; application examples do not fabricate retained protocol records."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::ProtocolRefused::refusal"
+symbol = "lash::tools::ToolIntentExecutionOutcome::ProtocolRefused::refusal"
+aliases = ["lash_core::ToolIntentExecutionOutcome::ProtocolRefused::refusal"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -73567,7 +73507,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed empty-batch protocol-version refusal evidence; application examples do not fabricate retained protocol records."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::kind"
+symbol = "lash::tools::ToolIntentExecutionOutcome::kind"
+aliases = ["lash_core::ToolIntentExecutionOutcome::kind"]
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
@@ -73575,7 +73516,8 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::model_addendum"
+symbol = "lash::tools::ToolIntentExecutionOutcome::model_addendum"
+aliases = ["lash_core::ToolIntentExecutionOutcome::model_addendum"]
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
@@ -74001,7 +73943,8 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable effect hosts classify parent-end commands honestly rather than as synthetic tool batches."
 
 [[api]]
-symbol = "lash_core::ToolIntentExecutionOutcome::Executed::parent_end"
+symbol = "lash::tools::ToolIntentExecutionOutcome::Executed::parent_end"
+aliases = ["lash_core::ToolIntentExecutionOutcome::Executed::parent_end"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -74309,6 +74252,470 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
+
+[[api]]
+symbol = "lash::LashCore::tool_intents"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCore::tool_intents"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:72#core.tool_intents(SESSION, lash::runtime::ExecutionScope::turn(SESSION, SCOPE))?;"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:87#assert_eq!(duplicate, expected_duplicate);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::StaticToolExecute::execute_internal"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:247#let direct = lash::tools::StaticToolExecute::execute_internal("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:257#direct.as_output().value_for_projection()[\"name\"],"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngress"
+kind = "struct"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:71#let ingress: lash::tools::ToolIntentIngress ="
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:87#assert_eq!(duplicate, expected_duplicate);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngress::key"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:73#let key: lash::tools::ToolIntentIngressKey = ingress.key(\"docs-call\", 0);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:75#assert_eq!(key.identity(), derived.identity());"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngress::submit"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:77#let admitted = ingress.submit(key.clone(), event_intent(SESSION)).await;"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:87#assert_eq!(duplicate, expected_duplicate);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressKey"
+kind = "struct"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:73#let key: lash::tools::ToolIntentIngressKey = ingress.key(\"docs-call\", 0);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:75#assert_eq!(key.identity(), derived.identity());"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressKey::derive"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:74#let derived = lash::tools::ToolIntentIngressKey::derive(SESSION, SCOPE, \"docs-call\", 0);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:75#assert_eq!(key.identity(), derived.identity());"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressKey::from_identity"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:139#lash::tools::ToolIntentIngressKey::from_identity(forged),"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:154#assert_eq!(recorded_replay_key, \"forged\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressKey::identity"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:75#assert_eq!(key.identity(), derived.identity());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:75#assert_eq!(key.identity(), derived.identity());"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressOutcome"
+kind = "enum"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:79#let lash::tools::ToolIntentIngressOutcome::Admitted { outcome } = admitted else {"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:87#assert_eq!(duplicate, expected_duplicate);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressOutcome::Admitted"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:79#let lash::tools::ToolIntentIngressOutcome::Admitted { outcome } = admitted else {"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:87#assert_eq!(duplicate, expected_duplicate);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressOutcome::Admitted::outcome"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:79#let lash::tools::ToolIntentIngressOutcome::Admitted { outcome } = admitted else {"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:87#assert_eq!(duplicate, expected_duplicate);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressOutcome::Refused"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:95#let lash::tools::ToolIntentIngressOutcome::Refused { refusal } = foreign_session else {"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:102#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressOutcome::Refused::refusal"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:95#let lash::tools::ToolIntentIngressOutcome::Refused { refusal } = foreign_session else {"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:102#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal"
+kind = "enum"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:98#let lash::tools::ToolIntentIngressRefusal::ForeignSession { expected, recorded } = refusal"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:102#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::ForeignExecutionScope"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:111#refusal: lash::tools::ToolIntentIngressRefusal::ForeignExecutionScope { expected, recorded },"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:117#(expected.as_str(), recorded.as_str()),"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::ForeignExecutionScope::expected"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:111#refusal: lash::tools::ToolIntentIngressRefusal::ForeignExecutionScope { expected, recorded },"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:117#(expected.as_str(), recorded.as_str()),"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::ForeignExecutionScope::recorded"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:111#refusal: lash::tools::ToolIntentIngressRefusal::ForeignExecutionScope { expected, recorded },"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:117#(expected.as_str(), recorded.as_str()),"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::ForeignSession"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:98#let lash::tools::ToolIntentIngressRefusal::ForeignSession { expected, recorded } = refusal"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:102#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::ForeignSession::expected"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:98#let lash::tools::ToolIntentIngressRefusal::ForeignSession { expected, recorded } = refusal"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:102#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::ForeignSession::recorded"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:98#let lash::tools::ToolIntentIngressRefusal::ForeignSession { expected, recorded } = refusal"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:102#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::IntentSessionMismatch"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:125#refusal: lash::tools::ToolIntentIngressRefusal::IntentSessionMismatch { expected, recorded },"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:131#(expected.as_str(), recorded.as_str()),"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::IntentSessionMismatch::expected"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:125#refusal: lash::tools::ToolIntentIngressRefusal::IntentSessionMismatch { expected, recorded },"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:131#(expected.as_str(), recorded.as_str()),"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::IntentSessionMismatch::recorded"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:125#refusal: lash::tools::ToolIntentIngressRefusal::IntentSessionMismatch { expected, recorded },"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:131#(expected.as_str(), recorded.as_str()),"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::MalformedKey"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:145#lash::tools::ToolIntentIngressRefusal::MalformedKey {"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::MalformedKey::expected_replay_key"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:146#expected_replay_key,"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::MalformedKey::recorded_replay_key"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:147#recorded_replay_key,"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:154#assert_eq!(recorded_replay_key, \"forged\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::execute_internal"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ToolProvider::execute_internal"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:261#let fallback = lash::tools::ToolProvider::execute_internal("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:271#fallback.as_output().value_for_projection()[\"name\"],"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolProvider::execute_internal_by_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ToolProvider::execute_internal_by_id"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:227#let result = lash::tools::ToolProvider::execute_internal_by_id("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:235#assert_eq!(value[\"name\"], \"internal_probe\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessAdmin"
+kind = "struct"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:172#let admin: lash_core::InternalProcessAdmin<'_> = context.processes();"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:240#assert_eq!(value[\"start_ok\"], false);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessAdmin::await_process"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:183#let await_process = admin.await_process(\"docs-missing\").await;"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:242#assert_eq!(value[\"await_error\"], true);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessAdmin::cancel"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:184#let cancel = admin.cancel(\"docs-missing\").await;"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:243#assert_eq!(value[\"cancel_error\"], true);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessAdmin::complete_external"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:189#.complete_external("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:245#assert_eq!(value[\"complete_error\"], true);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessAdmin::list_handles_filtered"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:181#.list_handles_filtered(&lash_core::ProcessListFilter::default())"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:241#assert_eq!(value[\"list_ok\"], false);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessAdmin::signal"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:186#.signal(\"docs-missing\", \"resume\", serde_json::Value::Null)"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:244#assert_eq!(value[\"signal_error\"], true);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessAdmin::start"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:174#.start(lash_core::ProcessStartRequest::external("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:240#assert_eq!(value[\"start_ok\"], false);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessContext"
+kind = "struct"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:217#let context = lash_core::InternalProcessContext::__for_testing(&tool);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:237#assert_eq!(value[\"session_id\"], \"test-session\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessContext::cancellation_token"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:203#\"has_cancellation\": context.cancellation_token().is_some(),"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:239#assert_eq!(value[\"has_cancellation\"], false);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessContext::process_events"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:197#let _events = context.process_events();"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:235#assert_eq!(value[\"name\"], \"internal_probe\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessContext::process_id"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:202#\"process_id\": context.process_id(),"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:238#assert!(value[\"process_id\"].is_null());"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessContext::processes"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:172#let admin: lash_core::InternalProcessAdmin<'_> = context.processes();"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:240#assert_eq!(value[\"start_ok\"], false);"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessContext::session_id"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:201#\"session_id\": context.session_id(),"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:237#assert_eq!(value[\"session_id\"], \"test-session\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessToolCall"
+kind = "struct"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:167#let lash_core::InternalProcessToolCall {"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:235#assert_eq!(value[\"name\"], \"internal_probe\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessToolCall::args"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:169#args,"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:236#assert_eq!(value[\"args\"], serde_json::json!({\"probe\": true}));"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessToolCall::context"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:170#context,"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:237#assert_eq!(value[\"session_id\"], \"test-session\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash_core::InternalProcessToolCall::name"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:168#name,"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:235#assert_eq!(value[\"name\"], \"internal_probe\");"
+reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
 
 [[api]]
 symbol = "lash::tools::StaticToolExecute::supports_attempt_context"

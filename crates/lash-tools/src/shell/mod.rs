@@ -224,13 +224,13 @@ impl StandardShell {
     async fn start_command_process(
         &self,
         params: &StartCommandParams,
-        context: &lash_core::ToolContext<'_>,
+        context: &lash_core::InternalProcessContext<'_>,
         cancel: Option<CancellationToken>,
     ) -> ToolResult {
         if params.detach {
             return self.detach_command_process(params, context).await;
         }
-        if let Some(process_id) = context.async_process_id() {
+        if let Some(process_id) = context.process_id() {
             return self
                 .run_start_command_process(process_id, params, context, cancel)
                 .await;
@@ -254,9 +254,9 @@ impl StandardShell {
     async fn detach_command_process(
         &self,
         params: &StartCommandParams,
-        context: &lash_core::ToolContext<'_>,
+        context: &lash_core::InternalProcessContext<'_>,
     ) -> ToolResult {
-        let Some(_launcher_process_id) = context.async_process_id() else {
+        let Some(_launcher_process_id) = context.process_id() else {
             return execution_failure(
                 "detached_process_runner_missing_process",
                 "the internal detached process runner requires a durable process id",
@@ -434,7 +434,7 @@ impl StandardShell {
         &self,
         process_id: &str,
         params: &StartCommandParams,
-        context: &lash_core::ToolContext<'_>,
+        context: &lash_core::InternalProcessContext<'_>,
         cancel: Option<CancellationToken>,
     ) -> ToolResult {
         let started = Instant::now();
@@ -618,6 +618,28 @@ impl StaticToolExecute for StandardShell {
             .await
     }
 
+    async fn execute_internal(&self, call: lash_core::InternalProcessToolCall<'_>) -> ToolResult {
+        if call.name != "run_start_command" {
+            return self
+                .execute(ToolCall {
+                    name: call.name,
+                    args: call.args,
+                    context: call.context.__tool_context(),
+                })
+                .await;
+        }
+        let params = match self.parse_start_command_params(call.args) {
+            Ok(params) => params,
+            Err(err) => return err,
+        };
+        self.start_command_process(
+            &params,
+            call.context,
+            call.context.cancellation_token().cloned(),
+        )
+        .await
+    }
+
     fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
         matches!(tool_id.as_str(), "tool:start_command" | "tool:write_stdin")
     }
@@ -798,11 +820,11 @@ finish probe.exit_code == 0"#.into(),
                 "shell.write executes through the leaf intent protocol",
             ),
             "run_start_command" => {
-                let params = match self.parse_start_command_params(args) {
-                    Ok(params) => params,
-                    Err(err) => return err,
-                };
-                self.start_command_process(&params, context, cancel).await
+                let _ = (context, cancel);
+                execution_failure(
+                    "shell_internal_process_context_required",
+                    "the owner-bound shell runner requires InternalProcessContext",
+                )
             }
             _ => invalid_request_failure("unknown_shell_tool", format!("Unknown tool: {name}")),
         }

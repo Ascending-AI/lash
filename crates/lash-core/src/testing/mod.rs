@@ -844,11 +844,6 @@ impl EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
         command: crate::ProcessCommand,
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
-        crate::runtime::guard_process_command_in_recorded_body(
-            scope.parent_invocation.as_ref(),
-            scope.controller(),
-            &command,
-        )?;
         let effect_id = command.effect_id();
         // Production derives the nested invocation from the parent invocation
         // the ToolContext carries (`process_effect_invocation`), so a nested

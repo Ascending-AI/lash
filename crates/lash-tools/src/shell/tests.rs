@@ -27,11 +27,12 @@ mod tests {
         context: &lash_core::ToolContext<'_>,
     ) -> ToolResult {
         if name == "start_command" && context.async_process_id().is_some() {
+            let internal = lash_core::InternalProcessContext::__for_testing(context);
             return shell
-                .execute(ToolCall {
+                .execute_internal(lash_core::InternalProcessToolCall {
                     name: "run_start_command",
                     args,
-                    context,
+                    context: &internal,
                 })
                 .await;
         }
@@ -47,17 +48,18 @@ mod tests {
             let lash_core::ToolAttemptResult::Done { result, intents } = outcome else {
                 panic!("shell leaf test unexpectedly returned Pending");
             };
+            let internal = lash_core::InternalProcessContext::__for_testing(context);
             for intent in intents.intents {
                 match intent {
                     lash_core::ToolIntent::StartProcess(intent) => {
-                        context
+                        internal
                             .processes()
                             .start(intent.request)
                             .await
                             .expect("test drains StartProcess intent");
                     }
                     lash_core::ToolIntent::SignalProcess(intent) => {
-                        let _ = context
+                        let _ = internal
                             .processes()
                             .signal(&intent.process_id, &intent.signal_name, intent.payload)
                             .await;
@@ -1286,11 +1288,12 @@ mod tests {
                 "detach": true,
                 "detached_process_id": "detach-ordering-audit",
             });
+        let internal = lash_core::InternalProcessContext::__for_testing(&ctx);
         let result = shell
-            .execute(ToolCall {
+            .execute_internal(lash_core::InternalProcessToolCall {
                 name: "run_start_command",
                 args: &args,
-                context: &ctx,
+                context: &internal,
             })
             .await;
         assert!(!result.is_success(), "missing durable context must refuse");

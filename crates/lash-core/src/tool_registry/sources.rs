@@ -312,6 +312,20 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
             .execute_by_id(tool_id, args, context)
             .await
     }
+
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::InternalProcessContext<'_>,
+    ) -> ToolResult {
+        let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
+            return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
+        };
+        self.providers[provider_idx]
+            .execute_internal_by_id(tool_id, args, context)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -402,6 +416,17 @@ impl ToolSourceExecutor for ToolProviderSource {
     ) -> ToolResult {
         self.provider
             .execute_by_id(tool_id, args, context)
+            .await
+    }
+
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::InternalProcessContext<'_>,
+    ) -> ToolResult {
+        self.provider
+            .execute_internal_by_id(tool_id, args, context)
             .await
     }
 }

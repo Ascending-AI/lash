@@ -265,4 +265,12 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         };
         self.execute(&manifest.name, args, context).await
     }
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::InternalProcessContext<'_>,
+    ) -> ToolResult {
+        self.execute_by_id(tool_id, args, context.__tool_context()).await
+    }
 }

@@ -368,6 +368,22 @@ impl ToolProvider for ToolRegistry {
             .await
     }
 
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::InternalProcessContext<'_>,
+    ) -> ToolResult {
+        let (source, manifest) = match self.resolve_execution_source(tool_id) {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let _ = manifest;
+        source
+            .execute_internal_by_id(tool_id, args, context)
+            .await
+    }
+
     async fn execute_granted(
         &self,
         grant: &ToolExecutionGrant,

@@ -14,35 +14,6 @@ struct ProcessCommandRunner<'scope> {
     turn_cancellation: Option<crate::ProcessTurnCancellation>,
 }
 
-pub(crate) fn guard_process_command_in_recorded_body(
-    parent_invocation: Option<&crate::RuntimeInvocation>,
-    effect_controller: &dyn crate::RuntimeEffectController,
-    command: &crate::ProcessCommand,
-) -> Result<(), crate::PluginError> {
-    if parent_invocation.is_some_and(|invocation| {
-        invocation.effect_kind() == Some(crate::RuntimeEffectKind::ToolAttempt)
-    }) && effect_controller.journal_addressing()
-        == crate::EffectJournalAddressing::OrdinalAddressed
-        && !matches!(command, crate::ProcessCommand::List { .. })
-    {
-        let route = match command {
-            crate::ProcessCommand::Start { .. } => "processes().start()",
-            crate::ProcessCommand::Await { .. } => "processes().await_process()",
-            crate::ProcessCommand::Cancel { .. } => "processes().cancel()",
-            crate::ProcessCommand::ParentEnd { .. } => "recorded parent-end teardown",
-            crate::ProcessCommand::Signal { .. } => "processes().signal()",
-            crate::ProcessCommand::EmitEvent { .. } => "process_events().emit()",
-            crate::ProcessCommand::Transfer { .. } => "processes().transfer()",
-            crate::ProcessCommand::DeleteSession { .. } => "processes().delete_session()",
-            crate::ProcessCommand::List { .. } => unreachable!("list is journal-neutral"),
-        };
-        return Err(crate::PluginError::Session(format!(
-            "ToolContext::{route} is unavailable inside a recorded tool attempt; return a ToolIntent for coordinator execution after the final attempt is committed"
-        )));
-    }
-    Ok(())
-}
-
 impl<'scope> ProcessCommandRunner<'scope> {
     fn new(
         current: &'scope CurrentSessionCapability,
@@ -244,11 +215,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
         &self,
         command: crate::ProcessCommand,
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
-        guard_process_command_in_recorded_body(
-            self.parent_invocation.as_ref(),
-            self.effect_controller,
-            &command,
-        )?;
         let effect_id = command.effect_id();
         let invocation = crate::runtime::causal::process_effect_invocation(
             &self.current.session_id,

@@ -84,38 +84,25 @@ from the orchestration determinism contract. The internal shell runner uses
 this boundary for PTY ownership and registry point-read/backoff signal-event
 waits; those waits do not consume journal ordinals.
 
-FIG-1127 completion (2026-08-12) replaces the falsified static route inventory
-with this structural rule:
+The structural rule remains:
 
 > A recorded body must not emit commands into an ordinal-addressed journal.
 
-Every process command emitted through an in-turn process capability crosses
-`ProcessCommandRunner::run`. That choke point refuses `Start`, `Await`,
-`Cancel`, `Signal`, and `Transfer` when their parent is a `ToolAttempt` and the
-controller reports `EffectJournalAddressing::OrdinalAddressed`. `List` remains
-available: the Restate endpoint replay law proves at the captured-byte level
-that it is registry-served and reissues no journal command. Registry-only
-`validate_visible` and `complete_external` do not cross the choke point.
-`ToolContext::triggers().emit()` and `ToolContext::sessions().start_turn()` keep
-their corresponding ordinal-tier guards because they are not process commands.
-Each refusal names the route and tier and directs legacy authors to process-step
-decomposition.
+FIG-1294 enforces it by construction. `ToolContext` no longer exposes process
+administration, and the former command guard and refusal vocabulary are gone.
+Leaf providers receive only `AttemptContext`; its process/session projections
+are controller-free reads. Owner-bound internal process bodies receive the
+separate `InternalProcessContext`, and authored orchestration receives
+`OrchestrationContext`, so neither durable class is smuggled into a leaf body.
+The controller-decorating sentinel now asserts the post-cutover invariant
+directly: exactly zero controller crossings occur while a leaf attempt body is
+open. A deliberate test-only leak proves the sentinel still trips.
 
-The 20-row attempt-atomicity matrix and its controller-decorating sentinel are
-the standing inventory mechanism. The sentinel records every controller
-crossing while a recorded attempt body is open; its catch-all law fails when a
-new capability crosses without a declared row. Restate endpoint laws separately
-pin the ordinal behavior, including active crash-redrive laws for the formerly
-unguarded await, cancel, and signal routes. The PostgreSQL crash/replay law
-proves the converse: its controller is key-addressed by stable replay key, so
-nested commands remain safe and all guarded capabilities stay available there.
-Runtime-owned tiers are likewise unaffected. Layer 2 reclassifies the shipped
-tool routes without weakening those legacy-capability guards:
+Layer 2 reclassified the shipped tool routes before that deletion:
 `shell.start`/detach declare `StartProcess`, `shell.write` declares
 `SignalProcess`, and `processes.cancel` declares `CancelProcess`; `spawn_agent`
 and protocol-standard `batch` use process-replay orchestration. The five tools
-therefore have one behavior on every tier even while the direct legacy
-`ToolContext` routes remain fenced until the aggregate cutover deletes them.
+therefore have one behavior on every tier without a compatibility guard.
 
 FIG-1291 ships the capability-separated authoring model. A provider opts in with
 `supports_attempt_context` and receives the sealed, controller-free
@@ -151,9 +138,17 @@ hard-kill primitive; engines own their own kill semantics. Temporal's three-way
 Parent Close Policy therefore maps to Lash as `{Abandon, Cancel}`. This is a
 recorded model deviation, not an omitted implementation. If a hard-kill
 primitive earns its way into the process model, reject-and-recreate versioning
-adds the policy only together with that primitive, never ahead of it. The old
-`ToolContext` guards remain only for providers that have not yet moved to the
-FIG-1291 leaf signature.
+adds the policy only together with that primitive, never ahead of it.
+
+Outside a turn, a host binds `LashCore::tool_intents` to an actual session and
+`ExecutionScope`, derives a `ToolIntentIngressKey` from the same
+`(session_id, execution_scope_id, tool_call_id, intent_index)` identity, and
+submits one typed intent through `ToolIntentIngress::submit`. This is the sole
+host front door for durable leaf-style declarations. The identity-derived
+replay key is validated before admission and drives the process effect, so a
+duplicate returns the same typed outcome and a crash after journal admission
+redrives exactly one realization. Foreign session/scope keys and malformed
+transport keys return typed ingress refusals.
 
 For a process parent, "reaches its end" means after its terminal outcome is
 durable. The terminal write atomically retains a compact

@@ -30,6 +30,7 @@ mod support;
 #[cfg(test)]
 mod tests;
 mod tool_catalog;
+mod tool_intent_ingress;
 pub mod turn;
 pub mod usage;
 
@@ -148,6 +149,9 @@ pub mod triggers {
 }
 
 pub mod tools {
+    pub use crate::tool_intent_ingress::{
+        ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
+    };
     /// Typed cancellation evidence constructed by tool implementors; pass it to
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
@@ -162,10 +166,10 @@ pub mod tools {
         ProcessParentEndPolicy, SignalProcessIntent, StartProcessIntent, TimeoutBehavior,
         ToolActivation, ToolArgumentProjectionPolicy, ToolAttemptResult, ToolCall, ToolCallOutput,
         ToolCallRecord, ToolContext, ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailure,
-        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntents, ToolManifest,
-        ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolResult,
-        ToolResultDone, ToolRetryDisposition, ToolValue, facade_support::ToolSourceHandle,
-        facade_support::ToolTriggerClient,
+        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentExecutionOutcome, ToolIntents,
+        ToolManifest, ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+        ToolResult, ToolResultDone, ToolRetryDisposition, ToolValue,
+        facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
     };
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
@@ -506,8 +510,8 @@ pub mod process {
         facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
         facade_support::ProcessWake, facade_support::ProcessWorkDriver,
         facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::SessionScopeId, facade_support::ToolSessionProcessAdmin,
-        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
+        facade_support::SessionScopeId, facade_support::watch_process_registry,
+        facade_support::watch_process_registry_with_sink,
     };
     /// Event semantics a registration declares for its extra event types: which
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is
