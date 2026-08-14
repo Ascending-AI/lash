@@ -321,6 +321,10 @@ mod tests {
         target
             .restore_state(legacy_snapshot)
             .expect("the live surface re-derives the registration lane");
+        assert!(
+            target.is_orchestrating_tool(&tool_id("batch")),
+            "the restored registration is effectively routed through the orchestrating lane"
+        );
 
         let context = crate::facade_support::OrchestrationContext::new(test_tool_context());
         let result = target

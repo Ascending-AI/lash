@@ -38,8 +38,9 @@ enter the lane with an `unsafe` act that violates provenance without that act
 itself causing undefined behavior, and `#![deny(unsafe_code)]` keeps the act
 visible. The registry never recognizes a tool id or plugin id and upgrades its
 provider: a leaf registration remains a leaf for every identifier.
-If the two live lanes contain the same tool id, reconciliation fails with
-`CrossLaneToolIdCollision`. Dispatch matches the stored registration kind and
+The law `leaf_and_orchestrating_tool_id_collision_is_typed` pins the advertised
+case: when both lanes advertise the same id, reconciliation fails with
+`CrossLaneToolIdCollision`. Dispatch matches the bound registration kind and
 resolves through a typed source key whose leaf and orchestrating variants are
 disjoint, so even a leaf plugin id that renders like an internal source cannot
 select or replace the orchestrating route. Dispatch then
@@ -55,11 +56,13 @@ Persisted registration kind is only a routing hint until a live source binds
 the id. On restore and subsequent reconciliation, the live source is
 authoritative and re-derives the lane; an unresolved orphan remains
 non-executable until that source reappears. This is what lets pre-cutover
-snapshots restore even though they carry no lane field. Two live sources that
-resolve the same id from different lanes still fail with
-`CrossLaneToolIdCollision`. If an orchestrating entry is already bound, a later
-never-advertised lazy leaf resolution cannot replace it; full reconciliation
-produces the typed collision when both live sources claim the id.
+snapshots restore even though they carry no lane field. The law
+`snapshot_resolution_rejects_lazy_live_sources_from_both_lanes` pins the other
+typed-collision case: a snapshot-only id lazily resolved by both lanes fails
+with `CrossLaneToolIdCollision`. The law
+`lazy_leaf_resolution_cannot_smuggle_an_orchestrating_registration` pins the
+mixed advertised/lazy case: the advertised lane's source-derived kind binds
+silently and the lazy claim cannot replace it, so dispatch remains fail-closed.
 
 The orchestration-body determinism contract is binding: no wall clock, random
 number generation, or unordered iteration may drive commands; no unjournaled
