@@ -295,7 +295,12 @@ impl Lowerer {
                     None,
                 ));
             }
-            if let Some(function) = self.functions.last_mut() {
+            let first_capturing_function = self
+                .functions
+                .iter()
+                .position(|function| function.id == binding.owner_function)
+                .map_or(0, |owner| owner + 1);
+            for function in &mut self.functions[first_capturing_function..] {
                 function.captures.insert(binding.internal.clone());
             }
         }
