@@ -41,8 +41,8 @@ impl ExecutionHost for Host {
                 Self::perform_resource_operation(operation).map(AbilityResult::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult {
-                    results: batch
+                ResourceOperationBatchResult::settled_in_input_order(
+                    batch
                         .operations
                         .into_iter()
                         .map(|operation| {
@@ -51,7 +51,7 @@ impl ExecutionHost for Host {
                             ))
                         })
                         .collect(),
-                },
+                ),
             )),
             AbilityOp::Await(handle) => match handle {
                 Value::Record(_) => Ok(AbilityResult::Value(Value::Null)),

@@ -299,8 +299,8 @@ impl ExecutionHost for AggregateHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult {
-                    results: batch
+                ResourceOperationBatchResult::settled_in_input_order(
+                    batch
                         .operations
                         .iter()
                         .enumerate()
@@ -308,7 +308,7 @@ impl ExecutionHost for AggregateHost {
                             ResourceOperationResult::Value(Value::Number(index as f64 + 1.0))
                         })
                         .collect(),
-                },
+                ),
             )),
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected aggregate ability")),
@@ -322,8 +322,8 @@ impl ExecutionHost for SettledHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult {
-                    results: batch
+                ResourceOperationBatchResult::settled_in_input_order(
+                    batch
                         .operations
                         .iter()
                         .enumerate()
@@ -335,7 +335,7 @@ impl ExecutionHost for SettledHost {
                             }
                         })
                         .collect(),
-                },
+                ),
             )),
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected settled ability")),
@@ -539,8 +539,8 @@ impl ExecutionHost for ProcessDurabilityHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult {
-                    results: batch
+                ResourceOperationBatchResult::settled_in_input_order(
+                    batch
                         .operations
                         .iter()
                         .map(|operation| {
@@ -555,7 +555,7 @@ impl ExecutionHost for ProcessDurabilityHost {
                             )
                         })
                         .collect(),
-                },
+                ),
             )),
             AbilityOp::WaitSignal { name } => {
                 assert_eq!(name, "ready");

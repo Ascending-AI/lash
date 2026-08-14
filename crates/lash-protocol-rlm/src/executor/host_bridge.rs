@@ -536,12 +536,12 @@ impl HostBridge<'_> {
             results[source_index] = Some(lashlang::ResourceOperationResult::from_result(result));
         }
 
-        lashlang::ResourceOperationBatchResult {
-            results: results
+        lashlang::ResourceOperationBatchResult::settled_in_input_order(
+            results
                 .into_iter()
                 .map(|result| result.expect("every batch result slot should be filled"))
                 .collect(),
-        }
+        )
     }
 
     async fn trigger_operation(

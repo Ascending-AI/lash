@@ -281,28 +281,30 @@ mod tests {
                         Record::from_iter([("ok".to_string(), Value::Bool(true))]),
                     ))))
                 }
-                AbilityOp::ResourceOperationBatch(batch) => Ok(
-                    AbilityResult::ResourceOperationBatch(ResourceOperationBatchResult {
-                        results: batch
-                            .operations
-                            .into_iter()
-                            .map(|operation| {
-                                if operation.operation == "anything" {
-                                    ResourceOperationResult::Value(Value::Record(
-                                        std::sync::Arc::new(Record::from_iter([(
-                                            "ok".to_string(),
-                                            Value::Bool(true),
-                                        )])),
-                                    ))
-                                } else {
-                                    ResourceOperationResult::Error(ExecutionHostError::new(
-                                        "unsupported host ability",
-                                    ))
-                                }
-                            })
-                            .collect(),
-                    }),
-                ),
+                AbilityOp::ResourceOperationBatch(batch) => {
+                    Ok(AbilityResult::ResourceOperationBatch(
+                        ResourceOperationBatchResult::settled_in_input_order(
+                            batch
+                                .operations
+                                .into_iter()
+                                .map(|operation| {
+                                    if operation.operation == "anything" {
+                                        ResourceOperationResult::Value(Value::Record(
+                                            std::sync::Arc::new(Record::from_iter([(
+                                                "ok".to_string(),
+                                                Value::Bool(true),
+                                            )])),
+                                        ))
+                                    } else {
+                                        ResourceOperationResult::Error(ExecutionHostError::new(
+                                            "unsupported host ability",
+                                        ))
+                                    }
+                                })
+                                .collect(),
+                        ),
+                    ))
+                }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
                     Ok(AbilityResult::Value(value))
                 }
