@@ -237,6 +237,7 @@ fn exclusive_draft(session_id: &str, text: &str) -> QueuedWorkBatchDraft {
     let process_id = format!("process:{text}");
     let sequence = 1;
     let wake = ProcessWakeDelivery {
+        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{text}"),
         target_session_id: session_id.to_string(),
         process_id: process_id.clone(),

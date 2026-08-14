@@ -27,6 +27,7 @@ use sha2::{Digest, Sha256};
 use crate::plugin::PluginError;
 use crate::store::session_execution_lease::LeaseOwnerIdentity;
 
+use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWakeDelivery};
 #[cfg(test)]
 use super::model::ProcessStatus;
 use super::model::{PROCESS_LEASE_SCHEMA_VERSION, ProcessLease};
@@ -39,6 +40,26 @@ use super::registry::{WakeDelivery, WakeDeliveryState, WakeDiscardReason};
 /// substrate stored it.
 fn registry_row_decode_error(err: serde_json::Error) -> PluginError {
     PluginError::Session(format!("failed to decode process registry row: {err}"))
+}
+
+#[derive(serde::Deserialize)]
+struct ProcessWakeDeliveryFormatVersionProbe {
+    version: Option<u32>,
+}
+
+fn decode_process_wake_delivery(delivery_json: &str) -> Result<ProcessWakeDelivery, PluginError> {
+    let probe: ProcessWakeDeliveryFormatVersionProbe =
+        serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
+    let found = probe
+        .version
+        .unwrap_or(PROCESS_WAKE_DELIVERY_FORMAT_VERSION);
+    if found != PROCESS_WAKE_DELIVERY_FORMAT_VERSION {
+        return Err(PluginError::ProcessWakeDeliveryFormatVersionMismatch {
+            expected: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            found,
+        });
+    }
+    serde_json::from_str(delivery_json).map_err(registry_row_decode_error)
 }
 
 // ---------------------------------------------------------------------------
@@ -462,9 +483,10 @@ impl WakeDeliveryRow {
             &self.delivery_id,
             self.discard_reason_label.as_deref(),
         )?;
+        let wake = decode_process_wake_delivery(&self.delivery_json)?;
         Ok(WakeDelivery {
             delivery_id: self.delivery_id,
-            wake: serde_json::from_str(&self.delivery_json).map_err(registry_row_decode_error)?,
+            wake,
             state,
             claim_token: self.claim_token,
             attempts: self.attempts as u64,
@@ -1076,6 +1098,7 @@ mod tests {
 
     fn wake_delivery_json() -> String {
         let wake = super::super::events::ProcessWakeDelivery {
+            version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: format!("wake:v1:sha256:{}", "a".repeat(64)),
             target_session_id: "session".to_string(),
             process_id: "process".to_string(),
@@ -1124,6 +1147,72 @@ mod tests {
         assert_eq!(delivery.discard_reason, None);
         assert_eq!(delivery.wake.sequence, 4);
         assert_eq!(delivery.wake.target_session_id, "session");
+    }
+
+    #[test]
+    fn a_version_absent_wake_delivery_projects_as_v1() {
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
+        payload
+            .as_object_mut()
+            .expect("wake delivery object")
+            .remove("version");
+        let delivery = WakeDeliveryRow {
+            delivery_json: serde_json::to_string(&payload).expect("wake delivery JSON"),
+            ..wake_row()
+        }
+        .project()
+        .expect("a pre-version wake delivery row projects as v1");
+
+        assert_eq!(
+            delivery.wake.version, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            "version-absent rows retain the current v1 meaning"
+        );
+    }
+
+    #[test]
+    fn a_future_wake_delivery_version_is_refused_with_expected_and_found() {
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
+        payload["version"] = serde_json::json!(2);
+        let error = WakeDeliveryRow {
+            delivery_json: serde_json::to_string(&payload).expect("future wake delivery JSON"),
+            ..wake_row()
+        }
+        .project()
+        .expect_err("a future wake-delivery format must be refused");
+
+        assert!(
+            matches!(
+                &error,
+                PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
+                    if *expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && *found == 2
+            ),
+            "unexpected refusal: {error}"
+        );
+    }
+
+    #[test]
+    fn a_wake_delivery_missing_event_type_is_refused() {
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
+        payload
+            .as_object_mut()
+            .expect("wake delivery object")
+            .remove("event_type");
+        let error = WakeDeliveryRow {
+            delivery_json: serde_json::to_string(&payload).expect("wake delivery JSON"),
+            ..wake_row()
+        }
+        .project()
+        .expect_err("a wake delivery without event_type must be refused");
+
+        assert!(
+            matches!(&error, PluginError::Session(message)
+                if message.starts_with("failed to decode process registry row: ")
+                    && message.contains("missing field `event_type`")),
+            "unexpected refusal: {error}"
+        );
     }
 
     #[test]

@@ -590,6 +590,7 @@ mod tests {
             .lock_recover()
             .insert((session_id.to_string(), process_id.to_string()), 7);
         let wake = crate::ProcessWakeDelivery {
+            version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: "rewound-commit-wake".to_string(),
             target_session_id: session_id.to_string(),
             process_id: process_id.to_string(),

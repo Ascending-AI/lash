@@ -19768,6 +19768,33 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
+symbol = "lash::plugins::PluginError::ProcessWakeDeliveryFormatVersionMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessWakeDeliveryFormatVersionMismatch"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable process registries and hosts diagnose persisted wake deliveries written by an incompatible format version."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ProcessWakeDeliveryFormatVersionMismatch::expected"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessWakeDeliveryFormatVersionMismatch::expected"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable process registries and hosts inspect the expected wake-delivery format version when diagnosing drift."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ProcessWakeDeliveryFormatVersionMismatch::found"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessWakeDeliveryFormatVersionMismatch::found"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable process registries and hosts inspect the found wake-delivery format version when diagnosing drift."
+
+[[api]]
 symbol = "lash::plugins::PluginError::Registration"
 kind = "variant"
 availability = "default+all-features"
@@ -27316,6 +27343,15 @@ aliases = ["lash_core::ProcessWakeDelivery::target_session_id"]
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash::process::ProcessWakeDelivery::version"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWakeDelivery::version"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates refuse wake-delivery payloads written by an incompatible format version."
 
 [[api]]
 symbol = "lash::process::ProcessWakeDelivery::wake_id"
@@ -64843,6 +64879,14 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::PreparedTurnMachine. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
+kind = "constant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable process registries and alternative wake-delivery substrates use the published payload format version when writing persisted deliveries."
 
 [[api]]
 symbol = "lash_core::ProcessChange"

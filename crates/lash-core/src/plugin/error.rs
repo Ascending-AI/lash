@@ -110,6 +110,10 @@ pub enum PluginError {
     ReservedProcessEvent { event_type: String },
     #[error("process wake delivery carries an invalid wake identity `{wake_id}`")]
     InvalidProcessWakeIdentity { wake_id: String },
+    #[error(
+        "process wake delivery format version {found} is incompatible with version {expected}; drain in-flight sessions on the old build before deploying this build, or recreate development/test stores"
+    )]
+    ProcessWakeDeliveryFormatVersionMismatch { expected: u32, found: u32 },
     /// A worklist continuation was passed to a registry backend other than the
     /// backend that issued it.
     #[error("process worklist cursor belongs to backend `{actual}`, not `{expected}`")]
