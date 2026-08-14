@@ -117,14 +117,6 @@ pub(crate) async fn complete(
         provider.base_url.trim_end_matches('/'),
         endpoint.path()
     );
-    if let Some(tx) = &stream_events {
-        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-            request_body: Some(request_body_for_error.clone()),
-            http_summary: Some(endpoint.http_summary(&url, stream)),
-            generation_disposition,
-            ..Default::default()
-        }));
-    }
     let mut headers = vec![
         (
             "Authorization".to_string(),
@@ -179,14 +171,17 @@ pub(crate) async fn complete(
     }
 
     let provider_request_id = first_header_value(&resp.headers, "x-request-id").map(str::to_string);
-    if let Some(tx) = &stream_events
-        && let Some(provider_request_id) = provider_request_id.clone()
-    {
+    if let Some(tx) = &stream_events {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-            execution_evidence: Some(ExecutionEvidence {
-                provider_request_id: Some(provider_request_id),
-                ..Default::default()
+            request_body: Some(request_body_for_error.clone()),
+            http_summary: Some(endpoint.http_summary(&url, stream)),
+            execution_evidence: provider_request_id.clone().map(|provider_request_id| {
+                ExecutionEvidence {
+                    provider_request_id: Some(provider_request_id),
+                    ..Default::default()
+                }
             }),
+            generation_disposition,
             ..Default::default()
         }));
     }

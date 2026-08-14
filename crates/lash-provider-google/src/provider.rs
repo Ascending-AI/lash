@@ -61,14 +61,6 @@ impl GoogleOAuthProvider {
         if stream_events.is_some() {
             url.push_str("?alt=sse");
         }
-        if let Some(tx) = &stream_events {
-            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                request_body: request_body.clone(),
-                http_summary: Some(format!("HTTP POST {url} (stream)")),
-                generation_disposition,
-                ..Default::default()
-            }));
-        }
         let http_request = LlmHttpRequest::post(url.clone(), request_body_bytes)
             .with_header("Authorization", format!("Bearer {access_token}"))
             .with_header("Content-Type", "application/json")
@@ -105,6 +97,14 @@ impl GoogleOAuthProvider {
                 body,
                 request_body,
             ));
+        }
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                request_body: request_body.clone(),
+                http_summary: Some(format!("HTTP POST {url} (stream)")),
+                generation_disposition,
+                ..Default::default()
+            }));
         }
 
         let mut response_metadata =

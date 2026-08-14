@@ -64,18 +64,6 @@ impl Provider for AnthropicProvider {
             &request_body_bytes,
         );
         let request_body = Some(String::from_utf8_lossy(&request_body_bytes).into_owned());
-        if let Some(tx) = &stream_events {
-            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                request_body: request_body.clone(),
-                http_summary: Some(format!(
-                    "HTTP POST {}/v1/messages (stream)",
-                    base_url.trim_end_matches('/')
-                )),
-                generation_disposition,
-                ..Default::default()
-            }));
-        }
-
         // `fine-grained-tool-streaming-2025-05-14` streams partial JSON so we
         // can surface tool arguments incrementally. Interleaved thinking is
         // built-in on adaptive thinking; the beta is only needed for the
@@ -127,6 +115,17 @@ impl Provider for AnthropicProvider {
                 text,
                 request_body.clone(),
             ));
+        }
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                request_body: request_body.clone(),
+                http_summary: Some(format!(
+                    "HTTP POST {}/v1/messages (stream)",
+                    base_url.trim_end_matches('/')
+                )),
+                generation_disposition,
+                ..Default::default()
+            }));
         }
 
         let mut response_metadata =

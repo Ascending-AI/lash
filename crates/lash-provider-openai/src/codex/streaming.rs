@@ -665,15 +665,6 @@ impl Provider for CodexProvider {
             LlmTransportError::new(format!("Failed to serialize Codex request: {e}"))
         })?;
         emit_provider_request_trace(provider_trace.as_ref(), "codex", "responses", &body_bytes);
-        if let Some(tx) = &stream_events {
-            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                request_body: request_body.clone(),
-                http_summary: Some(format!("HTTP POST {} (stream)", self.responses_url)),
-                generation_disposition,
-                ..Default::default()
-            }));
-        }
-
         let access_token = credential.access_token.clone();
         let account_id = credential.account_id.clone();
         let mut headers = vec![
@@ -752,6 +743,14 @@ impl Provider for CodexProvider {
                 text,
                 request_body.clone(),
             ));
+        }
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                request_body: request_body.clone(),
+                http_summary: Some(format!("HTTP POST {} (stream)", self.responses_url)),
+                generation_disposition,
+                ..Default::default()
+            }));
         }
         let mut response_metadata =
             ResponseMetadataCapture::from_response(&self.options, &response_headers);
