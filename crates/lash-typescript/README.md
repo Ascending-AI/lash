@@ -53,6 +53,22 @@ language semantics:
 - A TypeScript cell is capped at **64 KiB** of source and rejects with
   `TS_SOURCE_TOO_LARGE`. The bound is what makes the parse-stack reservation
   finite, and 64 KiB is roughly 1 600 lines — far more than a cell should be.
+  Two consequences of the reservation belong with it. Parsing a cell at the cap
+  costs about **30 ms**, nearly all of it mapping and unmapping the reservation
+  rather than parsing; a small cell costs well under a millisecond, and the cost
+  scales with source size. And the host must be able to hand out **more than
+  2 GiB of address space** for a cap-sized cell (at most 4 GiB): under a tighter
+  `RLIMIT_AS`, or `vm.overcommit_memory=2`, a large cell fails closed with
+  `TS_PARSE_RESOURCES_UNAVAILABLE` — a resource diagnostic, deliberately distinct
+  from any diagnostic that describes the program — while small cells keep working.
+- Allocation during parsing is not bounded. Stack exhaustion is arithmetically
+  unreachable (see below), but a source the nesting preflight fails to reject
+  could allocate without limit: SWC's duplicate-label check is quadratic in
+  memory, and 64 KiB of one repeated label peaks near 37 GB when the preflight is
+  disabled. No shape reaches that on the shipping path — the preflight rejects
+  them all before the parse, and the worst measured peak across 164 adversarial
+  shapes is 17 MB — so this is a bound the preflight carries rather than one the
+  arithmetic provides.
 - TypeScript source nesting is capped at **28 budget units** and rejects with
   `TS_SOURCE_NESTING_LIMIT`. The cap is pinned on a 2 MiB stack; it protects both
   SWC parsing and adapter conversion, and it binds before the shared AST's own
@@ -146,18 +162,30 @@ five review rounds showed that a hand-written pre-parse scan cannot be relied on
 to agree with SWC about every shape — each round's guard was right about the axis
 it modelled and the next abort sat just outside it.
 
-So the guarantee is arithmetic. A nesting level costs at least two source bytes,
-the worst frame cost measured across every shape that ever aborted is 19 552
-bytes per level, and the parse runs on a thread reserving 8 MiB plus 40 000 bytes
-per source byte — over four times the worst case, on a source that cannot exceed
-64 KiB. The reservation is address space, not memory: pages commit when touched,
-and an ordinary cell touches a few hundred kilobytes. `tests/no_abort_guarantee.rs`
-demonstrates it by disabling the nesting preflight entirely and running every
-shape that aborted in any round through what remains.
+So the stack bound is arithmetic. A nesting level can cost as little as one
+source byte — an unclosed `(` recurses one level per byte, and is also the most
+expensive shape per level — and the measured requirement for that shape is about
+22 500 bytes of stack per source byte. The parse runs on a thread reserving 8 MiB
+plus 40 000 bytes per source byte, roughly 1.8x the worst measurement, on a
+source that cannot exceed 64 KiB. The reservation is address space, not memory:
+pages commit when touched, the worst shape at the bound touches 1.2 GB of the
+2.5 GB reserved, and an ordinary cell touches a few hundred kilobytes.
+`tests/no_abort_guarantee.rs` keeps the margin honest by disabling the nesting
+preflight entirely and running every shape that aborted in any round — including
+the unclosed-delimiter worst cases at the bound — through what remains.
 
-The preflight stays for the diagnostic: `TS_SOURCE_NESTING_LIMIT` with
-source-level wording beats a parser-depth error, and rejecting before the parse
-keeps a pathological cell cheap.
+The preflight stays for the diagnostic and for cost: `TS_SOURCE_NESTING_LIMIT`
+with source-level wording beats a parser-depth error, and rejecting before the
+parse keeps a pathological cell at 17 MB instead of 1.2 GB.
+
+**The arithmetic covers stack, not memory.** Nothing bounds what the parser may
+allocate, and with the preflight disabled a 64 KiB cell of one repeated label
+peaks around 37 GB, because SWC's duplicate-label check is quadratic in memory.
+On the shipping path the preflight rejects those shapes before the parse and the
+worst peak across 164 adversarial shapes is 17 MB, so there is no reachable
+vector — but memory is carried by the preflight being right, where stack is not.
+Parsing in a subprocess, which would bring both axes under one limit, is the
+change that would close it.
 
 The budget depends on a second property besides charging the right productions:
 the preflight's lexer has to agree with SWC's about where each token ends, since

@@ -10,12 +10,28 @@
 //! implementation of SWC's lexer, and any disagreement between the two silently
 //! disarms a charge.
 //!
-//! So the guarantee no longer rests on that agreement. The source is bounded,
+//! So the **stack** no longer rests on that agreement. The source is bounded,
 //! and the parse runs on a thread whose stack is reserved in proportion to the
-//! source, with enough margin that the parser cannot reach the end of it. The
-//! preflight remains — a source-level `TS_SOURCE_NESTING_LIMIT` is a far better
-//! diagnostic than a parser-depth error — but it is no longer what stands
-//! between an LLM-authored cell and a dead process.
+//! source, with margin over the worst frame cost ever measured. The preflight
+//! remains — a source-level `TS_SOURCE_NESTING_LIMIT` is a far better diagnostic
+//! than a parser-depth error, and rejecting before the parse keeps a
+//! pathological cell cheap — but it is no longer what stands between an
+//! LLM-authored cell and a stack overflow.
+//!
+//! **Memory is a different story, and the preflight still carries it.** These
+//! tests assert that nothing aborts, and nothing does; they do not bound
+//! allocation, and with the preflight disabled a 64 KiB cell can commit tens of
+//! gigabytes. SWC's duplicate-label check is quadratic in memory, so a cell of
+//! one repeated label — `a:` to the bound — peaks at about 37 GB, which is why
+//! the duplicate-label shapes below are filled to 8 KiB instead: that is a
+//! workaround in the corpus, not a bound in the product. On the shipping path
+//! there is no reachable vector, because the preflight rejects every such shape
+//! at 28 units before the parse begins and the worst peak across 164
+//! adversarial shapes is 17 MB. But the honest statement of the guarantee is:
+//! **stack is bounded arithmetically, memory is bounded by the preflight being
+//! right.** Bounding allocation — the natural closure is parsing in a
+//! subprocess, where both axes come under one limit — is the work that would
+//! retire the second half.
 //!
 //! These tests demonstrate exactly that by **disabling the preflight** and
 //! running every shape that aborted in any round, plus the fuzzer's corpus,
@@ -129,6 +145,31 @@ fn abort_corpus() -> Vec<(String, String)> {
     corpus.push((
         "round5-escape-label".into(),
         fill_to(duplicate_label_limit, "", "a\\u00e9:", "1;", ""),
+    ));
+    // The true worst case for the reservation, and the shape the round-7
+    // verification used to falsify the original derivation: an *unclosed*
+    // delimiter recurses one level per source byte, and is simultaneously the
+    // most expensive shape per level. These fill the bound exactly, so the
+    // reservation's real margin is measured here rather than asserted in a
+    // comment.
+    corpus.push(("worst-open-paren".into(), "(".repeat(cap - 1)));
+    corpus.push(("worst-open-bracket".into(), "[".repeat(cap - 1)));
+    corpus.push(("worst-open-brace".into(), "{".repeat(cap - 1)));
+    corpus.push((
+        "worst-open-generic".into(),
+        format!("const x: {}", "A<".repeat(cap / 2 - 8)),
+    ));
+    corpus.push((
+        "worst-open-template".into(),
+        format!("`{}", "${`".repeat(cap / 3 - 4)),
+    ));
+    corpus.push((
+        "worst-open-paren-type".into(),
+        format!("const x: {}", "(".repeat(cap - 12)),
+    ));
+    corpus.push((
+        "worst-open-paren-unicode-tail".into(),
+        format!("{}\u{e9}", "(".repeat(cap - 4)),
     ));
     // Round 6: contextual keywords in label position.
     corpus.push((
@@ -338,4 +379,51 @@ fn fuzz_source(seed: u64, tokens: usize) -> String {
         source.push_str(&chosen[prng.below(chosen.len())]);
     }
     source
+}
+
+/// When the host cannot give the parser its reservation, that is a resource
+/// failure and must be reported as one.
+///
+/// The reservation for a cap-sized cell exceeds 2 GiB of address space, so a
+/// host with a tighter `RLIMIT_AS` cannot parse a large cell at all. Failing
+/// closed is right; failing closed as though the *program* were malformed is
+/// not, because it sends whoever reads the diagnostic to debug the cell instead
+/// of the limit.
+#[test]
+fn an_unavailable_reservation_is_a_resource_diagnostic() {
+    const CHILD_ENV: &str = "LASH_TS_RLIMIT_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        // A source small enough to need only the base reservation still parses
+        // under the limit; only the large one cannot be given its stack.
+        lash_typescript::validate("finish(1);").expect("a small cell parses under the limit");
+        let large = format!(
+            "const x = '{}';finish(x);",
+            "a".repeat(lash_typescript::MAX_SOURCE_BYTES - 32)
+        );
+        let error = lash_typescript::validate(&large)
+            .expect_err("the reservation cannot be met under this limit");
+        assert_eq!(
+            error.code.as_str(),
+            "TS_PARSE_RESOURCES_UNAVAILABLE",
+            "a host resource failure must not be reported as a program defect: {error}"
+        );
+        return;
+    }
+
+    let executable = std::env::current_exe().expect("test executable");
+    let command = format!(
+        "ulimit -v 2097152 && exec {} an_unavailable_reservation_is_a_resource_diagnostic --exact --nocapture",
+        executable.display()
+    );
+    let output = std::process::Command::new("bash")
+        .args(["-c", &command])
+        .env(CHILD_ENV, "1")
+        .output()
+        .expect("the limited child starts");
+    assert!(
+        output.status.success(),
+        "the address-space-limited child failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

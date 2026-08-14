@@ -198,22 +198,48 @@ const PARSE_STACK_BASE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Parser stack reserved per source byte.
 ///
-/// A nesting level costs at least two source bytes — a delimiter needs an
-/// opener and a closer, a label needs a name byte and its `:` — so a source of
-/// `n` bytes cannot nest deeper than `n / 2` levels. The worst measured frame
-/// cost across the whole six-round abort corpus is 19 552 bytes per level, on
-/// parenthesis nesting in a debug build (release: 2 812; label chains, the
-/// densest in *source* terms, cost 10 845). Stack usage is linear in depth:
-/// measured at depths 1 000, 2 000, 4 000 and 8 000, the per-level cost varies
-/// by under half a percent.
+/// The honest worst case is **one source byte per nesting level**. An earlier
+/// derivation claimed two — an opener and a closer — and that is false: `(`
+/// repeated with no closers is a complete recursive-descent recursion of depth
+/// `n` from `n` bytes, and SWC only discovers the problem at end of input. Worse,
+/// that same shape is the most expensive *per level*, so the densest source and
+/// the deepest frames coincide rather than trading off.
 ///
-/// So the requirement is at most `19 552 / 2 = 9 776` bytes per source byte,
-/// and reserving 40 000 leaves a 4.09x margin over the worst debug shape and
-/// 28x over the worst release shape. With [`MAX_SOURCE_BYTES`] at 64 KiB the
-/// largest reservation is 8 MiB + 2.44 GiB, which is address space rather than
-/// memory: pages commit only when touched, and an ordinary cell touches a few
-/// hundred kilobytes. Overflow is arithmetically out of reach rather than
-/// guarded against, which is the point — see `nesting.rs` for why that matters.
+/// Measured by binary search, each attempt in its own process, on the unclosed
+/// forms:
+///
+/// | shape | bytes per level | bytes per source byte |
+/// | --- | ---: | ---: |
+/// | `(` unclosed | ~19 900 | **~19 900** |
+/// | `A<` unclosed | ~19 100 | ~9 300 |
+/// | `{` unclosed | ~12 000 | ~12 000 |
+/// | `[` unclosed | ~11 300 | ~11 300 |
+/// | `a:` labels | ~11 300 | ~5 600 |
+/// | `(`…`)` closed | ~20 700 | ~10 400 |
+///
+/// The round-7 verification measured the same shape at up to **22 540** bytes
+/// per source byte, which is the figure this constant is set against. Usage is
+/// linear in depth — at depths 1 000, 2 000, 4 000 and 8 000 the per-level cost
+/// varies by under half a percent — which is what makes extrapolating to the
+/// bound sound.
+///
+/// So reserving 40 000 bytes per source byte leaves a margin of roughly
+/// **1.8x** (40 000 / 22 540), not the 4x an earlier comment claimed. An
+/// independent check agrees: the worst shape at the bound touches 1 228 MB of
+/// the 2 508 MB reserved, a **2.04x** margin by peak RSS.
+///
+/// Two reasons that margin is accepted rather than widened. Raising the constant
+/// to restore 4x would reserve 5.9 GiB for a cap-sized cell, which makes the
+/// address-space requirement in the deviation register worse — the reservation
+/// already fails closed on a host with `RLIMIT_AS` under 2 GiB. And the margin
+/// is *guarded*, not asserted: `tests/no_abort_guarantee.rs` runs these worst
+/// shapes filled to the bound with the nesting preflight disabled, so a future
+/// SWC whose frames outgrew the reservation would abort there and fail CI rather
+/// than in production.
+///
+/// With [`MAX_SOURCE_BYTES`] at 64 KiB the largest reservation is 8 MiB +
+/// 2.44 GiB. That is address space rather than memory: pages commit only when
+/// touched, and an ordinary cell touches a few hundred kilobytes.
 const PARSE_STACK_BYTES_PER_SOURCE_BYTE: usize = 40_000;
 
 /// The stack a source of this size is parsed on.
@@ -267,9 +293,17 @@ fn parse_on_proportional_stack(source: &str) -> Result<Program, Diagnostic> {
             .stack_size(stack_size)
             .spawn_scoped(scope, || parse_source(source))
             .map_err(|error| {
+                // The host could not give us the reservation. That is a
+                // resource failure, not a defect in the program, and it must not
+                // be reported as one: an operator reading `TS_INVALID_SHARED_AST`
+                // would go and debug the cell instead of the address-space
+                // limit. See MAX_SOURCE_BYTES for what the requirement is.
                 Diagnostic::new(
-                    DiagnosticCode::InvalidAst,
-                    format!("the TypeScript parse thread could not be started: {error}"),
+                    DiagnosticCode::ParseResourcesUnavailable,
+                    format!(
+                        "the TypeScript parser could not reserve {stack_size} bytes of stack for a                          {}-byte source: {error}",
+                        source.len()
+                    ),
                     None,
                 )
             })?;
