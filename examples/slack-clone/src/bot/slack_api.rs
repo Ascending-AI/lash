@@ -301,6 +301,8 @@ pub struct ChatPostMessageRequest {
     pub channel: String,
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_ts: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_broadcast: Option<bool>,
@@ -314,6 +316,7 @@ impl ChatPostMessageRequest {
         Self {
             channel: channel.into(),
             text: text.into(),
+            username: None,
             thread_ts: None,
             reply_broadcast: None,
             metadata: Some(MessageMetadata {
@@ -334,6 +337,7 @@ impl ChatPostMessageRequest {
         Self {
             channel: channel.into(),
             text: text.into(),
+            username: None,
             thread_ts: Some(thread_ts.into()),
             reply_broadcast: None,
             metadata: Some(MessageMetadata {

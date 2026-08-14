@@ -19,6 +19,9 @@ workspace = true
 # still requires the explicit SLACK_CLONE_E2E_PROVIDER=scripted-v1 selector at
 # runtime, so an ordinary dev/manual launch always uses OpenRouter.
 e2e = ["lash/testing"]
+# Keeps the reference bot standard-only while allowing the manual live-model
+# acceptance binary to exercise the RLM protocol in the same package.
+live-e2e = ["lash/rlm"]
 
 # Two binaries, one crate. The split is the point of the example: the platform
 # binary is a plain product with no Lash dependency, and the bot binary is the
@@ -34,6 +37,11 @@ path = "src/bin/bot.rs"
 [[bin]]
 name = "slack-clone-mcp-server"
 path = "src/bin/mcp_server.rs"
+
+[[bin]]
+name = "slack-clone-live-e2e"
+path = "src/bin/live_e2e.rs"
+required-features = ["live-e2e"]
 
 # Standard-mode host: no `rlm` feature, no `lash-protocol-rlm`, no Lashlang
 # artifact store. `LashCore::standard_builder(TurnBudget::Unbounded)` pre-seeds the standard protocol
@@ -60,6 +68,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash = { workspace = true, features = ["testing"] }
