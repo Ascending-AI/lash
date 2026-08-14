@@ -18,6 +18,8 @@ use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatiblePr
 mod board;
 mod db;
 mod demo_plugin;
+#[cfg(test)]
+mod fork_rewind_contract;
 mod lease_triage;
 mod raw_activities;
 #[cfg(feature = "restate")]

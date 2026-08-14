@@ -127,9 +127,16 @@ Save the API/store extracts and the fully scrolled branch UI as
 
 ## Phase 5 — Prove sibling independence
 
-On the fork, click a legal cell that produces a board different from the advanced source.
-Poll until settled and save the fork messages/board. Switch to the source chat in the
-browser and require its rendered transcript and board to match the unchanged source APIs.
+Derive the source's Phase-3 human move by comparing `02-pinned-board.json` with
+`03-advanced-source-state.json`: require exactly one newly occupied `X` cell and record its
+index. On the fork, choose a legal empty cell at a **different** index and require that click
+to place `X` there before the agent turn settles. This is the divergence witness: the model
+may add only `O`, so it cannot erase either sibling's distinct `X` position or make the two
+boards equal. Abort if no such legal cell exists; do not let the model choose the witness.
+
+Poll until settled and require both distinct `X` positions still to differ between the
+fork and advanced source, then save the fork messages/board. Switch to the source chat in
+the browser and require its rendered transcript and board to match the unchanged source APIs.
 Switch back to the fork and require its own rendered state to match its APIs.
 
 Query the durable graph and require two distinct live heads whose ancestry converges at
@@ -142,7 +149,36 @@ settings endpoint. Reload the browser. Visit each sibling and require its render
 transcript and board to match the Phase 5 API artifacts exactly. Save
 `06-reconstructed-source.png` and `06-reconstructed-fork.png`.
 
-## Phase 7 — Teardown and score
+## Phase 7 — Assert the host-facing fork/rewind contract
+
+The browser deliberately cannot manufacture an already-existing target id or delete a live
+source behind the app's projection. Cover those host-only outcomes with the deterministic
+embedding acceptance in this same example package:
+
+```bash
+cargo test -p agent-service \
+  host_can_rewind_from_a_retained_anchor_after_deleting_its_source \
+  --all-targets
+```
+
+Save the command's complete output as `07-host-fork-rewind-contract.txt` and require exit 0
+plus the named test result `ok`. That test must continue to establish all three rows below:
+
+1. an unrelated, already-existing root session used as a fork target returns the typed
+   `ForkSessionAlreadyExists` fence before any later fork validation can alter it;
+2. the source returns a typed deletion report and its explicit pin remains enumerable and
+   re-forkable afterward; do **not** require terminal process rows to survive deletion — a
+   registry-backed host prunes terminal work on session delete; this focused example keeps
+   one live external process, requires the source observer edge to be removed, and proves an
+   inherited branch observer remains; and
+3. every enumerated point and fork result continues to report the original retained-anchor
+   `source_session_id`, including after source deletion, rather than the unrelated target or
+   the most recent branch id.
+
+These are deterministic CI outcomes, not permission to edit the browser run's SQLite files
+or substitute internal store calls for the rendered/API gates in Phases 0–6.
+
+## Phase 8 — Teardown and score
 
 Stop the service and confirm the port is closed.
 
@@ -153,13 +189,17 @@ Stop the service and confirm the port is closed.
 | Retained turn | UI status, branch-point API, app snapshot, and one anchor row agree | | `02-pinned-*` |
 | Source advance | source changes while the retained point stays fixed | | `03-advanced-source*` |
 | Zero-copy fork story | new id restores the pinned app projection and shares the durable prefix | | `04-fork-restored.*` |
-| Sibling independence | each UI agrees with its API; two live heads converge only in shared ancestry | | `05-*` |
+| Sibling independence | distinct driver-chosen `X` positions make divergence deterministic; each UI agrees with its API and both heads converge only in shared ancestry | | `05-*` |
 | Cold durability | both divergent chats reconstruct after process replacement | | `06-*` |
+| Foreign-lineage fence precedence | an unrelated existing target returns typed `ForkSessionAlreadyExists` | | `07-host-fork-rewind-contract.txt` |
+| Deleted-source re-fork | typed source deletion leaves its explicit anchor enumerable and re-forkable without expecting pruned terminal work to remain | | `07-host-fork-rewind-contract.txt` |
+| Retained-anchor provenance | pin enumeration, first fork, and deleted-source re-fork all report the original source id | | `07-host-fork-rewind-contract.txt` |
 
 **Aggregate:** did the raw endpoint prove canonical activity framing, and did the browser
 make pin → advance → fork → independent continuation understandable while the API and
 durable stores proved that the new chat shares history without moving or corrupting the
-source?
+source, and did the deterministic embedding acceptance preserve typed fence, deletion,
+re-fork, and provenance outcomes that the browser cannot safely manufacture?
 
 ---
 
