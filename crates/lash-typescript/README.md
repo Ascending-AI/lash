@@ -38,6 +38,9 @@ their optional second parameter (`'abc'.startsWith('bc', 1)`,
 `'abc'.includes('b', 2)`, `'abc'.endsWith('b', 2)`, `'abc'.split('', 2)`)
 rejects. Identifiers beginning with `__typescript_` are reserved for the
 lowerer's generated bindings and reject with `TS_RESERVED_IDENTIFIER`.
+Mutually recursive function declarations reject with
+`TS_MUTUAL_RECURSION_UNSUPPORTED`; a function *expression* may still be named
+and call itself by that name, and self-recursive declarations are unaffected.
 
 ## Deviation register
 
@@ -47,16 +50,21 @@ language semantics:
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
-- TypeScript source nesting is capped at 28 levels and rejects with
+- TypeScript source nesting is capped at **28 budget units** and rejects with
   `TS_SOURCE_NESTING_LIMIT`. The cap is pinned on a 2 MiB stack; it protects both
-  SWC parsing and adapter conversion before the shared AST's own limit. The
-  budget is cumulative and shared: every open delimiter (`(`, `[`, `{`, and a
-  template hole) and every nested recursive operator or statement form — prefix
-  operators, `?:` and binary chains, `if`/`while` — draws on the same 28 units,
-  in the preflight scan and in the adapter's conversion counter alike. A
-  statement boundary (`;`, `,`, or the `}` that closes a statement block)
-  releases the operator run it terminates, so a long flat sequence of statements
-  stays one level deep.
+  SWC parsing and adapter conversion, and it binds before the shared AST's own
+  nesting limit for every shape the grammar accepts. See
+  [Source nesting budget](#source-nesting-budget) for what a unit costs.
+- Mutually recursive function declarations reject with
+  `TS_MUTUAL_RECURSION_UNSUPPORTED`, naming the cycle
+  (`cycle: isEven -> isOdd -> isEven`). v1 captures by value, so a declaration
+  cycle has no emission order; routing it through a shared mutable record would
+  build a heap cycle reachable from a durable root, which is exactly what the
+  deferred cycle-capable durable graph encoding below cannot hold — the program
+  would run and then fail to suspend or snapshot. Failing closed at compile time
+  is the honest form of that same deferral. Self-recursion, named self-recursive
+  function expressions, nested declarations, and acyclic declaration chains are
+  all unaffected.
 - Cyclic heap objects are rejected at durable capture. Shared acyclic object
   identity is preserved byte-for-byte. Cycle-capable durable graph encoding is
   deferred; the front-end does not silently copy a cycle.
@@ -87,6 +95,38 @@ language semantics:
 
 No other semantic deviation is intentionally accepted for an operation in the
 surface above.
+
+## Source nesting budget
+
+The 28 is a budget in units, not a count of visible levels: it is cumulative
+across delimiters *and* operators, so an apparent level often costs two units.
+Every open delimiter costs one unit until it closes; every nested recursive
+operator or statement form costs one unit until its statement ends. A statement
+boundary — `;`, `,`, the `}` that closes a statement block, or a newline in
+automatic-semicolon-insertion position — releases the operator run it
+terminates, so a flat sequence of statements stays one level deep however long
+it runs, punctuated or not. A newline releases nothing while a statement form is
+still open (`if (1)` on its own line) or when the next token continues the
+expression (a leading `.` or `+`), because neither is a statement end.
+
+Measured ceilings inside a single `const x = …;` statement, which itself spends
+one unit on the `=`:
+
+| Form | Cost per level | Max nesting |
+| --- | ---: | ---: |
+| grouping `(…)`, array `[…]`, object `{a: …}`, call `f(…)` | 1 | 26 |
+| prefix operator (`!`, `typeof`, unary `-`) | 1 | 26 |
+| member step `.a`, ternary `?:`, template hole `${…}` | 1 | 26 |
+| binary chain term (`1 + 1 + …`) | 1 | 27 |
+| statement block `{ … }` | 1 | 27 |
+| `if (…) { … }` / `while (…) { … }` block | 2 (keyword + brace) | 13 |
+| `else if` branch | 1 | 25 |
+| flat statement sequence | 0 | unbounded |
+
+A template hole costs a unit for the same reason a `+` term does: a template
+lowers into a left-nested concatenation chain, so its holes deepen the tree
+after they close. Charging them keeps the source budget binding before the
+shared AST's generic limit, which no accepted-grammar source can reach.
 
 The Node differential table carries 310 rows, of which 237 are distinct
 expressions: duplicates are retained deliberately so each review lane's
