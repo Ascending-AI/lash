@@ -373,19 +373,29 @@ async fn execute_code_inner(
                         format_rlm_link_diagnostic(code, &error)
                     }
                 }),
-            SourceDialect::Typescript => lash_typescript::parse(code)
-                .map_err(|error| error.to_string())
-                .and_then(|program| {
-                    state
-                        .linked_programs
-                        .get_or_compile_ast(
-                            code,
-                            program,
-                            &host_environment,
-                            lashlang::CompilationDialect::Typescript,
-                        )
-                        .map_err(|error| format_rlm_link_diagnostic(code, &error))
-                }),
+            // TypeScript is parsed here rather than by the cache, so the cache
+            // is asked first: otherwise every cell would pay a full parse even
+            // when its linked program is already cached.
+            SourceDialect::Typescript => match state.linked_programs.cached_linked_program(
+                code,
+                &host_environment,
+                lashlang::CompilationDialect::Typescript,
+            ) {
+                Some(program) => Ok(program),
+                None => lash_typescript::parse(code)
+                    .map_err(|error| error.to_string())
+                    .and_then(|program| {
+                        state
+                            .linked_programs
+                            .get_or_compile_ast(
+                                code,
+                                program,
+                                &host_environment,
+                                lashlang::CompilationDialect::Typescript,
+                            )
+                            .map_err(|error| format_rlm_link_diagnostic(code, &error))
+                    }),
+            },
         }
     };
     let cached_program = match compile_result {

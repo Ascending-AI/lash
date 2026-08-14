@@ -462,6 +462,64 @@ mod tests {
     }
 
     #[test]
+    fn linked_program_cache_hit_does_not_reparse_the_source() {
+        let source = r#"finish (await tools.read_file({ path: "." }))?"#;
+        let environment = LashlangHostEnvironment::new(
+            LashlangHostCatalog::tool_default(["read_file"]),
+            LashlangAbilities::default(),
+        );
+        let mut cache = LinkedProgramCache::with_capacity(2);
+
+        let first = cache
+            .get_or_compile(source, &environment)
+            .expect("compile first linked program");
+        let after_miss = crate::parser::parse_calls();
+
+        let second = cache
+            .get_or_compile(source, &environment)
+            .expect("reuse the cached linked program");
+
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            crate::parser::parse_calls(),
+            after_miss,
+            "a linked-program cache hit must not re-parse its source"
+        );
+        assert_eq!(cache.stats().hits, 1);
+        assert_eq!(cache.stats().misses, 1);
+    }
+
+    #[test]
+    fn linked_program_cache_hit_serves_an_already_parsed_program_without_the_ast() {
+        let source = "finish 1";
+        let environment =
+            LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::default());
+        let mut cache = LinkedProgramCache::with_capacity(2);
+
+        let first = cache
+            .get_or_compile_ast(
+                source,
+                crate::parse(source).expect("source parses"),
+                &environment,
+                CompilationDialect::Typescript,
+            )
+            .expect("link first program");
+
+        let cached = cache
+            .cached_linked_program(source, &environment, CompilationDialect::Typescript)
+            .expect("the linked program is cached");
+
+        assert!(std::sync::Arc::ptr_eq(&first, &cached));
+        assert_eq!(cache.stats().hits, 1);
+        assert!(
+            cache
+                .cached_linked_program(source, &environment, CompilationDialect::Lashlang)
+                .is_none(),
+            "a lookup must not cross dialects"
+        );
+    }
+
+    #[test]
     fn linked_program_cache_keeps_source_and_host_requirements_distinct() {
         let source = r#"finish (await tools.read_file({ path: "." }))?"#;
         let base_environment = LashlangHostEnvironment::new(

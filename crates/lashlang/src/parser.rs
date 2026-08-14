@@ -78,7 +78,28 @@ impl ParseError {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Counts `parse` calls made on this thread.
+    ///
+    /// Whether a parse happened is otherwise observable only as cost, so a law
+    /// about parse *avoidance* — a linked-program cache hit must not re-parse
+    /// its source — would have to be pinned by an allocation or timing
+    /// threshold. This counts the calls exactly instead. It is thread-local
+    /// because the test binary runs its tests in parallel and a shared counter
+    /// would see every other test's parses.
+    pub(crate) static PARSE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of `parse` calls made on this thread so far.
+#[cfg(test)]
+pub(crate) fn parse_calls() -> usize {
+    PARSE_CALLS.with(std::cell::Cell::get)
+}
+
 pub fn parse(source: &str) -> Result<Program, ParseError> {
+    #[cfg(test)]
+    PARSE_CALLS.with(|calls| calls.set(calls.get() + 1));
     let tokens = lex(source)?;
     Parser {
         tokens,
