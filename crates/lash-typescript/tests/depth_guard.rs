@@ -345,74 +345,79 @@ fn no_accepted_grammar_shape_leaks_the_shared_ast_diagnostic() {
     }
 }
 
-/// Every recursive production of the accepted grammar, one repeatable unit each.
+/// Every recursive production of the grammar **SWC parses**, one repeatable
+/// unit each.
 ///
-/// A recursive production is one whose right-hand side can contain the
-/// non-terminal it defines, so repeating its unit deepens the tree without
-/// bound. Walking the accepted grammar (see the scanner's module comment in
-/// `src/adapter/mod.rs`) they fall into five families, and the source-nesting
-/// budget must charge every one of them:
-///
-/// * prefix — `UnaryExpression := <op> UnaryExpression`, for punctuation
-///   operators and keyword operators alike;
-/// * infix — `BinaryExpression := Expression <op> Expression`, including the
-///   conditional and logical forms;
-/// * postfix — `LeftHandSideExpression := LeftHandSideExpression <tail>`, where
-///   the tail is a call, a subscript, a member step, or a tagged template;
-/// * delimiter — the bracketed primary forms and template holes;
-/// * statement form — `Statement := <keyword> ( Expression ) Statement`.
-///
-/// Newline-separated variants are listed separately because automatic
-/// semicolon insertion releases the budget, and a release that fires where no
-/// statement ends would leave the family uncharged.
+/// The preflight runs before SWC, and SWC parses the whole TypeScript grammar —
+/// not the subset this dialect accepts. A production the dialect rejects later
+/// still recurses in the parser the guard exists to protect, so the argument in
+/// `src/adapter/nesting.rs` is stated against SWC's grammar and this table
+/// follows it. Each unit is exercised twice: repeated on one line, and repeated
+/// one per line, because a unit can be charged on one line and released by
+/// automatic semicolon insertion across lines.
 const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
     // prefix — punctuation operators
     ("prefix-not", "!", "1;"),
     ("prefix-tilde", "~", "1;"),
     ("prefix-minus", "- ", "1;"),
     ("prefix-plus", "+ ", "1;"),
-    ("prefix-not-newline", "!\n", "1;"),
-    ("prefix-minus-newline", "-\n", "1;"),
-    // prefix — keyword operators
+    ("prefix-increment", "++", "a;"),
+    ("prefix-spread", "...", "1;"),
+    // prefix — keyword operators, value and type position
     ("prefix-typeof", "typeof ", "1;"),
     ("prefix-void", "void ", "1;"),
     ("prefix-delete", "delete ", "1;"),
     ("prefix-new", "new ", "1;"),
-    ("prefix-typeof-newline", "typeof\n", "1;"),
-    ("prefix-void-newline", "void\n", "1;"),
-    ("prefix-delete-newline", "delete\n", "1;"),
-    ("prefix-new-newline", "new\n", "1;"),
+    ("prefix-await", "await ", "1;"),
+    ("prefix-yield", "yield ", "1;"),
+    ("prefix-keyof", "keyof ", "1;"),
+    ("prefix-readonly", "readonly ", "1;"),
+    ("prefix-infer", "infer ", "1;"),
+    ("prefix-unique", "unique ", "1;"),
     // infix
     ("infix-add", "1+", "1;"),
     ("infix-strict-equal", "1===", "1;"),
     ("infix-and", "1&&", "1;"),
     ("infix-or", "1||", "1;"),
+    ("infix-nullish", "1??", "1;"),
     ("infix-ternary", "1?1:", "1;"),
-    ("infix-add-newline", "1+\n", "1;"),
-    ("infix-ternary-newline", "1?1:\n", "1;"),
+    ("infix-union", "1|", "1;"),
+    ("infix-intersection", "1&", "1;"),
+    ("infix-less", "1<", "1;"),
+    ("infix-arrow", "() =>", "1;"),
+    ("infix-as", " as number", ";"),
+    ("infix-satisfies", " satisfies number", ";"),
     // postfix
     ("postfix-call", "(1)", ";"),
     ("postfix-subscript", "[0]", ";"),
     ("postfix-member", ".a", ";"),
     ("postfix-optional-member", "?.a", ";"),
+    ("postfix-optional-call", "?.(1)", ";"),
+    ("postfix-optional-subscript", "?.[0]", ";"),
+    ("postfix-non-null", "!", ";"),
     ("postfix-tagged-template", "`x`", ";"),
-    ("postfix-call-newline", "(1)\n", ";"),
-    ("postfix-subscript-newline", "[0]\n", ";"),
-    ("postfix-member-newline", ".a\n", ";"),
     ("postfix-mixed-tails", "(1)[0].a", ";"),
     // delimiter
     ("delimiter-paren", "(", "1"),
     ("delimiter-bracket", "[", "1"),
     ("delimiter-brace", "{a:", "1"),
-    ("delimiter-arrow", "(() => ", "1"),
+    ("delimiter-arrow-paren", "(() => ", "1"),
     ("delimiter-template-hole", "${a}", ""),
+    ("delimiter-jsx", "<a>", "1"),
+    ("delimiter-type-argument", "Array<", "1"),
     // statement form
     ("statement-if-block", "if (1) {", "const q = 1;"),
     ("statement-while-block", "while (0) {", "const q = 1;"),
+    ("statement-for-block", "for (;;) {", "const q = 1;"),
     ("statement-if-bare", "if (1) ", "const q = 1;"),
-    ("statement-if-newline", "if (1)\n", "const q = 1;"),
-    ("statement-while-newline", "while (0)\n", "const q = 1;"),
+    ("statement-with", "with (a) ", "const q = 1;"),
     ("statement-block", "{", "const q = 1;"),
+    ("statement-label", "a:", "1;"),
+    ("statement-label-distinct", "l:", "1;"),
+    ("statement-try", "try {", "const q = 1;"),
+    ("statement-switch", "switch (a) {", "const q = 1;"),
+    ("statement-class", "class C {", ""),
+    ("statement-function", "function f() {", "const q = 1;"),
     // mixed families
     ("mixed-prefix-in-delimiter", "(!", "1"),
     ("mixed-prefix-in-bracket", "[!", "1"),
@@ -420,29 +425,29 @@ const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
     ("mixed-postfix-after-keyword", "typeof a(1)", ";"),
     ("mixed-infix-postfix", "1+a[0]", ";"),
     ("mixed-alternating", "!(1)[0].a typeof ", "1;"),
+    ("mixed-label-prefix", "a:!", "1;"),
+    ("mixed-as-postfix", " as number as any", ";"),
+    ("mixed-delimiter-statement", "if (1) { (", "1"),
     // A prefix chain broken across lines: each newline sits mid-expression, so
     // none of them ends a statement and the run must keep accumulating.
     ("mixed-newline-alternation", "!\ntypeof\n-\n", "1;"),
-    ("mixed-delimiter-statement", "if (1) { (", "1"),
 ];
 
-fn family_source(unit: &str, tail: &str, repeats: usize) -> String {
-    // A leading binding keeps the postfix and member families applied to a real
-    // expression, which is the shape that recurses.
-    match unit {
-        "${a}" => format!("const a = 1; const x = `{}`;", unit.repeat(repeats)),
-        "`x`" => format!("const a = 1; const x = a{};", unit.repeat(repeats)),
-        _ if unit.starts_with('(') && tail == ";" => {
-            format!("const a = 1; const x = a{}{tail}", unit.repeat(repeats))
-        }
-        _ if unit.starts_with('[') && tail == ";" => {
-            format!("const a = 1; const x = a{}{tail}", unit.repeat(repeats))
-        }
-        _ if unit.starts_with('.') || unit.starts_with("?.") => {
-            format!("const a = 1; const x = a{}{tail}", unit.repeat(repeats))
-        }
-        _ if tail == ";" => format!("const a = 1; const x = a{}{tail}", unit.repeat(repeats)),
-        _ => format!("const a = 1; const x = {}{tail}", unit.repeat(repeats)),
+fn family_source(unit: &str, tail: &str, repeats: usize, per_line: bool) -> String {
+    let unit = if per_line {
+        format!("{unit}\n")
+    } else {
+        unit.to_string()
+    };
+    let body = unit.repeat(repeats);
+    // A leading binding keeps the postfix, member and cast families applied to a
+    // real expression, which is the shape that recurses.
+    if tail == ";" {
+        format!("const a = 1; const x = a{body}{tail}")
+    } else if unit.trim_end() == "${a}" {
+        format!("const a = 1; const x = `{body}`;")
+    } else {
+        format!("const a = 1; const x = {body}{tail}")
     }
 }
 
@@ -459,17 +464,22 @@ fn every_recursive_production_family_rejects_without_aborting() {
             .iter()
             .find(|(name, _, _)| *name == family)
             .expect("known family");
-        let source = family_source(unit, tail, REPEATS);
+        let sources = [
+            ("one line", family_source(unit, tail, REPEATS, false)),
+            ("one per line", family_source(unit, tail, REPEATS, true)),
+        ];
         std::thread::Builder::new()
             .stack_size(STACK_BUDGET_BYTES)
             .spawn(move || {
-                let error = lash_typescript::parse(&source)
-                    .expect_err("a repeated recursive production must reject");
-                assert_eq!(
-                    error.code.as_str(),
-                    "TS_SOURCE_NESTING_LIMIT",
-                    "{family} rejected for the wrong reason"
-                );
+                for (axis, source) in sources {
+                    let error = lash_typescript::parse(&source)
+                        .expect_err("a repeated recursive production must reject");
+                    assert_eq!(
+                        error.code.as_str(),
+                        "TS_SOURCE_NESTING_LIMIT",
+                        "{family} ({axis}) rejected for the wrong reason"
+                    );
+                }
             })
             .expect("family thread starts")
             .join()
