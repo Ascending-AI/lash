@@ -2038,6 +2038,7 @@ mod tests {
                 runtime_host,
                 Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
                 registry_dyn,
+                lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy.clone()),
         );
