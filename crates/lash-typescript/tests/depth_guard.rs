@@ -119,13 +119,22 @@ fn sequential_statement_forms_do_not_accumulate_source_nesting() {
         "if (1) { const a = 1; } ".repeat(200),
         "while (0) { const a = 1; } ".repeat(200),
         "if (1) { const a = 1; } else { const b = 2; } ".repeat(200),
-        "do { const a = 1; } while (0); ".repeat(200),
         "if (1) { if (0) { const a = 1; } } ".repeat(200),
+        (0..200)
+            .map(|index| {
+                format!("function f{index}(): number {{ if (1) {{ return 1; }} return 0; }} ")
+            })
+            .collect::<String>(),
     ] {
         lash_typescript::parse(&source).unwrap_or_else(|error| {
             panic!("flat statement sequences parse: {}", error.code.as_str())
         });
     }
+    // Statement forms outside the accepted surface still reject on their own
+    // terms rather than on an accumulated nesting budget.
+    let error = lash_typescript::parse(&"do { const a = 1; } while (0); ".repeat(200))
+        .expect_err("do/while is outside the surface");
+    assert_eq!(error.code.as_str(), "TS_DO_WHILE_UNSUPPORTED");
     let error = lash_typescript::parse(&format!("{}finish(1);", "if (1) ".repeat(200)))
         .expect_err("brace-free statement nesting must still reject");
     assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");

@@ -1052,7 +1052,11 @@ enum ScanMode {
 enum SourceDelimiter {
     Paren,
     Bracket,
+    /// A brace in expression position: an object literal or an object type.
     Brace,
+    /// A brace that opens a statement block, which ends the statement forms
+    /// that introduced it.
+    StatementBrace,
     TemplateExpression,
 }
 
@@ -1062,108 +1066,180 @@ struct SourceNestingFrame {
     outer_operators: usize,
 }
 
+/// The last significant token, which decides whether a `{` opens an object
+/// literal or a statement block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreviousToken {
+    None,
+    Byte(u8),
+    /// A word that can only be followed by an expression (`return {…}`).
+    ExpressionPrefixWord,
+    OtherWord,
+}
+
+impl PreviousToken {
+    fn opens_expression_brace(self) -> bool {
+        match self {
+            Self::ExpressionPrefixWord => true,
+            Self::Byte(byte) => matches!(
+                byte,
+                b'=' | b'('
+                    | b','
+                    | b'['
+                    | b':'
+                    | b'?'
+                    | b'+'
+                    | b'-'
+                    | b'*'
+                    | b'/'
+                    | b'%'
+                    | b'<'
+                    | b'>'
+                    | b'!'
+                    | b'~'
+                    | b'&'
+                    | b'|'
+                    | b'^'
+            ),
+            Self::None | Self::OtherWord => false,
+        }
+    }
+}
+
 // Keep one cumulative lexical budget before SWC sees the source. Each open
 // delimiter and each recursively nested operator/statement form consumes one
 // unit; operator counts from outer delimiter frames remain active while the
-// scanner visits an inner expression. The adapter repeats the guard with one
-// shared counter for statement and expression conversion.
+// scanner visits an inner expression. A statement boundary — `;`, `,`, or the
+// `}` that closes a statement block — releases the operator run it terminates,
+// so a flat sequence of statement forms stays one level deep. The adapter
+// repeats the guard with one shared counter for statement and expression
+// conversion.
 fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
     let bytes = source.as_bytes();
     let mut mode = ScanMode::Code;
     let mut escaped = false;
     let mut frames = Vec::new();
     let mut current_operators = 0usize;
+    let mut previous = PreviousToken::None;
     let mut index = 0usize;
 
     while index < bytes.len() {
         let byte = bytes[index];
         let next = bytes.get(index + 1).copied();
         match mode {
-            ScanMode::Code => match (byte, next) {
-                (b'/', Some(b'/')) => {
-                    mode = ScanMode::LineComment;
-                    index += 1;
-                }
-                (b'/', Some(b'*')) => {
-                    mode = ScanMode::BlockComment;
-                    index += 1;
-                }
-                (b'\'', _) => {
-                    mode = ScanMode::SingleQuoted;
-                    escaped = false;
-                }
-                (b'"', _) => {
-                    mode = ScanMode::DoubleQuoted;
-                    escaped = false;
-                }
-                (b'`', _) => {
-                    mode = ScanMode::Template;
-                    escaped = false;
-                }
-                (b'(', _) => enter_source_delimiter(
-                    &mut frames,
-                    &mut current_operators,
-                    SourceDelimiter::Paren,
-                    index,
-                )?,
-                (b')', _) => leave_source_delimiter(
-                    &mut frames,
-                    &mut current_operators,
-                    SourceDelimiter::Paren,
-                ),
-                (b'[', _) => enter_source_delimiter(
-                    &mut frames,
-                    &mut current_operators,
-                    SourceDelimiter::Bracket,
-                    index,
-                )?,
-                (b']', _) => leave_source_delimiter(
-                    &mut frames,
-                    &mut current_operators,
-                    SourceDelimiter::Bracket,
-                ),
-                (b'{', _) => enter_source_delimiter(
-                    &mut frames,
-                    &mut current_operators,
-                    SourceDelimiter::Brace,
-                    index,
-                )?,
-                (b'}', _) => {
-                    let closes_template_expression = frames.last().is_some_and(|frame| {
-                        frame.delimiter == SourceDelimiter::TemplateExpression
-                    });
-                    leave_source_delimiter(
+            ScanMode::Code => {
+                // `None` leaves the previous significant token in place, so
+                // whitespace and comments never change how a `{` is classified.
+                let mut scanned = Some(PreviousToken::Byte(byte));
+                match (byte, next) {
+                    (b'/', Some(b'/')) => {
+                        mode = ScanMode::LineComment;
+                        index += 1;
+                        scanned = None;
+                    }
+                    (b'/', Some(b'*')) => {
+                        mode = ScanMode::BlockComment;
+                        index += 1;
+                        scanned = None;
+                    }
+                    (b'\'', _) => {
+                        mode = ScanMode::SingleQuoted;
+                        escaped = false;
+                    }
+                    (b'"', _) => {
+                        mode = ScanMode::DoubleQuoted;
+                        escaped = false;
+                    }
+                    (b'`', _) => {
+                        mode = ScanMode::Template;
+                        escaped = false;
+                    }
+                    (b'(', _) => enter_source_delimiter(
                         &mut frames,
                         &mut current_operators,
-                        if closes_template_expression {
-                            SourceDelimiter::TemplateExpression
-                        } else {
+                        SourceDelimiter::Paren,
+                        index,
+                    )?,
+                    (b')', _) => leave_source_delimiter(
+                        &mut frames,
+                        &mut current_operators,
+                        SourceDelimiter::Paren,
+                    ),
+                    (b'[', _) => enter_source_delimiter(
+                        &mut frames,
+                        &mut current_operators,
+                        SourceDelimiter::Bracket,
+                        index,
+                    )?,
+                    (b']', _) => leave_source_delimiter(
+                        &mut frames,
+                        &mut current_operators,
+                        SourceDelimiter::Bracket,
+                    ),
+                    (b'{', _) => enter_source_delimiter(
+                        &mut frames,
+                        &mut current_operators,
+                        if previous.opens_expression_brace() {
                             SourceDelimiter::Brace
+                        } else {
+                            SourceDelimiter::StatementBrace
                         },
-                    );
-                    if closes_template_expression {
-                        mode = ScanMode::Template;
+                        index,
+                    )?,
+                    (b'}', _) => {
+                        let closed =
+                            frames
+                                .last()
+                                .map(|frame| frame.delimiter)
+                                .filter(|delimiter| {
+                                    matches!(
+                                        delimiter,
+                                        SourceDelimiter::Brace
+                                            | SourceDelimiter::StatementBrace
+                                            | SourceDelimiter::TemplateExpression
+                                    )
+                                });
+                        if let Some(delimiter) = closed {
+                            leave_source_delimiter(&mut frames, &mut current_operators, delimiter);
+                        }
+                        match closed {
+                            // A statement block ends every statement form that
+                            // introduced it, so the next statement starts over.
+                            Some(SourceDelimiter::StatementBrace) => current_operators = 0,
+                            Some(SourceDelimiter::TemplateExpression) => mode = ScanMode::Template,
+                            _ => {}
+                        }
                     }
-                }
-                (b';' | b',', _) => current_operators = 0,
-                _ if is_identifier_start(byte) => {
-                    let start = index;
-                    while bytes
-                        .get(index + 1)
-                        .is_some_and(|byte| is_identifier_continue(*byte))
-                    {
-                        index += 1;
+                    (b';' | b',', _) => current_operators = 0,
+                    _ if is_identifier_start(byte) => {
+                        let start = index;
+                        while bytes
+                            .get(index + 1)
+                            .is_some_and(|byte| is_identifier_continue(*byte))
+                        {
+                            index += 1;
+                        }
+                        let word = &source[start..=index];
+                        if is_recursive_operator_word(word) {
+                            increment_source_operators(&frames, &mut current_operators, start)?;
+                        }
+                        scanned = Some(if is_expression_prefix_word(word) {
+                            PreviousToken::ExpressionPrefixWord
+                        } else {
+                            PreviousToken::OtherWord
+                        });
                     }
-                    if is_recursive_operator_word(&source[start..=index]) {
-                        increment_source_operators(&frames, &mut current_operators, start)?;
+                    _ if is_recursive_operator_start(byte) => {
+                        increment_source_operators(&frames, &mut current_operators, index)?;
+                        index += recursive_operator_extra_bytes(bytes, index);
                     }
+                    _ if byte.is_ascii_whitespace() => scanned = None,
+                    _ => {}
                 }
-                _ if is_recursive_operator_start(byte) => {
-                    increment_source_operators(&frames, &mut current_operators, index)?;
-                    index += recursive_operator_extra_bytes(bytes, index);
+                if let Some(token) = scanned {
+                    previous = token;
                 }
-                _ => {}
-            },
+            }
             ScanMode::SingleQuoted => {
                 if escaped {
                     escaped = false;
@@ -1171,6 +1247,7 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                     escaped = true;
                 } else if byte == b'\'' {
                     mode = ScanMode::Code;
+                    previous = PreviousToken::OtherWord;
                 }
             }
             ScanMode::DoubleQuoted => {
@@ -1180,6 +1257,7 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                     escaped = true;
                 } else if byte == b'"' {
                     mode = ScanMode::Code;
+                    previous = PreviousToken::OtherWord;
                 }
             }
             ScanMode::Template => {
@@ -1189,6 +1267,7 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                     escaped = true;
                 } else if byte == b'`' {
                     mode = ScanMode::Code;
+                    previous = PreviousToken::OtherWord;
                 } else if byte == b'$' && next == Some(b'{') {
                     index += 1;
                     enter_source_delimiter(
@@ -1198,6 +1277,8 @@ fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                         index,
                     )?;
                     mode = ScanMode::Code;
+                    // A template hole is expression position, like `(`.
+                    previous = PreviousToken::Byte(b'(');
                 }
             }
             ScanMode::LineComment => {
@@ -1298,6 +1379,23 @@ fn is_recursive_operator_word(word: &str) -> bool {
             | "void"
             | "while"
             | "with"
+            | "yield"
+    )
+}
+
+/// Words after which a `{` can only open an object literal, never a block.
+fn is_expression_prefix_word(word: &str) -> bool {
+    matches!(
+        word,
+        "await"
+            | "case"
+            | "delete"
+            | "in"
+            | "instanceof"
+            | "new"
+            | "return"
+            | "typeof"
+            | "void"
             | "yield"
     )
 }
