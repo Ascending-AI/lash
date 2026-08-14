@@ -127,7 +127,8 @@ fn word_can_end_expression(word: &str) -> bool {
 fn word_can_end_statement(word: &str) -> bool {
     !matches!(
         word,
-        "await"
+        "as" | "asserts"
+            | "await"
             | "case"
             | "catch"
             | "class"
@@ -144,16 +145,22 @@ fn word_can_end_statement(word: &str) -> bool {
             | "if"
             | "import"
             | "in"
+            | "infer"
             | "instanceof"
             | "interface"
+            | "is"
+            | "keyof"
             | "let"
             | "new"
             | "of"
+            | "readonly"
+            | "satisfies"
             | "switch"
             | "throw"
             | "try"
             | "type"
             | "typeof"
+            | "unique"
             | "var"
             | "void"
             | "while"
@@ -167,11 +174,15 @@ fn word_can_end_statement(word: &str) -> bool {
 /// only keeps the budget accumulating, which is the safe direction.
 fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
     if let Some(word) = word {
-        return matches!(word, "in" | "instanceof");
+        // A cast keyword continues the expression on the previous line, exactly
+        // as a relational keyword does.
+        return matches!(word, "as" | "in" | "instanceof" | "of" | "satisfies");
     }
     matches!(
         byte,
-        b'.' | b','
+        // A backtick continues the previous line as a tagged template.
+        b'`' | b'.'
+            | b','
             | b')'
             | b']'
             | b'}'
@@ -198,39 +209,65 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 //
 // SWC overflows the native stack on deep input and aborts the process rather
 // than returning an error, so this scan has to be complete: any recursive
-// production it fails to charge is a shape that takes the host down. What
-// follows is why the five families it charges are exhaustive against the
-// accepted grammar.
+// production it fails to charge is a shape that takes the host down.
+//
+// **The grammar this argues over is the one SWC parses — all of TypeScript —
+// not the subset the dialect accepts.** That distinction is the whole point.
+// The dialect's rejections happen in the adapter and the lowerer, both of which
+// run *after* a successful parse, so a production this crate will later refuse
+// still recurses in the parser here. Labelled statements, `as` casts and the
+// type-level operators are all outside the accepted surface and all of them
+// recurse; each one was an abort until it was charged.
 //
 // A production can nest without bound exactly when its right-hand side can
-// contain the non-terminal it defines. Walking the accepted surface (see this
-// crate's README for the surface itself), every such production is one of:
+// contain the non-terminal it defines. Walking SWC's grammar — equivalently,
+// the `swc_ecma_ast` node kinds that can contain themselves, which
+// `tests/grammar_coverage.rs` enumerates with a compiler-checked exhaustive
+// match — every such production is one of:
 //
-//  1. Prefix — `UnaryExpression := <op> UnaryExpression`. Charged one unit per
-//     operator, for punctuation (`!`, `~`, unary `+`/`-`) and for the keyword
-//     operators alike (`typeof`, `void`, `delete`, `new`, `await`, `yield`),
-//     which `is_recursive_operator_word` lists.
+//  1. Prefix — `UnaryExpression := <op> UnaryExpression`. One unit per operator
+//     token: punctuation (`!`, `~`, unary `+`/`-`, `++`, `--`, `...`), value
+//     keywords (`typeof`, `void`, `delete`, `new`, `await`, `yield`), and the
+//     type-position keywords (`keyof`, `readonly`, `infer`, `unique`,
+//     `asserts`, `is`), all listed by `is_recursive_operator_word` and
+//     `is_recursive_operator_start`.
 //  2. Infix — `BinaryExpression := Expression <op> Expression`, plus the
-//     conditional and logical forms. Charged one unit per operator token; a
-//     left-nested chain therefore costs its own length.
-//  3. Postfix — `LeftHandSideExpression := LeftHandSideExpression <tail>`,
-//     where the tail is a call `(…)`, a subscript `[…]`, a member step `.a` /
-//     `?.a`, or a tagged template. Member steps are operator tokens and charge
-//     directly; the bracketed tails open *and close* a delimiter pair, so their
-//     frame carries a `postfix` flag and charges a unit when the pair closes.
-//     Without that, a chain of any length would sit at depth one.
-//  4. Delimiter — the bracketed primary forms `(…)`, `[…]`, `{…}` and a
-//     template hole `${…}`. Charged one unit while open. A template hole also
-//     charges a persistent unit, because a template lowers into a left-nested
-//     concatenation chain whose depth outlives the hole.
-//  5. Statement form — `Statement := <keyword> ( Expression ) Statement` for
-//     `if`, `while`, `do`, `for`, `with`. Charged one unit per keyword.
+//     conditional, logical, arrow and assignment forms, plus the TypeScript
+//     cast forms `Expression as Type` and `Expression satisfies Type`, and the
+//     type-level `|`, `&` and `extends`. One unit per operator token, so a
+//     left-nested chain costs its own length.
+//  3. Postfix — `LeftHandSideExpression := LeftHandSideExpression <tail>`: a
+//     call `(…)`, a subscript `[…]`, a member step `.a` / `?.a`, a tagged
+//     template, a non-null `!`, or a type instantiation `<…>`. Member steps and
+//     `!` are operator tokens and charge directly; the bracketed tails open
+//     *and close* a delimiter pair, so their frame carries a `postfix` flag and
+//     charges a unit when the pair closes. Without that a chain of any length
+//     would sit at depth one.
+//  4. Delimiter — every bracketed form: grouping, array and object literals and
+//     patterns, class and function bodies, type literals and tuples, JSX
+//     elements (through `<`), type argument lists, and a template hole `${…}`.
+//     One unit while open. A template hole also charges a persistent unit,
+//     because a template lowers into a left-nested concatenation chain whose
+//     depth outlives the hole.
+//  5. Statement form — a keyword-introduced statement that contains a
+//     statement: `if`, `while`, `do`, `for`, `with`, and — the one that has no
+//     keyword at all — `LabelledStatement := Identifier ':' Statement`, which
+//     is charged on the `:` when no conditional is waiting for it and the
+//     statement is at statement level.
 //
-// Nothing else in the grammar recurses: literals, identifiers and keywords are
-// terminals; declarations and blocks recurse only through families 4 and 5; and
-// the type grammar is erased before this point. `tests/depth_guard.rs` turns
-// this list into the standing guard — each family, and mixed combinations of
-// them, repeated to 100 000 in a child process on the 2 MiB stack contract.
+// Nothing else recurses: identifiers, literals, keywords, JSX text and regular
+// expression bodies are terminals; declarations, modules, classes and switch
+// bodies recurse only through families 4 and 5; and the sequence expression is
+// a flat list whose separator resets the run.
+//
+// `tests/depth_guard.rs` turns this list into the standing guard — every family
+// and mixed combinations of them, repeated to 100 000 both inline and one per
+// line, parsed in a child process on the 2 MiB stack contract.
+// `tests/grammar_coverage.rs` cross-checks the list mechanically in two ways:
+// an exhaustive match over SWC's own AST node kinds that fails to compile when
+// SWC gains a variant, and a deterministic fuzzer that feeds random token
+// sequences drawn from the charged alphabet through the preflight and into SWC
+// inside a child process, where an abort is a test failure.
 //
 // The budget is one cumulative counter, not one per family: every unit above
 // draws on the same 28, in this preflight and in the adapter's own conversion
@@ -241,8 +278,9 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 // statements stays one level deep whether or not it is punctuated. The ASI
 // release is the delicate part: it must not fire where no statement can end
 // (after a prefix keyword, or while a statement form is still open) and must
-// not fire when the next token continues the expression, or a newline-separated
-// chain would slip through uncharged.
+// not fire when the next token continues the expression — including a backtick,
+// which makes the next line a tagged template, and `as`/`satisfies`, which make
+// it a cast — or a newline-separated chain would slip through uncharged.
 pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
     let bytes = source.as_bytes();
     let mut mode = ScanMode::Code;
@@ -257,6 +295,9 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
     // newline cannot end a statement while one is open: `if (1)` is not a
     // complete statement however the line breaks.
     let mut open_statement_forms = 0usize;
+    // Conditional operators awaiting their `:`. A `:` that no `?` is waiting for
+    // is a label or an annotation, not a ternary arm.
+    let mut open_conditionals = 0usize;
     let mut index = 0usize;
 
     while index < bytes.len() {
@@ -286,6 +327,7 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                         if !continues_previous_statement(byte, word) {
                             current_operators = 0;
                             open_statement_forms = 0;
+                            open_conditionals = 0;
                         }
                     }
                 }
@@ -381,6 +423,7 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                             Some(SourceDelimiter::StatementBrace) => {
                                 current_operators = 0;
                                 open_statement_forms = 0;
+                                open_conditionals = 0;
                             }
                             Some(SourceDelimiter::TemplateExpression) => mode = ScanMode::Template,
                             _ => {}
@@ -388,7 +431,35 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                     }
                     (b';' | b',', _) => {
                         current_operators = 0;
-                        open_statement_forms = 0;
+                        open_conditionals = 0;
+                        // A `;` inside a delimiter is a `for` header separator
+                        // and a `,` is an element separator; neither ends the
+                        // statement that opened the delimiter. Clearing the
+                        // open statement forms there would let a newline end a
+                        // `for (;;)` that has not reached its body yet.
+                        if frames.last().is_none_or(|frame: &SourceNestingFrame| {
+                            frame.delimiter == SourceDelimiter::StatementBrace
+                        }) {
+                            open_statement_forms = 0;
+                        }
+                    }
+                    (b':', _) => {
+                        if open_conditionals > 0 {
+                            // The second arm of a conditional, already charged
+                            // by its `?`.
+                            open_conditionals -= 1;
+                        } else if previous.can_end_expression()
+                            && frames.last().is_none_or(|frame: &SourceNestingFrame| {
+                                frame.delimiter == SourceDelimiter::StatementBrace
+                            })
+                        {
+                            // `LabelledStatement := Identifier ':' Statement`
+                            // recurses without bound and uses no delimiter, so
+                            // the label itself has to carry the charge. A type
+                            // annotation in the same position charges one unit
+                            // too, which its statement boundary releases.
+                            increment_source_operators(&frames, &mut current_operators, index)?;
+                        }
                     }
                     _ if is_identifier_start(byte) => {
                         let start = index;
@@ -409,7 +480,11 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                     }
                     _ if is_recursive_operator_start(byte) => {
                         increment_source_operators(&frames, &mut current_operators, index)?;
-                        index += recursive_operator_extra_bytes(bytes, index);
+                        let extra = recursive_operator_extra_bytes(bytes, index);
+                        if byte == b'?' && extra == 0 {
+                            open_conditionals += 1;
+                        }
+                        index += extra;
                     }
                     (b'\n' | b'\r', _) => {
                         // Automatic semicolon insertion ends the statement here
@@ -577,6 +652,7 @@ fn is_identifier_continue(byte: u8) -> bool {
 fn is_recursive_operator_word(word: &str) -> bool {
     matches!(
         word,
+        // Value-position prefix and infix keyword operators.
         "await"
             | "delete"
             | "do"
@@ -590,6 +666,18 @@ fn is_recursive_operator_word(word: &str) -> bool {
             | "while"
             | "with"
             | "yield"
+            // Cast operators: `Expression as Type` and `Expression satisfies
+            // Type` are left-recursive in the grammar SWC parses.
+            | "as"
+            | "satisfies"
+            // Type-position prefix operators. The dialect erases types, but SWC
+            // parses them first and recurses through every one.
+            | "asserts"
+            | "infer"
+            | "is"
+            | "keyof"
+            | "readonly"
+            | "unique"
     )
 }
 

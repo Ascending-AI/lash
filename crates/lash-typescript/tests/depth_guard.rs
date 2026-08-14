@@ -433,6 +433,17 @@ const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
     ("mixed-newline-alternation", "!\ntypeof\n-\n", "1;"),
 ];
 
+/// Units whose one-per-line form is a legal flat sequence of complete
+/// statements rather than a nesting: each line ends a statement and the next
+/// line opens a new one, so automatic semicolon insertion is right to release
+/// the budget and the source is right to be accepted. Both axes must still
+/// avoid aborting the process, which is what the child proves by exiting.
+const FLAT_WHEN_SPLIT: &[&str] = &[
+    "mixed-postfix-after-prefix",
+    "mixed-postfix-after-keyword",
+    "mixed-infix-postfix",
+];
+
 fn family_source(unit: &str, tail: &str, repeats: usize, per_line: bool) -> String {
     let unit = if per_line {
         format!("{unit}\n")
@@ -471,9 +482,22 @@ fn every_recursive_production_family_rejects_without_aborting() {
         std::thread::Builder::new()
             .stack_size(STACK_BUDGET_BYTES)
             .spawn(move || {
+                let flat_when_split = FLAT_WHEN_SPLIT.contains(&family.as_str());
                 for (axis, source) in sources {
-                    let error = lash_typescript::parse(&source)
-                        .expect_err("a repeated recursive production must reject");
+                    let outcome = lash_typescript::parse(&source);
+                    if flat_when_split && axis == "one per line" {
+                        // A flat statement sequence must not be charged as
+                        // nesting; reaching here at all proves it did not abort.
+                        if let Err(error) = outcome {
+                            assert_ne!(
+                                error.code.as_str(),
+                                "TS_SOURCE_NESTING_LIMIT",
+                                "{family} ({axis}) is a flat sequence, not a nesting"
+                            );
+                        }
+                        continue;
+                    }
+                    let error = outcome.expect_err("a repeated recursive production must reject");
                     assert_eq!(
                         error.code.as_str(),
                         "TS_SOURCE_NESTING_LIMIT",

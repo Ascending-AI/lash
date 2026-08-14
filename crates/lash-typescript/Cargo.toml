@@ -26,3 +26,5 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 futures = "0.3"
+swc_common = { workspace = true }
+swc_ecma_ast = { workspace = true }
