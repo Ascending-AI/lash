@@ -1,0 +1,40 @@
+{
+  "schema": "lash.provider-wire-script.v1",
+  "name": "google.generate-content-literal-present",
+  "provider_kind": "google_oauth",
+  "endpoint": { "method": "POST", "path": "/v1internal:streamGenerateContent" },
+  "request_match": {
+    "body": {
+      "request.generationConfig.stopSequences": { "present": false }
+    },
+    "headers": {
+      "authorization": { "present": true },
+      "content-type": { "contains": "application/json" }
+    }
+  },
+  "timeline": [
+    {
+      "at": 10,
+      "event": "response_start",
+      "status": 200,
+      "headers": [{ "name": "content-type", "value": "text/event-stream" }]
+    },
+    {
+      "at": 20,
+      "event": "sse",
+      "data": "{\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"<lashlang>\\nfinish \\\"settled\\\"\\n</lashlang>\\n\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":7}}}"
+    },
+    {
+      "at": 21,
+      "event": "sse",
+      "data": "{\"response\":{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":7}}}"
+    },
+    { "at": 22, "event": "end" }
+  ],
+  "expected_provider": {
+    "variation": "literal_present",
+    "terminal_reason": "stop",
+    "provider_finish_reason": "STOP",
+    "literal_present": true
+  }
+}

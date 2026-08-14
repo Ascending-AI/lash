@@ -17,6 +17,7 @@ pub mod oracles;
 pub mod postgres_replay;
 pub mod provider;
 pub mod provider_mutations;
+pub mod provider_variations;
 pub mod recording;
 pub mod replay;
 pub mod runner;
