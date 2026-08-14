@@ -330,7 +330,7 @@ const FUZZ_ALPHABET: &[&str] = &[
 fn fuzz_source(seed: u64, tokens: usize) -> String {
     let mut prng = Prng(seed);
     let alphabet_size = match prng.below(8) {
-        0 | 1 | 2 => 1,
+        0..=2 => 1,
         3 | 4 => 2,
         5 => 3,
         6 => 5,
