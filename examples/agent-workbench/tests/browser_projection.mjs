@@ -22,13 +22,13 @@ assert.ok(
 const multiAttachmentMessage = JSON.parse(
   process.env.LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE ?? "null",
 );
-const executionEvidenceEvents = JSON.parse(
-  process.env.LASH_WORKBENCH_EXECUTION_EVIDENCE_EVENTS ?? "null",
+const executionEvidenceScenarios = JSON.parse(
+  process.env.LASH_WORKBENCH_EXECUTION_EVIDENCE_SCENARIOS ?? "null",
 );
 assert.equal(
-  executionEvidenceEvents?.length,
+  executionEvidenceScenarios?.providers?.length,
   2,
-  "execution evidence must come from the Rust provider-to-remote gate",
+  "execution evidence must come from real Rust runtime scenarios",
 );
 assert.ok(
   multiAttachmentMessage,
@@ -1193,95 +1193,129 @@ function snapshot(sessionId, cursor, eventIds = []) {
   };
 }
 
-test("remote cursor replay, gap recovery, and terminal replacement converge on the rendered execution scorecard", async () => {
-  const target = { textContent: "" };
-  const snapshots = [];
-  const scorecardContext = {
-    Map,
-    Set,
-    executionScorecard: target,
-    projectionState: { observationCursor: null },
-    appliedObservationEvents: new Set(),
-    finishTransientRows() {},
-    beginStateRecovery() { return {}; },
-    async fetchStateSnapshot() { return snapshots.shift(); },
-    markShellChannel() {},
-    shellAvailability: {},
-    recoveryResponseIsCurrent() { return true; },
-    renderShellStatus() {},
-    scheduleStateRetry() {},
-    renderError() {},
-    snapshotFailureReason(error) { return String(error); },
-  };
-  vm.runInNewContext(
-    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
-     this.executionScorecardState = createExecutionScorecardState();
-     ${markedSource("WORKBENCH_TURN_EVENT_REDUCER", "WORKBENCH_TURN_EVENT_REDUCER")}
-     ${markedSource("WORKBENCH_REMOTE_STREAM_RECOVERY", "WORKBENCH_REMOTE_STREAM_RECOVERY")}`,
-    scorecardContext,
-  );
-  scorecardContext.applyStateSnapshot = state => {
-    scorecardContext.rebuildExecutionScorecard(
-      scorecardContext.executionScorecardState,
-      state.product_events?.events,
-      target,
+test("real provider turns survive cursor replay, recovery races, terminal replacement, and production snapshot rendering", async () => {
+  for (const scenario of executionEvidenceScenarios.providers) {
+    const target = { textContent: "" };
+    const snapshots = [];
+    let resolveDelayedSnapshot;
+    let handledModelCalls = 0;
+    const element = () => ({
+      value: "",
+      innerHTML: "",
+      textContent: "",
+      appendChild() {},
+      addEventListener() {},
+    });
+    const scorecardContext = {
+      Map,
+      Set,
+      Math,
+      Number,
+      executionScorecard: target,
+      finishTransientRows() {},
+      async fetchStateSnapshot() {
+        const next = snapshots.shift();
+        return next === "delayed"
+          ? new Promise(resolve => { resolveDelayedSnapshot = resolve; })
+          : next;
+      },
+      markShellChannel() {},
+      shellAvailability: {},
+      renderShellStatus() {},
+      scheduleStateRetry() {},
+      renderError() {},
+      snapshotFailureReason(error) { return String(error); },
+      __LASH_WORKBENCH_TURN_EVENT_HOOK__(event) {
+        if (event.type === "model_call_recorded") handledModelCalls += 1;
+      },
+      modelInput: element(),
+      variantSelect: element(),
+      knownModels: new Set(),
+      modelListenersBound: false,
+      document: { getElementById: element, createElement: element },
+      clearTerminalTurnTombstones() {},
+      clearTranscript() {},
+      validateModel() {},
+      knownWebState: null,
+      knownSessionLabel: null,
+      markShellHydrated() {},
+      renderUsage() {},
+      renderQueuedWork() {},
+      renderStateTranscript() {},
+      renderIngressReceipt() {},
+      recordTurnInputApplications() {},
+      busy: false,
+      setBusy(value) { this.busy = value; },
+    };
+    vm.runInNewContext(
+      `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+       ${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+       this.executionScorecardState = createExecutionScorecardState();
+       this.projectionState = createWorkbenchProjectionState();
+       this.renderedProductEvents = projectionState.renderedProductEvents;
+       this.appliedObservationEvents = projectionState.appliedObservationEvents;
+       ${markedSource("WORKBENCH_TURN_EVENT_REDUCER", "WORKBENCH_TURN_EVENT_REDUCER")}
+       ${markedSource("WORKBENCH_STATE_SNAPSHOT", "WORKBENCH_STATE_SNAPSHOT")}
+       ${markedSource("WORKBENCH_REMOTE_STREAM_RECOVERY", "WORKBENCH_REMOTE_STREAM_RECOVERY")}`,
+      scorecardContext,
     );
-  };
-  const googleEvent = executionEvidenceEvents[0];
-  const anthropicEvent = executionEvidenceEvents[1];
-  const google = googleEvent.activity.record;
-  const anthropic = anthropicEvent.activity.record;
 
-  const googleLine = JSON.stringify({ type: "observation", event: googleEvent });
-  scorecardContext.handleObservationStreamLine(googleLine);
-  scorecardContext.handleObservationStreamLine(googleLine);
-  assert.equal(
-    target.textContent,
-    "google-call #1 completed · model gemini-3.1-pro-served · response google-evidence-1 · finish STOP · reasoning 0",
-    "replaying the same remote cursor must not duplicate a scorecard row",
-  );
+    const firstLine = JSON.stringify(scenario.first_observation_line);
+    scorecardContext.handleObservationStreamLine(firstLine);
+    scorecardContext.handleObservationStreamLine(firstLine);
+    assert.equal(handledModelCalls, 1, "cursor dedupe must stop a second reducer dispatch");
+    assert.match(target.textContent, new RegExp(scenario.expected.first_call_id));
+    assert.match(target.textContent, new RegExp(`model ${scenario.expected.served_model}`));
+    assert.match(target.textContent, new RegExp(`response ${scenario.expected.response_id}`));
+    assert.match(target.textContent, new RegExp(`finish ${scenario.expected.finish}`));
+    assert.match(target.textContent, /reasoning 0/);
 
-  snapshots.push({
-    product_events: {
-      events: [{ type: "model_call_recorded", record: anthropic }],
-    },
-  });
-  scorecardContext.handleObservationStreamLine(JSON.stringify({
-    type: "replay_gap",
-    gap: { latest_cursor: "gap-recovery" },
-  }));
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(
-    target.textContent,
-    "anthropic-call #1 completed · model claude-sonnet-4-20250514-served · response msg_anthropic_evidence_1 · finish end_turn · reasoning 0",
-    "an authoritative product snapshot replaces rows after a replay gap",
-  );
+    snapshots.push(scenario.first_snapshot);
+    scorecardContext.handleObservationStreamLine(
+      JSON.stringify(scenario.first_terminal_replacement_line),
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the production snapshot renderer must retain the first runtime ledger",
+    );
 
-  snapshots.push({
-    product_events: {
-      events: [
-        { type: "model_call_recorded", record: anthropic },
-        { type: "model_call_recorded", record: google },
-      ],
-    },
-  });
-  scorecardContext.handleObservationStreamLine(JSON.stringify({
-    type: "terminal_replacement",
-    cursor: "terminal-replacement",
-    event: googleEvent,
-  }));
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(
-    target.textContent,
-    [
-      "anthropic-call #1 completed · model claude-sonnet-4-20250514-served · response msg_anthropic_evidence_1 · finish end_turn · reasoning 0",
-      "google-call #1 completed · model gemini-3.1-pro-served · response google-evidence-1 · finish STOP · reasoning 0",
-    ].join("\n"),
-    "a terminal replacement event converges with the authoritative scorecard",
-  );
+    snapshots.push("delayed");
+    scorecardContext.handleObservationStreamLine(JSON.stringify({
+      type: "replay_gap",
+      gap: { latest_cursor: scenario.first_snapshot.observation.cursor },
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+    scorecardContext.handleObservationStreamLine(
+      JSON.stringify(scenario.second_observation_line),
+    );
+    assert.equal(handledModelCalls, 2);
+    resolveDelayedSnapshot(scenario.first_snapshot);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(
+      target.textContent,
+      new RegExp(scenario.expected.second_call_id),
+      "an observation arriving during recovery must survive the older snapshot",
+    );
+
+    snapshots.push(scenario.final_snapshot);
+    scorecardContext.handleObservationStreamLine(
+      JSON.stringify(scenario.second_terminal_replacement_line),
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    for (const callId of [scenario.expected.first_call_id, scenario.expected.second_call_id]) {
+      assert.match(target.textContent, new RegExp(callId));
+    }
+    assert.equal(
+      target.textContent.split("\n").length,
+      2,
+      "the real terminal replacement must converge to the authoritative product snapshot",
+    );
+  }
 });
 
-test("execution scorecard ordering is locale-independent for arbitrary call ids", () => {
+test("execution scorecard ordering follows attempt start time with call id as tie-breaker", () => {
   const target = { textContent: "" };
   const scorecardContext = { Map };
   vm.runInNewContext(
@@ -1289,17 +1323,43 @@ test("execution scorecard ordering is locale-independent for arbitrary call ids"
      this.scorecard = createExecutionScorecardState();`,
     scorecardContext,
   );
-  for (const call_id of ["a-call", "!call", "A-call"]) {
+  for (const [call_id, started_at_ms] of [["a-call", 30], ["!call", 20], ["A-call", 10]]) {
     scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
       call_id,
-      attempts: [{ ordinal: 1, outcome: "completed", evidence: { reasoning_output_tokens: 0 } }],
+      attempts: [{ ordinal: 1, started_at_ms, outcome: "completed", evidence: { reasoning_output_tokens: 0 } }],
     });
   }
   scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
   assert.deepEqual(
     target.textContent.split("\n").map(line => line.split(" #", 1)[0]),
-    ["!call", "A-call", "a-call"],
+    ["A-call", "!call", "a-call"],
   );
+});
+
+test("execution scorecard explains collection interruption only when reported", () => {
+  const target = { textContent: "" };
+  const scorecardContext = { Map, Math, Number };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+     this.scorecard = createExecutionScorecardState();`,
+    scorecardContext,
+  );
+  scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
+    call_id: "partial",
+    attempts: [{
+      ordinal: 1,
+      started_at_ms: 1,
+      outcome: "aborted",
+      evidence: { collection_interruption: "protocol_abort" },
+    }],
+  });
+  scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
+    call_id: "complete",
+    attempts: [{ ordinal: 1, started_at_ms: 2, outcome: "completed", evidence: {} }],
+  });
+  scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
+  assert.equal(target.textContent.match(/collection interrupted:/g)?.length, 1);
+  assert.match(target.textContent, /collection interrupted: protocol_abort/);
 });
 
 test("a snapshot overtaken by a live event cannot erase its row", () => {

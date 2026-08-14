@@ -2318,6 +2318,7 @@
         sessionId: null,
         productCursor: 0,
         observationCursor: null,
+        replayIncarnationId: null,
         recoveryGeneration: 0,
         renderedProductEvents: new Set(),
         appliedObservationEvents: new Set()
@@ -2328,7 +2329,9 @@
       return {
         generation: ++projection.recoveryGeneration,
         sessionId: projection.sessionId,
-        productCursor: projection.productCursor
+        productCursor: projection.productCursor,
+        observationCursor: projection.observationCursor,
+        replayIncarnationId: projection.replayIncarnationId
       };
     }
 
@@ -2338,6 +2341,8 @@
       return token.generation === projection.recoveryGeneration
         && token.sessionId === projection.sessionId
         && snapshotSession === token.sessionId
+        && token.observationCursor === projection.observationCursor
+        && token.replayIncarnationId === projection.replayIncarnationId
         && projection.productCursor <= snapshotCursor;
     }
 
@@ -2352,6 +2357,7 @@
         projection.appliedObservationEvents.clear();
         projection.productCursor = snapshotProductCursor;
         projection.observationCursor = snapshotObservationCursor;
+        projection.replayIncarnationId = null;
       } else {
         projection.productCursor = Math.max(
           projection.productCursor,
@@ -2384,9 +2390,15 @@
 
     function executionScorecardText(state) {
       const lines = [];
-      const records = [...state.values()].sort((left, right) =>
-        left.call_id < right.call_id ? -1 : left.call_id > right.call_id ? 1 : 0
+      const startedAt = record => Math.min(
+        ...(record.attempts || []).map(attempt => Number(attempt.started_at_ms)),
+        Number.MAX_SAFE_INTEGER
       );
+      const records = [...state.values()].sort((left, right) => {
+        const byStart = startedAt(left) - startedAt(right);
+        if (byStart) return byStart;
+        return left.call_id < right.call_id ? -1 : left.call_id > right.call_id ? 1 : 0;
+      });
       for (const record of records) {
         for (const attempt of record.attempts || []) {
           const evidence = attempt.evidence;
@@ -2397,6 +2409,8 @@
             evidence.provider_finish_reason && `finish ${evidence.provider_finish_reason}`,
             evidence.reasoning_output_tokens !== undefined
               && `reasoning ${evidence.reasoning_output_tokens}`,
+            evidence.collection_interruption
+              && `collection interrupted: ${evidence.collection_interruption}`,
           ].filter(Boolean);
           lines.push(`${record.call_id} #${attempt.ordinal} ${attempt.outcome} · ${facts.join(" · ")}`);
         }
@@ -3735,6 +3749,8 @@
       appliedObservationEvents.add(identity);
       projectionState.observationCursor =
         event.cursor || projectionState.observationCursor;
+      projectionState.replayIncarnationId =
+        event.replay_incarnation_id || projectionState.replayIncarnationId;
       if (event.type === "turn_activity") handleTurnEvent(event.activity, event.turn_id);
     }
 
@@ -4545,6 +4561,7 @@
       syncCommandAvailability();
     }
 
+    // BEGIN WORKBENCH_STATE_SNAPSHOT
     function applyStateSnapshot(
       state,
       replaceTranscript = false,
@@ -4609,6 +4626,7 @@
         setBusy(nextBusy, nextBusy ? "turn running · restored" : "ready");
       }
     }
+    // END WORKBENCH_STATE_SNAPSHOT
 
     /* Every snapshot request is bounded. A backend that accepts the connection
        and then blocks on an unavailable engine is otherwise indistinguishable

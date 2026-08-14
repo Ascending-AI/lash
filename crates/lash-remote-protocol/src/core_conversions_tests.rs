@@ -939,6 +939,50 @@ fn remote_turn_result_maps_core_semantics() {
 }
 
 #[test]
+fn core_diagnostics_do_not_cross_the_public_remote_projection() {
+    const PRIVATE_DIAGNOSTIC: &str = "secret provider panic: token=raw-secret";
+    let record = lash_core::LlmCallRecord {
+        call_id: lash_core::LlmCallId("panic-call".to_string()),
+        label: None,
+        attempts: vec![lash_core::AttemptRecord {
+            ordinal: 1,
+            started_at: 0,
+            duration: std::time::Duration::ZERO,
+            outcome: lash_core::AttemptOutcome::Failed,
+            protocol_position: lash_core::ProtocolPosition::NoResponse,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: Some(lash_core::NormalizedError {
+                class: "unknown".to_string(),
+                provider_code: Some("provider_panicked".to_string()),
+                http_status: None,
+                provider_request_id: None,
+                retry_after: None,
+                diagnostic: Some(PRIVATE_DIAGNOSTIC.to_string()),
+            }),
+            evidence: None,
+            generation_disposition: None,
+            usage: None,
+        }],
+    };
+
+    let remote_record = RemoteLlmCallRecord::from(record.clone());
+    let activity = RemoteTurnActivity::from_core(
+        1,
+        lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded { record }),
+    );
+    for value in [
+        serde_json::to_value(remote_record).expect("serialize remote result record"),
+        serde_json::to_value(activity).expect("serialize remote activity"),
+    ] {
+        let encoded = value.to_string();
+        assert!(!encoded.contains(PRIVATE_DIAGNOSTIC));
+        assert!(!encoded.contains("raw-secret"));
+        assert!(encoded.contains("provider_panicked"));
+    }
+}
+
+#[test]
 fn remote_tool_grants_validate_explicit_bindings_and_duplicates() {
     let grant = demo_grant("one", "tools", "search");
     grant.validate().expect("valid grant");

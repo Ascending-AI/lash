@@ -277,8 +277,6 @@ pub struct RemoteNormalizedError {
     pub provider_request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostic: Option<String>,
 }
 
 pub(crate) fn validate_llm_call_record(
@@ -308,6 +306,64 @@ pub(crate) fn validate_llm_call_record(
         }
         if let Some(error) = &attempt.error {
             require_non_empty("RemoteNormalizedError", "class", &error.class)?;
+        }
+        match attempt.outcome {
+            RemoteAttemptOutcome::Completed => {
+                if attempt.protocol_position != RemoteProtocolPosition::TerminalObserved {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteLlmCallRecord",
+                        message: format!(
+                            "completed attempt {} must have terminal_observed protocol position",
+                            attempt.ordinal
+                        ),
+                    });
+                }
+                if attempt.error.is_some() {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteLlmCallRecord",
+                        message: format!(
+                            "completed attempt {} must not carry an error",
+                            attempt.ordinal
+                        ),
+                    });
+                }
+                if attempt
+                    .retry_decision
+                    .as_ref()
+                    .is_some_and(|decision| decision.scheduled)
+                {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteLlmCallRecord",
+                        message: format!(
+                            "completed attempt {} must not schedule a retry",
+                            attempt.ordinal
+                        ),
+                    });
+                }
+            }
+            RemoteAttemptOutcome::Failed if attempt.error.is_none() => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteLlmCallRecord",
+                    message: format!("failed attempt {} must carry an error", attempt.ordinal),
+                });
+            }
+            RemoteAttemptOutcome::Failed
+            | RemoteAttemptOutcome::Aborted
+            | RemoteAttemptOutcome::Interrupted => {}
+        }
+        if attempt
+            .retry_decision
+            .as_ref()
+            .is_some_and(|decision| decision.scheduled)
+            && index + 1 == record.attempts.len()
+        {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteLlmCallRecord",
+                message: format!(
+                    "attempt {} schedules a retry but no following attempt is sealed",
+                    attempt.ordinal
+                ),
+            });
         }
     }
     Ok(())

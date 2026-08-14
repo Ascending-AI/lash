@@ -16,9 +16,10 @@ use std::collections::BTreeSet;
 
 use lash_core::runtime::QueuedWorkClaimBoundary;
 use lash_core::{
-    CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin, MessageRole, PluginMessage,
-    PluginRuntimeEvent, TokenUsage, ToolCallOutput, ToolFailure, ToolFailureClass, TurnActivity,
-    TurnActivityId, TurnCause, TurnEvent, TurnInputApplication,
+    AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin,
+    MessageRole, PluginMessage, PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput,
+    ToolFailure, ToolFailureClass, TurnActivity, TurnActivityId, TurnCause, TurnEvent,
+    TurnInputApplication,
 };
 use serde_json::json;
 
@@ -161,7 +162,19 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 record: LlmCallRecord {
                     call_id: LlmCallId("llm-call-1".to_string()),
                     label: Some("primary".to_string()),
-                    attempts: Vec::new(),
+                    attempts: vec![AttemptRecord {
+                        ordinal: 1,
+                        started_at: 7,
+                        duration: std::time::Duration::from_millis(3),
+                        outcome: AttemptOutcome::Completed,
+                        protocol_position: ProtocolPosition::TerminalObserved,
+                        retry_budget_consumed: true,
+                        retry_decision: None,
+                        error: None,
+                        evidence: None,
+                        generation_disposition: None,
+                        usage: None,
+                    }],
                 },
             },
             json!({
@@ -169,7 +182,14 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "record": {
                     "call_id": "llm-call-1",
                     "label": "primary",
-                    "attempts": [],
+                    "attempts": [{
+                        "ordinal": 1,
+                        "started_at": 7,
+                        "duration": { "secs": 0, "nanos": 3000000 },
+                        "outcome": "completed",
+                        "protocol_position": "terminal_observed",
+                        "retry_budget_consumed": true,
+                    }],
                 },
             }),
         ),

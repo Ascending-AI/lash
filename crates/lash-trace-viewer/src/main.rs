@@ -1192,6 +1192,7 @@ mod tests {
                             provider_response_id: Some("provider-response-1".to_string()),
                             reasoning_output_tokens: Some(0),
                             provider_finish_reason: Some("stop".to_string()),
+                            collection_interruption: Some("protocol_abort".to_string()),
                             ..Default::default()
                         }),
                     },
@@ -1201,7 +1202,10 @@ mod tests {
                         duration_ms: 8,
                         reason: None,
                         delay_ms: None,
-                        execution_evidence: None,
+                        execution_evidence: Some(lash_trace::TraceExecutionEvidence {
+                            served_model: Some("served-model-2".to_string()),
+                            ..Default::default()
+                        }),
                     },
                 ]),
             },

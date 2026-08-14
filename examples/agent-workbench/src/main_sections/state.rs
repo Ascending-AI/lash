@@ -401,8 +401,7 @@ enum StreamItem {
         receipt: TurnInputReceipt,
     },
     ModelCallRecorded {
-        turn_id: String,
-        record: lash_remote_protocol::RemoteLlmCallRecord,
+        record: lash::remote::llm::RemoteLlmCallRecord,
     },
     Done {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -700,7 +699,7 @@ impl SessionEventRegistry {
         }
     }
 
-    /// Retire the product rows this workbench published on behalf of `turn_id`,
+    /// Retire the transient product rows this workbench published on behalf of `turn_id`,
     /// reporting the message ids it removed.
     ///
     /// A turn that failed has no outcome for its optimistic rows to stand for —

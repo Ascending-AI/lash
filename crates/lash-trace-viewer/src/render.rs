@@ -272,6 +272,10 @@ fn with_retry_ladder(
                 evidence
                     .reasoning_output_tokens
                     .map(|value| format!("reasoning_tokens={value}")),
+                evidence
+                    .collection_interruption
+                    .as_deref()
+                    .map(|value| format!("collection_interruption={value}")),
             ]
             .into_iter()
             .flatten()

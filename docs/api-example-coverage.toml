@@ -1515,7 +1515,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::session"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1345#.session(session_id.clone())"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1417#.session(session_id.clone())"
 reason = "Syntax-only evidence: the recorded example anchor inherits a closure operand that can observe an unrelated callback; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -2064,8 +2064,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::close"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1366#session.close().await.expect(\"close canonical session\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1388#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1438#session.close().await.expect(\"close canonical session\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1460#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::LashSession::commands"
@@ -2198,7 +2198,7 @@ aliases = ["lash::prelude::LashSession::read_view"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1041#.read_view()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2385#assistant_events.len(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2457#assistant_events.len(),"
 
 [[api]]
 symbol = "lash::LashSession::refresh_background_graph"
@@ -2244,8 +2244,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2154#crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2160#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2226#crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2232#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::LashSession::set_turn_phase_probe"
@@ -2283,8 +2283,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::turn"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2135#.turn(lash::TurnInput::text(turn_text))"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2162#\"the first provider call must be blocked before the mid-turn read\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2207#.turn(lash::TurnInput::text(turn_text))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2234#\"the first provider call must be blocked before the mid-turn read\""
 
 [[api]]
 symbol = "lash::LashSession::turn_address"
@@ -5062,8 +5062,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::run", "lash::turn::TurnBuilder::run"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2291#.run()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2300#receipts.as_slice(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2363#.run()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2372#receipts.as_slice(),"
 
 [[api]]
 symbol = "lash::TurnBuilder::stream"
@@ -5081,8 +5081,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::stream_to", "lash::turn::TurnBuilder::stream_to"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1645#.stream_to(&ChannelTurnEvents {"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2160#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1717#.stream_to(&ChannelTurnEvents {"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2232#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::TurnBuilder::turn_id"
@@ -5091,8 +5091,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::turn_id", "lash::turn::TurnBuilder::turn_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2136#.turn_id(run_turn_id.clone())"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2160#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2208#.turn_id(run_turn_id.clone())"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2232#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::TurnBuilder::with_plugin_input"
@@ -5133,7 +5133,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2302#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2374#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5166,7 +5166,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2301#[TurnCancelReceipt {"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2373#[TurnCancelReceipt {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5175,8 +5175,8 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2302#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2318#done_ids.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2374#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2390#done_ids.len(),"
 
 [[api]]
 symbol = "lash::TurnCancelRequest"
@@ -5570,9 +5570,8 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ModelCallRecorded", "lash_core::TurnEvent::ModelCallRecorded"]
 area = "protocol"
-disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs:75#lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {"
-reason = "Syntax-only evidence: the example constructs the semantic event and separately asserts its record field after remote projection; the variant constructor itself has no independent outcome beyond that field contract."
+disposition = "unused-justify"
+reason = "Concrete host class: Lash runtime observation producers emit this core event and the shipped workbench consumes its versioned remote mirror; the example intentionally does not couple directly to the in-process event variant."
 
 [[api]]
 symbol = "lash::TurnEvent::ModelCallRecorded::record"
@@ -5580,9 +5579,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ModelCallRecorded::record", "lash_core::TurnEvent::ModelCallRecorded::record"]
 area = "protocol"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs:75#lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {"
-assertion = "examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs:85#assert_eq!(remote_record.call_id, call_id);"
+disposition = "unused-justify"
+reason = "Concrete host class: the runtime fills this field before remote conversion, while the shipped workbench directly asserts the corresponding RemoteTurnEvent record at its public process boundary."
 
 [[api]]
 symbol = "lash::TurnEvent::ModelAttemptReset"
@@ -6130,7 +6128,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnInput::text", "lash_core::TurnInput::text"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2135#.turn(lash::TurnInput::text(turn_text))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2207#.turn(lash::TurnInput::text(turn_text))"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -8694,7 +8692,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2081#lash::direct::LlmOutputPart::Reasoning {"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2153#lash::direct::LlmOutputPart::Reasoning {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -8704,8 +8702,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning::replay"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2083#replay: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2227#&& text == \"durable reasoning disclosure\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2155#replay: None,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2299#&& text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Reasoning::text"
@@ -8714,8 +8712,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning::text"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2082#text: \"durable reasoning disclosure\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2227#&& text == \"durable reasoning disclosure\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2154#text: \"durable reasoning disclosure\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2299#&& text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Text"
@@ -10135,8 +10133,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Message::id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1212#id: committed_id.to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1236#assert_eq!(reconciled.cursor, 2);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1226#id: committed_id.to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1309#if message.id == workbench_turn_user_message_id(\"reconciled-turn\")"
 
 [[api]]
 symbol = "lash::messages::Message::is_transient"
@@ -10155,7 +10153,7 @@ aliases = ["lash_core::Message::origin"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:68#message.origin.as_ref()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1466#\"the UI-owned row renders once and the committed copy stays provenance\""
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1538#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::Message::parts"
@@ -10173,8 +10171,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Message::role"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1213#role: \"user\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1236#assert_eq!(reconciled.cursor, 2);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1227#role: \"user\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2275#.map(|message| (message.role.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::messages::MessageOrigin"
@@ -10284,8 +10282,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageOrigin::TurnInput::input_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1432#input_id: Some(\"workbench-input-1\".to_string()),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1466#\"the UI-owned row renders once and the committed copy stays provenance\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1504#input_id: Some(\"workbench-input-1\".to_string()),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1538#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::MessageOrigin::TurnInput::turn_id"
@@ -10295,7 +10293,7 @@ aliases = ["lash_core::MessageOrigin::TurnInput::turn_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:67#let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) ="
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1466#\"the UI-owned row renders once and the committed copy stays provenance\""
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1538#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::MessageRole"
@@ -10304,7 +10302,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageRole"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1359#lash::messages::MessageRole::Assistant,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1431#lash::messages::MessageRole::Assistant,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -10314,7 +10312,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageRole::Assistant"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1359#lash::messages::MessageRole::Assistant,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1431#lash::messages::MessageRole::Assistant,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -16137,7 +16135,7 @@ aliases = ["lash_core::SessionReadView::messages"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1042#.messages()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2385#assistant_events.len(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2457#assistant_events.len(),"
 
 [[api]]
 symbol = "lash::persistence::SessionReadView::policy"
@@ -20399,8 +20397,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::text"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1388#.map(|message| (message.id.as_str(), message.text.as_str()))"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1388#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1460#.map(|message| (message.id.as_str(), message.text.as_str()))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1460#.map(|message| (message.id.as_str(), message.text.as_str()))"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -20410,7 +20408,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::with_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1357#.with_id(\"canonical-user\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1429#.with_id(\"canonical-user\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31793,296 +31791,324 @@ symbol = "lash::remote::llm::RemoteAttemptOutcome"
 kind = "enum"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptOutcome::Aborted"
 kind = "variant"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1205#lash::remote::llm::RemoteAttemptOutcome::Aborted,"
+reason = "The example keeps the aborted vocabulary reachable, while its outcome assertions exercise the failed and completed records that the shipped scorecard renders."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptOutcome::Completed"
 kind = "variant"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptOutcome::Failed"
 kind = "variant"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptOutcome::Interrupted"
 kind = "variant"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1208#lash::remote::llm::RemoteAttemptOutcome::Interrupted,"
+reason = "The example keeps the interrupted vocabulary reachable, while its outcome assertions exercise the failed and completed records that the shipped scorecard renders."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord"
 kind = "struct"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::duration_ms"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::error"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::evidence"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::generation_disposition"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::ordinal"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::outcome"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::protocol_position"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::retry_budget_consumed"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::retry_decision"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::started_at_ms"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::usage"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmCallRecord"
 kind = "struct"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmCallRecord::attempts"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmCallRecord::call_id"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmCallRecord::label"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError"
 kind = "struct"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::class"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
-
-[[api]]
-symbol = "lash::remote::llm::RemoteNormalizedError::diagnostic"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::http_status"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::provider_code"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::provider_request_id"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::retry_after_ms"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProtocolPosition"
 kind = "enum"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProtocolPosition::NoResponse"
 kind = "variant"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProtocolPosition::OutputStarted"
 kind = "variant"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1214#lash::remote::llm::RemoteProtocolPosition::OutputStarted,"
+reason = "The example keeps the output-started vocabulary reachable; its reconciliation assertion directly exercises no-response and terminal-observed positions."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProtocolPosition::ResponseObserved"
 kind = "variant"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1213#lash::remote::llm::RemoteProtocolPosition::ResponseObserved,"
+reason = "The example keeps the response-observed vocabulary reachable; its reconciliation assertion directly exercises no-response and terminal-observed positions."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProtocolPosition::TerminalObserved"
 kind = "variant"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteRetryDecision"
 kind = "struct"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteRetryDecision::delay_ms"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteRetryDecision::reason"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteRetryDecision::scheduled"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete consumer class: Lash-facade remote hosts decode protocol-35 model-call records from turn results and semantic activities; the shipped workbench consumes this nested DTO through serde and inferred field access, so it does not name this facade symbol directly."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1314#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteDiagnostic"
@@ -41421,7 +41447,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs:79#let lash::remote::usage::RemoteTurnEvent::ModelCallRecorded {"
+usage = "examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs:88#let lash::remote::usage::RemoteTurnEvent::ModelCallRecorded { record } = &activity.event else {"
 reason = "Syntax-only evidence: the example pattern-matches the remote variant and separately asserts its record field; the pattern itself only distinguishes the enum shape."
 
 [[api]]
@@ -41430,8 +41456,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs:79#let lash::remote::usage::RemoteTurnEvent::ModelCallRecorded {"
-assertion = "examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs:85#assert_eq!(remote_record.call_id, call_id);"
+usage = "examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs:88#let lash::remote::usage::RemoteTurnEvent::ModelCallRecorded { record } = &activity.event else {"
+assertion = "examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs:91#assert!(!record.call_id.is_empty());"
 
 [[api]]
 symbol = "lash::remote::usage::RemoteTurnEvent::ModelAttemptReset"
@@ -43109,8 +43135,8 @@ kind = "function"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1643#.require_finish()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2160#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1715#.require_finish()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2232#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::rlm::RlmTurnBuilderExt::require_finish_schema"
@@ -62606,7 +62632,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:803#registrant_scope: record.registrant_scope_id(),"
+usage = "examples/agent-workbench/src/main_sections/state.rs:802#registrant_scope: record.registrant_scope_id(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::created_at_ms"
@@ -62723,7 +62749,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord::registrant_scope_id"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:803#registrant_scope: record.registrant_scope_id(),"
+usage = "examples/agent-workbench/src/main_sections/state.rs:802#registrant_scope: record.registrant_scope_id(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::registrant_session_id"

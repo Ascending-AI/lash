@@ -96,6 +96,28 @@ pub fn runtime_script_for_text(
     Ok(ProviderWireScript::from_json_str(&encoded)?)
 }
 
+/// Google runtime fixture variant that reports an explicit zero reasoning
+/// count without weakening the canonical fixture's non-zero coverage.
+pub fn google_runtime_script_for_text_with_explicit_zero_reasoning(
+    text: &str,
+) -> Result<ProviderWireScript, RuntimeProviderError> {
+    let mut script = runtime_script_value_for_text(GOOGLE_OAUTH, text)?;
+    for timeline_index in [1, 2] {
+        let encoded = script
+            .pointer(&format!("/timeline/{timeline_index}/data"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                RuntimeProviderError::new(format!(
+                    "Google runtime script missing timeline[{timeline_index}].data"
+                ))
+            })?;
+        let mut event: Value = serde_json::from_str(encoded)?;
+        event["response"]["usageMetadata"]["thoughtsTokenCount"] = json!(0);
+        set_sse_data(&mut script, timeline_index, event)?;
+    }
+    ProviderWireScript::from_json_str(&script.to_string()).map_err(Into::into)
+}
+
 /// The runtime provider wire script for `text` as a still-mutable JSON value,
 /// before it is parsed into a `ProviderWireScript`. This lets failure-script
 /// builders reuse the exact happy-path request match and content framing for a
@@ -213,7 +235,7 @@ pub fn runtime_script_value_for_text(
                         "usageMetadata": {
                             "promptTokenCount": 6,
                             "candidatesTokenCount": 3,
-                            "thoughtsTokenCount": 0,
+                            "thoughtsTokenCount": 1,
                         }
                     }
                 }),
@@ -465,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_google_partial_fixture_preserves_identity_and_explicit_zero_reasoning() {
+    fn generated_google_partial_fixture_preserves_canonical_identity_and_reasoning() {
         let script = live_failure_script(GOOGLE_OAUTH, 2).expect("Google partial fixture");
         let payload = sse_payload(&script.timeline[1]);
         assert_eq!(
@@ -478,8 +500,21 @@ mod tests {
         );
         assert_eq!(
             payload.pointer("/response/usageMetadata/thoughtsTokenCount"),
-            Some(&json!(0))
+            Some(&json!(1))
         );
+    }
+
+    #[test]
+    fn generated_google_explicit_zero_reasoning_variant_preserves_presence() {
+        let script = google_runtime_script_for_text_with_explicit_zero_reasoning("answer")
+            .expect("Google explicit-zero variant");
+        for timeline_index in [1, 2] {
+            let payload = sse_payload(&script.timeline[timeline_index]);
+            assert_eq!(
+                payload.pointer("/response/usageMetadata/thoughtsTokenCount"),
+                Some(&json!(0))
+            );
+        }
     }
 
     #[test]

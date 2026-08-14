@@ -84,21 +84,59 @@ fn merge_raw_usage(provider_usage: &mut Option<Value>, next: &Value) {
     }
 }
 
-fn merge_execution_evidence(accumulated: &mut Option<ExecutionEvidence>, next: ExecutionEvidence) {
+fn merge_execution_evidence(
+    accumulated: &mut Option<ExecutionEvidence>,
+    next: ExecutionEvidence,
+) -> Result<(), LlmTransportError> {
     if next == ExecutionEvidence::default() {
-        return;
+        return Ok(());
     }
+    let ExecutionEvidence {
+        served_model,
+        provider_response_id,
+        provider_request_id,
+        reasoning_output_tokens,
+        provider_finish_reason,
+        collection_interruption,
+    } = next;
     let current = accumulated.get_or_insert_with(ExecutionEvidence::default);
-    current.served_model = next.served_model.or(current.served_model.take());
-    current.provider_response_id = next
-        .provider_response_id
-        .or(current.provider_response_id.take());
-    current.reasoning_output_tokens = next
-        .reasoning_output_tokens
-        .or(current.reasoning_output_tokens);
-    current.provider_finish_reason = next
-        .provider_finish_reason
-        .or(current.provider_finish_reason.take());
+    merge_stable_identity(&mut current.served_model, served_model, "served_model")?;
+    merge_stable_identity(
+        &mut current.provider_response_id,
+        provider_response_id,
+        "provider_response_id",
+    )?;
+    merge_stable_identity(
+        &mut current.provider_request_id,
+        provider_request_id,
+        "provider_request_id",
+    )?;
+    current.reasoning_output_tokens =
+        match (current.reasoning_output_tokens, reasoning_output_tokens) {
+            (Some(current), Some(next)) => Some(current.max(next)),
+            (current, next) => current.or(next),
+        };
+    current.provider_finish_reason =
+        provider_finish_reason.or_else(|| current.provider_finish_reason.take());
+    current.collection_interruption = collection_interruption.or(current.collection_interruption);
+    Ok(())
+}
+
+fn merge_stable_identity(
+    current: &mut Option<String>,
+    next: Option<String>,
+    field: &'static str,
+) -> Result<(), LlmTransportError> {
+    match (current.as_deref(), next) {
+        (Some(existing), Some(next)) if existing != next => Err(LlmTransportError::new(format!(
+            "Anthropic stream changed {field} from `{existing}` to `{next}`"
+        ))),
+        (None, Some(next)) => {
+            *current = Some(next);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn reasoning_output_tokens(usage: &Value) -> Option<u64> {
@@ -199,7 +237,7 @@ impl AnthropicProvider {
                         reasoning_output_tokens: usage.and_then(reasoning_output_tokens),
                         ..ExecutionEvidence::default()
                     },
-                );
+                )?;
                 if let Some(usage) = usage {
                     state.usage = Self::parse_usage(usage);
                     merge_raw_usage(&mut state.provider_usage, usage);
@@ -339,7 +377,7 @@ impl AnthropicProvider {
                             reasoning_output_tokens: reasoning_output_tokens(usage),
                             ..ExecutionEvidence::default()
                         },
-                    );
+                    )?;
                 }
                 if let Some(stop) = event
                     .get("delta")
@@ -353,7 +391,7 @@ impl AnthropicProvider {
                             provider_finish_reason: Some(stop.to_string()),
                             ..ExecutionEvidence::default()
                         },
-                    );
+                    )?;
                 }
                 if let Some(tx) = stream_events {
                     tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {

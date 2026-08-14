@@ -42,6 +42,7 @@ mod tests {
     include!("tests/provider_execution_evidence.rs");
     include!("tests/remote_execution_evidence.rs");
     include!("tests/recoverable_chat.rs");
+    include!("tests/recoverable_chat_bare_prose.rs");
     include!("tests/recoverable_chat_failures.rs");
     include!("tests/continue_as_projection.rs");
     include!("tests/tool_catalog.rs");

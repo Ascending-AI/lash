@@ -602,7 +602,7 @@ impl From<core_llm::NormalizedError> for RemoteNormalizedError {
             http_status,
             provider_request_id,
             retry_after,
-            diagnostic,
+            diagnostic: _,
         } = value;
         Self {
             class,
@@ -611,7 +611,6 @@ impl From<core_llm::NormalizedError> for RemoteNormalizedError {
             provider_request_id,
             retry_after_ms: retry_after
                 .map(|value| value.as_millis().try_into().unwrap_or(u64::MAX)),
-            diagnostic,
         }
     }
 }

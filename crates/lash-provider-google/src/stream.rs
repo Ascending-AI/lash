@@ -67,25 +67,38 @@ impl GoogleOAuthProvider {
     fn merge_execution_evidence(
         accumulated: &mut Option<ExecutionEvidence>,
         next: Option<ExecutionEvidence>,
-    ) {
-        let Some(next) = next else { return };
+    ) -> Result<(), LlmTransportError> {
+        let Some(next) = next else { return Ok(()) };
+        let ExecutionEvidence {
+            served_model,
+            provider_response_id,
+            provider_request_id,
+            reasoning_output_tokens,
+            provider_finish_reason,
+            collection_interruption,
+        } = next;
         let current = accumulated.get_or_insert_with(ExecutionEvidence::default);
-        current.served_model = next.served_model.or(current.served_model.take());
-        current.provider_response_id = next
-            .provider_response_id
-            .or(current.provider_response_id.take());
-        current.provider_request_id = next
-            .provider_request_id
-            .or(current.provider_request_id.take());
-        current.reasoning_output_tokens = next
-            .reasoning_output_tokens
-            .or(current.reasoning_output_tokens);
-        current.provider_finish_reason = next
-            .provider_finish_reason
-            .or(current.provider_finish_reason.take());
-        current.collection_interruption = next
-            .collection_interruption
-            .or(current.collection_interruption);
+        merge_stable_identity(&mut current.served_model, served_model, "served_model")?;
+        merge_stable_identity(
+            &mut current.provider_response_id,
+            provider_response_id,
+            "provider_response_id",
+        )?;
+        merge_stable_identity(
+            &mut current.provider_request_id,
+            provider_request_id,
+            "provider_request_id",
+        )?;
+        current.reasoning_output_tokens =
+            match (current.reasoning_output_tokens, reasoning_output_tokens) {
+                (Some(current), Some(next)) => Some(current.max(next)),
+                (current, next) => current.or(next),
+            };
+        current.provider_finish_reason =
+            provider_finish_reason.or_else(|| current.provider_finish_reason.take());
+        current.collection_interruption =
+            collection_interruption.or(current.collection_interruption);
+        Ok(())
     }
 
     fn text_parts_from_event(event: &Value) -> Vec<(String, Option<String>, bool)> {
@@ -323,7 +336,7 @@ impl GoogleOAuthProvider {
         Self::merge_execution_evidence(
             execution_evidence,
             Self::execution_evidence_from_value(&event),
-        );
+        )?;
         let new_usage = Self::usage_from_event(&event);
         if new_usage.input_tokens > 0
             || new_usage.output_tokens > 0
@@ -488,5 +501,22 @@ impl GoogleOAuthProvider {
             "" => terminal_reason_from_parts(parts),
             _ => LlmTerminalReason::ProviderError,
         }
+    }
+}
+
+fn merge_stable_identity(
+    current: &mut Option<String>,
+    next: Option<String>,
+    field: &'static str,
+) -> Result<(), LlmTransportError> {
+    match (current.as_deref(), next) {
+        (Some(existing), Some(next)) if existing != next => Err(LlmTransportError::new(format!(
+            "Google stream changed {field} from `{existing}` to `{next}`"
+        ))),
+        (None, Some(next)) => {
+            *current = Some(next);
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }

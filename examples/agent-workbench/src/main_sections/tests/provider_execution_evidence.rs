@@ -1,101 +1,297 @@
-async fn provider_execution_evidence_events(
-) -> Vec<lash::remote::observations::RemoteSessionObservationEvent> {
-    let mut evidence_events = Vec::new();
-    for (provider_kind, model, call_id, response_id, served_model, finish) in [
+async fn run_provider_evidence_turn(
+    state: &AppState,
+    session: &lash::LashSession,
+    turn_id: &str,
+) -> (lash::TurnResult, Arc<Mutex<TurnStreamState>>) {
+    state.track_turn(&session.session_id(), turn_id);
+    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+    let output = session
+        .turn(lash::TurnInput::text("answer directly"))
+        .turn_id(turn_id)
+        .require_finish()
+        .expect("require provider fixture finish")
+        .stream_to(&ChannelTurnEvents {
+            turn_state: Arc::clone(&turn_state),
+        })
+        .await
+        .expect("provider fixture completes through a real Lash turn");
+    (output, turn_state)
+}
+
+async fn next_remote_model_call(
+    recovery: &mut lash::observe::RemoteSessionObservationStream,
+) -> serde_json::Value {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let update = recovery
+                .next()
+                .await
+                .expect("remote observation stream stays open")
+                .expect("remote observation update");
+            match update {
+                lash::observe::RemoteSessionObservationStreamItem::Event(remote)
+                    if matches!(
+                        &remote.event,
+                        lash::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
+                            activity,
+                        } if matches!(
+                            &activity.event,
+                            lash::remote::usage::RemoteTurnEvent::ModelCallRecorded { .. }
+                        )
+                    ) =>
+                {
+                    return serde_json::json!({
+                        "type": "observation",
+                        "event": remote,
+                    });
+                }
+                lash::observe::RemoteSessionObservationStreamItem::Event(_) => {}
+                lash::observe::RemoteSessionObservationStreamItem::Gap { .. } => {
+                    panic!("live provider observation must not gap")
+                }
+            }
+        }
+    })
+    .await
+    .expect("provider model-call observation timeout")
+}
+
+async fn next_terminal_replacement(
+    recovery: &mut lash::recoverable_chat::RecoverableChatSubscription,
+    sequence: u64,
+) -> serde_json::Value {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match recovery
+                .next()
+                .await
+                .expect("recoverable chat stream stays open")
+                .expect("recoverable chat update")
+            {
+                lash::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
+                    event,
+                    snapshot,
+                    ..
+                } => {
+                    let remote = lash::remote::observations::RemoteSessionObservationEvent::from_core(
+                        sequence,
+                        Arc::clone(&event),
+                    );
+                    return serde_json::json!({
+                        "type": "terminal_replacement",
+                        "event": remote,
+                        "cursor": snapshot.cursor.to_string(),
+                    });
+                }
+                lash::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}
+                lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
+                    panic!("live recoverable chat must not gap")
+                }
+            }
+        }
+    })
+    .await
+    .expect("provider terminal replacement timeout")
+}
+
+async fn provider_state_snapshot(state: &AppState, session_id: &str) -> serde_json::Value {
+    let Json(snapshot) = app_state(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(session_id.to_string()),
+        }),
+    )
+    .await
+    .expect("production state facade projects provider evidence");
+    serde_json::to_value(snapshot).expect("serialize production state snapshot")
+}
+
+fn assert_delivered_provider_evidence(
+    observation_line: &serde_json::Value,
+    runtime_record: &lash::LlmCallRecord,
+    response_id: &str,
+    served_model: &str,
+    finish: &str,
+    reasoning_tokens: u64,
+) {
+    let remote_record = observation_line
+        .pointer("/event/activity/record")
+        .expect("remote observation carries the model-call record");
+    assert_eq!(remote_record["call_id"], runtime_record.call_id.0);
+    let evidence = &remote_record["attempts"][0]["evidence"];
+    assert_eq!(evidence["provider_response_id"], response_id);
+    assert_eq!(evidence["served_model"], served_model);
+    assert_eq!(evidence["provider_finish_reason"], finish);
+    assert_eq!(evidence["reasoning_output_tokens"], reasoning_tokens);
+}
+
+async fn provider_execution_evidence_scenarios() -> serde_json::Value {
+    let mut scenarios = Vec::new();
+    for (provider_kind, response_id, served_model, finish, reasoning_tokens) in [
         (
             lash_sim::runtime_providers::GOOGLE_OAUTH,
-            "gemini-3.1-pro-preview",
-            "google-call",
             "google-evidence-1",
             "gemini-3.1-pro-served",
             "STOP",
+            0,
         ),
         (
             lash_sim::runtime_providers::ANTHROPIC,
-            "claude-sonnet-4-20250514",
-            "anthropic-call",
             "msg_anthropic_evidence_1",
             "claude-sonnet-4-20250514-served",
             "end_turn",
+            0,
         ),
     ] {
-        let script = lash_sim::runtime_providers::runtime_script_for_text(
-            provider_kind,
-            &format!("{provider_kind} evidence"),
-        )
-        .expect("provider evidence fixture");
-        let transport = Arc::new(lash_sim::ScriptedLlmHttpTransport::new(script));
-        let (mut provider, _, _) = lash_sim::runtime_providers::runtime_provider_components(
+        let answer = format!(
+            "<lashlang>\nfinish \"{provider_kind} execution evidence\"\n</lashlang>"
+        );
+        let script = if provider_kind == lash_sim::runtime_providers::GOOGLE_OAUTH {
+            lash_sim::runtime_providers::google_runtime_script_for_text_with_explicit_zero_reasoning(
+                &answer,
+            )
+            .expect("Google explicit-zero provider fixture")
+        } else {
+            lash_sim::runtime_providers::runtime_script_for_text(provider_kind, &answer)
+                .expect("provider evidence fixture")
+        };
+        let transport = Arc::new(lash_sim::ScriptedLlmHttpTransport::from_scripts([
+            script.clone(),
+            script,
+        ]));
+        let (provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
             provider_kind,
             &transport,
         )
         .expect("provider fixture components");
-        let completion = provider
-            .complete(lash_core::LlmRequest {
-                model: model.to_string(),
-                messages: vec![lash_core::llm::types::LlmMessage::text(
-                    lash_core::llm::types::LlmRole::User,
-                    "answer directly",
-                )],
-                attachments: Vec::new(),
-                resolved_stored: Default::default(),
-                tools: Arc::new(Vec::new()),
-                tool_choice: lash_core::llm::types::LlmToolChoice::Auto,
-                model_variant: Default::default(),
-                model_capability: Default::default(),
-                generation: Default::default(),
-                scope: lash_core::LlmRequestScope::new(
-                    "scorecard-session",
-                    "scorecard-frame",
-                    format!("scorecard-{provider_kind}"),
-                ),
-                output_spec: None,
-                stream_events: Some(lash_core::llm::types::LlmEventSender::new(|_| {})),
-                provider_trace: None,
+        let data_dir = tempfile::tempdir().expect("provider evidence workbench tempdir");
+        let state = recoverable_chat_test_state_with_provider(data_dir.path(), 64, provider).await;
+        let session_id = state.current_session_id();
+        let session = state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .expect("open provider evidence session");
+        session
+            .configure(lash::SessionConfigPatch {
+                model: Some(model),
+                ..Default::default()
             })
             .await
-            .expect("provider fixture completion");
-        let response_evidence = completion
-            .response
-            .execution_evidence
-            .as_ref()
-            .expect("fixture response has typed execution evidence");
-        assert_eq!(
-            response_evidence.provider_response_id.as_deref(),
-            Some(response_id)
-        );
-        assert_eq!(response_evidence.served_model.as_deref(), Some(served_model));
-        assert_eq!(response_evidence.provider_finish_reason.as_deref(), Some(finish));
-        assert_eq!(response_evidence.reasoning_output_tokens, Some(0));
+            .expect("configure provider-specific model");
 
-        let mut record = completion.call_record;
-        record.call_id = lash_core::LlmCallId(call_id.to_string());
-        let activity = lash::remote::usage::RemoteTurnActivity::from_core(
-            evidence_events.len() as u64,
-            lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {
-                record,
-            }),
+        let observable = session.observe();
+        let initial = observable.recoverable_chat_snapshot();
+        let remote_cursor = lash::remote::observations::RemoteSessionCursor::new(
+            initial.cursor.to_string(),
         );
-        let lash::remote::usage::RemoteTurnEvent::ModelCallRecorded {
-            record: remote_record,
-        } = &activity.event
-        else {
-            panic!("core model-call record must become typed remote activity");
-        };
-        assert_eq!(remote_record.call_id, call_id);
-        let event = lash::remote::observations::RemoteSessionObservationEvent {
-            protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
-            session_id: "scorecard-session".to_string(),
-            replay_incarnation_id: "scorecard-incarnation".to_string(),
-            turn_id: Some("scorecard-turn".to_string()),
-            revision: evidence_events.len() as u64 + 1,
-            cursor: format!("scorecard-cursor-{}", evidence_events.len() + 1),
-            event: lash::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
-                activity: Box::new(activity),
+        let mut observation_recovery = observable
+            .subscribe_and_recover_remote(remote_cursor)
+            .expect("subscribe through the remote observation facade");
+        let mut chat_recovery = observable.subscribe_recoverable_chat(initial.cursor);
+
+        let first_turn_id = format!("{provider_kind}-evidence-turn-1");
+        let (first_observation_line, first_terminal_replacement_line, first_execution) = tokio::join!(
+            next_remote_model_call(&mut observation_recovery),
+            next_terminal_replacement(&mut chat_recovery, 0),
+            run_provider_evidence_turn(&state, &session, &first_turn_id),
+        );
+        let (first_output, first_turn_state) = first_execution;
+        let first_record = first_output
+            .llm_calls
+            .first()
+            .expect("first runtime turn seals one model-call ledger")
+            .clone();
+        assert_delivered_provider_evidence(
+            &first_observation_line,
+            &first_record,
+            response_id,
+            served_model,
+            finish,
+            reasoning_tokens,
+        );
+        crate::restate::record_turn_output(
+            &state,
+            &session,
+            &first_turn_id,
+            first_output,
+            first_turn_state,
+            "test.provider_execution_evidence.first.completed",
+        )
+        .await
+        .expect("workbench publishes the first runtime turn output");
+        state.active_turns.remove(&session_id, &first_turn_id);
+        let first_snapshot = provider_state_snapshot(&state, &session_id).await;
+
+        let second_turn_id = format!("{provider_kind}-evidence-turn-2");
+        let (second_observation_line, second_terminal_replacement_line, second_execution) = tokio::join!(
+            next_remote_model_call(&mut observation_recovery),
+            next_terminal_replacement(&mut chat_recovery, 1),
+            run_provider_evidence_turn(&state, &session, &second_turn_id),
+        );
+        let (second_output, second_turn_state) = second_execution;
+        let second_record = second_output
+            .llm_calls
+            .first()
+            .expect("second runtime turn seals one model-call ledger")
+            .clone();
+        assert_delivered_provider_evidence(
+            &second_observation_line,
+            &second_record,
+            response_id,
+            served_model,
+            finish,
+            reasoning_tokens,
+        );
+        crate::restate::record_turn_output(
+            &state,
+            &session,
+            &second_turn_id,
+            second_output,
+            second_turn_state,
+            "test.provider_execution_evidence.second.completed",
+        )
+        .await
+        .expect("workbench publishes the second runtime turn output");
+        state.active_turns.remove(&session_id, &second_turn_id);
+        let final_snapshot = provider_state_snapshot(&state, &session_id).await;
+
+        let product_records = final_snapshot
+            .pointer("/product_events/events")
+            .and_then(serde_json::Value::as_array)
+            .expect("product event snapshot")
+            .iter()
+            .filter(|event| event["type"] == "model_call_recorded")
+            .map(|event| event["record"]["call_id"].as_str().expect("call id"))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            product_records,
+            BTreeSet::from([first_record.call_id.0.as_str(), second_record.call_id.0.as_str()]),
+            "the product snapshot must contain the exact runtime-published ledgers"
+        );
+
+        scenarios.push(serde_json::json!({
+            "provider_kind": provider_kind,
+            "first_observation_line": first_observation_line,
+            "first_terminal_replacement_line": first_terminal_replacement_line,
+            "first_snapshot": first_snapshot,
+            "second_observation_line": second_observation_line,
+            "second_terminal_replacement_line": second_terminal_replacement_line,
+            "final_snapshot": final_snapshot,
+            "expected": {
+                "first_call_id": first_record.call_id.0,
+                "second_call_id": second_record.call_id.0,
+                "response_id": response_id,
+                "served_model": served_model,
+                "finish": finish,
+                "reasoning_tokens": reasoning_tokens,
             },
-        };
-        event.validate().expect("provider evidence remote event");
-        evidence_events.push(event);
+        }));
+        drop(observation_recovery);
+        drop(chat_recovery);
+        drop(observable);
+        session.close().await.expect("close provider evidence session");
     }
-    evidence_events
+    serde_json::json!({ "providers": scenarios })
 }

@@ -285,10 +285,10 @@ pub(super) async fn prove_google_stream_generate_text() -> Result<ProofRun, Fixe
     )?;
     require(
         response.usage.input_tokens == 6
-            && response.usage.output_tokens == 3
+            && response.usage.output_tokens == 4
             && response.usage.cache_read_input_tokens == 0
             && response.usage.cache_write_input_tokens == 0
-            && response.usage.reasoning_output_tokens == 0,
+            && response.usage.reasoning_output_tokens == 1,
         "Google streamGenerateContent did not normalize usage metadata",
     )?;
     proof(

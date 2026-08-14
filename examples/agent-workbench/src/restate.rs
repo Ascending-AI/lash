@@ -1214,17 +1214,11 @@ pub(crate) async fn record_turn_output(
     }
     for record in output.llm_calls.iter().cloned() {
         let call_id = record.call_id.0.clone();
-        let mut remote_record: lash_remote_protocol::RemoteLlmCallRecord = record.into();
-        for attempt in &mut remote_record.attempts {
-            if let Some(error) = &mut attempt.error {
-                error.diagnostic = None;
-            }
-        }
+        let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();
         state.publish_for_session_identified(
             &session.session_id(),
             format!("turn:{turn_id}:model-call:{call_id}"),
             crate::StreamItem::ModelCallRecorded {
-                turn_id: turn_id.to_string(),
                 record: remote_record,
             },
         );

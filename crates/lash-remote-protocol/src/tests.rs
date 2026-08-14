@@ -237,7 +237,6 @@ fn remote_turn_result_json_round_trips() {
                 http_status: None,
                 provider_request_id: Some("provider-request".to_string()),
                 retry_after_ms: Some(0),
-                diagnostic: Some("stream ended before terminal evidence".to_string()),
             }),
             evidence: Some(RemoteExecutionEvidence {
                 served_model: Some("served-model".to_string()),
@@ -292,6 +291,12 @@ fn remote_turn_result_json_round_trips() {
 
     result.validate().expect("valid result");
     let value = serde_json::to_value(&result).expect("serialize");
+    assert!(
+        !value
+            .to_string()
+            .contains("stream ended before terminal evidence"),
+        "remote result and activity payloads must not publish diagnostic prose"
+    );
     let decoded: RemoteTurnResult = serde_json::from_value(value.clone()).expect("deserialize");
     assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(decoded.session_id, "session");
@@ -316,7 +321,6 @@ fn remote_turn_result_json_round_trips() {
                 "provider_code": "eof",
                 "provider_request_id": "provider-request",
                 "retry_after_ms": 0,
-                "diagnostic": "stream ended before terminal evidence",
             },
             "evidence": {
                 "served_model": "served-model",
@@ -396,9 +400,214 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
         http_status: None,
         provider_request_id: None,
         retry_after_ms: None,
-        diagnostic: None,
     });
     assert!(result.validate().is_err());
+}
+
+#[test]
+fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
+    fn valid_attempt() -> RemoteAttemptRecord {
+        RemoteAttemptRecord {
+            ordinal: 1,
+            started_at_ms: 0,
+            duration_ms: 0,
+            outcome: RemoteAttemptOutcome::Completed,
+            protocol_position: RemoteProtocolPosition::TerminalObserved,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: None,
+            evidence: None,
+            generation_disposition: None,
+            usage: None,
+        }
+    }
+
+    fn assert_rejected(attempt: RemoteAttemptRecord) {
+        let record = RemoteLlmCallRecord {
+            call_id: "llm-call".to_string(),
+            label: None,
+            attempts: vec![attempt],
+        };
+        let activity = RemoteTurnActivity {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            sequence: 1,
+            id: "event".to_string(),
+            correlation_id: "correlation".to_string(),
+            event: RemoteTurnEvent::ModelCallRecorded {
+                record: record.clone(),
+            },
+        };
+        assert!(activity.validate().is_err(), "activity accepted {record:?}");
+
+        let result = RemoteTurnResult {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            session_id: "session".to_string(),
+            turn_id: "turn".to_string(),
+            status: RemoteTurnStatus::Completed,
+            outcome: RemoteTurnOutcome::Finished {
+                finish: RemoteTurnFinish::AssistantMessage {
+                    text: "done".to_string(),
+                },
+            },
+            cancellation: None,
+            assistant_output: RemoteAssistantOutput::default(),
+            usage: RemoteTurnUsageSummary::default(),
+            execution: RemoteExecutionSummary::default(),
+            tool_calls: Vec::new(),
+            llm_calls: vec![record.clone()],
+            issues: Vec::new(),
+            activities: Vec::new(),
+            metadata: HashMap::new(),
+        };
+        assert!(result.validate().is_err(), "result accepted {record:?}");
+    }
+
+    let normalized_error = || RemoteNormalizedError {
+        class: "provider".to_string(),
+        provider_code: None,
+        http_status: None,
+        provider_request_id: None,
+        retry_after_ms: None,
+    };
+
+    let mut completed_with_error = valid_attempt();
+    completed_with_error.error = Some(normalized_error());
+    assert_rejected(completed_with_error);
+
+    let mut completed_with_retry = valid_attempt();
+    completed_with_retry.retry_decision = Some(RemoteRetryDecision {
+        scheduled: true,
+        delay_ms: Some(1),
+        reason: Some("retry".to_string()),
+    });
+    assert_rejected(completed_with_retry);
+
+    let mut completed_before_terminal = valid_attempt();
+    completed_before_terminal.protocol_position = RemoteProtocolPosition::OutputStarted;
+    assert_rejected(completed_before_terminal);
+
+    let mut failed_without_error = valid_attempt();
+    failed_without_error.outcome = RemoteAttemptOutcome::Failed;
+    failed_without_error.protocol_position = RemoteProtocolPosition::NoResponse;
+    assert_rejected(failed_without_error);
+}
+
+#[test]
+fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
+    fn normalized_error(class: &str) -> RemoteNormalizedError {
+        RemoteNormalizedError {
+            class: class.to_string(),
+            provider_code: None,
+            http_status: None,
+            provider_request_id: None,
+            retry_after_ms: None,
+        }
+    }
+
+    fn assert_accepted(attempts: Vec<RemoteAttemptRecord>) {
+        let record = RemoteLlmCallRecord {
+            call_id: "llm-call".to_string(),
+            label: None,
+            attempts,
+        };
+        RemoteTurnActivity {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            sequence: 1,
+            id: "event".to_string(),
+            correlation_id: "correlation".to_string(),
+            event: RemoteTurnEvent::ModelCallRecorded {
+                record: record.clone(),
+            },
+        }
+        .validate()
+        .expect("valid ledger in activity envelope");
+        RemoteTurnResult {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            session_id: "session".to_string(),
+            turn_id: "turn".to_string(),
+            status: RemoteTurnStatus::Completed,
+            outcome: RemoteTurnOutcome::Finished {
+                finish: RemoteTurnFinish::AssistantMessage {
+                    text: "done".to_string(),
+                },
+            },
+            cancellation: None,
+            assistant_output: RemoteAssistantOutput::default(),
+            usage: RemoteTurnUsageSummary::default(),
+            execution: RemoteExecutionSummary::default(),
+            tool_calls: Vec::new(),
+            llm_calls: vec![record],
+            issues: Vec::new(),
+            activities: Vec::new(),
+            metadata: HashMap::new(),
+        }
+        .validate()
+        .expect("valid ledger in result envelope");
+    }
+
+    assert_accepted(vec![RemoteAttemptRecord {
+        ordinal: 1,
+        started_at_ms: 0,
+        duration_ms: 1,
+        outcome: RemoteAttemptOutcome::Failed,
+        protocol_position: RemoteProtocolPosition::NoResponse,
+        retry_budget_consumed: false,
+        retry_decision: None,
+        error: Some(normalized_error("provider_panicked")),
+        evidence: None,
+        generation_disposition: None,
+        usage: None,
+    }]);
+    assert_accepted(vec![RemoteAttemptRecord {
+        ordinal: 1,
+        started_at_ms: 0,
+        duration_ms: 1,
+        outcome: RemoteAttemptOutcome::Interrupted,
+        protocol_position: RemoteProtocolPosition::OutputStarted,
+        retry_budget_consumed: false,
+        retry_decision: None,
+        error: Some(normalized_error("stream_interrupted")),
+        evidence: Some(RemoteExecutionEvidence {
+            collection_interruption: Some(
+                RemoteExecutionEvidenceCollectionInterruption::ProtocolAbort,
+            ),
+            ..RemoteExecutionEvidence::default()
+        }),
+        generation_disposition: None,
+        usage: None,
+    }]);
+    assert_accepted(vec![
+        RemoteAttemptRecord {
+            ordinal: 1,
+            started_at_ms: 0,
+            duration_ms: 1,
+            outcome: RemoteAttemptOutcome::Failed,
+            protocol_position: RemoteProtocolPosition::NoResponse,
+            retry_budget_consumed: true,
+            retry_decision: Some(RemoteRetryDecision {
+                scheduled: true,
+                delay_ms: Some(1),
+                reason: Some("retry".to_string()),
+            }),
+            error: Some(normalized_error("transport")),
+            evidence: None,
+            generation_disposition: None,
+            usage: None,
+        },
+        RemoteAttemptRecord {
+            ordinal: 2,
+            started_at_ms: 2,
+            duration_ms: 1,
+            outcome: RemoteAttemptOutcome::Completed,
+            protocol_position: RemoteProtocolPosition::TerminalObserved,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: None,
+            evidence: None,
+            generation_disposition: None,
+            usage: None,
+        },
+    ]);
 }
 
 #[test]
