@@ -760,3 +760,112 @@ fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
             .any(|child| contains_aggregate_await(child, unwrap)),
     }
 }
+
+/// The decisive case from the FIG-1305 report.
+///
+/// Leaf 0 rejects late with `late-A`; leaf 1 rejects early with `early-B`. The
+/// host reports that leaf 1 settled first. ECMA rejects `Promise.all` at the
+/// first settled rejection, so the surfaced reason must be `early-B` — the
+/// input-order scan surfaces `late-A`.
+struct FirstSettledRejectionHost;
+
+impl ExecutionHost for FirstSettledRejectionHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperationBatch(batch) => {
+                assert_eq!(
+                    batch.operations.len(),
+                    2,
+                    "the decisive case has two leaves"
+                );
+                Ok(AbilityResult::ResourceOperationBatch(
+                    ResourceOperationBatchResult::settled_in_order(
+                        vec![
+                            ResourceOperationResult::Error(ExecutionHostError::new("late-A")),
+                            ResourceOperationResult::Error(ExecutionHostError::new("early-B")),
+                        ],
+                        // Leaf 1 settled first.
+                        vec![1, 0],
+                    ),
+                ))
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unexpected first-settled ability")),
+        }
+    }
+}
+
+fn two_leaf_web_environment() -> lashlang::LashlangHostEnvironment {
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_binding(
+            ["web"],
+            "Web",
+            "fetch",
+            "tool:web/fetch",
+            lashlang::ResourceOperationBinding {
+                input_ty: lashlang::TypeExpr::Any,
+                output_ty: lashlang::TypeExpr::Any,
+                output_from_input: None,
+            },
+        )
+        .expect("test host binding");
+    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
+}
+
+#[test]
+fn promise_all_rejects_with_the_first_settled_rejection() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(
+        "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
+        &environment,
+    )
+    .expect("Promise.all should link");
+    let error = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &FirstSettledRejectionHost,
+    ))
+    .expect_err("a rejected aggregate fails the program");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("early-B"),
+        "Promise.all must surface the first-settled rejection: {rendered}"
+    );
+    assert!(
+        !rendered.contains("late-A"),
+        "Promise.all must not surface the later rejection: {rendered}"
+    );
+}
+
+/// `Promise.allSettled` is specified to preserve *input* order regardless of
+/// when each leaf settled, so the same out-of-order settlement metadata must
+/// leave the result array alone.
+#[test]
+fn promise_all_settled_stays_input_ordered_under_out_of_order_settlement() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(
+        "finish(await Promise.allSettled([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]));",
+        &environment,
+    )
+    .expect("Promise.allSettled should link");
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &FirstSettledRejectionHost,
+    ))
+    .expect("allSettled reports rejections as records");
+    let ExecutionOutcome::Finished(Value::List(items)) = outcome else {
+        panic!("allSettled returns a list, got {outcome:?}");
+    };
+    assert_eq!(items.len(), 2);
+    let rendered = format!("{items:?}");
+    let late = rendered.find("late-A").expect("leaf 0's reason is present");
+    let early = rendered
+        .find("early-B")
+        .expect("leaf 1's reason is present");
+    assert!(
+        late < early,
+        "allSettled keeps input order even when leaf 1 settled first: {rendered}"
+    );
+}
