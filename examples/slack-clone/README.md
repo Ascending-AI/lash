@@ -61,6 +61,9 @@ source of truth for the CI split:
 - **Full-host CI:** the `slack-clone-full-host` functional E2E leg runs
   `just slack-clone-full-host-e2e` (token-free, deterministic). CI still does not
   run `just slack-clone` interactively or the real-token MCP client-depth path.
+- **Manual live-model CI:** the dispatch-only `Slack-clone live-model acceptance`
+  workflow runs one RLM agent and one standard agent through OpenRouter. It is
+  never triggered by pushes, pull requests, or schedules.
 - **Manual judged:** [`slack-clone-bot`](../../runbooks/slack-clone-bot/runbook.md)
   and [`slack-clone-mcp-client-depth`](../../runbooks/slack-clone-mcp-client-depth/runbook.md).
 
@@ -82,6 +85,47 @@ The `e2e` Cargo feature and `SLACK_CLONE_E2E_PROVIDER=scripted-v1` selector are
 test-harness implementation details. Both are required together; ordinary
 launches always require `OPENROUTER_API_KEY` and keep using the manual OpenRouter
 path.
+
+### Real-model two-agent acceptance
+
+`just slack-clone-live-model-e2e` is the manual FIG-1388 companion to the
+token-free full-host leg. It starts only the existing platform, then runs two
+fresh Lash sessions in one fresh channel: Agent A uses RLM/Lashlang with
+`anthropic/claude-sonnet-5`; Agent B uses the standard native tool loop with
+`deepseek/deepseek-v4-flash-0731`. Override those with
+`LASH_LIVE_E2E_RLM_MODEL` and `LASH_LIVE_E2E_STANDARD_MODEL`; the harness
+refuses unpriced slugs instead of guessing their cost.
+
+For a local run, copy the gitignored key into the shell environment without
+printing it, select the required private target directory, and invoke the
+recipe:
+
+```bash
+set -a
+source /workspace/code/lash/.env
+set +a
+export CARGO_TARGET_DIR=/workspace/.cargo-target-lash-fig1388
+just slack-clone-live-model-e2e
+```
+
+An unset `OPENROUTER_API_KEY` prints an explicit skip and exits zero. The same
+policy applies in the manual workflow when its repository secret is absent.
+The default invocation cap is `$2`, configured by
+`LASH_LIVE_E2E_MAX_SPEND_USD`. Provider retries are disabled and every request
+atomically reserves its conservative worst-case input/output cost before it is
+sent; actual OpenRouter usage metadata then settles that reservation. At the
+defaults, 21 possible Sonnet calls plus 24 possible DeepSeek calls, each capped
+at 32,768 input and 512 output tokens, reserve at most `$1.94138112` across the
+three smoke probes and both swap attempts.
+
+The behavior verdict is deterministic despite using real models: Agent A must
+submit Agent B's fresh random nonce, Agent B must submit Agent A's, and a
+headless Chromium assertion must find both exact nonces in the rendered
+channel. There is no LLM judge. A failed first attempt retries once with a new
+channel, sessions, and nonce pair. Failure artifacts include both traces, the
+two Lash session transcripts, full platform transcript, spend ledger,
+screenshot, and DOM dump. Set
+`LASH_SLACK_CLONE_LIVE_E2E_ARTIFACT_DIR` to retain them at a chosen path.
 
 ## What this demonstrates
 
