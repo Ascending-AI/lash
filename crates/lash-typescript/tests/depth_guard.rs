@@ -524,3 +524,212 @@ fn every_recursive_production_family_rejects_without_aborting() {
         assert!(status.success(), "{family} did not fail closed: {status}");
     }
 }
+
+/// The lexical-fidelity axis: the scanner has its own lexer, and it must agree
+/// with SWC's about where a token ends.
+///
+/// A grammar family can be charged correctly and still be defeated if the
+/// scanner disagrees with the parser about tokenisation — a charge gated on
+/// "the previous token was an identifier" never fires if the identifier was
+/// split in half. That is a different failure surface from the grammar
+/// families, and neither the AST classification nor an ASCII-alphabet fuzzer
+/// can see it, so it gets its own enumeration: non-ASCII identifier
+/// characters, identifier escapes, numeric separators, and the Unicode line
+/// terminators.
+const LEXICAL_UNITS: &[&str] = &[
+    "label-trailing-latin",
+    "label-trailing-cjk",
+    "label-trailing-tilde",
+    "label-leading-latin",
+    "label-escaped",
+    "label-escaped-braced",
+    "label-numeric-separator",
+    "label-line-separator",
+    "label-paragraph-separator",
+    "postfix-after-unicode",
+    "cast-after-unicode",
+    "member-after-unicode",
+    "prefix-before-unicode",
+    "template-after-unicode",
+];
+
+/// Sources built to nest, one per lexical unit. Each returns the source that
+/// repeats the unit `repeats` times, optionally one per line.
+fn lexical_source(unit: &str, repeats: usize, per_line: bool) -> String {
+    let separator = if per_line { "\n" } else { "" };
+    let mut source = String::new();
+    match unit {
+        "label-trailing-latin" => {
+            for index in 0..repeats {
+                source.push_str(&format!("a{index}\u{e9}:{separator}"));
+            }
+            source.push_str("1;");
+        }
+        "label-trailing-cjk" => {
+            for index in 0..repeats {
+                source.push_str(&format!("a{index}\u{4e2d}:{separator}"));
+            }
+            source.push_str("1;");
+        }
+        "label-trailing-tilde" => {
+            for index in 0..repeats {
+                source.push_str(&format!("a{index}\u{f1}:{separator}"));
+            }
+            source.push_str("1;");
+        }
+        "label-leading-latin" => {
+            for index in 0..repeats {
+                source.push_str(&format!("\u{e9}{index}:{separator}"));
+            }
+            source.push_str("1;");
+        }
+        // An identifier written with an escape is the same identifier to SWC.
+        "label-escaped" => {
+            for index in 0..repeats {
+                source.push_str(&format!("a{index}\\u00e9:{separator}"));
+            }
+            source.push_str("1;");
+        }
+        "label-escaped-braced" => {
+            for index in 0..repeats {
+                source.push_str(&format!("a{index}\\u{{e9}}:{separator}"));
+            }
+            source.push_str("1;");
+        }
+        "label-numeric-separator" => {
+            for index in 0..repeats {
+                source.push_str(&format!("a1_0{index}:{separator}"));
+            }
+            source.push_str("1;");
+        }
+        // U+2028 and U+2029 are ECMAScript line terminators.
+        "label-line-separator" => {
+            for index in 0..repeats {
+                source.push_str(&format!("a{index}:\u{2028}"));
+            }
+            source.push_str("1;");
+        }
+        "label-paragraph-separator" => {
+            for index in 0..repeats {
+                source.push_str(&format!("a{index}:\u{2029}"));
+            }
+            source.push_str("1;");
+        }
+        "postfix-after-unicode" => {
+            source.push_str("const f\u{e9} = (n: number): number => n; const x = f\u{e9}");
+            for _ in 0..repeats {
+                source.push_str(&format!("(1){separator}"));
+            }
+            source.push(';');
+        }
+        "cast-after-unicode" => {
+            source.push_str("const x\u{e9} = 1");
+            for _ in 0..repeats {
+                source.push_str(&format!(" as number{separator}"));
+            }
+            source.push(';');
+        }
+        "member-after-unicode" => {
+            source.push_str("const o\u{e9} = { a: 1 }; const x = o\u{e9}");
+            for _ in 0..repeats {
+                source.push_str(&format!(".a{separator}"));
+            }
+            source.push(';');
+        }
+        "prefix-before-unicode" => {
+            source.push_str("const x = ");
+            for _ in 0..repeats {
+                source.push_str(&format!("!{separator}"));
+            }
+            source.push_str("a\u{e9};");
+        }
+        "template-after-unicode" => {
+            source.push_str("const a\u{e9} = 1; const x = a\u{e9}");
+            for _ in 0..repeats {
+                source.push_str(&format!("`x`{separator}"));
+            }
+            source.push(';');
+        }
+        other => panic!("unknown lexical unit: {other}"),
+    }
+    source
+}
+
+#[test]
+fn lexical_units_reject_without_aborting() {
+    const CHILD_ENV: &str = "LASH_TS_LEXICAL_CHILD";
+    const REPEATS: usize = 20_000;
+    if let Some(unit) = std::env::var_os(CHILD_ENV) {
+        let unit = unit.to_string_lossy().to_string();
+        let sources = [
+            ("one line", lexical_source(&unit, REPEATS, false)),
+            ("one per line", lexical_source(&unit, REPEATS, true)),
+        ];
+        std::thread::Builder::new()
+            .stack_size(STACK_BUDGET_BYTES)
+            .spawn(move || {
+                for (axis, source) in sources {
+                    let error = lash_typescript::parse(&source)
+                        .expect_err("a repeated lexical unit must reject");
+                    assert_eq!(
+                        error.code.as_str(),
+                        "TS_SOURCE_NESTING_LIMIT",
+                        "{unit} ({axis}) rejected for the wrong reason"
+                    );
+                }
+            })
+            .expect("lexical thread starts")
+            .join()
+            .expect("lexical thread does not abort or panic");
+        return;
+    }
+
+    for unit in LEXICAL_UNITS {
+        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "lexical_units_reject_without_aborting",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, unit)
+            .status()
+            .expect("lexical child starts");
+        assert!(status.success(), "{unit} did not fail closed: {status}");
+    }
+}
+
+/// The same axis in the legal direction: none of these lexical forms may cause
+/// a spurious rejection.
+#[test]
+fn lexical_forms_do_not_cause_false_rejections() {
+    let unicode_declarations = (0..120)
+        .map(|index| format!("const v\u{e9}{index} = {index};"))
+        .collect::<String>();
+    let escaped_declarations = (0..120)
+        .map(|index| format!("const v\\u00e9{index} = {index};"))
+        .collect::<String>();
+    let numeric_separators = (0..120)
+        .map(|index| format!("const n{index} = 1_000_{index:03};"))
+        .collect::<String>();
+    // U+2028 as the only line terminator, with no semicolons.
+    let line_separated = (0..120)
+        .map(|index| format!("const s{index} = {index}\u{2028}"))
+        .collect::<String>();
+    let paragraph_separated = (0..120)
+        .map(|index| format!("const p{index} = {index}\u{2029}"))
+        .collect::<String>();
+    let cjk_identifiers = (0..120)
+        .map(|index| format!("const \u{4e2d}{index} = {index};"))
+        .collect::<String>();
+    for (name, source) in [
+        ("unicode identifiers", unicode_declarations),
+        ("escaped identifiers", escaped_declarations),
+        ("numeric separators", numeric_separators),
+        ("U+2028 line separators", line_separated),
+        ("U+2029 paragraph separators", paragraph_separated),
+        ("CJK identifiers", cjk_identifiers),
+    ] {
+        lash_typescript::parse(&source)
+            .unwrap_or_else(|error| panic!("{name} must parse: {}", error.code.as_str()));
+    }
+}
