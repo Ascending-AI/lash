@@ -11,6 +11,10 @@ use crate::adapter::{
 };
 use crate::{Diagnostic, DiagnosticCode};
 
+/// Every binding the lowerer generates carries this prefix, which the dialect
+/// reserves so a source identifier can never collide with one.
+const GENERATED_BINDING_PREFIX: &str = "__typescript_";
+
 pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnostic> {
     let mut lowerer = Lowerer::default();
     lowerer.scopes.push(Scope::default());
@@ -222,7 +226,7 @@ impl Lowerer {
             if component.len() < 2 {
                 continue;
             }
-            let frame = format!("__typescript_{}_frame", self.next_binding);
+            let frame = format!("{GENERATED_BINDING_PREFIX}{}_frame", self.next_binding);
             self.next_binding += 1;
             let peers = component
                 .iter()
@@ -294,6 +298,15 @@ impl Lowerer {
         initialized: bool,
         preserve_name: bool,
     ) -> Result<(), Diagnostic> {
+        if name.starts_with(GENERATED_BINDING_PREFIX) {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ReservedIdentifier,
+                format!(
+                    "`{name}` is reserved: identifiers starting with `{GENERATED_BINDING_PREFIX}` name the lowerer's generated bindings"
+                ),
+                None,
+            ));
+        }
         let owner_function = self.current_function();
         let scope = self.scopes.last_mut().expect("a scope is always active");
         if scope.bindings.contains_key(name) {
@@ -308,7 +321,7 @@ impl Lowerer {
         } else {
             let id = self.next_binding;
             self.next_binding += 1;
-            format!("__typescript_{id}_{name}")
+            format!("{GENERATED_BINDING_PREFIX}{id}_{name}")
         };
         scope.bindings.insert(
             name.to_string(),
