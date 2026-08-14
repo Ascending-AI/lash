@@ -118,17 +118,20 @@ pub struct RlmCheckpointPerfFixture {
 impl RlmCheckpointPerfFixture {
     pub fn new(binding_count: usize, payload_bytes: usize) -> Result<Self, SessionError> {
         let mut state = RlmExecutionState::for_engine("lashlang")?;
-        let mut snapshot = state.rlm.snapshot();
+        // The snapshot's globals became a read-only projection when the heap
+        // took ownership of them, so seed through the state's own insert.
         for index in 0..binding_count {
-            snapshot.globals.insert(
-                format!("mid_{index}"),
-                json_to_flow_value(serde_json::json!([format!(
-                    "binding-{index}-{}",
-                    "x".repeat(payload_bytes)
-                )])),
-            );
+            state
+                .rlm
+                .insert_global(
+                    format!("mid_{index}"),
+                    json_to_flow_value(serde_json::json!([format!(
+                        "binding-{index}-{}",
+                        "x".repeat(payload_bytes)
+                    )])),
+                )
+                .map_err(|error| SessionError::Protocol(error.to_string()))?;
         }
-        state.rlm = FlowState::from_snapshot(snapshot);
         Ok(Self {
             state: Some(state),
             binding_count,
