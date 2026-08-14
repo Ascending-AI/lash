@@ -397,6 +397,7 @@ impl RecordingInlineEffectController {
         self.invocations.lock_recover().clone()
     }
 
+    #[cfg(feature = "rlm")]
     fn persisted_outcomes(&self) -> Vec<lash_core::RuntimeEffectOutcome> {
         self.persisted_outcomes
             .lock_recover()
