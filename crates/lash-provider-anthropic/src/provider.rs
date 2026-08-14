@@ -64,7 +64,6 @@ impl Provider for AnthropicProvider {
             &request_body_bytes,
         );
         let request_body = Some(String::from_utf8_lossy(&request_body_bytes).into_owned());
-
         // `fine-grained-tool-streaming-2025-05-14` streams partial JSON so we
         // can surface tool arguments incrementally. Interleaved thinking is
         // built-in on adaptive thinking; the beta is only needed for the
@@ -117,9 +116,20 @@ impl Provider for AnthropicProvider {
                 request_body.clone(),
             ));
         }
-
         let mut response_metadata =
             ResponseMetadataCapture::from_response(&self.options, &resp.headers);
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                request_body: request_body.clone(),
+                http_summary: Some(format!(
+                    "HTTP POST {}/v1/messages (stream)",
+                    base_url.trim_end_matches('/')
+                )),
+                generation_disposition,
+                response_metadata: response_metadata.metadata(),
+                ..Default::default()
+            }));
+        }
         let mut state = StreamState::default();
         let expose_thinking = self.options.expose_thinking;
         let stream_result = drive_sse_response(
@@ -166,6 +176,7 @@ impl Provider for AnthropicProvider {
         }
 
         let provider_usage = state.provider_usage.take();
+        let provider_finish_reason = state.stop_reason.clone();
         let (parts, full_text, usage, terminal_reason) = Self::finalize(state);
         Ok(LlmResponse {
             full_text,
@@ -176,7 +187,12 @@ impl Provider for AnthropicProvider {
             provider_usage,
             request_body,
             http_summary: Some(format!("HTTP POST {} (stream)", url)),
-            execution_evidence: None,
+            execution_evidence: provider_finish_reason.map(|provider_finish_reason| {
+                ExecutionEvidence {
+                    provider_finish_reason: Some(provider_finish_reason),
+                    ..ExecutionEvidence::default()
+                }
+            }),
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
         })

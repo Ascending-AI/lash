@@ -163,8 +163,24 @@ async fn spawn_http_sse(
     spawn_http_sse_sequence(vec![(response_id, message_id, text)]).await
 }
 
+async fn spawn_http_sse_with_headers(
+    response_id: &'static str,
+    message_id: &'static str,
+    text: &'static str,
+    headers: Vec<(String, String)>,
+) -> HttpSseServer {
+    spawn_http_sse_sequence_with_headers(vec![(response_id, message_id, text)], headers).await
+}
+
 async fn spawn_http_sse_sequence(
     responses: Vec<(&'static str, &'static str, &'static str)>,
+) -> HttpSseServer {
+    spawn_http_sse_sequence_with_headers(responses, Vec::new()).await
+}
+
+async fn spawn_http_sse_sequence_with_headers(
+    responses: Vec<(&'static str, &'static str, &'static str)>,
+    headers: Vec<(String, String)>,
 ) -> HttpSseServer {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -172,6 +188,10 @@ async fn spawn_http_sse_sequence(
     let addr = listener.local_addr().expect("http addr");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let task_captured = Arc::clone(&captured);
+    let extra_headers = headers
+        .into_iter()
+        .map(|(name, value)| format!("{name}: {value}\r\n"))
+        .collect::<String>();
     let task = tokio::spawn(async move {
         for (response_id, message_id, text) in responses {
             let Ok((mut stream, _)) = listener.accept().await else {
@@ -201,7 +221,7 @@ async fn spawn_http_sse_sequence(
                 json!({"type":"response.completed","response":{"id":response_id,"status":"completed","output":[assistant_item(message_id, text)],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}})
             );
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
@@ -766,6 +786,33 @@ async fn codex_scripted_websocket_full_turn_sends_response_create() {
         Some("session-1:request:test")
     );
     assert_eq!(header("session_id"), None);
+}
+
+#[tokio::test]
+async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
+    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::IdleBeforeStart]).await;
+    let mut provider = websocket_test_provider(
+        CodexTransport::Websocket,
+        "http://127.0.0.1:9/unused".to_string(),
+        ws.url.clone(),
+    );
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let event_sink = Arc::clone(&events);
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(move |event| {
+        event_sink.lock_recover().push(event);
+    }));
+
+    let error = provider
+        .complete(req)
+        .await
+        .expect_err("idle before response start must time out");
+
+    assert_eq!(error.code.as_deref(), Some("websocket_idle_timeout"));
+    assert!(
+        events.lock_recover().is_empty(),
+        "no stream event may commit before the first response frame"
+    );
 }
 
 #[tokio::test]
@@ -1345,6 +1392,50 @@ async fn codex_scripted_websocket_idle_before_start_falls_back_to_sse() {
     assert_eq!(response.full_text, "fallback");
     assert_eq!(ws.captured().len(), 1);
     assert_eq!(http.captured_len(), 1);
+}
+
+#[tokio::test]
+async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
+    let http = spawn_http_sse_with_headers(
+        "resp_http",
+        "msg_http",
+        "done",
+        vec![
+            ("x-request-cost".to_string(), "0.05".to_string()),
+            ("set-cookie".to_string(), "secret".to_string()),
+        ],
+    )
+    .await;
+    let mut provider = websocket_test_provider(
+        CodexTransport::Sse,
+        http.url.clone(),
+        "ws://127.0.0.1:9/unused".to_string(),
+    )
+    .with_options(ProviderOptions {
+        reliability: ProviderReliability::codex()
+            .request_timeout(Some(RequestTimeout::Millis(5_000)))
+            .stream_chunk_timeout_ms(Some(50)),
+        response_metadata_headers: vec!["X-Request-Cost".to_string()],
+        ..ProviderOptions::default()
+    });
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let event_sink = Arc::clone(&events);
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(move |event| {
+        event_sink.lock_recover().push(event);
+    }));
+
+    provider.complete(req).await.expect("SSE response");
+
+    assert!(events.lock_recover().iter().any(|event| {
+        matches!(
+            event,
+            lash_core::llm::types::LlmStreamEvent::Evidence(evidence)
+                if evidence.response_metadata.get("header:x-request-cost")
+                    == Some(&json!("0.05"))
+                    && !evidence.response_metadata.contains_key("header:set-cookie")
+        )
+    }));
 }
 
 #[tokio::test]

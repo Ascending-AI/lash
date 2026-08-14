@@ -41,13 +41,14 @@ pub fn register_stream_mask(reg: &mut PluginRegistrar) -> Result<(), PluginError
             Box::pin(async move {
                 let response = {
                     let mut detector = state.lock_recover();
+                    let events = detector.finish_response();
                     let response = transform_final_response(&detector, ctx.response);
                     detector.reset();
-                    response
+                    (response, events)
                 };
                 Ok(lash_core::plugin::AssistantResponseTransform {
-                    response,
-                    events: Vec::new(),
+                    response: response.0,
+                    events: response.1,
                 })
             })
         },
@@ -186,15 +187,15 @@ impl CellDetector {
         mut events: Vec<PluginRuntimeEvent>,
     ) -> AssistantStreamTransform {
         self.cell_body.push_str(chunk);
-        let abort_stream = if let Some(span) = complete_lashlang_end_tag_span(&self.cell_body, true)
-        {
-            self.cell_body = self.cell_body[..span.body_end].to_string();
-            self.cell_closed = true;
-            events.push(self.end_event());
-            true
-        } else {
-            false
-        };
+        let abort_stream =
+            if let Some(span) = complete_lashlang_end_tag_span(&self.cell_body, false) {
+                self.cell_body = self.cell_body[..span.body_end].to_string();
+                self.cell_closed = true;
+                events.push(self.end_event());
+                true
+            } else {
+                false
+            };
 
         AssistantStreamTransform {
             chunk: visible_chunk,
@@ -202,6 +203,18 @@ impl CellDetector {
             events,
             abort_stream,
         }
+    }
+
+    fn finish_response(&mut self) -> Vec<PluginRuntimeEvent> {
+        if self.cell_closed || !self.inside_cell {
+            return Vec::new();
+        }
+        let Some(span) = complete_lashlang_end_tag_span(&self.cell_body, true) else {
+            return Vec::new();
+        };
+        self.cell_body.truncate(span.body_end);
+        self.cell_closed = true;
+        vec![self.end_event()]
     }
 
     fn start_event(&mut self) -> PluginRuntimeEvent {
@@ -286,6 +299,48 @@ mod tests {
     }
 
     #[test]
+    fn accepted_cell_is_independent_of_split_immediately_after_end_tag() {
+        fn accepted(chunks: &[&str]) -> Option<String> {
+            let mut detector = CellDetector::new();
+            for chunk in chunks {
+                if detector.process_chunk(chunk).abort_stream {
+                    break;
+                }
+            }
+            detector.finish_response();
+            detector
+                .cell_closed
+                .then(|| detector.spliced_response_text())
+        }
+
+        for raw in [
+            "<lashlang>\nprint 1\n</lashlang>suffix",
+            "<lashlang>\nprint 1\n</lashlang>",
+            "<lashlang>\nprint 1\n</lashlang>\nsuffix",
+        ] {
+            let expected = accepted(&[raw]);
+            for split in raw
+                .char_indices()
+                .map(|(index, _)| index)
+                .chain([raw.len()])
+            {
+                assert_eq!(
+                    accepted(&[&raw[..split], &raw[split..]]),
+                    expected,
+                    "accepted cell changed at byte split {split} for {raw:?}"
+                );
+            }
+        }
+
+        let malformed = "<lashlang>\nprint 1\n</lashlang>suffix";
+        let after_tag = malformed.find("suffix").expect("suffix boundary");
+        assert_eq!(
+            accepted(&[&malformed[..after_tag], &malformed[after_tag..]]),
+            None
+        );
+    }
+
+    #[test]
     fn body_after_start_tag_is_suppressed_until_close() {
         let mut d = CellDetector::new();
         assert_eq!(d.process_chunk("<lashlang>\n").chunk, "");
@@ -345,7 +400,7 @@ mod tests {
     #[test]
     fn reset_after_closed_cell_isolates_next_response() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1\n</lashlang>");
+        let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1\n</lashlang>\n");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(t.abort_stream);
         assert!(d.cell_closed);
@@ -364,7 +419,7 @@ mod tests {
         let mut d = CellDetector::new();
         assert_eq!(d.process_chunk("<lashlang>\nfinish 1\n</lash").chunk, "");
 
-        let t = d.process_chunk("lang>");
+        let t = d.process_chunk("lang>\n");
         assert_eq!(t.chunk, "");
         assert!(t.abort_stream);
         assert!(d.cell_closed);
@@ -457,6 +512,7 @@ mod tests {
                 break;
             }
         }
+        d.finish_response();
         (d, visible)
     }
 
@@ -563,6 +619,7 @@ mod tests {
                 provider_request_id: None,
                 reasoning_output_tokens: Some(0),
                 provider_finish_reason: Some("stop".to_string()),
+                collection_interruption: None,
             }),
             parts: vec![
                 lash_core::LlmOutputPart::Text {

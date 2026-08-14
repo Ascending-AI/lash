@@ -12,8 +12,8 @@ use std::collections::BTreeMap;
 
 use crate::ToolCallRecord;
 use crate::llm::types::{
-    LlmOutputPart, LlmResponse, LlmStreamEvent, LlmUsage, ProviderReasoningReplay,
-    ProviderReplayMeta, ResponseTextMeta,
+    LlmOutputPart, LlmResponse, LlmStreamEvent, LlmStreamEvidence, LlmUsage,
+    ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta,
 };
 use crate::session_model::{MessageRole, PartKind, SessionStreamEvent, TokenUsage};
 use crate::{TurnFinish, TurnOutcome, TurnStop};
@@ -62,6 +62,7 @@ pub(super) struct LlmStreamState<'a> {
     pub(super) text_streamed: &'a mut bool,
     pub(super) streamed_usage: &'a mut LlmUsage,
     pub(super) stream_accumulator: &'a mut LlmStreamAccumulator,
+    pub(super) stream_evidence: &'a mut LlmStreamEvidence,
     pub(super) debug: &'a mut LlmStreamDebugState,
     pub(super) protocol_iteration: usize,
     pub(super) assistant_prose_correlation: &'a mut Option<crate::TurnActivityId>,
@@ -386,6 +387,7 @@ pub(super) fn fold_llm_stream_event(
             accumulator.push_reasoning_with_replay(text.clone(), replay.clone());
         }
         LlmStreamEvent::Usage(streamed) => *usage = streamed.clone(),
+        LlmStreamEvent::Evidence(_) => {}
         LlmStreamEvent::RetryStatus { .. } => {}
     }
 }

@@ -445,10 +445,11 @@ pub use attachments::{
     AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence, GenerationDisposition,
-    GenerationOptionDisposition, GenerationOptions, LlmCallId, LlmCallRecord, LlmOutputPart,
-    LlmRequest, LlmRequestScope, LlmResponse, LlmTerminalReason, NonNegativeFiniteF64,
-    NormalizedError, ProtocolPosition, ProviderFileScope, RetryDecision,
+    AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence,
+    ExecutionEvidenceCollectionInterruption, GenerationDisposition, GenerationOptionDisposition,
+    GenerationOptions, LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope,
+    LlmResponse, LlmStreamEvidence, LlmTerminalReason, NonNegativeFiniteF64, NormalizedError,
+    ProtocolPosition, ProviderFileScope, RetryDecision,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CheckpointDelivery,

@@ -817,7 +817,12 @@ async fn fixed_script_manifest_schema_contains_required_proofs_and_artifact_fiel
             assert_eq!(envelope["retryable"], true);
         }
         if name == "openai-compatible.chat-stream-chunk-timeout" {
-            assert_eq!(transcript["observed"]["stream_events_committed"], 0);
+            assert_eq!(transcript["observed"]["stream_events_committed"], 1);
+            assert_eq!(transcript["observed"]["evidence_events_committed"], 1);
+            assert_eq!(
+                transcript["observed"]["partial_response_events_committed"],
+                0
+            );
             assert_eq!(
                 transcript["observed"]["reported_successful_partial_response"],
                 false
@@ -883,7 +888,12 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
             false
         );
         if name == "openai-compatible.chat-stream-chunk-timeout" {
-            assert_eq!(transcript["observed"]["stream_events_committed"], 0);
+            assert_eq!(transcript["observed"]["stream_events_committed"], 1);
+            assert_eq!(transcript["observed"]["evidence_events_committed"], 1);
+            assert_eq!(
+                transcript["observed"]["partial_response_events_committed"],
+                0
+            );
             assert_eq!(transcript["http_exchanges"][0]["response"]["status"], 200);
             assert!(
                 transcript["http_exchanges"][0]["response"]["event_names"]

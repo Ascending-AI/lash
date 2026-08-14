@@ -12,9 +12,10 @@ pub(crate) use lash_core::llm::transport::{
     known_attachment_acceptors, unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
-    AttachmentSource, GenerationDisposition, GenerationOptionDisposition, LlmContentBlock,
-    LlmEventSender, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
-    LlmTerminalReason, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
+    AttachmentSource, ExecutionEvidence, GenerationDisposition, GenerationOptionDisposition,
+    LlmContentBlock, LlmEventSender, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse,
+    LlmRole, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
+    ProviderReasoningReplay,
 };
 pub(crate) use lash_core::provider::{
     CacheRetention, Provider, ProviderComponents, ProviderFactory, ProviderOptions,

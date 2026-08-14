@@ -119,11 +119,15 @@ mod tests {
                     ("set-cookie".to_string(), "secret".to_string()),
                 ],
             )));
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
         let response = provider
             .execute_request(
                 "access",
                 json!({ "model": "gemini-test" }),
-                Some(LlmEventSender::new(|_| {})),
+                Some(LlmEventSender::new(move |event| {
+                    event_sink.lock_recover().push(event);
+                })),
                 None,
                 StreamTermination::RequireTerminalEvidence,
                 None,
@@ -146,6 +150,15 @@ mod tests {
                 .values()
                 .any(|value| value == "hidden")
         );
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Evidence(evidence)
+                    if evidence.response_metadata.get("header:x-request-cost")
+                        == Some(&json!("0.03"))
+                        && !evidence.response_metadata.contains_key("header:set-cookie")
+            )
+        }));
     }
 
     #[tokio::test]
@@ -205,6 +218,13 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
         );
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Evidence(evidence)
+                    if evidence.provider_usage == partial.provider_usage
+            )
+        }));
     }
 
     #[tokio::test]
@@ -535,14 +555,22 @@ mod tests {
             .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
             .collect::<Vec<_>>();
         assert_eq!(reasoning.len(), 2);
-        assert!(matches!(
-            events.as_slice(),
+        let visible = events
+            .iter()
+            .filter_map(|event| match event {
+                LlmStreamEvent::ReasoningDelta(text) => Some(("reasoning", text.as_str())),
+                LlmStreamEvent::Delta(text) => Some(("text", text.as_str())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visible,
             [
-                LlmStreamEvent::ReasoningDelta(first),
-                LlmStreamEvent::ReasoningDelta(second),
-                LlmStreamEvent::Delta(answer),
-            ] if first == "first" && second == "second" && answer == "answer"
-        ));
+                ("reasoning", "first"),
+                ("reasoning", "second"),
+                ("text", "answer")
+            ]
+        );
     }
 
     #[tokio::test]

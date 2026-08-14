@@ -35,6 +35,9 @@ pub use usage_activity::*;
 // Bumped to 32: session process originators retain their optional agent-frame
 // elevation. Exact version negotiation prevents an older peer from silently
 // dropping that authority before a process wake is enqueued.
+// Bumped to 34: generation disposition renamed the protocol-owned stop value
+// without a compatibility decoder, and execution evidence can explicitly
+// report collection interrupted by a protocol abort.
 // Bumped to 33: `RemoteTurnOutcome::AgentFrameSwitch` carries `frame_key`
 // instead of `frame_id`; version 32 carries the wake-coalesce wire change.
 // Bumped to 31: process execution policies require an explicit `turn_budget`,
@@ -68,7 +71,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 33;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 34;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

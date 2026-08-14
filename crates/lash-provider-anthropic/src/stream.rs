@@ -163,6 +163,12 @@ impl AnthropicProvider {
                         tx.send(LlmStreamEvent::Usage(state.usage.clone()));
                     }
                 }
+                if let Some(tx) = stream_events {
+                    tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                        provider_usage: state.provider_usage.clone(),
+                        ..Default::default()
+                    }));
+                }
             }
             "content_block_start" => {
                 let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -287,6 +293,18 @@ impl AnthropicProvider {
                     .and_then(|v| v.as_str())
                 {
                     state.stop_reason = Some(stop.to_string());
+                }
+                if let Some(tx) = stream_events {
+                    tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                        provider_usage: state.provider_usage.clone(),
+                        execution_evidence: state.stop_reason.clone().map(|reason| {
+                            ExecutionEvidence {
+                                provider_finish_reason: Some(reason),
+                                ..Default::default()
+                            }
+                        }),
+                        ..Default::default()
+                    }));
                 }
             }
             "message_stop" => {

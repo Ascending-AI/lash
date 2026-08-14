@@ -182,7 +182,7 @@ pub enum RemoteGenerationOptionDisposition {
     #[default]
     NotRequested,
     Applied,
-    ReplacedProtocolOwned,
+    SuppressedProtocolOwned,
     OmittedUnsupported,
     OmittedSamplingPinned,
     ClampedToCapacity,
@@ -200,6 +200,14 @@ pub struct RemoteExecutionEvidence {
     pub reasoning_output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_finish_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_interruption: Option<RemoteExecutionEvidenceCollectionInterruption>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteExecutionEvidenceCollectionInterruption {
+    ProtocolAbort,
 }
 
 impl RemoteLlmResponse {

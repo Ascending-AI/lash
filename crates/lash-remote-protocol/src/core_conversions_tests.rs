@@ -332,6 +332,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             provider_request_id: Some("request-1".to_string()),
             reasoning_output_tokens: Some(0),
             provider_finish_reason: Some("stop".to_string()),
+            collection_interruption: None,
         }),
         generation_disposition: None,
         response_metadata: response_metadata.clone(),
@@ -1651,7 +1652,7 @@ fn every_generation_option_disposition_crosses_the_boundary_in_both_directions()
     for core in [
         core_llm::GenerationOptionDisposition::NotRequested,
         core_llm::GenerationOptionDisposition::Applied,
-        core_llm::GenerationOptionDisposition::ReplacedProtocolOwned,
+        core_llm::GenerationOptionDisposition::SuppressedProtocolOwned,
         core_llm::GenerationOptionDisposition::OmittedUnsupported,
         core_llm::GenerationOptionDisposition::OmittedSamplingPinned,
         core_llm::GenerationOptionDisposition::ClampedToCapacity,
@@ -1661,8 +1662,8 @@ fn every_generation_option_disposition_crosses_the_boundary_in_both_directions()
     }
 
     assert_eq!(
-        serde_json::to_value(RemoteGenerationOptionDisposition::ReplacedProtocolOwned)
+        serde_json::to_value(RemoteGenerationOptionDisposition::SuppressedProtocolOwned)
             .expect("serialize"),
-        serde_json::json!("replaced_protocol_owned")
+        serde_json::json!("suppressed_protocol_owned")
     );
 }

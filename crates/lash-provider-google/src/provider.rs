@@ -98,9 +98,17 @@ impl GoogleOAuthProvider {
                 request_body,
             ));
         }
-
         let mut response_metadata =
             ResponseMetadataCapture::from_response(&self.options, &resp.headers);
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                request_body: request_body.clone(),
+                http_summary: Some(format!("HTTP POST {url} (stream)")),
+                generation_disposition,
+                response_metadata: response_metadata.metadata(),
+                ..Default::default()
+            }));
+        }
         if stream_events.is_none() {
             let text = read_http_body_text(
                 resp.body,
@@ -191,6 +199,12 @@ impl GoogleOAuthProvider {
                 if let Some(tx) = stream_events.as_ref() {
                     if usage != prev_usage && usage != LlmUsage::default() {
                         tx.send(LlmStreamEvent::Usage(usage.clone()));
+                    }
+                    if provider_usage.is_some() {
+                        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                            provider_usage: provider_usage.clone(),
+                            ..Default::default()
+                        }));
                     }
                     for delta in text_deltas {
                         tx.send(LlmStreamEvent::Delta(delta));

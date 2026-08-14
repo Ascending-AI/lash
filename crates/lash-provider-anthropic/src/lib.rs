@@ -158,9 +158,15 @@ mod tests {
                 ..ProviderOptions::default()
             })
             .with_transport(Arc::new(MetadataSseTransport(body)));
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        req.stream_events = Some(LlmEventSender::new(move |event| {
+            event_sink.lock_recover().push(event);
+        }));
 
         let response = provider
-            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .complete(req)
             .await
             .expect("metadata fixture completes");
 
@@ -169,6 +175,13 @@ mod tests {
             json!("0.02")
         );
         assert_eq!(response.response_metadata["body:/billing/cost"], json!(2));
+        assert_eq!(
+            response
+                .execution_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.provider_finish_reason.as_deref()),
+            Some("end_turn")
+        );
         assert!(!response.response_metadata.contains_key("header:set-cookie"));
         assert!(
             !response
@@ -176,6 +189,15 @@ mod tests {
                 .values()
                 .any(|value| value == "hidden")
         );
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Evidence(evidence)
+                    if evidence.response_metadata.get("header:x-request-cost")
+                        == Some(&json!("0.02"))
+                        && !evidence.response_metadata.contains_key("header:set-cookie")
+            )
+        }));
     }
 
     #[tokio::test]
@@ -672,6 +694,11 @@ mod tests {
     #[test]
     fn stream_merges_raw_usage_sidecar_across_message_start_and_delta() {
         let mut state = StreamState::default();
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
+        let sender = LlmEventSender::new(move |event| {
+            event_sink.lock_recover().push(event);
+        });
         for event in [
             json!({
                 "type": "message_start",
@@ -688,8 +715,13 @@ mod tests {
                 "usage": {"output_tokens": 40}
             }),
         ] {
-            AnthropicProvider::process_sse_event(&event.to_string(), &mut state, None, true)
-                .expect("sse event");
+            AnthropicProvider::process_sse_event(
+                &event.to_string(),
+                &mut state,
+                Some(&sender),
+                true,
+            )
+            .expect("sse event");
         }
 
         // The raw sidecar overlays `message_delta`'s cumulative output count
@@ -705,6 +737,18 @@ mod tests {
         );
         assert_eq!(state.usage.input_tokens, 25);
         assert_eq!(state.usage.output_tokens, 40);
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Evidence(evidence)
+                    if evidence.provider_usage == state.provider_usage
+                        && evidence
+                            .execution_evidence
+                            .as_ref()
+                            .and_then(|evidence| evidence.provider_finish_reason.as_deref())
+                            == Some("end_turn")
+            )
+        }));
     }
 
     #[test]

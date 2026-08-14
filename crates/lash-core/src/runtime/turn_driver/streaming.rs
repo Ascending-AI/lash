@@ -81,30 +81,78 @@ fn record_clamped_output_token_cap(
     }
 }
 
-/// Narrow the adapter's wire-level report when protocol projection replaced
+/// Narrow the adapter's wire-level report when protocol projection suppressed
 /// caller-owned stop sequences before the request reached the adapter.
-fn record_protocol_owned_stop_replacement(
+fn record_protocol_owned_stop_suppression(
     result: &mut Result<LlmResponse, LlmCallError>,
     call_record: Option<&mut crate::LlmCallRecord>,
 ) {
-    fn replace(disposition: &mut Option<crate::GenerationDisposition>) {
+    fn suppress(disposition: &mut Option<crate::GenerationDisposition>) {
         disposition.get_or_insert_default().stop_sequences =
-            crate::GenerationOptionDisposition::ReplacedProtocolOwned;
+            crate::GenerationOptionDisposition::SuppressedProtocolOwned;
     }
 
     match result {
-        Ok(response) => replace(&mut response.generation_disposition),
+        Ok(response) => suppress(&mut response.generation_disposition),
         Err(error) => {
             if let Some(partial) = error.partial_response.as_deref_mut() {
-                replace(&mut partial.generation_disposition);
+                suppress(&mut partial.generation_disposition);
             }
         }
     }
     if let Some(call_record) = call_record {
         for attempt in &mut call_record.attempts {
-            replace(&mut attempt.generation_disposition);
+            suppress(&mut attempt.generation_disposition);
         }
     }
+}
+
+fn synthesize_protocol_abort(
+    stream_accumulator: &LlmStreamAccumulator,
+    streamed_usage: LlmUsage,
+    stream_evidence: &crate::LlmStreamEvidence,
+    started_at: u64,
+    duration: std::time::Duration,
+) -> (LlmResponse, crate::LlmCallRecord) {
+    let mut execution_evidence = stream_evidence
+        .execution_evidence
+        .clone()
+        .unwrap_or_default();
+    execution_evidence.collection_interruption =
+        Some(crate::ExecutionEvidenceCollectionInterruption::ProtocolAbort);
+    let mut response = LlmResponse {
+        full_text: stream_accumulator.full_text(),
+        parts: Vec::new(),
+        usage: streamed_usage,
+        terminal_reason: crate::LlmTerminalReason::Stop,
+        terminal_diagnostic: None,
+        provider_usage: stream_evidence.provider_usage.clone(),
+        request_body: stream_evidence.request_body.clone(),
+        http_summary: stream_evidence.http_summary.clone(),
+        execution_evidence: Some(execution_evidence.clone()),
+        generation_disposition: stream_evidence.generation_disposition,
+        response_metadata: stream_evidence.response_metadata.clone(),
+    };
+    stream_accumulator.apply_to_response(&mut response);
+    let call_record = crate::LlmCallRecord {
+        call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),
+        label: None,
+        attempts: vec![crate::AttemptRecord {
+            ordinal: 1,
+            started_at,
+            duration,
+            outcome: crate::AttemptOutcome::Aborted,
+            protocol_position: crate::ProtocolPosition::OutputStarted,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: None,
+            evidence: Some(execution_evidence),
+            generation_disposition: response.generation_disposition,
+            usage: (response.provider_usage.is_some() || response.usage != LlmUsage::default())
+                .then(|| response.usage.clone()),
+        }],
+    };
+    (response, call_record)
 }
 
 impl RuntimeTurnDriver<'_> {
@@ -230,8 +278,8 @@ impl RuntimeTurnDriver<'_> {
         cancel: &CancellationToken,
     ) -> RuntimeLlmCallOutcome {
         let mut request = (*request).clone();
-        let protocol_replaced_stop_sequences =
-            request.generation.stop_sequences_replaced_by_protocol();
+        let protocol_suppressed_stop_sequences =
+            request.generation.stop_sequences_suppressed_by_protocol();
         let clamped_output_token_cap = self
             .policy
             .model
@@ -306,7 +354,10 @@ impl RuntimeTurnDriver<'_> {
         let mut text_streamed = false;
         let mut streamed_usage = LlmUsage::default();
         let mut stream_accumulator = LlmStreamAccumulator::default();
+        let mut stream_evidence = crate::LlmStreamEvidence::default();
         let mut abort_requested = false;
+        let attempt_started_at = self.host.core.clock.timestamp_ms();
+        let attempt_started = self.host.core.clock.now();
         let mut assistant_prose_correlation = None;
         let mut reasoning_correlation = None;
         let mut assistant_prose_attempt_correlations = Vec::new();
@@ -315,6 +366,7 @@ impl RuntimeTurnDriver<'_> {
             text_streamed: &mut text_streamed,
             streamed_usage: &mut streamed_usage,
             stream_accumulator: &mut stream_accumulator,
+            stream_evidence: &mut stream_evidence,
             debug: &mut debug,
             protocol_iteration,
             assistant_prose_correlation: &mut assistant_prose_correlation,
@@ -370,21 +422,59 @@ impl RuntimeTurnDriver<'_> {
                         {
                             break Err(err);
                         }
-                        let final_streamed_usage = stream_state.streamed_usage.clone();
-                        let mut resp = LlmResponse {
-                            full_text: stream_state.stream_accumulator.full_text(),
-                            parts: Vec::new(),
-                            usage: final_streamed_usage,
-                            terminal_reason: crate::LlmTerminalReason::Stop,
-                            terminal_diagnostic: None,
-                            provider_usage: None,
-                            request_body: None,
-                            http_summary: None,
-                            execution_evidence: None,
-                            generation_disposition: None,
-                            response_metadata: Default::default(),
-                        };
-                        stream_state.stream_accumulator.apply_to_response(&mut resp);
+                        if llm_task.is_finished()
+                            && let Ok((provider_result, provider_after)) = (&mut llm_task).await
+                        {
+                            llm_task_abort.disarm();
+                            self.policy.binding = match crate::ProviderBinding::new(
+                                self.policy.binding.provider_id.clone(),
+                                provider_after,
+                            ) {
+                                Ok(binding) => binding,
+                                Err(err) => {
+                                    break Err(LlmCallError {
+                                        message: err.to_string(),
+                                        retryable: false,
+                                        kind: crate::ProviderFailureKind::Unknown,
+                                        raw: None,
+                                        code: Some("provider_binding_mismatch".to_string()),
+                                        terminal_reason: crate::LlmTerminalReason::ProviderError,
+                                        request_body: None,
+                                        partial_response: None,
+                                    });
+                                }
+                            };
+                            if let Ok(completion) = provider_result {
+                                let crate::ProviderCompletion {
+                                    response: mut resp,
+                                    call_record: completed_call_record,
+                                } = completion;
+                                call_record = Some(completed_call_record);
+                                if response_usage_is_empty(&resp.usage) {
+                                    resp.usage = stream_state.streamed_usage.clone();
+                                }
+                                stream_state.stream_accumulator.apply_to_response(&mut resp);
+                                let resp = match self
+                                    .transform_assistant_response(&mut host_forwarder, resp)
+                                    .await
+                                {
+                                    Ok(resp) => resp,
+                                    Err(err) => break Err(err),
+                                };
+                                break Ok(resp);
+                            }
+                        }
+                        let (resp, aborted_call_record) = synthesize_protocol_abort(
+                            stream_state.stream_accumulator,
+                            stream_state.streamed_usage.clone(),
+                            stream_state.stream_evidence,
+                            attempt_started_at,
+                            self.host
+                                .core
+                                .clock
+                                .now()
+                                .saturating_duration_since(attempt_started),
+                        );
                         let resp = match self
                             .transform_assistant_response(&mut host_forwarder, resp)
                             .await
@@ -392,6 +482,8 @@ impl RuntimeTurnDriver<'_> {
                             Ok(resp) => resp,
                             Err(err) => break Err(err),
                         };
+
+                        call_record = Some(aborted_call_record);
 
                         break Ok(resp);
                     }
@@ -534,8 +626,8 @@ impl RuntimeTurnDriver<'_> {
         if clamped_output_token_cap {
             record_clamped_output_token_cap(&mut result, call_record.as_mut());
         }
-        if protocol_replaced_stop_sequences {
-            record_protocol_owned_stop_replacement(&mut result, call_record.as_mut());
+        if protocol_suppressed_stop_sequences {
+            record_protocol_owned_stop_suppression(&mut result, call_record.as_mut());
         }
 
         self.finish_assistant_stream_hooks(assistant_stream_finish_reason(
@@ -933,6 +1025,7 @@ impl RuntimeTurnDriver<'_> {
                     state.streamed_usage,
                     &LlmStreamEvent::AttemptReset,
                 );
+                *state.stream_evidence = crate::LlmStreamEvidence::default();
                 *state.text_streamed = false;
                 *state.assistant_prose_correlation = None;
                 *state.reasoning_correlation = None;
@@ -1093,6 +1186,9 @@ impl RuntimeTurnDriver<'_> {
                     &LlmStreamEvent::Usage(usage),
                 );
             }
+            LlmStreamEvent::Evidence(evidence) => {
+                state.stream_evidence.merge(evidence);
+            }
             LlmStreamEvent::RetryStatus {
                 wait_seconds,
                 attempt,
@@ -1132,11 +1228,7 @@ impl RuntimeTurnDriver<'_> {
                 event = llm_stream_rx.recv() => match event {
                     None | Some(LlmStreamEvent::AttemptReset) => break,
                     Some(event) => {
-                        let has_final_usage = matches!(event, LlmStreamEvent::Usage(_));
                         self.forward_provider_stream_event(forwarder, event, state).await?;
-                        if has_final_usage {
-                            break;
-                        }
                     }
                 },
             }
@@ -1358,7 +1450,7 @@ mod clamp_report_tests {
     }
 
     #[test]
-    fn protocol_stop_replacement_updates_response_and_attempt_ledger() {
+    fn protocol_stop_suppression_updates_response_and_attempt_ledger() {
         let mut result: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
             generation_disposition: applied(),
             ..LlmResponse::default()
@@ -1381,7 +1473,7 @@ mod clamp_report_tests {
             }],
         };
 
-        record_protocol_owned_stop_replacement(&mut result, Some(&mut call_record));
+        record_protocol_owned_stop_suppression(&mut result, Some(&mut call_record));
 
         let response = result.expect("response");
         assert_eq!(
@@ -1389,14 +1481,18 @@ mod clamp_report_tests {
                 .generation_disposition
                 .expect("response disposition")
                 .stop_sequences,
-            crate::GenerationOptionDisposition::ReplacedProtocolOwned
+            crate::GenerationOptionDisposition::SuppressedProtocolOwned
         );
         assert_eq!(
             call_record.attempts[0]
                 .generation_disposition
                 .expect("attempt disposition")
                 .stop_sequences,
-            crate::GenerationOptionDisposition::ReplacedProtocolOwned
+            crate::GenerationOptionDisposition::SuppressedProtocolOwned
         );
     }
 }
+
+#[cfg(test)]
+#[path = "streaming_protocol_abort_tests.rs"]
+mod protocol_abort_evidence_tests;

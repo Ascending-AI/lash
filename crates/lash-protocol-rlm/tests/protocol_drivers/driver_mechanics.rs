@@ -126,7 +126,7 @@ fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
 }
 
 #[test]
-fn applied_provider_stop_does_not_reconstruct_an_unclosed_cell() {
+fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
@@ -143,6 +143,10 @@ fn applied_provider_stop_does_not_reconstruct_an_unclosed_cell() {
             full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
+            execution_evidence: Some(lash_core::ExecutionEvidence {
+                provider_finish_reason: Some("stop_sequence".to_string()),
+                ..Default::default()
+            }),
             generation_disposition: Some(lash_core::GenerationDisposition {
                 stop_sequences: lash_core::GenerationOptionDisposition::Applied,
                 ..Default::default()
@@ -163,14 +167,12 @@ fn applied_provider_stop_does_not_reconstruct_an_unclosed_cell() {
         Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
             if content == "Before"
     )));
-    assert!(
-        machine
-            .messages()
+    assert!(!machine.messages().iter().any(|message| {
+        message
+            .parts
             .iter()
-            .any(|message| message.parts.iter().any(|part| part
-                .content
-                .contains("stop sequence may consume a literal `</lashlang>`")))
-    );
+            .any(|part| part.content.contains("inside multiline source text"))
+    }));
 }
 
 #[test]
@@ -211,6 +213,88 @@ fn natural_stop_without_applied_boundary_does_not_close_or_execute_a_cell() {
         Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
             if content.contains("<lashlang>")
     )));
+}
+
+#[test]
+fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = concat!(
+        "<lashlang>\n",
+        "print \"kept\"\n",
+        "</lashlang>\n",
+        "print \"discarded\"\n",
+        "finish \"also discarded\"",
+    );
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::Stop,
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        effects.iter().any(
+            |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print \"kept\"")
+        )
+    );
+    assert!(!effects.iter().any(|effect| {
+        matches!(effect, Effect::ExecCode { code, .. } if code.contains("discarded"))
+    }));
+}
+
+#[test]
+fn buffered_response_executes_only_first_of_two_complete_cells_without_retry() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = concat!(
+        "<lashlang>\n",
+        "print \"first\"\n",
+        "</lashlang>\n",
+        "<lashlang>\n",
+        "finish \"second\"\n",
+        "</lashlang>",
+    );
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::Stop,
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(effects.iter().any(
+        |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print \"first\"")
+    ));
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::LlmCall { .. }))
+    );
+    assert!(!effects.iter().any(|effect| {
+        matches!(effect, Effect::ExecCode { code, .. } if code.contains("second"))
+    }));
 }
 
 #[test]
@@ -334,7 +418,7 @@ fn output_limit_unclosed_cell_retries_with_shorten_block_diagnostic() {
 }
 
 #[test]
-fn multiple_cells_are_rejected_without_emitting_raw_markup() {
+fn multiple_cells_execute_only_the_first_without_emitting_raw_markup() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
@@ -352,9 +436,14 @@ fn multiple_cells_are_rejected_without_emitting_raw_markup() {
 
     let effects = drain_effects(&mut machine);
     assert!(
-        !effects
+        effects
             .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+            .any(|effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print 1"))
+    );
+    assert!(
+        !effects.iter().any(
+            |effect| matches!(effect, Effect::ExecCode { code, .. } if code.contains("print 2"))
+        )
     );
     assert!(effects.iter().any(|effect| matches!(
         effect,

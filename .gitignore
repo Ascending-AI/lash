@@ -1,4 +1,5 @@
 /target/
+/.tgt/
 *.perf
 *.old
 /dist/

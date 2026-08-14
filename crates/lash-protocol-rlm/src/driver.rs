@@ -302,13 +302,10 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         ));
 
         let mut generation = ctx.config.generation.clone();
-        // RLM owns the generation boundary. Keeping unrelated caller stops
-        // would make a provider's generic `Stop` terminal reason ambiguous.
-        // The typed replacement helper retains that ownership for the
-        // response and attempt dispositions.
-        generation.replace_stop_sequences_for_protocol(vec![
-            crate::cell_scan::LASHLANG_END_TAG.to_string(),
-        ]);
+        // The paired-tag grammar is RLM's response boundary. Provider wire
+        // stops, including caller-supplied ones, could withhold that literal
+        // boundary and leave the parser with a truncated cell.
+        generation.suppress_stop_sequences_for_protocol();
 
         Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
@@ -689,14 +686,14 @@ mod tests {
     }
 
     #[test]
-    fn rlm_projector_requests_the_closing_tag_as_a_stop_sequence() {
+    fn rlm_projector_sends_no_stop_sequence_without_caller_stops() {
         let request = project_iteration_request(&projector(100), &[], 0, "test-model");
-        assert_eq!(request.generation.stop_sequences, ["</lashlang>"]);
-        assert!(!request.generation.stop_sequences_replaced_by_protocol());
+        assert!(request.generation.stop_sequences.is_empty());
+        assert!(!request.generation.stop_sequences_suppressed_by_protocol());
     }
 
     #[test]
-    fn rlm_projector_records_protocol_ownership_for_every_nonempty_caller_stop_list() {
+    fn rlm_projector_suppresses_every_nonempty_caller_stop_list() {
         for caller_stops in [
             vec!["caller-boundary".to_string()],
             vec!["</lashlang>".to_string()],
@@ -711,8 +708,8 @@ mod tests {
                     ..Default::default()
                 },
             );
-            assert_eq!(request.generation.stop_sequences, ["</lashlang>"]);
-            assert!(request.generation.stop_sequences_replaced_by_protocol());
+            assert!(request.generation.stop_sequences.is_empty());
+            assert!(request.generation.stop_sequences_suppressed_by_protocol());
         }
     }
 

@@ -13,17 +13,13 @@ pub(super) struct CellExtraction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CellExtractionError {
     UnclosedCell,
-    MultipleCells,
 }
 
 impl CellExtractionError {
     pub(super) fn message(self) -> &'static str {
         match self {
             Self::UnclosedCell => {
-                "Model response started a `<lashlang>` block but did not close it. Retry with a complete paired block. The provider's stop sequence may consume a literal `</lashlang>` — if your program or prose must contain it, restructure to avoid the literal."
-            }
-            Self::MultipleCells => {
-                "Model response contained multiple `<lashlang>...</lashlang>` blocks. The blocks were discarded; reply with exactly one paired block containing all work for this step."
+                "Model response started a `<lashlang>` block but did not close it. Retry with a complete paired block. A line whose trimmed content is exactly `</lashlang>` closes the cell."
             }
         }
     }
@@ -42,26 +38,6 @@ pub fn project_visible_assistant_prose(text: &str) -> String {
         .unwrap_or_else(|| text.to_string())
 }
 
-/// Normalize the assistant text to the single executable-cell boundary.
-///
-/// Keep exactly one complete cell and discard anything after it.
-///
-/// Native provider stop reasons do not prove that a requested delimiter was
-/// consumed: several providers collapse a natural end and a matched stop
-/// sequence into the same terminal reason. Consequently an unclosed cell is
-/// never reconstructed here and always flows to the retry diagnostic.
-pub(super) fn normalize_cell_boundary(text: &str) -> String {
-    if let Some(span) = first_lashlang_cell_span(text) {
-        let trailing = &text[span.end_tag_end..];
-        if first_lashlang_cell_span(trailing).is_some() {
-            return text.to_string();
-        }
-        return text[..span.end_tag_end].to_string();
-    }
-
-    text.to_string()
-}
-
 pub(super) fn extract_lashlang_cell(
     text: &str,
 ) -> Result<Option<CellExtraction>, CellExtractionError> {
@@ -72,10 +48,6 @@ pub(super) fn extract_lashlang_cell(
             Ok(None)
         };
     };
-    let trailing = &text[span.end_tag_end..];
-    if first_lashlang_cell_span(trailing).is_some() {
-        return Err(CellExtractionError::MultipleCells);
-    }
     let code = text[span.body_start..span.body_end].to_string();
     Ok(Some(CellExtraction {
         prose: text[..span.start_tag_start].trim_end().to_string(),

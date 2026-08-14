@@ -598,8 +598,12 @@ impl OpenAiCompatibleProvider {
                 state.capture_reasoning_tokens(usage);
             }
             if let Some(finish_reason) = choice.finish_reason {
-                if state.provider_finish_reason.is_none() && !finish_reason.is_empty() {
-                    state.provider_finish_reason = Some(finish_reason.to_string());
+                if state.provider_finish_reason.is_none() {
+                    state.provider_finish_reason = choice
+                        .native_finish_reason
+                        .filter(|reason| !reason.is_empty())
+                        .or_else(|| (!finish_reason.is_empty()).then_some(finish_reason))
+                        .map(str::to_string);
                 }
                 state.terminal_reason =
                     terminal_reason_from_chat_finish_reason(finish_reason, state.terminal_reason);
@@ -661,6 +665,8 @@ struct ChatSseChoice<'a> {
     delta: Option<ChatSseDelta<'a>>,
     #[serde(default, borrow)]
     finish_reason: Option<&'a str>,
+    #[serde(default, borrow)]
+    native_finish_reason: Option<&'a str>,
     #[serde(default)]
     usage: Option<Value>,
 }
@@ -720,9 +726,18 @@ impl ChatStreamState {
             .get("choices")
             .and_then(Value::as_array)
             .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("finish_reason"))
-            .and_then(Value::as_str)
-            .filter(|reason| !reason.is_empty())
+            .and_then(|choice| {
+                choice
+                    .get("native_finish_reason")
+                    .and_then(Value::as_str)
+                    .filter(|reason| !reason.is_empty())
+                    .or_else(|| {
+                        choice
+                            .get("finish_reason")
+                            .and_then(Value::as_str)
+                            .filter(|reason| !reason.is_empty())
+                    })
+            })
             .map(str::to_string);
     }
 
@@ -756,6 +771,7 @@ impl ChatStreamState {
             provider_request_id: None,
             reasoning_output_tokens: self.reasoning_output_tokens,
             provider_finish_reason: self.provider_finish_reason.clone(),
+            collection_interruption: None,
         };
         (evidence != ExecutionEvidence::default()).then_some(evidence)
     }

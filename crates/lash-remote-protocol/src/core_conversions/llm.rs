@@ -418,8 +418,8 @@ impl From<core_llm::GenerationOptionDisposition> for RemoteGenerationOptionDispo
         match value {
             core_llm::GenerationOptionDisposition::NotRequested => Self::NotRequested,
             core_llm::GenerationOptionDisposition::Applied => Self::Applied,
-            core_llm::GenerationOptionDisposition::ReplacedProtocolOwned => {
-                Self::ReplacedProtocolOwned
+            core_llm::GenerationOptionDisposition::SuppressedProtocolOwned => {
+                Self::SuppressedProtocolOwned
             }
             core_llm::GenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
             core_llm::GenerationOptionDisposition::OmittedSamplingPinned => {
@@ -435,8 +435,8 @@ impl From<RemoteGenerationOptionDisposition> for core_llm::GenerationOptionDispo
         match value {
             RemoteGenerationOptionDisposition::NotRequested => Self::NotRequested,
             RemoteGenerationOptionDisposition::Applied => Self::Applied,
-            RemoteGenerationOptionDisposition::ReplacedProtocolOwned => {
-                Self::ReplacedProtocolOwned
+            RemoteGenerationOptionDisposition::SuppressedProtocolOwned => {
+                Self::SuppressedProtocolOwned
             }
             RemoteGenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
             RemoteGenerationOptionDisposition::OmittedSamplingPinned => {
@@ -455,6 +455,7 @@ impl From<core_llm::ExecutionEvidence> for RemoteExecutionEvidence {
             provider_request_id,
             reasoning_output_tokens,
             provider_finish_reason,
+            collection_interruption,
         } = value;
         Self {
             served_model,
@@ -462,6 +463,7 @@ impl From<core_llm::ExecutionEvidence> for RemoteExecutionEvidence {
             provider_request_id,
             reasoning_output_tokens,
             provider_finish_reason,
+            collection_interruption: collection_interruption.map(Into::into),
         }
     }
 }
@@ -474,6 +476,7 @@ impl From<RemoteExecutionEvidence> for core_llm::ExecutionEvidence {
             provider_request_id,
             reasoning_output_tokens,
             provider_finish_reason,
+            collection_interruption,
         } = value;
         Self {
             served_model,
@@ -481,6 +484,29 @@ impl From<RemoteExecutionEvidence> for core_llm::ExecutionEvidence {
             provider_request_id,
             reasoning_output_tokens,
             provider_finish_reason,
+            collection_interruption: collection_interruption.map(Into::into),
+        }
+    }
+}
+
+impl From<core_llm::ExecutionEvidenceCollectionInterruption>
+    for RemoteExecutionEvidenceCollectionInterruption
+{
+    fn from(value: core_llm::ExecutionEvidenceCollectionInterruption) -> Self {
+        match value {
+            core_llm::ExecutionEvidenceCollectionInterruption::ProtocolAbort => {
+                Self::ProtocolAbort
+            }
+        }
+    }
+}
+
+impl From<RemoteExecutionEvidenceCollectionInterruption>
+    for core_llm::ExecutionEvidenceCollectionInterruption
+{
+    fn from(value: RemoteExecutionEvidenceCollectionInterruption) -> Self {
+        match value {
+            RemoteExecutionEvidenceCollectionInterruption::ProtocolAbort => Self::ProtocolAbort,
         }
     }
 }
