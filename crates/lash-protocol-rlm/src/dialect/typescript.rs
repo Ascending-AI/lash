@@ -74,10 +74,7 @@ impl RlmDialect for TypescriptDialect {
     fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String {
         match error {
             crate::protocol::CellExtractionError::UnclosedCell => {
-                "Model response started a `<typescript>` block but did not close it. Retry with one complete paired block.".to_string()
-            }
-            crate::protocol::CellExtractionError::MultipleCells => {
-                "Model response contained multiple `<typescript>...</typescript>` blocks. Retry with exactly one paired block.".to_string()
+                "Model response started a `<typescript>` block but did not close it. Retry with one complete paired block. A line whose trimmed content is exactly `</typescript>` closes the cell.".to_string()
             }
         }
     }
