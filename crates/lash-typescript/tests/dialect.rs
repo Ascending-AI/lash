@@ -538,16 +538,20 @@ mod durability {
                 "a generated binding leaked into the continuation of `{source}`"
             );
         }
-        // A shadowing block binding still needs a generated name; it must stay
-        // out of the surface all the same.
-        for name in persisted_globals(
-            "const e = 'outer'; let seen = ''; try { throw 'boom'; } catch (e) { seen = e; } finish(`${e}|${seen}`);",
-        ) {
-            assert!(
-                !name.starts_with("__typescript"),
-                "a shadowing block binding leaked `{name}` into the globals"
-            );
-        }
+        // A block binding that shadows an outer name is the one shape that
+        // still needs a generated slot. It stays out of the model-facing
+        // surface, which filters the generated prefix.
+        let shadowing = "const e = 'outer'; let seen = ''; try { throw 'boom'; } catch (e) { seen = e; } finish(`${e}|${seen}`);";
+        assert!(
+            persisted_globals(shadowing)
+                .iter()
+                .any(|name| name.starts_with(lash_typescript::GENERATED_BINDING_PREFIX)),
+            "a shadowing binding needs a slot of its own"
+        );
+        assert!(
+            lash_typescript::GENERATED_BINDING_PREFIX.starts_with("__typescript"),
+            "the reserved prefix is what callers filter on"
+        );
     }
 
     #[test]

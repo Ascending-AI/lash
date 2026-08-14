@@ -258,7 +258,12 @@ impl RlmDialectSession for TypescriptDialectSession {
         &self,
         exclude: &BTreeSet<String>,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
-        let globals = self.state()?.bound_variable_values(exclude);
+        let mut globals = self.state()?.bound_variable_values(exclude);
+        // A block-scoped binding that shadows an outer name is lowered to a
+        // generated slot. It is the author's value under a name the author
+        // never wrote, and it is dead by the time any turn boundary renders,
+        // so it is never a bound variable the model should see.
+        globals.retain(|(name, _)| !name.starts_with(lash_typescript::GENERATED_BINDING_PREFIX));
         let cache = Arc::clone(&self.bound_variable_render_cache);
         Ok(BoundVariablesPromptRender::new(move || {
             let mut cache = cache

@@ -13,7 +13,7 @@ use crate::{Diagnostic, DiagnosticCode};
 
 /// Every binding the lowerer generates carries this prefix, which the dialect
 /// reserves so a source identifier can never collide with one.
-const GENERATED_BINDING_PREFIX: &str = "__typescript_";
+pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
 
 pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnostic> {
     let mut lowerer = Lowerer::default();
@@ -242,6 +242,12 @@ impl Lowerer {
         if name.starts_with(GENERATED_BINDING_PREFIX) {
             return Err(reserved_identifier(name));
         }
+        // Mangling exists to stop an inner scope from overwriting an outer slot
+        // of the same name. Where nothing of that name is visible there is
+        // nothing to protect, and a mangled root-level binding would publish a
+        // generated name into the durable globals and the bound-variables
+        // prompt, so keep the author's name in that case.
+        let preserve_name = preserve_name || !self.has_binding(name);
         let owner_function = self.current_function();
         let scope = self.scopes.last_mut().expect("a scope is always active");
         if scope.bindings.contains_key(name) {

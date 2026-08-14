@@ -9,6 +9,11 @@ mod lower;
 mod signatures;
 
 pub use adapter::MAX_SOURCE_NESTING_DEPTH;
+/// The prefix on every binding the lowerer generates. Source identifiers that
+/// start with it are rejected, so a name carrying it is always generated — and
+/// never something a caller should render back to a user.
+pub const GENERATED_BINDING_PREFIX: &str = lower::GENERATED_BINDING_PREFIX;
+
 pub use diagnostics::{Diagnostic, DiagnosticCode, SourceSpan};
 pub use signatures::render_tool_signature;
 
