@@ -1323,11 +1323,7 @@ fn leave_source_delimiter(
     current_operators: &mut usize,
     delimiter: SourceDelimiter,
 ) {
-    if frames
-        .last()
-        .is_some_and(|frame| frame.delimiter == delimiter)
-    {
-        let frame = frames.pop().expect("matching source nesting frame exists");
+    if let Some(frame) = frames.pop_if(|frame| frame.delimiter == delimiter) {
         *current_operators = frame.outer_operators;
     }
 }
