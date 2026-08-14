@@ -176,8 +176,33 @@ fn javascript_to_number(value: &Value) -> f64 {
     }
 }
 
+/// ECMA-262 `StrWhiteSpace`: `WhiteSpace` plus `LineTerminator`. It differs
+/// from Rust's Unicode `White_Space` property in both directions — ZWNBSP is
+/// ECMA whitespace and NEL is not.
+fn is_ecma_string_whitespace(value: char) -> bool {
+    matches!(
+        value,
+        '\u{0009}'
+            | '\u{000A}'
+            | '\u{000B}'
+            | '\u{000C}'
+            | '\u{000D}'
+            | '\u{0020}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'
+            ..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+                | '\u{FEFF}'
+    )
+}
+
 fn javascript_string_to_number(value: &str) -> f64 {
-    let value = value.trim();
+    let value = value.trim_matches(is_ecma_string_whitespace);
     if value.is_empty() {
         return 0.0;
     }
