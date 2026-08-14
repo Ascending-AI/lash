@@ -100,6 +100,40 @@ fn function_declarations_capture_initialized_top_level_bindings() {
 }
 
 #[test]
+fn immutable_captures_cross_every_intermediate_function_frame() {
+    let cases = [
+        (
+            "const outer = 5; const f = () => { const g = () => outer; return g(); }; finish(f());",
+            5.0,
+        ),
+        (
+            "const base = 10; const outer = () => { const inner = () => base; return inner; }; finish(outer()());",
+            10.0,
+        ),
+        (
+            "const a = 1; const f = () => { const g = () => { const h = () => a; return h(); }; return g(); }; finish(f());",
+            1.0,
+        ),
+        (
+            "const outer = (a: number) => { const x = 2; const middle = (b: number) => { const y = 4; const inner = () => a + x + b + y; return inner(); }; return middle(8); }; finish(outer(16));",
+            30.0,
+        ),
+        (
+            "const outer = (a: number) => { const x = 2; const middle = (b: number) => { const y = 4; const deep = (c: number) => { const z = 8; const inner = () => a + x + b + y + c + z; return inner(); }; return deep(16); }; return middle(32); }; finish(outer(64));",
+            126.0,
+        ),
+        (
+            "const base = 10; const outer = () => { const middle = () => { const also = base; const inner = () => base + also; return inner(); }; return middle(); }; finish(outer());",
+            20.0,
+        ),
+    ];
+
+    for (source, expected) in cases {
+        assert_eq!(finished(source), Value::Number(expected), "{source}");
+    }
+}
+
+#[test]
 fn hoisted_function_bodies_can_capture_later_const_bindings() {
     assert_eq!(
         finished("function f() { return k; } const k = 3; finish(f());"),
