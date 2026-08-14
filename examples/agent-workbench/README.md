@@ -10,7 +10,7 @@ service, waits for readiness, registers the Restate deployment, and then exits
 after printing the URL:
 
 ```bash
-OPENROUTER_API_KEY=... just agent-workbench 3000
+OPENROUTER_API_KEY=... just agent-workbench
 ```
 
 SQLite is the default. To run every durable workbench facet on a managed,
@@ -22,7 +22,9 @@ OPENROUTER_API_KEY=... AGENT_WORKBENCH_POSTGRES=1 just agent-workbench 3000
 
 Alternatively, set `AGENT_WORKBENCH_DATABASE_URL` to an existing Postgres database.
 
-Open `http://127.0.0.1:3000`. Useful lifecycle commands:
+Open `http://127.0.0.1:3030`. Pass a port, for example `just agent-workbench 3000`, to
+override the web port; the helper derives the dependent Restate and Postgres ports from
+that value. Useful lifecycle commands:
 
 ```bash
 just agent-workbench-status 3000
@@ -41,6 +43,22 @@ Validate the example build and unit tests:
 ```bash
 cargo test -p agent-workbench --all-targets
 ```
+
+## Coverage
+
+The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
+source of truth for the CI split:
+
+- **Deterministic CI:** `Test docs + build cache` runs the all-target workspace check and
+  the package-scoped workbench check, and `Test shard ${{ matrix.shard }}/3` runs workspace
+  tests.
+- **Full-host CI:** `Functional E2E (agent-workbench)` runs
+  `agent-workbench-restate-e2e` with Restate and Postgres live tests; it does not judge
+  the browser journeys.
+- **Manual judged:** [`workbench-process-lifecycle`](../../runbooks/workbench-process-lifecycle/runbook.md),
+  [`workbench-session-resume`](../../runbooks/workbench-session-resume/runbook.md), and
+  [`workbench-deferred-tools`](../../runbooks/workbench-deferred-tools/runbook.md), plus
+  the other `workbench-*` runbooks.
 
 For the old attached process style, use `just agent-workbench-foreground 3000`.
 

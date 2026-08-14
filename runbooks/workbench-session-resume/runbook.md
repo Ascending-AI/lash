@@ -21,7 +21,7 @@ committed row counts, request history, and cross-surface agreement—not on pros
    do not reload only the page and do not restart Restate or replace the data directory.
 3. **The store is authoritative.** Before and after restart, the active `graph_nodes`
    path must contain every committed user and assistant nonce: use
-   `<data-dir>/lash-sessions/*.db` in SQLite mode or `lash_graph_nodes` in the managed
+   `<data-dir>/lash-sessions/durable-core.db` in SQLite mode or `lash_graph_nodes` in the managed
    database in Postgres mode. `/api/state.messages` and the rendered transcript must
    project the same ordered rows.
 4. **Continuity reaches the provider.** The first post-restart `llm_call_started` record
@@ -63,7 +63,7 @@ committed row counts, request history, and cross-surface agreement—not on pros
   are top-level fields. Use `.messages` for committed chat rows and `.transcript` for
   execution-disclosure rows such as settled reasoning and code blocks.
 - Durable truth: `<data-dir>/session-id`, `<data-dir>/trace.jsonl`, and either the SQLite
-  `graph_nodes` table in `<data-dir>/lash-sessions/*.db` or Postgres
+  `graph_nodes` table in `<data-dir>/lash-sessions/durable-core.db` or Postgres
   `lash_graph_nodes` (`node_json`, excluding tombstoned rows), selected by the boot mode.
   Save extracted JSON rows rather than treating a terminal printout as the artifact.
 - `trace.jsonl` records use serde-flattened payloads: fields such as `type` and `request`

@@ -50,6 +50,19 @@ just slack-clone-down
 State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model key
 — the suite drives a scripted provider.
 
+## Coverage
+
+The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
+source of truth for the CI split:
+
+- **Deterministic CI:** `Test docs + build cache` compiles all workspace targets, and
+  `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack
+  package tests.
+- **Full-host CI:** None. CI does not run `just slack-clone`, the two-process browser
+  journey, or the real-token MCP client-depth path.
+- **Manual judged:** [`slack-clone-bot`](../../runbooks/slack-clone-bot/runbook.md)
+  and [`slack-clone-mcp-client-depth`](../../runbooks/slack-clone-mcp-client-depth/runbook.md).
+
 ## What this demonstrates
 
 | Concern | Where |
@@ -718,5 +731,3 @@ Tracked for follow-up rather than half-built:
   session-execution lease TTL (30s by default). A bot that wanted faster resumption
   would lower `LeaseTimings`, trading recovery latency against the risk of losing a
   live lease during a slow model call.
-- **Judged runbook.** A scripted downstream-host walkthrough, per
-  `docs/agents/way-of-working.md`.

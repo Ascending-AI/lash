@@ -52,8 +52,8 @@ the model's surrounding prose.
 - UI truth: rendered session id, idle/running pill, transcript rows, composer, and
   visible assistant digest.
 - HTTP truth: `GET /healthz` and `GET /api/state?session_id=<S>`.
-- Disk truth: `<data-dir>/deferred-tool-grants.db`, the SQLite session graph under
-  `<data-dir>/lash-sessions/`, `<data-dir>/trace.jsonl`, and
+- Disk truth: `<data-dir>/deferred-tool-grants.db`, the SQLite session graph in
+  `<data-dir>/lash-sessions/durable-core.db`, `<data-dir>/trace.jsonl`, and
   `<data-dir>/lashlang-execution.jsonl`.
 - Teardown: `just agent-workbench-down <port>` with the same run/data variables, then
   verify the Workbench process and managed Restate container are gone.

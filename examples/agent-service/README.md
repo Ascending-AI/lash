@@ -36,6 +36,19 @@ Validate the example build and unit tests:
 cargo test -p agent-service --all-targets
 ```
 
+## Coverage
+
+The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
+source of truth for the CI split:
+
+- **Deterministic CI:** `Test docs + build cache` compiles all workspace targets, and
+  `Test shard ${{ matrix.shard }}/3` runs workspace tests.
+- **Full-host CI:** `Functional E2E (agent-service)` runs `agent-service-restate-e2e`,
+  including the Restate ingress and process-workflow live test; it does not judge the
+  browser journeys.
+- **Manual judged:** [`agent-service-branching`](../../runbooks/agent-service-branching/runbook.md)
+  and [`tictactoe-full-game`](../../runbooks/tictactoe-full-game/runbook.md).
+
 Optional environment:
 
 ```bash
