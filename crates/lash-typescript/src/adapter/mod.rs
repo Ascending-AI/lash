@@ -177,7 +177,7 @@ pub(crate) enum LogicalOp {
 }
 
 pub(crate) fn parse(source: &str) -> Result<Program, Diagnostic> {
-    guard_source_delimiters(source)?;
+    guard_source_nesting(source)?;
     let end = u32::try_from(source.len()).unwrap_or(u32::MAX);
     let lexer = Lexer::new(
         Syntax::Typescript(TsSyntax {
@@ -201,8 +201,7 @@ pub(crate) fn parse(source: &str) -> Result<Program, Diagnostic> {
 
 #[derive(Default)]
 struct Adapter {
-    statement_depth: Cell<usize>,
-    expression_depth: Cell<usize>,
+    nesting_depth: Cell<usize>,
 }
 
 impl Adapter {
@@ -211,7 +210,7 @@ impl Adapter {
         span: Option<SourceSpan>,
         convert: impl FnOnce() -> Result<T, Diagnostic>,
     ) -> Result<T, Diagnostic> {
-        self.with_depth(&self.statement_depth, span, convert)
+        self.with_depth(span, convert)
     }
 
     fn with_expression_depth<T>(
@@ -219,22 +218,21 @@ impl Adapter {
         span: Option<SourceSpan>,
         convert: impl FnOnce() -> Result<T, Diagnostic>,
     ) -> Result<T, Diagnostic> {
-        self.with_depth(&self.expression_depth, span, convert)
+        self.with_depth(span, convert)
     }
 
     fn with_depth<T>(
         &self,
-        depth: &Cell<usize>,
         span: Option<SourceSpan>,
         convert: impl FnOnce() -> Result<T, Diagnostic>,
     ) -> Result<T, Diagnostic> {
-        let next = depth.get() + 1;
+        let next = self.nesting_depth.get() + 1;
         if next > MAX_SOURCE_NESTING_DEPTH {
             return Err(source_nesting_diagnostic(span));
         }
-        depth.set(next);
+        self.nesting_depth.set(next);
         let result = convert();
-        depth.set(next - 1);
+        self.nesting_depth.set(next - 1);
         result
     }
 
@@ -1050,14 +1048,31 @@ enum ScanMode {
     BlockComment,
 }
 
-fn guard_source_delimiters(source: &str) -> Result<(), Diagnostic> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceDelimiter {
+    Paren,
+    Bracket,
+    Brace,
+    TemplateExpression,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SourceNestingFrame {
+    delimiter: SourceDelimiter,
+    outer_operators: usize,
+}
+
+// Keep one cumulative lexical budget before SWC sees the source. Each open
+// delimiter and each recursively nested operator/statement form consumes one
+// unit; operator counts from outer delimiter frames remain active while the
+// scanner visits an inner expression. The adapter repeats the guard with one
+// shared counter for statement and expression conversion.
+fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
     let bytes = source.as_bytes();
     let mut mode = ScanMode::Code;
     let mut escaped = false;
-    let mut parens = 0usize;
-    let mut brackets = 0usize;
-    let mut braces = 0usize;
-    let mut template_expression_braces = Vec::new();
+    let mut frames = Vec::new();
+    let mut current_operators = 0usize;
     let mut index = 0usize;
 
     while index < bytes.len() {
@@ -1085,20 +1100,67 @@ fn guard_source_delimiters(source: &str) -> Result<(), Diagnostic> {
                     mode = ScanMode::Template;
                     escaped = false;
                 }
-                (b'(', _) => increment_source_depth(&mut parens, index)?,
-                (b')', _) => parens = parens.saturating_sub(1),
-                (b'[', _) => increment_source_depth(&mut brackets, index)?,
-                (b']', _) => brackets = brackets.saturating_sub(1),
-                (b'{', _) => increment_source_depth(&mut braces, index)?,
+                (b'(', _) => enter_source_delimiter(
+                    &mut frames,
+                    &mut current_operators,
+                    SourceDelimiter::Paren,
+                    index,
+                )?,
+                (b')', _) => leave_source_delimiter(
+                    &mut frames,
+                    &mut current_operators,
+                    SourceDelimiter::Paren,
+                ),
+                (b'[', _) => enter_source_delimiter(
+                    &mut frames,
+                    &mut current_operators,
+                    SourceDelimiter::Bracket,
+                    index,
+                )?,
+                (b']', _) => leave_source_delimiter(
+                    &mut frames,
+                    &mut current_operators,
+                    SourceDelimiter::Bracket,
+                ),
+                (b'{', _) => enter_source_delimiter(
+                    &mut frames,
+                    &mut current_operators,
+                    SourceDelimiter::Brace,
+                    index,
+                )?,
                 (b'}', _) => {
-                    let closes_template_expression = template_expression_braces
-                        .last()
-                        .is_some_and(|depth| *depth == braces);
-                    braces = braces.saturating_sub(1);
+                    let closes_template_expression = frames.last().is_some_and(|frame| {
+                        frame.delimiter == SourceDelimiter::TemplateExpression
+                    });
+                    leave_source_delimiter(
+                        &mut frames,
+                        &mut current_operators,
+                        if closes_template_expression {
+                            SourceDelimiter::TemplateExpression
+                        } else {
+                            SourceDelimiter::Brace
+                        },
+                    );
                     if closes_template_expression {
-                        template_expression_braces.pop();
                         mode = ScanMode::Template;
                     }
+                }
+                (b';' | b',', _) => current_operators = 0,
+                _ if is_identifier_start(byte) => {
+                    let start = index;
+                    while bytes
+                        .get(index + 1)
+                        .is_some_and(|byte| is_identifier_continue(*byte))
+                    {
+                        index += 1;
+                    }
+                    if is_recursive_operator_word(&source[start..=index]) {
+                        increment_source_operators(&frames, &mut current_operators, start)?;
+                    }
+                }
+                _ if is_recursive_operator_start(byte) => {
+                    increment_source_operators(&frames, &mut current_operators, index)?;
+                    index += recursive_operator_extra_bytes(bytes, index);
                 }
                 _ => {}
             },
@@ -1129,8 +1191,12 @@ fn guard_source_delimiters(source: &str) -> Result<(), Diagnostic> {
                     mode = ScanMode::Code;
                 } else if byte == b'$' && next == Some(b'{') {
                     index += 1;
-                    increment_source_depth(&mut braces, index)?;
-                    template_expression_braces.push(braces);
+                    enter_source_delimiter(
+                        &mut frames,
+                        &mut current_operators,
+                        SourceDelimiter::TemplateExpression,
+                        index,
+                    )?;
                     mode = ScanMode::Code;
                 }
             }
@@ -1151,15 +1217,121 @@ fn guard_source_delimiters(source: &str) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-fn increment_source_depth(depth: &mut usize, index: usize) -> Result<(), Diagnostic> {
-    *depth += 1;
-    if *depth > MAX_SOURCE_NESTING_DEPTH {
+fn enter_source_delimiter(
+    frames: &mut Vec<SourceNestingFrame>,
+    current_operators: &mut usize,
+    delimiter: SourceDelimiter,
+    index: usize,
+) -> Result<(), Diagnostic> {
+    let next_depth = source_nesting_depth(frames, *current_operators) + 1;
+    if next_depth > MAX_SOURCE_NESTING_DEPTH {
+        return Err(source_nesting_diagnostic(Some(SourceSpan {
+            start: index,
+            end: index + 1,
+        })));
+    }
+    frames.push(SourceNestingFrame {
+        delimiter,
+        outer_operators: std::mem::take(current_operators),
+    });
+    Ok(())
+}
+
+fn leave_source_delimiter(
+    frames: &mut Vec<SourceNestingFrame>,
+    current_operators: &mut usize,
+    delimiter: SourceDelimiter,
+) {
+    if frames
+        .last()
+        .is_some_and(|frame| frame.delimiter == delimiter)
+    {
+        let frame = frames.pop().expect("matching source nesting frame exists");
+        *current_operators = frame.outer_operators;
+    }
+}
+
+fn increment_source_operators(
+    frames: &[SourceNestingFrame],
+    current_operators: &mut usize,
+    index: usize,
+) -> Result<(), Diagnostic> {
+    *current_operators += 1;
+    if source_nesting_depth(frames, *current_operators) > MAX_SOURCE_NESTING_DEPTH {
         return Err(source_nesting_diagnostic(Some(SourceSpan {
             start: index,
             end: index + 1,
         })));
     }
     Ok(())
+}
+
+fn source_nesting_depth(frames: &[SourceNestingFrame], current_operators: usize) -> usize {
+    frames.len()
+        + current_operators
+        + frames
+            .iter()
+            .map(|frame| frame.outer_operators)
+            .sum::<usize>()
+}
+
+fn is_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$')
+}
+
+fn is_identifier_continue(byte: u8) -> bool {
+    is_identifier_start(byte) || byte.is_ascii_digit()
+}
+
+fn is_recursive_operator_word(word: &str) -> bool {
+    matches!(
+        word,
+        "await"
+            | "delete"
+            | "do"
+            | "for"
+            | "if"
+            | "in"
+            | "instanceof"
+            | "new"
+            | "typeof"
+            | "void"
+            | "while"
+            | "with"
+            | "yield"
+    )
+}
+
+fn is_recursive_operator_start(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'!' | b'~'
+            | b'+'
+            | b'-'
+            | b'*'
+            | b'/'
+            | b'%'
+            | b'<'
+            | b'>'
+            | b'|'
+            | b'^'
+            | b'&'
+            | b'?'
+            | b'='
+            | b'.'
+    )
+}
+
+fn recursive_operator_extra_bytes(bytes: &[u8], index: usize) -> usize {
+    const COMPOUND_OPERATORS: &[&[u8]] = &[
+        b">>>=", b"===", b"!==", b">>>", b"**=", b"<<=", b">>=", b"||=", b"&&=", b"??=", b"...",
+        b"=>", b"++", b"--", b"+=", b"-=", b"*=", b"/=", b"%=", b"|=", b"^=", b"&=", b"==", b"!=",
+        b"<=", b">=", b"<<", b">>", b"**", b"||", b"&&", b"??", b"?.",
+    ];
+    COMPOUND_OPERATORS
+        .iter()
+        .find(|operator| bytes[index..].starts_with(operator))
+        .map_or(0, |operator| operator.len() - 1)
 }
 
 fn source_nesting_diagnostic(span: Option<SourceSpan>) -> Diagnostic {

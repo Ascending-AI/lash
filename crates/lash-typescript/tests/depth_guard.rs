@@ -16,11 +16,14 @@ impl ExecutionHost for Host {
     }
 }
 
-fn nested_if_source(depth: usize) -> String {
-    let mut source = "if (true) {".repeat(depth);
-    source.push_str("finish(1);");
-    source.push_str(&"}".repeat(depth));
-    source
+fn stack_budget_source(blocks: usize, parens: usize) -> String {
+    format!(
+        "{}finish({}1{});{}",
+        "{".repeat(blocks),
+        "(".repeat(parens),
+        ")".repeat(parens),
+        "}".repeat(blocks),
+    )
 }
 
 fn delimiter_free_source(shape: &str, depth: usize) -> String {
@@ -100,7 +103,7 @@ fn delimiter_free_nesting_returns_a_named_diagnostic_without_aborting() {
 
 #[test]
 fn mixed_delimiters_share_one_source_nesting_budget() {
-    // The surrounding `finish(` call is one level too.
+    // The surrounding `finish(` call consumes one level of the total.
     lash_typescript::parse(&mixed_delimiter_source(13, 14))
         .expect("28 total delimiter levels should parse");
     let error = lash_typescript::parse(&mixed_delimiter_source(14, 14))
@@ -114,17 +117,19 @@ fn documented_source_nesting_limit_fits_the_two_mebibyte_stack_budget() {
         .name("typescript-source-nesting-budget".to_string())
         .stack_size(STACK_BUDGET_BYTES)
         .spawn(|| {
-            let program =
-                lash_typescript::compile(&nested_if_source(DOCUMENTED_SOURCE_NESTING_LIMIT))
-                    .expect("documented source nesting limit compiles");
+            let parens = DOCUMENTED_SOURCE_NESTING_LIMIT / 2;
+            let blocks = DOCUMENTED_SOURCE_NESTING_LIMIT - parens - 1;
+            // The blocks, grouping parentheses, and `finish(` call consume the
+            // complete shared budget.
+            let program = lash_typescript::compile(&stack_budget_source(blocks, parens))
+                .expect("documented source nesting limit compiles");
             let outcome =
                 futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
                     .expect("documented source nesting limit executes");
             assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(1.0)));
 
-            let error =
-                lash_typescript::parse(&nested_if_source(DOCUMENTED_SOURCE_NESTING_LIMIT + 1))
-                    .expect_err("first over-limit source must be rejected");
+            let error = lash_typescript::parse(&stack_budget_source(blocks + 1, parens))
+                .expect_err("first over-limit source must be rejected");
             assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
         })
         .expect("stack-budget thread starts")
