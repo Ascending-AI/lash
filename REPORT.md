@@ -16,7 +16,9 @@ Round-5 fix baseline: `97c797c4b` (round-4 closure verification, verdict BLOCK)
 
 Round-6 fix baseline: `e9dbf4605` (round-5 closure verification, verdict BLOCK)
 
-Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed, all ten findings from the first verification round are closed, all five findings from the round-2 closure verification are closed, all five findings from the round-3 closure verification are closed, all four findings from the round-4 closure verification are closed, and the single round-5 finding is closed. The no-abort guarantee is no longer verified shape-by-shape: it is carried by generative regressions over two axes — the recursive-production families of **the grammar SWC parses**, and the **lexical fidelity** of the preflight's own lexer against SWC's — cross-checked mechanically against SWC's AST node kinds and by a deterministic fuzzer, with both guards' power re-verified by mutation. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
+Round-7 fix baseline: `bd1d5faa6` (round-6 closure verification, verdict BLOCK — the recorded escalation trigger fired)
+
+Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed, all ten findings from the first verification round are closed, all five findings from the round-2 closure verification are closed, all five findings from the round-3 closure verification are closed, all four findings from the round-4 closure verification are closed, the single round-5 finding is closed, and the round-6 finding is closed along with the class it belonged to. **The no-abort guarantee no longer depends on the source-nesting preflight at all**: the source is bounded and the parse runs on a stack reserved in proportion to it, with measured margin, so stack exhaustion is arithmetically unreachable. The preflight remains for the diagnostic, and its generative guards remain as fast feedback on that. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
 
 This layer is still a **pure calculator**. A TypeScript cell has no tool calls, no `await`, and no deferred tool resolution. Rendered tool signatures are synchronous descriptions for FIG-1305; they do not make tools executable here.
 
@@ -217,7 +219,7 @@ Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR
 | `just perf-guard` | PASS | 297 Lashlang perf results and 1 profile result; runtime and stack budgets passed. |
 | `bash scripts/check-production-file-size.sh` | PASS | Production and test/support files remain within repository budgets. |
 | `git diff --check 93874e275..HEAD` | PASS | No whitespace errors across the whole branch before the final report commit. |
-| `cargo test -p lash-typescript --locked` | PASS | 210 tests across unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites (94 before round 2, 109 before round 3, 115 before round 4, 165 before round 5, 194 before round 6). |
+| `cargo test -p lash-typescript --locked` | PASS | 219 tests across unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites (94 before round 2, 109 before round 3, 115 before round 4, 165 before round 5, 194 before round 6, 210 before round 7). |
 | Committed Node differential table | PASS | All 310 rows match the checked Node v25.2.1 expectations or named rejection; regeneration under Node v25.2.1 reproduces the committed file byte for byte. |
 | `node crates/lash-typescript/tests/differential/generate.mjs` | PASS | Deliberate regeneration, Node version stamped and enforced by the generator. |
 | Base-vs-head Lashlang byte identity | PASS | Seven of seven raw artifact and normalized continuation records match; combined SHA-256 shown above. |
@@ -225,6 +227,10 @@ Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR
 | Lexical-fidelity sweep (14 units x 2 axes x 20 000 repeats, 2 MiB child processes) | PASS | Non-ASCII identifiers, identifier escapes, numeric separators and Unicode line terminators, in the nesting direction; the legal direction covers 120-statement programs of each. |
 | Generative family sweep (66 units x 2 axes x 100 000 repeats, 2 MiB child processes) | PASS | Every recursive production of the grammar SWC parses, and mixed combinations, inline and one per line, returns `TS_SOURCE_NESTING_LIMIT` with a clean exit. |
 | SWC AST node-kind classification | PASS | Exhaustive wildcard-free matches over `Expr`, `Stmt` and `TsType`; a new SWC variant is a compile error. |
+| **Abort corpus with the preflight disabled (29 shapes, filled to the 64 KiB bound, one child process each)** | **PASS** | The load-bearing guard: every shape that aborted in any round returns a diagnostic or a parse with the preflight switched off. |
+| **Fuzzed sources with the preflight disabled (192 sources, 8 child processes)** | PASS | |
+| Oversized source rejection | PASS | 64 KiB + 1 rejects as `TS_SOURCE_TOO_LARGE`; a source at the bound compiles. |
+| Mutation power-check (label regate reverted) | RED as designed on the unit sweep, green on the no-abort guards, then restored | The intended split: a missing charge is now a diagnostic regression, not a crash. |
 | Deterministic parser fuzzer (4 096 sources x 4 lengths, child processes) | PASS | No source built from the charged alphabet drives SWC past the stack budget; half the corpus pairs a lexical atom with a charge-bearing tail, and the corpus is required to reach the budget on more than half its sources. |
 | Mutation power-check (identifier `>= 0x80` rule deleted) | RED as designed, then restored | Both the lexical sweep and the fuzzer fail; the tree is restored and green. |
 | Legal ASI corpus (trailing/block comments, CRLF, multiline templates, newline arrow bodies, 120-statement sequences) | PASS | No false rejection. |
@@ -233,7 +239,7 @@ Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR
 
 The first verification pass exposed a stale docs-snippet assertion that still expected `Promise` signatures and two strict-lint style findings. Commits `074b24b3e`, `db4201eb7`, and `ea8ca2aeb` corrected them; every affected gate and the full battery were rerun successfully on the corrected tree. In round 2 the workspace suite exited 0 on the first run; the `lash-sqlite-store` `sqlite_real_turn_crash_matrix` seeded flake recorded by the verifier (P3-9) did not reproduce, and it remains a pre-existing concurrency-load flake unrelated to this layer — no TypeScript or Lashlang code path is involved.
 
-Round 6 reran the whole battery again, workspace suite green on the first run. Round 5 reran the whole battery once more on the final tree, workspace suite green on the first run. Round 4 reran the whole battery again on the final tree, with the workspace suite green on the first run. Round 3 reran the whole battery on the final tree; the workspace suite again exited 0 on the first run and the `sqlite_real_turn_crash_matrix` seeded flake did not recur.
+Round 7 reran the whole battery again, workspace suite green on the first run. Round 6 reran the whole battery again, workspace suite green on the first run. Round 5 reran the whole battery once more on the final tree, workspace suite green on the first run. Round 4 reran the whole battery again on the final tree, with the workspace suite green on the first run. Round 3 reran the whole battery on the final tree; the workspace suite again exited 0 on the first run and the `sqlite_real_turn_crash_matrix` seeded flake did not recur.
 
 The `ToNumber(String)` whitespace correction lives in `crates/lashlang/src/runtime/javascript.rs`, which is reached only through the `JavaScriptUnary`/`JavaScriptBinary` opcodes the TypeScript lowering emits. No Lashlang program semantics, and no semantic hash, change with it.
 
@@ -246,6 +252,25 @@ The `ToNumber(String)` whitespace correction lives in `crates/lashlang/src/runti
 No compatibility shim, fallback parser, dual execution path, migration adapter, silent semantic divergence, or `docs/adr/` change was added.
 
 ## Round-2 verification note
+
+### Round 7 — the escalation
+
+Round 6 found R6-1: a contextual keyword used as a label name (`type:` x 200, 1 002 bytes) aborted the process, because the label charge was gated on `can_end_expression`, itself derived from the automatic-semicolon-insertion reserved-word list — one predicate answering two different questions. It was the third consecutive defect in the same charge, and the third consecutive round in which the standing guards were correct about the axis they modelled while the abort sat one definition to the side of it. The escalation trigger recorded in round 6 fired, and the orchestrator honoured it.
+
+**What changed.** The guarantee moved off the preflight and onto arithmetic.
+
+| # | Change | Commit |
+| ---: | --- | --- |
+| 1 | A TypeScript cell is bounded at 64 KiB and rejects with `TS_SOURCE_TOO_LARGE`, registered as a runtime-system constraint. Nothing in the RLM layer bounded cell source before this. | `157335263` |
+| 2 | Parsing runs on a dedicated thread whose stack is `8 MiB + 40 000 x source_bytes`. | `157335263` |
+| 3 | `tests/no_abort_guarantee.rs` disables the preflight entirely and runs every shape that aborted in any of the six rounds — filled to the accepted bound — plus the fuzzer's corpus. Each must return a diagnostic or a parse. | `dfe45d7c7` |
+| 4 | R6-1 fixed properly in the preflight: the label charge asks its own narrower question, `can_name_a_label`, instead of reusing the ASI exclusion list. The fuzzer's indivisible pairing is extended to 22 contextual keywords. | `dfe45d7c7`, `ad6ce80e4` |
+
+**The arithmetic.** A nesting level costs at least two source bytes — a delimiter needs an opener and a closer, a label needs a name byte and its `:` — so a source of `n` bytes cannot nest deeper than `n / 2` levels. The worst frame cost measured across the entire six-round abort corpus is **19 552 bytes per level**, on parenthesis nesting in a debug build; release is 2 812, and label chains, the densest in source terms, cost 10 845. Stack usage is linear in depth: measured at depths 1 000, 2 000, 4 000 and 8 000, per-level cost varies by under half a percent, which is what makes the extrapolation to the bound sound. The requirement is therefore at most `19 552 / 2 = 9 776` bytes per source byte; reserving 40 000 leaves **4.09x** margin over the worst debug shape and 28x over the worst release shape. At the 64 KiB bound the largest reservation is 8 MiB + 2.44 GiB, which is address space rather than memory — pages commit when touched, and an ordinary cell touches a few hundred kilobytes. A 4 GiB reservation spawns and joins in about 80 microseconds on this machine.
+
+Only the parse and the drop of its output scale with the source. Everything downstream is bounded independently: the adapter refuses to convert past 28 levels, so the normalized tree is at most that deep, the lowerer walks that tree, and `lashlang` rejects any shared AST deeper than its own 64-level limit. The base allowance covers all of it.
+
+**What the guards mean now.** They have different jobs, and the round-7 mutation check makes the split explicit. Reverting the label regate turns `depth_guard.rs`'s unit sweep **red**, because that sweep is the guard on the preflight's charges — the diagnostic-quality property. It leaves the fuzzer and the no-abort corpus **green**, and that is the intended outcome rather than a weakness: after the structural change a missing charge is a worse diagnostic, not a dead process. That is precisely what retiring the class means.
 
 Round 6 added a third axis to the guards and, with it, a stopping rule. The first two axes are about the grammar: which productions recurse, and whether each is charged. The third is about the lexer: the preflight tokenises the source itself, so it is a second implementation of SWC's lexer, and a charge gated on a token boundary is disarmed wherever the two disagree. That axis has its own enumerable surface — Unicode identifiers, identifier escapes, numeric separators, Unicode line terminators — and it is now swept in both directions and drawn from by the fuzzer, whose lexical half pairs an atom with the charge-bearing token that follows it. Both guards were re-verified by mutation: deleting the `>= 0x80` rule turns the lexical sweep and the fuzzer red, and restoring it returns them to green.
 
