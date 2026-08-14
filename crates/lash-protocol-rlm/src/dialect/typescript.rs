@@ -79,7 +79,7 @@ impl RlmDialect for TypescriptDialect {
             format!("\n\nAvailable tools (all calls require `await`):\n```typescript\n{tools}\n```")
         };
         Ok(format!(
-            "## TypeScript execution\n\nUse exactly one paired `<typescript>...</typescript>` block. Cells are plain durable scripts. Durable work is declared with a top-level `const process = defineProcess({{ name: \"literal\", signals: {{}}, run: async (...) => {{ ... }} }})`. Agent primitives are `start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`, and `finish`. Use `await` for tools and process handles; `Promise.all` and `Promise.allSettled` preserve aggregate concurrency. Inside `run`, `return` completes successfully after enclosing `finally` blocks and an uncaught `throw` fails the run. General async function authoring and `new Date()` are named rejections in v1.{tools}"
+            "## TypeScript execution\n\nUse exactly one paired `<typescript>...</typescript>` block. Cells are plain durable scripts. Durable work is declared with a top-level `const process = defineProcess({{ name: \"literal\", signals: {{}}, run: async (...) => {{ ... }} }})`. Agent primitives are `start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`, and cell-only `finish`; `wake(value)` emits run progress and `wake(handle, \"signal\", payload)` signals another run. Use `await` for tools and process handles; `Promise.all` and `Promise.allSettled` batch top-level tool promises and resolved values. Inside `run`, `return` completes successfully after enclosing `finally` blocks and an uncaught `throw` fails the run. General async function authoring and `new Date()` are named rejections in v1.{tools}"
         ))
     }
 

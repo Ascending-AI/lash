@@ -476,14 +476,36 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
     trigger_router: Option<crate::TriggerRouter>,
     effect_controller: Arc<dyn crate::RuntimeEffectController>,
 ) -> crate::RuntimeExecutionContext<'static> {
-    let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
-        .build_session("test-session", None)
-        .expect("test plugin session");
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let execution_env_spec = crate::ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
+    code_execution_context_with_process_dependencies(
+        provider,
+        tool_catalog,
+        trigger_router,
+        Arc::new(crate::UnavailableProcessService),
+        effect_controller,
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        execution_env_spec,
+    )
+}
+
+/// Build a code-execution context whose process service, effect controller,
+/// and process-environment store are shared with a real test process worker.
+pub fn code_execution_context_with_process_dependencies(
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    trigger_router: Option<crate::TriggerRouter>,
+    processes: Arc<dyn crate::ProcessService>,
+    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    execution_env_spec: crate::ProcessExecutionEnvSpec,
+) -> crate::RuntimeExecutionContext<'static> {
+    let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
+        .build_session("test-session", None)
+        .expect("test plugin session");
+    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let attachment_store: Arc<crate::SessionAttachmentStore> =
         Arc::new(crate::SessionAttachmentStore::in_memory());
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
@@ -494,7 +516,7 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
-        processes: Arc::new(crate::UnavailableProcessService),
+        processes,
         trigger_router,
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(effect_controller),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -516,7 +538,7 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
     crate::RuntimeExecutionContext::new(
         "test-session".to_string(),
         dispatch,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        process_env_store,
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         None,

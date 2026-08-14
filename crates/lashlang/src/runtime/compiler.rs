@@ -66,7 +66,9 @@ pub(crate) struct Compiler {
 
 /// Source-language choices that affect bytecode while sharing the same AST and
 /// heap VM.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CompilationDialect {
     /// Lashlang's value-isolating assignment and aggregate semantics.

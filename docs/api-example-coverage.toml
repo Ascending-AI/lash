@@ -37748,6 +37748,14 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:950#RemoteRuntimeEffectKi
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::remote::processes::RemoteRuntimeEffectKind::LanguageRuntimeValue"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: remote transports for alternative language-runtime dialects must preserve the journaled language-value effect kind across their wire boundary."
+
+[[api]]
 symbol = "lash::remote::processes::RemoteRuntimeEffectKind::PeekAwaitEvent"
 kind = "variant"
 availability = "default+all-features"
@@ -46235,6 +46243,24 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectCommand::LanguageRuntimeValue"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectCommand::LanguageRuntimeValue"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative language-runtime dialect implementers use this command to journal values derived from time or entropy without exposing an unjournaled host source."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectCommand::LanguageRuntimeValue::operation"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectCommand::LanguageRuntimeValue::operation"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative language-runtime dialect implementers supply the requested deterministic operation when crossing the journaled value boundary."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::LlmCall::request"
 kind = "field"
 availability = "default+all-features"
@@ -46642,6 +46668,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectKind::LanguageRuntimeValue"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectKind::LanguageRuntimeValue"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative language-runtime dialect and durable-effect-host implementers classify journaled values derived from time or entropy with this effect kind."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectKind::PeekAwaitEvent"
 kind = "variant"
 availability = "default+all-features"
@@ -46793,6 +46828,15 @@ aliases = ["lash_core::RuntimeEffectLocalExecutor::into_trigger"]
 area = "triggers"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectLocalExecutor::into_trigger. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectLocalExecutor::language_runtime_value"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectLocalExecutor::language_runtime_value"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative language-runtime dialect implementers install this local executor to derive time and entropy only behind the runtime effect journal."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::processes"
@@ -46984,6 +47028,24 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::LanguageRuntimeValue"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::LanguageRuntimeValue"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative language-runtime dialect and durable-effect-host implementers return journaled time or entropy values through this typed outcome."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::LanguageRuntimeValue::value"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::LanguageRuntimeValue::value"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative language-runtime dialect implementers consume the journaled value payload after the effect host has recorded it."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::LlmCall::call_record"
 kind = "field"
 availability = "default+all-features"
@@ -47153,6 +47215,15 @@ aliases = ["lash_core::RuntimeEffectOutcome::into_peek_await_event"]
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::into_language_runtime_value"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::into_language_runtime_value"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative language-runtime dialect implementers extract a typed journaled value while rejecting mismatched effect outcomes."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::into_process"
@@ -66505,6 +66576,14 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeExecutionContext::execution_scope_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash_core::RuntimeExecutionContext::journaled_language_runtime_value"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative language-runtime dialect implementers request time or entropy through this context method so execution and replay observe the same journaled value."
 
 [[api]]
 symbol = "lash_core::RuntimeExecutionContext::parent_invocation"

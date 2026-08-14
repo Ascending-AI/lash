@@ -8,6 +8,22 @@ use num_traits::ToPrimitive;
 
 use super::{Value, is_truthy};
 
+pub(crate) const MAX_JAVASCRIPT_STRING_BYTES: usize = 8 * 1024 * 1024;
+
+pub(crate) fn ensure_javascript_string_size(bytes: usize) -> Result<(), super::RuntimeError> {
+    if bytes > MAX_JAVASCRIPT_STRING_BYTES {
+        return Err(javascript_string_size_error(bytes));
+    }
+    Ok(())
+}
+
+pub(crate) fn javascript_string_size_error(attempted: usize) -> super::RuntimeError {
+    super::RuntimeError::MemoryLimitExceeded {
+        limit: MAX_JAVASCRIPT_STRING_BYTES as u64,
+        attempted: u64::try_from(attempted).unwrap_or(u64::MAX),
+    }
+}
+
 pub(crate) fn eval_javascript_unary(value: Value, op: JavaScriptUnaryOp) -> Value {
     match op {
         JavaScriptUnaryOp::Plus => Value::Number(javascript_to_number(&value)),
@@ -145,7 +161,7 @@ fn javascript_is_object(value: &Value) -> bool {
     )
 }
 
-fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
+pub(crate) fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
     match value {
         Value::Tuple(items) | Value::List(items) => Value::String(
             items
@@ -304,14 +320,26 @@ pub(crate) fn javascript_join(
     } else {
         javascript_to_string(separator)
     };
-    Ok(values
+    let parts = values
         .iter()
         .map(|value| match value {
             Value::Null | Value::Undefined => String::new(),
             value => javascript_to_string(value),
         })
-        .collect::<Vec<_>>()
-        .join(&separator))
+        .collect::<Vec<_>>();
+    let bytes = parts
+        .iter()
+        .try_fold(0usize, |total, part| total.checked_add(part.len()))
+        .and_then(|total| {
+            total.checked_add(
+                separator
+                    .len()
+                    .saturating_mul(parts.len().saturating_sub(1)),
+            )
+        })
+        .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
+    ensure_javascript_string_size(bytes)?;
+    Ok(parts.join(&separator))
 }
 
 fn parse_radix_integer(digits: &str, radix: u32) -> f64 {

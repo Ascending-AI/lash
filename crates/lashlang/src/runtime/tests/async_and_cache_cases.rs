@@ -195,6 +195,55 @@ fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
     assert_eq!(cache.stats().misses, 1);
 }
 
+#[test]
+fn compiled_process_cache_separates_source_dialects() {
+    let program =
+        crate::parse("process scan() { value = [1] alias = value alias[0] = 2 finish value[0] }")
+            .expect("parse module");
+    let lashlang = crate::LinkedModule::link_with_dialect(
+        program.clone(),
+        runtime_test_environment(),
+        crate::CompilationDialect::Lashlang,
+    )
+    .expect("link Lashlang module");
+    let typescript = crate::LinkedModule::link_with_dialect(
+        program,
+        runtime_test_environment(),
+        crate::CompilationDialect::Typescript,
+    )
+    .expect("link TypeScript module");
+    assert_ne!(lashlang.module_ref, typescript.module_ref);
+    let process_ref = lashlang
+        .artifact
+        .process_ref("scan")
+        .expect("scan process ref");
+    assert_eq!(
+        Some(process_ref),
+        typescript.artifact.process_ref("scan"),
+        "process identity intentionally remains source-dialect independent"
+    );
+
+    let mut cache = CompiledProcessCache::with_capacity(2);
+    let lashlang_compiled = cache
+        .get_or_compile(
+            &lashlang.artifact,
+            process_ref,
+            &lashlang.host_requirements_ref,
+        )
+        .expect("compile Lashlang process");
+    let typescript_compiled = cache
+        .get_or_compile(
+            &typescript.artifact,
+            process_ref,
+            &typescript.host_requirements_ref,
+        )
+        .expect("compile TypeScript process");
+
+    assert!(!Arc::ptr_eq(&lashlang_compiled, &typescript_compiled));
+    assert_eq!(cache.stats().hits, 0);
+    assert_eq!(cache.stats().misses, 2);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn receiver_module_operation_unwraps_result() {
     let value = exec(r#"finish (await tools.echo({ value: "ok" })?)"#)

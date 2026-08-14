@@ -15,6 +15,8 @@ use crate::{Diagnostic, DiagnosticCode};
 
 mod stdlib;
 use stdlib::*;
+mod loops;
+use loops::*;
 mod graph;
 use graph::{shortest_cycle_through, strongly_connected_components};
 
@@ -96,6 +98,7 @@ struct Lowerer {
     await_depth: usize,
     declarations: Vec<Declaration>,
     process_bindings: BTreeMap<String, String>,
+    process_handle_bindings: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
 }
 
@@ -417,6 +420,9 @@ impl Lowerer {
                             .unwrap_or(LashExpr::Undefined)
                     };
                     let target = self.binding(&declaration.name)?.internal.clone();
+                    if *kind == VarKind::Const && matches!(&value, LashExpr::StartProcess(_)) {
+                        self.process_handle_bindings.insert(target.clone());
+                    }
                     self.initialize(&declaration.name);
                     output.push(LashExpr::Assign {
                         target: AssignTarget::variable(target.into()),
@@ -484,10 +490,23 @@ impl Lowerer {
                 iterable,
                 body,
             } => {
+                if contains_member_assignment(body) {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::ForOfUnsupported,
+                        "for-of bodies that may mutate the iterable through property assignment or user calls are not supported in v1",
+                        None,
+                    ));
+                }
                 self.scopes.push(Scope::default());
                 self.declare(binding, BindingKind::Const, true, false)?;
                 let internal = self.binding(binding)?.internal.clone();
-                let iterable = self.lower_expr(iterable)?;
+                let iterable = LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![
+                        LashExpr::String("Lash.ArrayFromIterable".into()),
+                        self.lower_expr(iterable)?,
+                    ],
+                };
                 self.loop_depth += 1;
                 self.continue_epilogues.push(None);
                 let body = self.lower_stmt_block(body)?;
@@ -747,118 +766,6 @@ impl Lowerer {
         })
     }
 
-    fn lower_classic_for(
-        &mut self,
-        init: Option<&Stmt>,
-        test: Option<&Expr>,
-        update: Option<&Expr>,
-        body: &Stmt,
-    ) -> Result<LashExpr, Diagnostic> {
-        let Some(Stmt::Var {
-            kind: VarKind::Let,
-            declarations,
-        }) = init
-        else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for requires `let i = start; i < end; i++` in v1",
-                None,
-            ));
-        };
-        let [declaration] = declarations.as_slice() else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for requires exactly one loop binding",
-                None,
-            ));
-        };
-        let Some(start) = declaration.init.as_ref() else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for loop binding requires an initializer",
-                None,
-            ));
-        };
-        let Some(Expr::Binary {
-            left,
-            op: BinaryOp::Less,
-            ..
-        }) = test
-        else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for condition must be `i < end`",
-                None,
-            ));
-        };
-        let Expr::Ident(condition_name) = left.as_ref() else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for condition must read its loop binding",
-                None,
-            ));
-        };
-        let Some(Expr::Update {
-            name: update_name,
-            delta,
-            ..
-        }) = update
-        else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for update must be `i++`",
-                None,
-            ));
-        };
-        if condition_name != &declaration.name || update_name != &declaration.name || *delta != 1.0
-        {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for binding, condition, and update must name the same identifier",
-                None,
-            ));
-        }
-
-        self.scopes.push(Scope::default());
-        self.declare(&declaration.name, BindingKind::Let, true, false)?;
-        let internal = self.binding(&declaration.name)?.internal.clone();
-        let start = self.lower_expr(start)?;
-        let condition = self.lower_expr(test.expect("validated classic for condition"))?;
-        let update = self.lower_update_statement(&declaration.name, *delta)?;
-        self.loop_depth += 1;
-        self.continue_epilogues.push(Some(update.clone()));
-        let body = self.lower_stmt_block(body)?;
-        self.continue_epilogues.pop();
-        self.loop_depth -= 1;
-        self.scopes.pop();
-        Ok(LashExpr::Block(vec![
-            LashExpr::Assign {
-                target: AssignTarget::variable(internal.as_str().into()),
-                expr: Box::new(start),
-            },
-            LashExpr::While {
-                condition: Box::new(condition),
-                body: Box::new(LashExpr::Block(vec![body, update])),
-            },
-        ]))
-    }
-
-    fn lower_update_statement(&mut self, name: &str, delta: f64) -> Result<LashExpr, Diagnostic> {
-        let target = self.lower_assign_target(&TsAssignTarget::Ident(name.to_string()))?;
-        Ok(LashExpr::Assign {
-            target,
-            expr: Box::new(LashExpr::JavaScriptBinary {
-                left: Box::new(LashExpr::Variable(self.resolve(name)?.into())),
-                op: if delta > 0.0 {
-                    JavaScriptBinaryOp::Add
-                } else {
-                    JavaScriptBinaryOp::Subtract
-                },
-                right: Box::new(LashExpr::Number(delta.abs())),
-            }),
-        })
-    }
-
     fn lower_process_definition(
         &mut self,
         binding_name: &str,
@@ -1019,6 +926,13 @@ impl Lowerer {
                         None,
                     ));
                 };
+                if !matches!(value, Expr::Array(_)) {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::AwaitUnsupported,
+                        format!("Promise.{method} currently requires an array iterable"),
+                        None,
+                    ));
+                }
                 Some((method.as_str(), value))
             }
             _ => None,
@@ -1031,6 +945,30 @@ impl Lowerer {
         };
         self.await_depth -= 1;
         let lowered = lowered?;
+        if mode.is_some() && has_unsupported_aggregate_effect(&lowered) {
+            return Err(Diagnostic::new(
+                DiagnosticCode::AwaitUnsupported,
+                "Promise.all/allSettled currently aggregate tool promises and resolved values; process and timer promises require separate await expressions",
+                None,
+            ));
+        }
+        if mode.is_some() && has_nested_aggregate_effect(&lowered) {
+            return Err(Diagnostic::new(
+                DiagnosticCode::AwaitUnsupported,
+                "Promise.all/allSettled tool promises must be top-level array elements",
+                None,
+            ));
+        }
+        if mode.is_some()
+            && has_aggregate_effect_leaf(&lowered)
+            && has_unbatchable_aggregate_value(&lowered)
+        {
+            return Err(Diagnostic::new(
+                DiagnosticCode::AwaitUnsupported,
+                "Promise.all/allSettled cannot mix tool promises with computed function or assignment values in v1",
+                None,
+            ));
+        }
         if matches!(
             lowered,
             LashExpr::SleepFor(_)
@@ -1044,10 +982,20 @@ impl Lowerer {
             return Ok(lowered);
         }
         if mode == Some("allSettled") {
-            return Ok(all_settled_results(LashExpr::Await(Box::new(lowered))));
+            let has_effect = has_aggregate_effect_leaf(&lowered);
+            let settled = settle_aggregate_leaves(lowered);
+            let values = if has_effect {
+                LashExpr::Await(Box::new(settled))
+            } else {
+                settled
+            };
+            return Ok(all_settled_results(values));
         }
         if mode == Some("all") {
-            return Ok(LashExpr::Await(Box::new(unwrap_aggregate_leaves(lowered))));
+            if has_aggregate_effect_leaf(&lowered) {
+                return Ok(LashExpr::Await(Box::new(unwrap_aggregate_leaves(lowered))));
+            }
+            return Ok(lowered);
         }
         if matches!(lowered, LashExpr::ReceiverCall { .. }) {
             return Ok(LashExpr::Await(Box::new(LashExpr::ResultUnwrap(Box::new(
@@ -1055,6 +1003,14 @@ impl Lowerer {
             )))));
         }
         if matches!(lowered, LashExpr::StartProcess(_)) {
+            return Ok(LashExpr::ResultUnwrap(Box::new(LashExpr::Await(Box::new(
+                lowered,
+            )))));
+        }
+        if matches!(
+            &lowered,
+            LashExpr::Variable(name) if self.process_handle_bindings.contains(name.as_str())
+        ) {
             return Ok(LashExpr::ResultUnwrap(Box::new(LashExpr::Await(Box::new(
                 lowered,
             )))));
@@ -1188,9 +1144,19 @@ impl Lowerer {
             && !self.has_binding(name)
         {
             return match (name.as_str(), args) {
+                ("finish", [_]) if self.process_depth > 0 => Err(Diagnostic::new(
+                    DiagnosticCode::UnsupportedExpression,
+                    "finish is cell-only; return from defineProcess.run so enclosing finally blocks execute",
+                    None,
+                )),
                 ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
                 ("print", [value]) => Ok(LashExpr::Print(Box::new(self.lower_expr(value)?))),
                 ("wake", [value]) => Ok(LashExpr::Wake(Box::new(self.lower_expr(value)?))),
+                ("wake", [run, Expr::String(signal), payload]) => Ok(LashExpr::SignalRun {
+                    run: Box::new(self.lower_expr(run)?),
+                    name: signal.as_str().into(),
+                    payload: Box::new(self.lower_expr(payload)?),
+                }),
                 ("sleep", [milliseconds]) if self.await_depth > 0 => {
                     Ok(LashExpr::SleepFor(Box::new(self.lower_expr(milliseconds)?)))
                 }
@@ -1309,18 +1275,14 @@ impl Lowerer {
                 });
             }
             if is_instance_stdlib_method(method) {
-                if method == "map" {
-                    let [function] = args else {
-                        return Err(Diagnostic::new(
-                            DiagnosticCode::UnsupportedExpression,
-                            "Array.prototype.map expects one callback",
-                            None,
-                        ));
-                    };
-                    return Ok(LashExpr::Map {
-                        items: Box::new(self.lower_expr(object)?),
-                        function: Box::new(self.lower_expr(function)?),
-                    });
+                if has_literal_stdlib_receiver(object)
+                    && !literal_supports_instance_method(object, method)
+                {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::MethodUnsupported,
+                        format!("method `{method}` is unavailable on this literal receiver"),
+                        None,
+                    ));
                 }
                 let mut builtin_args = vec![
                     LashExpr::String(method.as_str().into()),
@@ -1360,6 +1322,7 @@ impl Lowerer {
 
             if matches!(object.as_ref(), Expr::Ident(owner) if is_known_runtime_global(owner) && !self.has_binding(owner))
                 || has_literal_stdlib_receiver(object)
+                || matches!(object.as_ref(), Expr::Ident(owner) if self.has_binding(owner) && is_removed_instance_stdlib_method(method))
             {
                 return Err(Diagnostic::new(
                     DiagnosticCode::MethodUnsupported,

@@ -28,7 +28,6 @@ pub(crate) use control::{
     drive_effect_controller_task,
 };
 pub use controller_error::RuntimeEffectControllerError;
-use language_runtime::LanguageRuntimeValueRunner;
 pub use trigger::TriggerLocalExecution;
 
 use crate::LlmRequest as CoreLlmRequest;
@@ -250,17 +249,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub fn unavailable() -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Unavailable,
-            replay_trace: None,
-        }
-    }
-
-    pub fn language_runtime_value(
-        clock: Arc<dyn crate::Clock>,
-    ) -> RuntimeEffectLocalExecutor<'static> {
-        RuntimeEffectLocalExecutor {
-            state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
-                LanguageRuntimeValueRunner { clock },
-            )),
             replay_trace: None,
         }
     }

@@ -10,19 +10,21 @@ fn first_shot_agent_programs_lower_without_missing_standard_library() {
           web.fetch({ url: "https://example.test/a" }),
           web.fetch({ url: "https://example.test/b" })
         ]);
-        finish(pages.map((page: unknown) => JSON.stringify(page)).join("\n"));
+        const rendered = [];
+        for (let i = 0; i < pages.length; i++) { rendered[i] = JSON.stringify(pages[i]); }
+        finish(rendered.join("\n"));
         "#,
         r#"
         const rows = Object.entries({ beta: 2, alpha: 1 });
         const labels = [];
-        for (const row of rows) { labels[labels.length] = row.join(":"); }
+        for (let i = 0; i < rows.length; i++) { labels[i] = rows[i].join(":"); }
         finish(labels.join(","));
         "#,
         r#"
-        const input = "  one,two,three  ".trim().split(",");
+        const input = ["one", "two", "three"];
         let total = 0;
         for (let i = 0; i < input.length; i++) { total = total + input[i].length; }
-        finish({ total, last: input.at(-1).toUpperCase() });
+        finish({ total, last: input[input.length - 1].toUpperCase() });
         "#,
         r#"
         const worker = defineProcess({

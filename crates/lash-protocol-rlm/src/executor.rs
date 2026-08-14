@@ -843,6 +843,7 @@ mod tests {
         ProjectionRef, ProjectionRegistry, flow_record_to_json_value, flow_record_to_tool_args,
         flow_to_json_value, projected_index,
     };
+    use lash_core::ProcessRegistry;
     use lash_lashlang_runtime::ToolDefinitionLashlangExt;
     use lash_rlm_types::PROJECTED_JSON_TAG;
     use lash_sansio::sync::MutexExt;
@@ -1761,6 +1762,367 @@ mod tests {
             assert_eq!(stats.hits, 1);
             assert_eq!(stats.misses, 1);
         });
+    }
+
+    #[test]
+    fn typescript_executor_stores_a_typescript_process_artifact() {
+        block_on(async {
+            let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+            let (state, response) = execute_typescript_code_with_bounds(
+                RlmExecutionState::for_engine("typescript").expect("TypeScript state"),
+                lash_core::testing::code_execution_context(),
+                ExecRequest {
+                    language: "typescript".to_string(),
+                    code: r#"
+                        const worker = defineProcess({
+                          name: "worker", signals: {},
+                          run: async (input: unknown) => { return input; }
+                        });
+                        finish(1);
+                    "#
+                    .to_string(),
+                    accept_finish: true,
+                },
+                artifact_store.clone(),
+                LashlangSurface::new(
+                    lashlang::LashlangAbilities::default().with_processes(),
+                    lashlang::LashlangLanguageFeatures::default(),
+                    lashlang::LashlangHostCatalog::new(),
+                ),
+                None,
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
+            )
+            .await
+            .expect("execute TypeScript process declaration");
+            assert!(response.error.is_none(), "{:?}", response.error);
+            let module_ref = state
+                .stored_lashlang_modules
+                .iter()
+                .next()
+                .expect("stored process module");
+            let artifact = lashlang::LashlangArtifactStore::get_module_artifact(
+                artifact_store.as_ref(),
+                module_ref,
+            )
+            .await
+            .expect("read stored artifact")
+            .expect("artifact exists");
+            assert_eq!(
+                artifact.compilation_dialect,
+                lashlang::CompilationDialect::Typescript
+            );
+        });
+    }
+
+    #[derive(Clone)]
+    struct TypeScriptSignalProcessService {
+        registry: Arc<lash_core::TestLocalProcessRegistry>,
+        controller: Arc<dyn lash_core::RuntimeEffectController>,
+    }
+
+    struct EmptyTypeScriptSignalToolProvider;
+
+    #[async_trait::async_trait]
+    impl lash_core::ToolProvider for EmptyTypeScriptSignalToolProvider {
+        fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+            Vec::new()
+        }
+
+        fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
+            None
+        }
+
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+            lash_core::ToolResult::err(serde_json::json!(format!(
+                "signal round-trip test has no tool `{}`",
+                call.name
+            )))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl lash_core::ProcessService for TypeScriptSignalProcessService {
+        async fn start(
+            &self,
+            _session_id: &str,
+            registration: lash_core::ProcessRegistration,
+            options: lash_core::ProcessStartOptions,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
+            lash_core::ProcessRegistry::register_process_with_observers(
+                self.registry.as_ref(),
+                registration,
+                &options.initial_observers,
+            )
+            .await
+        }
+
+        async fn await_process(
+            &self,
+            process_id: &str,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
+            let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
+            lash_core::facade_support::ProcessAwaiter::polling(registry)
+                .await_terminal(process_id)
+                .await
+        }
+
+        async fn list_visible(
+            &self,
+            session_id: &str,
+            mode: lash_core::ProcessListMode,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<Vec<lash_core::ProcessRecord>, lash_core::PluginError> {
+            match mode {
+                lash_core::ProcessListMode::Live => {
+                    self.registry.list_live_observed_by(session_id).await
+                }
+                lash_core::ProcessListMode::All => self.registry.list_observed_by(session_id).await,
+            }
+        }
+
+        async fn validate_visible(
+            &self,
+            session_id: &str,
+            process_ids: &[String],
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<(), lash_core::PluginError> {
+            for process_id in process_ids {
+                if !self.registry.is_observer(session_id, process_id).await? {
+                    return Err(lash_core::PluginError::Session(format!(
+                        "process `{process_id}` is not visible"
+                    )));
+                }
+            }
+            Ok(())
+        }
+
+        async fn cancel(
+            &self,
+            _session_id: &str,
+            _process_id: &str,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "process cancellation is unused in this test".to_string(),
+            ))
+        }
+
+        async fn signal(
+            &self,
+            _session_id: &str,
+            process_id: &str,
+            signal_name: String,
+            signal_id: String,
+            payload: Value,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessEvent, lash_core::PluginError> {
+            let event_type = lash_core::facade_support::process_signal_event_type(&signal_name)?;
+            let command = lash_core::ProcessCommand::Signal {
+                process_id: process_id.to_string(),
+                signal_name: signal_name.clone(),
+                signal_id: signal_id.clone(),
+                request: lash_core::ProcessEventAppendRequest::new(event_type, payload)
+                    .with_replay_key(format!("typescript:signal:{process_id}:{signal_id}")),
+            };
+            let effect_id = command.effect_id();
+            let outcome = self
+                .controller
+                .execute_effect(
+                    lash_core::RuntimeEffectEnvelope::new(
+                        lash_core::RuntimeInvocation::effect(
+                            lash_core::RuntimeScope::new("typescript-signal-test"),
+                            effect_id.clone(),
+                            lash_core::RuntimeEffectKind::Process,
+                            effect_id,
+                        ),
+                        lash_core::RuntimeEffectCommand::process(command),
+                    ),
+                    lash_core::RuntimeEffectLocalExecutor::processes(self.registry.clone(), None),
+                )
+                .await?
+                .into_process()?;
+            let lash_core::ProcessEffectOutcome::Signal { event } = outcome else {
+                unreachable!("signal command returns signal outcome");
+            };
+            let ordinal = lash_core::ProcessRegistry::count_events_through(
+                self.registry.as_ref(),
+                process_id,
+                event.event_type.as_str(),
+                event.sequence,
+            )
+            .await?;
+            let key = self
+                .controller
+                .await_event_key(
+                    &lash_core::ExecutionScope::process(process_id),
+                    lash_core::AwaitEventWaitIdentity::process_signal(
+                        process_id,
+                        &signal_name,
+                        ordinal,
+                    ),
+                )
+                .await
+                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            let resolved = self
+                .controller
+                .resolve_await_event(&key, lash_core::Resolution::Ok(event.payload.clone()))
+                .await
+                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            assert_eq!(resolved, lash_core::ResolveOutcome::Accepted);
+            Ok(*event)
+        }
+
+        async fn transfer(
+            &self,
+            _from_session_id: &str,
+            _to_session_id: &str,
+            _process_ids: Vec<String>,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<(), lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "process transfer is unused in this test".to_string(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn typescript_signal_round_trip_crosses_protocol_and_process_engine() {
+        let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+            Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
+        let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
+            lash_core::facade_support::InlineRuntimeEffectController::default()
+                .allow_process_lifetime_completion_keys(),
+        );
+        let surface = LashlangSurface::new(
+            lashlang::LashlangAbilities::default()
+                .with_processes()
+                .with_process_signals(),
+            lashlang::LashlangLanguageFeatures::default(),
+            lashlang::LashlangHostCatalog::new(),
+        );
+        let session_policy = lash_core::SessionPolicy {
+            model: lash_core::ModelSpec::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("TypeScript signal test model"),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+        let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+            Arc::new(
+                lash_core::facade_support::InlineEffectHost::new(controller.clone())
+                    .allow_process_lifetime_completion_keys(),
+            ),
+            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            process_env_store.clone(),
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
+            artifact_store.clone(),
+            surface.clone(),
+        )));
+        let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+        let worker = lash_core::facade_support::DurableProcessWorker::new(
+            lash_core::facade_support::DurableProcessWorkerConfig::new(
+                Arc::new(lash_core::facade_support::PluginHost::new(
+                    lash_core::testing::test_code_protocol_factories(),
+                )),
+                runtime_host,
+                Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+                registry_dyn,
+            )
+            .with_session_policy(session_policy.clone()),
+        );
+        let processes: Arc<dyn lash_core::ProcessService> =
+            Arc::new(TypeScriptSignalProcessService {
+                registry: registry.clone(),
+                controller: controller.clone(),
+            });
+        let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
+            Arc::new(EmptyTypeScriptSignalToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+            None,
+            processes,
+            controller,
+            process_env_store,
+            lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                session_policy,
+            ),
+        );
+        let (_, response) = execute_typescript_code_with_bounds(
+            RlmExecutionState::for_engine("typescript").expect("TypeScript state"),
+            ctx,
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: r#"
+                    const worker = defineProcess({
+                      name: "worker", signals: { ready: null },
+                      run: async () => await waitSignal("ready")
+                    });
+                    const handle = start(worker);
+                    wake(handle, "ready", { ok: true });
+                    finish("signal-sent");
+                "#
+                .to_string(),
+                accept_finish: true,
+            },
+            artifact_store,
+            surface,
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+        )
+        .await
+        .expect("execute TypeScript signal round-trip");
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert_eq!(
+            response.terminal_finish,
+            Some(serde_json::json!("signal-sent"))
+        );
+
+        worker
+            .drive_pending_processes()
+            .await
+            .expect("drive signalled TypeScript process");
+        let records = registry
+            .list_observed_by("test-session")
+            .await
+            .expect("list started TypeScript process");
+        let [record] = records.as_slice() else {
+            panic!("expected exactly one started TypeScript process, got {records:?}");
+        };
+        let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+        let terminal = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            lash_core::facade_support::ProcessAwaiter::polling(registry_dyn)
+                .await_terminal(&record.id),
+        )
+        .await
+        {
+            Ok(output) => output.expect("await TypeScript signal process"),
+            Err(_) => panic!(
+                "TypeScript signal process reaches terminal state: {:?}",
+                registry.get_process(&record.id).await
+            ),
+        };
+        assert_eq!(
+            terminal,
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::json!({ "ok": true }),
+                control: None,
+            }
+        );
     }
 
     fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {

@@ -123,6 +123,16 @@ rejection_test!(
     Code::MethodUnsupported
 );
 rejection_test!(
+    rejects_removed_method_on_bound_receiver,
+    "const s = 'a,b'; s.split(',');",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_array_from_mapping_callback,
+    "Array.from('ab', value => value.toUpperCase());",
+    Code::MethodUnsupported
+);
+rejection_test!(
     rejects_missing_runtime_property,
     "finish(Math.PI);",
     Code::MethodUnsupported
@@ -237,7 +247,7 @@ fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
         "finish(`${'abc'.startsWith('bc', 1)}`);",
         "finish(`${'abc'.includes('b', 2)}`);",
         "finish(`${'abc'.endsWith('b', 2)}`);",
-        "finish(`${'abc'.split('', 2)}`);",
+        "finish(`${'abc'.charCodeAt(0, 99)}`);",
     ] {
         lash_typescript::validate(source).expect(source);
     }

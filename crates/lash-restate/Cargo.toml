@@ -37,6 +37,7 @@ http-body-util = { version = "0.1", features = ["channel"] }
 lash = { workspace = true, features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }
+lash-typescript = { workspace = true }
 lash-llm-tools = { workspace = true }
 lashlang = { workspace = true }
 lash-protocol-rlm = { workspace = true }

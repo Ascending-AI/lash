@@ -30,10 +30,20 @@ in the executor's deferred tool-resolution path.
 Durable work has the static shape
 `const worker = defineProcess({ name: "worker", signals: {}, run: async (...) => { ... } })`.
 `start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`, and `finish` lower to
-the shared process/effect machinery. A normal return from `run` finishes the
+the shared process/effect machinery. `wake(value)` emits progress from a run;
+`wake(handle, "signal", payload)` sends a declared signal to another run.
+`finish` is cell-only. A normal return from `run` finishes the
 process only after all enclosing `finally` blocks execute; an uncaught throw
 fails it. Dynamic process definitions and targets reject with dedicated
 `TS_PROCESS_*` diagnostics.
+
+`Promise.all` and `Promise.allSettled` aggregate top-level tool promises and
+already-resolved values through the shared batch machine. Nested tool promises,
+non-array iterables, and process/timer promises are named rejections in v1.
+The shared batch host currently reports outcomes only after every leaf settles;
+therefore `Promise.all` does not yet reject at the first-settled failure and can
+select an earlier input's later failure. This is an open FIG-1305 release blocker,
+not an accepted semantic deviation.
 
 `Date.now()` and `Math.random()` are host effects, so their result is recorded
 at the same journal boundary as other effects and replay never samples the VM's
@@ -56,6 +66,12 @@ Mutually recursive function declarations reject with
 `TS_MUTUAL_RECURSION_UNSUPPORTED`; a function *expression* may still be named
 and call itself by that name, and self-recursive declarations are unaffected.
 
+The canonical classic `for` lowering rejects a `continue` that crosses a
+`finally`, because the current loop epilogue would otherwise run before the
+`finally`. `for...of` snapshots arrays and strings before iteration; until a
+resumable iterator protocol exists, loop bodies that mutate the source or make
+user-authored calls reject with `TS_FOR_OF_ITERATOR_UNSUPPORTED`.
+
 ## Deviation register
 
 These are the only deliberate deviations from an otherwise accepted
@@ -64,6 +80,10 @@ language semantics:
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
+- A single JavaScript string result is capped at **8 MiB**. Multiplicative
+  growth paths such as `repeat` and replacement-token expansion preflight the
+  result before allocation; exceeding the cap terminates as the uncatchable
+  `MemoryLimitExceeded` resource exhaustion error.
 - A TypeScript cell is capped at **64 KiB** of source and rejects with
   `TS_SOURCE_TOO_LARGE`. The bound is what makes the parse-stack reservation
   finite, and 64 KiB is roughly 1 600 lines — far more than a cell should be.
@@ -97,26 +117,7 @@ language semantics:
   would run and then fail to suspend or snapshot. Failing closed at compile time
   is the honest form of that same deferral. Self-recursion, named self-recursive
   function expressions, nested declarations, and acyclic declaration chains are
-all unaffected.
-
-## Standard-library inventory
-
-The shipped static methods are `Object.keys`, `values`, `entries`,
-`fromEntries`, `hasOwn`, and `is`; `Array.isArray`, `from`, and `of`;
-`String.fromCharCode` and `fromCodePoint`; `Number.isFinite`, `isInteger`,
-`isNaN`, `isSafeInteger`, `parseFloat`, and `parseInt`; `JSON.parse` and
-`stringify`; and `Math.abs`, `ceil`, `floor`, `round`, `trunc`, `max`, `min`,
-`pow`, `sqrt`, and `sign`.
-
-The shipped instance methods are `at`, `charAt`, `charCodeAt`, `codePointAt`,
-`concat`, `endsWith`, `includes`, `indexOf`, `lastIndexOf`, `padEnd`,
-`padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`,
-`substring`, `toLowerCase`, `toUpperCase`, `trim`, `trimStart`, `trimEnd`,
-`toString`, `valueOf`, `join`, and `map`. Missing methods reject with
-`TS_METHOD_UNSUPPORTED` when the receiver is statically known and with the same
-named typed runtime failure when only its runtime type is known. Mutating array
-methods are deliberately absent; index assignment remains the supported
-mutation surface.
+  all unaffected.
 - Cyclic heap objects are rejected at durable capture. Shared acyclic object
   identity is preserved byte-for-byte. Cycle-capable durable graph encoding is
   deferred; the front-end does not silently copy a cycle.
@@ -128,19 +129,17 @@ mutation surface.
   `undefined` are omitted and array elements become `null`; incoming JSON
   cannot manufacture `undefined`.
 - Lone UTF-16 surrogates are not representable in the v1 UTF-8 value model, so
-  literals reject with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED` instead of being
-  replaced or corrupted. Two further shapes produce a lone surrogate only at
-  runtime and reject there with `TS_LONE_SURROGATE_UNSUPPORTED`: splitting a
-  string containing an astral character into units (`'\u{1F600}'.split('')`)
-  and indexing into one (`'\u{1F600}'[0]`). Both raise a catchable TypeScript
-  exception, so a program can swallow the deviation and continue with a result
-  Node would not produce.
-- Out-of-range non-negative array writes extend with `undefined` holes, matching
-  ECMAScript. Negative and other non-index array writes would create named
-  object properties, which the v1 array representation cannot carry; they
-  reject at runtime with `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED` and never
-  mutate an element.
-
+  literals reject with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`. Indexing an
+  astral string at one UTF-16 unit, and `Object.values`/`Object.entries` when
+  their string receiver would produce those units, reject at runtime with
+  `TS_LONE_SURROGATE_UNSUPPORTED`. String methods that could manufacture a lone
+  surrogate are absent from the shipped surface.
+- Appending at exactly `array.length` is supported. An assignment that skips an
+  index would create holes the v1 dense-list representation cannot distinguish
+  from explicit `undefined`, so it rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`.
+  Negative and other non-index writes would create named object properties and
+  reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; neither path mutates an
+  element.
 - `console.log` is host-defined rather than ECMA-262, and prints ECMA
   `ToString` of each argument. Node's inspector formatting is not reproduced:
   `console.log({a: 1})` prints `[object Object]` where Node prints `{ a: 1 }`.
@@ -153,7 +152,30 @@ mutation surface.
   nothing keeps the name its author wrote.
 
 No other semantic deviation is intentionally accepted for an operation in the
-surface above.
+surface below.
+
+## Standard-library inventory
+
+The v1 inventory contains 55 method names: 37 static methods and 18 instance
+method names (with `toString`, `concat`, `includes`, `indexOf`, and
+`lastIndexOf` shared by more than one receiver kind).
+
+The shipped static methods are `Object.keys`, `values`, `entries`,
+`fromEntries`, `hasOwn`, and `is`; `Array.isArray` and `of`;
+`String.fromCodePoint`; `Number.isFinite`, `isInteger`,
+`isNaN`, `isSafeInteger`, `parseFloat`, and `parseInt`; `JSON.parse` and
+`stringify`; and `Math.abs`, `acos`, `asin`, `cbrt`, `ceil`, `cos`, `exp`,
+`floor`, `log`, `log10`, `log2`, `round`, `sin`, `tan`, `trunc`, `max`, `min`,
+`pow`, `sqrt`, and `sign`.
+
+The shipped instance methods are `charCodeAt`, `codePointAt`, `concat`,
+`endsWith`, `includes`, `indexOf`, `lastIndexOf`, `repeat`, `replace`,
+`startsWith`, `toLowerCase`, `toUpperCase`, `trim`, `trimStart`, `trimEnd`,
+`toString`, `valueOf`, and `join`. Missing methods reject with
+`TS_METHOD_UNSUPPORTED` when the receiver is statically known and with the same
+named typed runtime failure when only its runtime type is known. Mutating array
+methods are deliberately absent; index assignment remains the supported
+mutation surface.
 
 ## Source nesting budget
 

@@ -29,14 +29,22 @@ const rejected = new Map([
   ['delete ({a:1}).a', 'TS_DELETE_UNSUPPORTED'],
   ['null ?? 1 || 2', 'TS_SYNTAX_ERROR'],
   ["'\\uD800'", 'TS_LONE_SURROGATE_LITERAL_UNSUPPORTED'],
+  ["'abc'.split('')", 'TS_METHOD_UNSUPPORTED'],
+  ["'a,b'.split(',')", 'TS_METHOD_UNSUPPORTED'],
+  ["''.split(',')", 'TS_METHOD_UNSUPPORTED'],
+  ["'abc'.split('b')", 'TS_METHOD_UNSUPPORTED'],
+  ["'\\uD83D\\uDE00'.split('')", 'TS_METHOD_UNSUPPORTED'],
 ]);
 
 const runtimeRejected = new Map([
   [
+    '(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()',
+    'TS_SPARSE_ARRAY_UNSUPPORTED',
+  ],
+  [
     '(() => { const a = [1,2]; a[-1] = 9; return a[-1]; })()',
     'TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED',
   ],
-  ["'\\uD83D\\uDE00'.split('')", 'TS_LONE_SURROGATE_UNSUPPORTED'],
   ["'\\uD83D\\uDE00'[0]", 'TS_LONE_SURROGATE_UNSUPPORTED'],
 ]);
 

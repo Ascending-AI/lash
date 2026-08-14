@@ -139,6 +139,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// Snapshot teardown actions for protocol and process-engine implementors before persistence.
     pub fn parent_end_actions(&self) -> Vec<crate::ToolIntentParentEndAction> {
         self.dispatch.recorded_intent_outcomes.snapshot()
+    }
 
     /// Executes a nondeterministic language-runtime operation behind the
     /// durable effect controller so replay returns the recorded sample.

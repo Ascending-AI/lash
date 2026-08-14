@@ -106,6 +106,132 @@ fn durable_process_agent_primitives_link_through_existing_effects() {
     );
 }
 
+#[test]
+fn production_link_cache_preserves_typescript_artifact_identity() {
+    let source = r#"
+        const worker = defineProcess({
+          name: "worker", signals: {},
+          run: async (input: unknown) => { const alias = input; return alias; }
+        });
+        finish(start(worker, { input: [1] }));
+    "#;
+    let environment = lashlang::LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        lashlang::LashlangAbilities::all(),
+    );
+    let program = lash_typescript::parse(source).expect("TypeScript should lower");
+    let mut cache = lashlang::LinkedProgramCache::new();
+    let linked = cache
+        .get_or_compile_ast(
+            source,
+            program,
+            &environment,
+            lashlang::CompilationDialect::Typescript,
+        )
+        .expect("production cache should link TypeScript");
+    assert_eq!(
+        linked.linked_module().artifact.compilation_dialect,
+        lashlang::CompilationDialect::Typescript
+    );
+    assert!(
+        linked
+            .linked_module()
+            .module_ref
+            .as_str()
+            .starts_with("lashlang:v1:sha256:")
+    );
+}
+
+#[test]
+fn wake_signals_runs_and_process_finish_is_rejected() {
+    let program = lash_typescript::parse(
+        r#"
+        const worker = defineProcess({
+          name: "worker", signals: { ready: null },
+          run: async () => await waitSignal("ready")
+        });
+        const handle = start(worker);
+        wake(handle, "ready", { ok: true });
+        finish(await handle);
+        "#,
+    )
+    .expect("wake(handle, signal, payload) should lower");
+    assert!(contains_signal_run(&program.main));
+
+    let error = lash_typescript::parse(
+        r#"
+        const worker = defineProcess({
+          name: "worker", signals: {},
+          run: async () => { try { finish(1); } finally { wake("cleanup"); } }
+        });
+        "#,
+    )
+    .expect_err("finish inside run must not bypass finally");
+    assert_eq!(
+        error.code,
+        lash_typescript::DiagnosticCode::UnsupportedExpression
+    );
+    assert!(error.message.contains("cell-only"));
+}
+
+#[derive(Default)]
+struct SignalHost {
+    signal: std::sync::Mutex<Option<lashlang::ProcessSignal>>,
+}
+
+impl ExecutionHost for SignalHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(lashlang::from_json(
+                serde_json::json!({ "__handle__": "process", "id": "run-1" }),
+            ))),
+            AbilityOp::SignalRun(signal) => {
+                *self.signal.lock().expect("signal lock") = Some(signal);
+                Ok(AbilityResult::Value(Value::Null))
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unexpected signal ability")),
+        }
+    }
+}
+
+#[test]
+fn foreground_wake_delivers_a_named_process_signal() {
+    let source = r#"
+        const worker = defineProcess({
+          name: "worker", signals: { ready: null },
+          run: async () => await waitSignal("ready")
+        });
+        const handle = start(worker);
+        wake(handle, "ready", { ok: true });
+        finish(handle);
+    "#;
+    let environment = lashlang::LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        lashlang::LashlangAbilities::all(),
+    );
+    let linked = lash_typescript::link(source, &environment).expect("signal program links");
+    let host = SignalHost::default();
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &host,
+    ))
+    .expect("signal program executes");
+    assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
+    let signal = host
+        .signal
+        .lock()
+        .expect("signal lock")
+        .clone()
+        .expect("signal delivered");
+    assert_eq!(signal.name, "ready");
+    assert_eq!(
+        signal.payload,
+        lashlang::from_json(serde_json::json!({ "ok": true }))
+    );
+}
+
 struct StartHost;
 
 impl ExecutionHost for StartHost {
@@ -288,8 +414,28 @@ fn promise_all_settled_preserves_javascript_result_shape() {
         outcome,
         ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
             { "status": "fulfilled", "value": "ok" },
-            { "status": "rejected", "reason": "boom" }
+            { "status": "rejected", "reason": {
+                "name": "EffectError",
+                "message": "boom",
+                "code": "UnwrappedModuleOperationFailed",
+                "details": { "kind": "effect", "operation": "resource_batch" }
+            } }
         ])))
+    );
+}
+
+#[test]
+fn promise_aggregates_apply_promise_resolve_to_plain_values() {
+    assert_eq!(
+        finished("finish(await Promise.all([1, 2]));"),
+        lashlang::from_json(serde_json::json!([1, 2]))
+    );
+    assert_eq!(
+        finished("finish(await Promise.allSettled([1, 2]));"),
+        lashlang::from_json(serde_json::json!([
+            { "status": "fulfilled", "value": 1 },
+            { "status": "fulfilled", "value": 2 }
+        ]))
     );
 }
 
@@ -323,6 +469,12 @@ impl ExecutionHost for RuntimeValueHost {
 
 #[test]
 fn time_and_randomness_are_host_effects_instead_of_vm_nondeterminism() {
+    let lowered = lash_typescript::parse("finish([Date.now(), Math.random()]);")
+        .expect("runtime values should lower");
+    assert!(
+        lashlang::referenced_module_call_paths(&lowered).is_empty(),
+        "resolved runtime intrinsics must not enter deferred tool discovery"
+    );
     let program = lash_typescript::compile("finish({ now: Date.now(), random: Math.random() });")
         .expect("runtime values should compile");
     let outcome = futures::executor::block_on(lashlang::execute(
@@ -357,7 +509,7 @@ fn common_for_forms_and_standard_library_execute() {
         finished(
             r#"
             const text = "  durable TypeScript  ".trim().toUpperCase();
-            const parts = text.split(" ", 2);
+            const parts = ["DURABLE", "TYPESCRIPT"];
             finish({
               text,
               parts,
@@ -584,6 +736,11 @@ fn contains_return(expr: &Expr) -> bool {
 
 fn contains_wake(expr: &Expr) -> bool {
     matches!(expr, Expr::Wake(_)) || expr.children().any(contains_wake)
+}
+
+fn contains_signal_run(expr: &Expr) -> bool {
+    matches!(expr, Expr::SignalRun { name, .. } if name.as_str() == "ready")
+        || expr.children().any(contains_signal_run)
 }
 
 fn contains_start(expr: &Expr) -> bool {

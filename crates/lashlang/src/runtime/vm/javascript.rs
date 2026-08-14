@@ -1,4 +1,7 @@
-use super::super::{from_json, javascript_to_string, to_json_direct};
+use super::super::{
+    ensure_javascript_string_size, javascript_string_size_error,
+    javascript_to_primitive_string_or_number, javascript_to_string, to_json_direct,
+};
 use super::*;
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -83,6 +86,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 right = self.heap.export_for_instruction(&right)?;
             }
         }
+        if op == JavaScriptBinaryOp::Add {
+            let left_primitive = javascript_to_primitive_string_or_number(&left);
+            let right_primitive = javascript_to_primitive_string_or_number(&right);
+            if matches!(left_primitive, Value::String(_))
+                || matches!(right_primitive, Value::String(_))
+            {
+                let left = javascript_to_string(&left_primitive);
+                let right = javascript_to_string(&right_primitive);
+                let bytes = left
+                    .len()
+                    .checked_add(right.len())
+                    .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
+                ensure_javascript_string_size(bytes)?;
+                self.stack
+                    .push(Value::String(format!("{left}{right}").into()));
+                return Ok(());
+            }
+        }
         self.stack.push(eval_javascript_binary(left, op, right));
         Ok(())
     }
@@ -118,7 +139,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 *value = self.heap.export_for_instruction(value)?;
             }
         }
-        self.stack.push(javascript_stdlib(&values)?);
+        let result = javascript_stdlib(&values)?;
+        if let Value::String(value) = &result {
+            ensure_javascript_string_size(value.len())?;
+        }
+        self.stack.push(result);
         Ok(())
     }
 }
@@ -139,6 +164,11 @@ fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
         Value::List(items) | Value::Tuple(items) => {
             javascript_array_method(method, items.as_ref(), args)
         }
+        Value::Null | Value::Undefined if matches!(method.as_str(), "toString" | "valueOf") => {
+            Err(js_stdlib_error(format!(
+                "TS_METHOD_UNSUPPORTED: cannot call `{method}` on null or undefined"
+            )))
+        }
         _ if method == "toString" && args.is_empty() => {
             Ok(Value::String(javascript_to_string(target).into()))
         }
@@ -151,26 +181,85 @@ fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
 
 fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     use crate::runtime::javascript::{javascript_strict_equal, javascript_to_number};
-    match (method, args) {
+    let args = normalized_static_arguments(method, args);
+    match (method, args.as_slice()) {
         ("Object.keys", [Value::Record(record)]) => Ok(Value::List(
-            record
-                .keys()
-                .map(|key| Value::String(key.into()))
+            ecma_record_entries(record)
+                .into_iter()
+                .map(|(key, _)| Value::String(key.into()))
                 .collect::<Vec<_>>()
                 .into(),
         )),
         ("Object.values", [Value::Record(record)]) => Ok(Value::List(
-            record.values().cloned().collect::<Vec<_>>().into(),
+            ecma_record_entries(record)
+                .into_iter()
+                .map(|(_, value)| value.clone())
+                .collect::<Vec<_>>()
+                .into(),
         )),
         ("Object.entries", [Value::Record(record)]) => Ok(Value::List(
-            record
-                .iter()
+            ecma_record_entries(record)
+                .into_iter()
                 .map(|(key, value)| {
                     Value::List(vec![Value::String(key.into()), value.clone()].into())
                 })
                 .collect::<Vec<_>>()
                 .into(),
         )),
+        ("Object.keys", [Value::List(values) | Value::Tuple(values)]) => Ok(Value::List(
+            (0..values.len())
+                .map(|index| Value::String(index.to_string().into()))
+                .collect::<Vec<_>>()
+                .into(),
+        )),
+        ("Object.values", [Value::List(values) | Value::Tuple(values)]) => {
+            Ok(Value::List(values.to_vec().into()))
+        }
+        ("Object.entries", [Value::List(values) | Value::Tuple(values)]) => Ok(Value::List(
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    Value::List(vec![Value::String(index.to_string().into()), value.clone()].into())
+                })
+                .collect::<Vec<_>>()
+                .into(),
+        )),
+        ("Object.keys", [Value::String(value)]) => Ok(Value::List(
+            value
+                .encode_utf16()
+                .enumerate()
+                .map(|(index, _)| Value::String(index.to_string().into()))
+                .collect::<Vec<_>>()
+                .into(),
+        )),
+        ("Object.values", [Value::String(value)]) => Ok(Value::List(
+            value
+                .encode_utf16()
+                .map(|unit| utf16_value(vec![unit]))
+                .collect::<Result<Vec<_>, _>>()?
+                .into(),
+        )),
+        ("Object.entries", [Value::String(value)]) => Ok(Value::List(
+            value
+                .encode_utf16()
+                .enumerate()
+                .map(|(index, unit)| {
+                    Ok(Value::List(
+                        vec![
+                            Value::String(index.to_string().into()),
+                            utf16_value(vec![unit])?,
+                        ]
+                        .into(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, RuntimeError>>()?
+                .into(),
+        )),
+        (
+            "Object.keys" | "Object.values" | "Object.entries",
+            [Value::Bool(_) | Value::Number(_)],
+        ) => Ok(Value::List(Vec::new().into())),
         ("Object.fromEntries", [Value::List(entries) | Value::Tuple(entries)]) => {
             let mut record = record_with_capacity(entries.len());
             for entry in entries.iter() {
@@ -189,6 +278,22 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
         ("Object.hasOwn", [Value::Record(record), key]) => Ok(Value::Bool(
             record.get(&javascript_to_string(key)).is_some(),
         )),
+        ("Object.hasOwn", [Value::List(values) | Value::Tuple(values), key]) => {
+            let key = javascript_to_string(key);
+            Ok(Value::Bool(
+                key == "length"
+                    || array_index_property(&key).is_some_and(|index| index < values.len() as u32),
+            ))
+        }
+        ("Object.hasOwn", [Value::String(value), key]) => {
+            let key = javascript_to_string(key);
+            Ok(Value::Bool(
+                key == "length"
+                    || array_index_property(&key)
+                        .is_some_and(|index| index < value.encode_utf16().count() as u32),
+            ))
+        }
+        ("Object.hasOwn", [Value::Bool(_) | Value::Number(_), _]) => Ok(Value::Bool(false)),
         ("Object.is", [left, right]) => Ok(Value::Bool(match (left, right) {
             (Value::Number(left), Value::Number(right)) => {
                 (left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()
@@ -199,10 +304,10 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
             value,
             Value::List(_) | Value::Tuple(_)
         ))),
-        ("Array.from", [Value::List(values) | Value::Tuple(values)]) => {
+        ("Lash.ArrayFromIterable", [Value::List(values) | Value::Tuple(values)]) => {
             Ok(Value::List(values.to_vec().into()))
         }
-        ("Array.from", [Value::String(value)]) => Ok(Value::List(
+        ("Lash.ArrayFromIterable", [Value::String(value)]) => Ok(Value::List(
             value
                 .chars()
                 .map(|character| Value::String(character.to_string().into()))
@@ -256,24 +361,33 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
             &javascript_to_string(value),
             Some(javascript_to_number(radix)),
         ))),
-        ("JSON.parse", [Value::String(value)]) => serde_json::from_str(value)
-            .map(from_json)
-            .map_err(|error| js_stdlib_error(format!("JSON.parse: {error}"))),
+        ("JSON.parse", [Value::String(value)]) => parse_javascript_json(value),
         ("JSON.stringify", [Value::Undefined]) => Ok(Value::Undefined),
-        ("JSON.stringify", [value]) => serde_json::to_string(&to_json_direct(value))
-            .map(|value| Value::String(value.into()))
-            .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
+        ("JSON.stringify", [value]) => {
+            javascript_json_stringify(value).map(|value| Value::String(value.into()))
+        }
         ("Math.abs", [value]) => Ok(Value::Number(javascript_to_number(value).abs())),
+        ("Math.acos", [value]) => Ok(Value::Number(javascript_to_number(value).acos())),
+        ("Math.asin", [value]) => Ok(Value::Number(javascript_to_number(value).asin())),
+        ("Math.cbrt", [value]) => Ok(Value::Number(javascript_to_number(value).cbrt())),
         ("Math.ceil", [value]) => Ok(Value::Number(javascript_to_number(value).ceil())),
+        ("Math.cos", [value]) => Ok(Value::Number(javascript_to_number(value).cos())),
+        ("Math.exp", [value]) => Ok(Value::Number(javascript_to_number(value).exp())),
         ("Math.floor", [value]) => Ok(Value::Number(javascript_to_number(value).floor())),
+        ("Math.log", [value]) => Ok(Value::Number(javascript_to_number(value).ln())),
+        ("Math.log10", [value]) => Ok(Value::Number(javascript_to_number(value).log10())),
+        ("Math.log2", [value]) => Ok(Value::Number(javascript_to_number(value).log2())),
         ("Math.round", [value]) => Ok(Value::Number(javascript_round(javascript_to_number(value)))),
         ("Math.trunc", [value]) => Ok(Value::Number(javascript_to_number(value).trunc())),
         ("Math.max", values) => Ok(Value::Number(javascript_extreme(values, true))),
         ("Math.min", values) => Ok(Value::Number(javascript_extreme(values, false))),
-        ("Math.pow", [base, exponent]) => Ok(Value::Number(
-            javascript_to_number(base).powf(javascript_to_number(exponent)),
-        )),
+        ("Math.pow", [base, exponent]) => Ok(Value::Number(javascript_pow(
+            javascript_to_number(base),
+            javascript_to_number(exponent),
+        ))),
         ("Math.sqrt", [value]) => Ok(Value::Number(javascript_to_number(value).sqrt())),
+        ("Math.sin", [value]) => Ok(Value::Number(javascript_to_number(value).sin())),
+        ("Math.tan", [value]) => Ok(Value::Number(javascript_to_number(value).tan())),
         ("Math.sign", [value]) => {
             let value = javascript_to_number(value);
             Ok(Value::Number(if value.is_nan() || value == 0.0 {
@@ -295,8 +409,9 @@ fn javascript_string_method(
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
     use crate::runtime::javascript::javascript_to_number;
+    let args = normalized_instance_arguments(method, args);
     let units = value.encode_utf16().collect::<Vec<_>>();
-    match (method, args) {
+    match (method, args.as_slice()) {
         ("at", [index]) => {
             let index = relative_index(javascript_to_number(index), units.len());
             index.map_or(Ok(Value::Undefined), |index| {
@@ -323,22 +438,29 @@ fn javascript_string_method(
             relative_nonnegative_index(javascript_to_number(index), units.len())
                 .map_or(Ok(Value::Undefined), |index| code_point_at(&units, index))
         }
-        ("concat", values) => Ok(Value::String(
-            values
+        ("concat", values) => {
+            let values = values.iter().map(javascript_to_string).collect::<Vec<_>>();
+            let bytes = values
                 .iter()
-                .fold(value.to_string(), |mut output, item| {
-                    output.push_str(&javascript_to_string(item));
-                    output
-                })
-                .into(),
-        )),
+                .try_fold(value.len(), |total, item| total.checked_add(item.len()));
+            ensure_javascript_string_size(
+                bytes.ok_or_else(|| javascript_string_size_error(usize::MAX))?,
+            )?;
+            let mut output = value.to_string();
+            for item in values {
+                output.push_str(&item);
+            }
+            Ok(Value::String(output.into()))
+        }
         ("startsWith", [needle]) => string_starts_with(&units, needle, 0),
         ("startsWith", [needle, position]) => string_starts_with(
             &units,
             needle,
             clamp_nonnegative_index(javascript_to_number(position), units.len()),
         ),
-        ("endsWith", [needle]) => string_ends_with(&units, needle, units.len()),
+        ("endsWith", [needle]) | ("endsWith", [needle, Value::Undefined]) => {
+            string_ends_with(&units, needle, units.len())
+        }
         ("endsWith", [needle, position]) => string_ends_with(
             &units,
             needle,
@@ -357,11 +479,21 @@ fn javascript_string_method(
             clamp_nonnegative_index(javascript_to_number(position), units.len()),
         ),
         ("lastIndexOf", [needle]) => string_last_index_of(&units, needle, units.len()),
-        ("lastIndexOf", [needle, position]) => string_last_index_of(
-            &units,
-            needle,
-            clamp_nonnegative_index(javascript_to_number(position), units.len()),
-        ),
+        ("lastIndexOf", [needle, Value::Undefined]) => {
+            string_last_index_of(&units, needle, units.len())
+        }
+        ("lastIndexOf", [needle, position]) => {
+            let position = javascript_to_number(position);
+            string_last_index_of(
+                &units,
+                needle,
+                if position.is_nan() {
+                    units.len()
+                } else {
+                    clamp_nonnegative_index(position, units.len())
+                },
+            )
+        }
         ("padStart", [length]) | ("padStart", [length, Value::Undefined]) => {
             pad_string(value, javascript_to_number(length), " ", true)
         }
@@ -382,20 +514,24 @@ fn javascript_string_method(
         ),
         ("repeat", [count]) => {
             let count = javascript_to_number(count);
+            let count = if count.is_nan() { 0.0 } else { count };
             if !count.is_finite() || count < 0.0 {
                 return Err(js_stdlib_error("String.repeat count is out of range"));
             }
-            Ok(Value::String(value.repeat(count.trunc() as usize).into()))
+            let count = count.trunc() as usize;
+            let output_bytes = value
+                .len()
+                .checked_mul(count)
+                .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
+            ensure_javascript_string_size(output_bytes)?;
+            Ok(Value::String(value.repeat(count).into()))
         }
-        ("replace", [needle, replacement]) => Ok(Value::String(
-            value
-                .replacen(
-                    &javascript_to_string(needle),
-                    &javascript_to_string(replacement),
-                    1,
-                )
-                .into(),
-        )),
+        ("replace", [needle, replacement]) => replace_string(
+            value,
+            &javascript_to_string(needle),
+            &javascript_to_string(replacement),
+        )
+        .map(|value| Value::String(value.into())),
         ("replaceAll", [needle, replacement]) => Ok(Value::String(
             value
                 .replace(
@@ -451,7 +587,9 @@ fn javascript_array_method(
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
     use crate::runtime::javascript::javascript_to_number;
-    match (method, args) {
+    let argument_count = args.len();
+    let args = normalized_instance_arguments(method, args);
+    match (method, args.as_slice()) {
         ("at", [index]) => Ok(relative_index(javascript_to_number(index), items.len())
             .map_or(Value::Undefined, |index| items[index].clone())),
         ("concat", values) => {
@@ -479,6 +617,9 @@ fn javascript_array_method(
             clamp_relative_index(javascript_to_number(from), items.len()),
         ),
         ("lastIndexOf", [needle]) => array_last_index_of(items, needle, items.len()),
+        ("lastIndexOf", [needle, Value::Undefined]) if argument_count < 2 => {
+            array_last_index_of(items, needle, items.len())
+        }
         ("lastIndexOf", [needle, from]) => {
             last_index_exclusive(javascript_to_number(from), items.len())
                 .map_or(Ok(Value::Number(-1.0)), |end| {
@@ -512,6 +653,306 @@ fn javascript_array_method(
 fn js_stdlib_error(reason: impl Into<String>) -> RuntimeError {
     RuntimeError::ValidationFailed {
         reason: reason.into(),
+    }
+}
+
+fn normalized_static_arguments(method: &str, args: &[Value]) -> Vec<Value> {
+    let arity = match method {
+        "Object.keys"
+        | "Object.values"
+        | "Object.entries"
+        | "Object.fromEntries"
+        | "Array.isArray"
+        | "Number.isFinite"
+        | "Number.isInteger"
+        | "Number.isNaN"
+        | "Number.isSafeInteger"
+        | "Number.parseFloat"
+        | "Math.abs"
+        | "Math.acos"
+        | "Math.asin"
+        | "Math.cbrt"
+        | "Math.ceil"
+        | "Math.cos"
+        | "Math.exp"
+        | "Math.floor"
+        | "Math.log"
+        | "Math.log10"
+        | "Math.log2"
+        | "Math.round"
+        | "Math.sin"
+        | "Math.sqrt"
+        | "Math.tan"
+        | "Math.trunc"
+        | "Math.sign" => 1,
+        "Object.hasOwn" | "Object.is" | "Number.parseInt" | "Math.pow" => 2,
+        _ => return args.to_vec(),
+    };
+    normalized_arguments(args, arity)
+}
+
+fn normalized_instance_arguments(method: &str, args: &[Value]) -> Vec<Value> {
+    let arity = match method {
+        "at" | "charAt" | "charCodeAt" | "codePointAt" | "repeat" | "join" => 1,
+        "endsWith" | "includes" | "indexOf" | "lastIndexOf" | "padEnd" | "padStart" | "replace"
+        | "replaceAll" | "startsWith" => 2,
+        "slice" | "substring" => 2,
+        "toLowerCase" | "toUpperCase" | "trim" | "trimStart" | "trimEnd" | "toString"
+        | "valueOf" => 0,
+        _ => return args.to_vec(),
+    };
+    normalized_arguments(args, arity)
+}
+
+fn normalized_arguments(args: &[Value], arity: usize) -> Vec<Value> {
+    let mut normalized = args[..args.len().min(arity)].to_vec();
+    normalized.resize(arity, Value::Undefined);
+    normalized
+}
+
+fn ecma_record_entries(record: &Record) -> Vec<(&str, &Value)> {
+    let mut indices = Vec::new();
+    let mut names = Vec::new();
+    for (key, value) in record.iter() {
+        match array_index_property(key) {
+            Some(index) => indices.push((index, key, value)),
+            None => names.push((key, value)),
+        }
+    }
+    indices.sort_unstable_by_key(|(index, _, _)| *index);
+    indices
+        .into_iter()
+        .map(|(_, key, value)| (key, value))
+        .chain(names)
+        .collect()
+}
+
+fn array_index_property(key: &str) -> Option<u32> {
+    if key.is_empty() || key.len() > 1 && key.starts_with('0') {
+        return None;
+    }
+    let index = key.parse::<u32>().ok()?;
+    (index != u32::MAX && index.to_string() == key).then_some(index)
+}
+
+fn replace_string(value: &str, needle: &str, replacement: &str) -> Result<String, RuntimeError> {
+    let Some(start) = value.find(needle) else {
+        ensure_javascript_string_size(value.len())?;
+        return Ok(value.to_string());
+    };
+    let end = start + needle.len();
+    let prefix = &value[..start];
+    let suffix = &value[end..];
+    let mut output_bytes = prefix
+        .len()
+        .checked_add(suffix.len())
+        .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
+    let mut chars = replacement.chars().peekable();
+    while let Some(character) = chars.next() {
+        let additional = if character != '$' {
+            character.len_utf8()
+        } else {
+            match chars.peek().copied() {
+                Some('$') => {
+                    chars.next();
+                    1
+                }
+                Some('&') => {
+                    chars.next();
+                    needle.len()
+                }
+                Some('`') => {
+                    chars.next();
+                    prefix.len()
+                }
+                Some('\'') => {
+                    chars.next();
+                    suffix.len()
+                }
+                _ => 1,
+            }
+        };
+        output_bytes = output_bytes
+            .checked_add(additional)
+            .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
+        ensure_javascript_string_size(output_bytes)?;
+    }
+
+    let mut output = String::with_capacity(output_bytes);
+    output.push_str(prefix);
+    let mut chars = replacement.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '$' {
+            output.push(character);
+            continue;
+        }
+        match chars.peek().copied() {
+            Some('$') => {
+                chars.next();
+                output.push('$');
+            }
+            Some('&') => {
+                chars.next();
+                output.push_str(needle);
+            }
+            Some('`') => {
+                chars.next();
+                output.push_str(prefix);
+            }
+            Some('\'') => {
+                chars.next();
+                output.push_str(suffix);
+            }
+            _ => output.push('$'),
+        }
+    }
+    output.push_str(suffix);
+    Ok(output)
+}
+
+fn javascript_json_stringify(value: &Value) -> Result<String, RuntimeError> {
+    match value {
+        Value::Null | Value::Undefined => Ok("null".to_string()),
+        Value::Bool(value) => Ok(value.to_string()),
+        Value::Number(value) if !value.is_finite() => Ok("null".to_string()),
+        Value::Number(_) => Ok(javascript_to_string(value)),
+        Value::String(_) | Value::Image(_) | Value::Resource(_) => {
+            serde_json::to_string(&to_json_direct(value))
+                .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}")))
+        }
+        Value::Tuple(values) | Value::List(values) => {
+            let values = values
+                .iter()
+                .map(javascript_json_stringify)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(format!("[{}]", values.join(",")))
+        }
+        Value::Record(record) => {
+            let entries = ecma_record_entries(record)
+                .into_iter()
+                .filter(|(_, value)| !matches!(value, Value::Undefined))
+                .map(|(key, value)| {
+                    Ok(format!(
+                        "{}:{}",
+                        serde_json::to_string(key).expect("record keys are JSON strings"),
+                        javascript_json_stringify(value)?
+                    ))
+                })
+                .collect::<Result<Vec<_>, RuntimeError>>()?;
+            Ok(format!("{{{}}}", entries.join(",")))
+        }
+        Value::Projected(_) | Value::Ref(_) => Err(js_stdlib_error(
+            "JSON.stringify received an unexported value",
+        )),
+    }
+}
+
+enum OrderedJsonValue {
+    Null,
+    Bool(bool),
+    Number(f64),
+    String(String),
+    Array(Vec<Self>),
+    Object(Vec<(String, Self)>),
+}
+
+impl<'de> serde::Deserialize<'de> for OrderedJsonValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = OrderedJsonValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(OrderedJsonValue::Bool(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(OrderedJsonValue::Number(value as f64))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(OrderedJsonValue::Number(value as f64))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(OrderedJsonValue::Number(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(OrderedJsonValue::String(value.to_string()))
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(OrderedJsonValue::Null)
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(OrderedJsonValue::Null)
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0));
+                while let Some(value) = sequence.next_element()? {
+                    values.push(value);
+                }
+                Ok(OrderedJsonValue::Array(values))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut values = Vec::with_capacity(map.size_hint().unwrap_or(0));
+                while let Some((key, value)) = map.next_entry()? {
+                    values.push((key, value));
+                }
+                Ok(OrderedJsonValue::Object(values))
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+fn parse_javascript_json(value: &str) -> Result<Value, RuntimeError> {
+    let value = serde_json::from_str::<OrderedJsonValue>(value)
+        .map_err(|error| js_stdlib_error(format!("JSON.parse: {error}")))?;
+    Ok(ordered_json_to_value(value))
+}
+
+fn ordered_json_to_value(value: OrderedJsonValue) -> Value {
+    match value {
+        OrderedJsonValue::Null => Value::Null,
+        OrderedJsonValue::Bool(value) => Value::Bool(value),
+        OrderedJsonValue::Number(value) => Value::Number(value),
+        OrderedJsonValue::String(value) => Value::String(value.into()),
+        OrderedJsonValue::Array(values) => Value::List(
+            values
+                .into_iter()
+                .map(ordered_json_to_value)
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+        OrderedJsonValue::Object(entries) => Value::Record(std::sync::Arc::new(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, ordered_json_to_value(value)))
+                .collect(),
+        )),
     }
 }
 
@@ -696,6 +1137,14 @@ fn javascript_round(value: f64) -> f64 {
     (value + 0.5).floor()
 }
 
+fn javascript_pow(base: f64, exponent: f64) -> f64 {
+    if base.abs() == 1.0 && exponent.is_infinite() {
+        f64::NAN
+    } else {
+        base.powf(exponent)
+    }
+}
+
 fn javascript_extreme(values: &[Value], maximum: bool) -> f64 {
     use crate::runtime::javascript::javascript_to_number;
     let mut result = if maximum {
@@ -814,13 +1263,7 @@ fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
         .strip_prefix('-')
         .map_or((false, value), |value| (true, value));
     let value = value.strip_prefix('+').unwrap_or(value);
-    let radix = radix.map_or(0, |value| {
-        if !value.is_finite() || value == 0.0 {
-            0
-        } else {
-            value.trunc() as i64
-        }
-    });
+    let radix = radix.map_or(0, to_int32);
     if radix != 0 && !(2..=36).contains(&radix) {
         return f64::NAN;
     }
@@ -847,6 +1290,20 @@ fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
     if digits.is_empty() {
         return f64::NAN;
     }
-    let number = u128::from_str_radix(&digits, radix).map_or(f64::INFINITY, |value| value as f64);
+    let number = num_bigint::BigUint::parse_bytes(digits.as_bytes(), radix)
+        .and_then(|value| num_traits::ToPrimitive::to_f64(&value))
+        .unwrap_or(f64::INFINITY);
     if negative { -number } else { number }
+}
+
+fn to_int32(value: f64) -> i64 {
+    if !value.is_finite() || value == 0.0 {
+        return 0;
+    }
+    let value = value.trunc().rem_euclid(4_294_967_296.0) as i64;
+    if value >= 2_147_483_648 {
+        value - 4_294_967_296
+    } else {
+        value
+    }
 }

@@ -39,8 +39,8 @@ pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
             method,
             "keys" | "values" | "entries" | "fromEntries" | "hasOwn" | "is"
         ),
-        "Array" => matches!(method, "isArray" | "from" | "of"),
-        "String" => matches!(method, "fromCharCode" | "fromCodePoint"),
+        "Array" => matches!(method, "isArray" | "of"),
+        "String" => matches!(method, "fromCodePoint"),
         "Number" => matches!(
             method,
             "isFinite" | "isInteger" | "isNaN" | "isSafeInteger" | "parseFloat" | "parseInt"
@@ -48,32 +48,58 @@ pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
         "JSON" => matches!(method, "parse" | "stringify"),
         "Math" => matches!(
             method,
-            "abs" | "ceil" | "floor" | "round" | "trunc" | "max" | "min" | "pow" | "sqrt" | "sign"
+            "abs"
+                | "acos"
+                | "asin"
+                | "cbrt"
+                | "ceil"
+                | "cos"
+                | "exp"
+                | "floor"
+                | "log"
+                | "log10"
+                | "log2"
+                | "round"
+                | "sin"
+                | "tan"
+                | "trunc"
+                | "max"
+                | "min"
+                | "pow"
+                | "sqrt"
+                | "sign"
         ),
         _ => false,
     }
 }
 
-pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
+pub(super) fn is_removed_instance_stdlib_method(method: &str) -> bool {
     matches!(
         method,
         "at" | "charAt"
-            | "charCodeAt"
+            | "padStart"
+            | "padEnd"
+            | "replaceAll"
+            | "slice"
+            | "split"
+            | "substring"
+            | "map"
+    )
+}
+
+pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
+    matches!(
+        method,
+        "charCodeAt"
             | "codePointAt"
             | "concat"
             | "endsWith"
             | "includes"
             | "indexOf"
             | "lastIndexOf"
-            | "padEnd"
-            | "padStart"
             | "repeat"
             | "replace"
-            | "replaceAll"
-            | "slice"
-            | "split"
             | "startsWith"
-            | "substring"
             | "toLowerCase"
             | "toUpperCase"
             | "trim"
@@ -82,8 +108,40 @@ pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
             | "toString"
             | "valueOf"
             | "join"
-            | "map"
     )
+}
+
+pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> bool {
+    match expr {
+        Expr::String(_) => matches!(
+            method,
+            "charCodeAt"
+                | "codePointAt"
+                | "concat"
+                | "endsWith"
+                | "includes"
+                | "indexOf"
+                | "lastIndexOf"
+                | "repeat"
+                | "replace"
+                | "startsWith"
+                | "toLowerCase"
+                | "toUpperCase"
+                | "trim"
+                | "trimStart"
+                | "trimEnd"
+                | "toString"
+                | "valueOf"
+        ),
+        Expr::Array(_) => matches!(
+            method,
+            "concat" | "includes" | "indexOf" | "lastIndexOf" | "join" | "toString"
+        ),
+        Expr::Number(_) | Expr::Bool(_) | Expr::Null | Expr::Undefined | Expr::Object(_) => {
+            matches!(method, "toString" | "valueOf")
+        }
+        _ => true,
+    }
 }
 
 pub(super) fn has_literal_stdlib_receiver(expr: &Expr) -> bool {
@@ -132,11 +190,99 @@ pub(super) fn all_settled_results(items: LashExpr) -> LashExpr {
                 ])),
                 else_block: Box::new(LashExpr::Record(vec![
                     ("status".into(), LashExpr::String("rejected".into())),
-                    ("reason".into(), field("error")),
+                    (
+                        "reason".into(),
+                        LashExpr::Record(vec![
+                            ("name".into(), LashExpr::String("EffectError".into())),
+                            ("message".into(), field("error")),
+                            (
+                                "code".into(),
+                                LashExpr::String("UnwrappedModuleOperationFailed".into()),
+                            ),
+                            (
+                                "details".into(),
+                                LashExpr::Record(vec![
+                                    ("kind".into(), LashExpr::String("effect".into())),
+                                    (
+                                        "operation".into(),
+                                        LashExpr::String("resource_batch".into()),
+                                    ),
+                                ]),
+                            ),
+                        ]),
+                    ),
                 ])),
             }),
         }))),
     }
+}
+
+pub(super) fn settle_aggregate_leaves(expr: LashExpr) -> LashExpr {
+    match expr {
+        LashExpr::List(items) => LashExpr::List(
+            items
+                .into_iter()
+                .map(|item| match item {
+                    LashExpr::ReceiverCall { .. } => item,
+                    value => LashExpr::Record(vec![
+                        ("ok".into(), LashExpr::Bool(true)),
+                        ("value".into(), value),
+                    ]),
+                })
+                .collect(),
+        ),
+        _ => unreachable!("Promise aggregate iterable is validated as an array"),
+    }
+}
+
+pub(super) fn has_aggregate_effect_leaf(expr: &LashExpr) -> bool {
+    matches!(expr, LashExpr::ReceiverCall { .. }) || expr.children().any(has_aggregate_effect_leaf)
+}
+
+pub(super) fn has_nested_aggregate_effect(expr: &LashExpr) -> bool {
+    let (LashExpr::List(items) | LashExpr::Tuple(items)) = expr else {
+        return true;
+    };
+    items.iter().any(|item| {
+        !matches!(item, LashExpr::ReceiverCall { .. }) && has_aggregate_effect_leaf(item)
+    })
+}
+
+pub(super) fn has_unsupported_aggregate_effect(expr: &LashExpr) -> bool {
+    matches!(
+        expr,
+        LashExpr::Await(_)
+            | LashExpr::SleepFor(_)
+            | LashExpr::SleepUntil(_)
+            | LashExpr::WaitSignal { .. }
+            | LashExpr::SignalRun { .. }
+            | LashExpr::Wake(_)
+            | LashExpr::StartProcess(_)
+            | LashExpr::Cancel(_)
+            | LashExpr::Finish(_)
+            | LashExpr::Fail(_)
+    ) || expr.children().any(has_unsupported_aggregate_effect)
+}
+
+pub(super) fn has_unbatchable_aggregate_value(expr: &LashExpr) -> bool {
+    matches!(
+        expr,
+        LashExpr::Function(_)
+            | LashExpr::Call { .. }
+            | LashExpr::Map { .. }
+            | LashExpr::Try(_)
+            | LashExpr::Throw(_)
+            | LashExpr::Return(_)
+            | LashExpr::Block(_)
+            | LashExpr::Assign { .. }
+            | LashExpr::For { .. }
+            | LashExpr::ListComprehension { .. }
+            | LashExpr::While { .. }
+            | LashExpr::Break
+            | LashExpr::Continue
+            | LashExpr::Print(_)
+            | LashExpr::Yield(_)
+    ) || expr.children().any(has_unbatchable_aggregate_value)
 }
 
 pub(super) fn unwrap_aggregate_leaves(expr: LashExpr) -> LashExpr {
