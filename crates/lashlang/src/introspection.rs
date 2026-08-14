@@ -324,6 +324,13 @@ fn collect_module_call_paths(
 fn module_call_receiver_path(expr: &crate::ast::Expr) -> Option<Vec<String>> {
     match expr {
         crate::ast::Expr::LabelAnnotated { expr, .. } => module_call_receiver_path(expr),
+        crate::ast::Expr::ResourceRef(reference) if !reference.path.is_empty() => Some(
+            reference
+                .path
+                .iter()
+                .map(|segment| segment.as_str().to_string())
+                .collect(),
+        ),
         crate::ast::Expr::Variable(name) => Some(vec![name.as_str().to_string()]),
         crate::ast::Expr::Field { target, field } => {
             let mut path = module_call_receiver_path(target)?;

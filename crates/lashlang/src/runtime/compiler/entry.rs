@@ -50,13 +50,14 @@ impl Compiler {
         program: &Program,
         module_context: CompiledModuleContext,
         lashlang_execution_context: LashlangExecutionContext,
+        dialect: CompilationDialect,
     ) -> (Chunk, CompileStats) {
         let stats = Rc::new(RefCell::new(CompileStats::default()));
         let mut compiler = Self::with_slots_and_stats(
             Some(module_context),
             Rc::new(RefCell::new(SlotTable::default())),
             stats.clone(),
-            CompilationDialect::Lashlang,
+            dialect,
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,

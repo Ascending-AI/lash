@@ -1,15 +1,18 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
 use lash_core::{ToolActivation, ToolCatalog, facade_support::ToolCatalogContribution};
-use lash_lashlang_runtime::required_tool_lashlang_executable;
+use lash_lashlang_runtime::{
+    required_tool_lashlang_executable, required_tool_typescript_executable,
+};
 
 /// RLM catalog assembly. The catalog is a flat callable set: every member is
 /// rendered as a full prompt doc under its Lashlang call-path. RLM contributes
 /// no removals; it only validates that each member carries an explicit
-/// `lashlang.tool` binding so the model can call it by module path.
+/// `lashlang.tool` and `typescript.tool` bindings so either dialect can call
+/// it by module path.
 pub(crate) fn rlm_tool_catalog(
     ctx: ToolCatalogContext,
 ) -> Result<ToolCatalogContribution, PluginError> {
-    validate_rlm_lashlang_bindings(&ctx)?;
+    validate_rlm_language_bindings(&ctx)?;
     Ok(ToolCatalogContribution::default())
 }
 
@@ -34,12 +37,14 @@ pub(crate) fn rlm_prompt_tool_docs(tool_catalog: &ToolCatalog) -> String {
         .join("\n\n")
 }
 
-fn validate_rlm_lashlang_bindings(ctx: &ToolCatalogContext) -> Result<(), PluginError> {
+fn validate_rlm_language_bindings(ctx: &ToolCatalogContext) -> Result<(), PluginError> {
     for tool in &ctx.tools {
         if tool.activation == ToolActivation::Internal {
             continue;
         }
         required_tool_lashlang_executable(tool)
+            .map_err(|err| PluginError::Registration(err.to_string()))?;
+        required_tool_typescript_executable(tool)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
     }
     Ok(())
@@ -156,6 +161,38 @@ mod tests {
             extensions: Default::default(),
         })
         .expect("internal process bodies are not Lashlang-callable catalog members");
+    }
+
+    #[test]
+    fn rlm_catalog_rejects_members_without_typescript_binding() {
+        let mut missing = ToolDefinition::raw(
+            "tool:test/update_plan",
+            "update_plan",
+            "Update plan",
+            ToolContract::default_input_schema(),
+            json!({ "type": "string" }),
+        )
+        .with_lashlang_binding(LashlangToolBinding::new(["plan"], "update"));
+        missing
+            .manifest
+            .bindings
+            .remove(lash_lashlang_runtime::TYPESCRIPT_TOOL_BINDING_KEY);
+
+        let err = rlm_tool_catalog(ToolCatalogContext {
+            session_id: "session".to_string(),
+            tools: vec![missing.manifest()],
+            resolve_contract: None,
+            tool_access: lash_core::SessionToolAccess::default(),
+            subagent: None,
+            extensions: Default::default(),
+        })
+        .expect_err("missing TypeScript binding should fail RLM registration");
+
+        assert!(
+            err.to_string()
+                .contains("missing an explicit `typescript.tool` binding"),
+            "{err}"
+        );
     }
 
     #[test]

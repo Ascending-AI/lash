@@ -1,9 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use sha2::{Digest, Sha256};
-
 mod error;
 pub use error::{LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError};
+mod process_identity;
+pub use process_identity::deterministic_lashlang_process_id;
+mod typescript_runtime;
+pub use typescript_runtime::{is_typescript_runtime_receiver, journaled_typescript_runtime_value};
 
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -22,6 +24,7 @@ pub use lashlang::{
 
 pub const LASHLANG_ENGINE_KIND: &str = "lashlang";
 pub const LASHLANG_TOOL_BINDING_KEY: &str = "lashlang.tool";
+pub const TYPESCRIPT_TOOL_BINDING_KEY: &str = "typescript.tool";
 pub const LASHLANG_SURFACE_EXTENSION_ID: &str = "lashlang.surface";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -227,6 +230,27 @@ pub fn required_tool_lashlang_executable(
     required_tool_lashlang_binding(manifest)?.executable_for(&manifest.name)
 }
 
+pub fn required_tool_typescript_executable(
+    manifest: &lash_core::ToolManifest,
+) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
+    let binding = manifest
+        .bindings
+        .get(TYPESCRIPT_TOOL_BINDING_KEY)
+        .cloned()
+        .map(serde_json::from_value::<LashlangToolBinding>)
+        .transpose()
+        .map_err(
+            |source| LashlangRuntimeError::InvalidTypescriptToolBinding {
+                tool: manifest.name.clone(),
+                source,
+            },
+        )?
+        .ok_or_else(|| LashlangRuntimeError::MissingTypescriptToolBinding {
+            tool: manifest.name.clone(),
+        })?;
+    binding.executable_for(&manifest.name)
+}
+
 pub trait ToolManifestLashlangExt {
     fn lashlang_binding(&self) -> Result<Option<LashlangToolBinding>, serde_json::Error>;
 }
@@ -247,11 +271,16 @@ pub trait ToolDefinitionLashlangExt {
 
 impl ToolDefinitionLashlangExt for lash_core::ToolDefinition {
     fn with_lashlang_binding(mut self, lashlang_binding: LashlangToolBinding) -> Self {
-        let value = serde_json::to_value(lashlang_binding)
+        let value = serde_json::to_value(&lashlang_binding)
             .expect("lashlang tool binding must serialize to JSON");
         self.manifest
             .bindings
             .insert(LASHLANG_TOOL_BINDING_KEY.to_string(), value);
+        self.manifest.bindings.insert(
+            TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
+            serde_json::to_value(lashlang_binding)
+                .expect("typescript tool binding must serialize to JSON"),
+        );
         self
     }
 }
@@ -263,10 +292,15 @@ pub trait RemoteToolGrantLashlangExt {
 
 impl RemoteToolGrantLashlangExt for lash_remote_protocol::RemoteToolGrant {
     fn with_lashlang_binding(mut self, lashlang_binding: LashlangToolBinding) -> Self {
-        let value = serde_json::to_value(lashlang_binding)
+        let value = serde_json::to_value(&lashlang_binding)
             .expect("lashlang tool binding must serialize to JSON");
         self.bindings
             .insert(LASHLANG_TOOL_BINDING_KEY.to_string(), value);
+        self.bindings.insert(
+            TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
+            serde_json::to_value(lashlang_binding)
+                .expect("typescript tool binding must serialize to JSON"),
+        );
         self
     }
 
@@ -360,6 +394,22 @@ pub fn lashlang_host_environment_from_tool_catalog(
 ) -> Result<LashlangHostEnvironment, LashlangRuntimeError> {
     let mut resources = lashlang_resources_from_tool_catalog(catalog)?;
     resources.extend(host_resources);
+    for (operation, host_operation) in [
+        ("now", "typescript.runtime.now"),
+        ("random", "typescript.runtime.random"),
+    ] {
+        resources.add_module_operation_binding(
+            ["__typescript_runtime"],
+            "typescript.Runtime",
+            operation,
+            host_operation,
+            lashlang::ResourceOperationBinding {
+                input_ty: lashlang::TypeExpr::Any,
+                output_ty: lashlang::TypeExpr::Float,
+                output_from_input: None,
+            },
+        )?;
+    }
     if abilities.triggers {
         lashlang::add_trigger_resource_operations(&mut resources);
     }
@@ -725,33 +775,6 @@ pub async fn prepare_lashlang_process_start(
         registration,
         label: display_name,
     })
-}
-
-pub fn deterministic_lashlang_process_id(
-    parent_start_seed: &str,
-    start_site: &lashlang::LashlangExecutionCallSite,
-    input: &LashlangProcessInput,
-) -> Result<String, serde_json::Error> {
-    let args = serde_json::to_string(&input.args)?;
-    let occurrence = start_site.occurrence.to_string();
-    let process_ref = lashlang::process_ref_key(&input.process_ref);
-    let mut hasher = Sha256::new();
-    for part in [
-        "lashlang-process-start:v1",
-        parent_start_seed,
-        start_site.site.node_id.as_str(),
-        occurrence.as_str(),
-        input.module_ref.as_str(),
-        process_ref.as_str(),
-        input.host_requirements_ref.as_str(),
-        input.process_name.as_str(),
-        args.as_str(),
-    ] {
-        hasher.update(part.as_bytes());
-        hasher.update([0]);
-    }
-    let hash = format!("{:x}", hasher.finalize());
-    Ok(format!("process:lashlang:sha256:{hash}"))
 }
 
 pub fn resolve_lashlang_module_operation(
@@ -1154,7 +1177,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_tool_binding_attaches_lashlang_metadata() {
+    fn explicit_tool_binding_attaches_lashlang_and_typescript_metadata() {
         let tool = lash_core::ToolDefinition::raw(
             "tool:test/read_file",
             "read_file",
@@ -1170,11 +1193,19 @@ mod tests {
 
         let binding =
             required_tool_lashlang_executable(&tool.manifest).expect("explicit binding resolves");
+        let typescript = required_tool_typescript_executable(&tool.manifest)
+            .expect("TypeScript binding resolves");
 
         assert_eq!(binding.module_path, vec!["fs"]);
         assert_eq!(binding.operation, "read");
         assert_eq!(binding.authority_type, "Filesystem");
         assert_eq!(binding.aliases, vec!["cat"]);
+        assert_eq!(typescript, binding);
+        assert!(
+            tool.manifest
+                .bindings
+                .contains_key(TYPESCRIPT_TOOL_BINDING_KEY)
+        );
     }
 
     #[test]

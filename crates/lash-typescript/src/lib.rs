@@ -59,11 +59,27 @@ pub fn link(
     host: &lashlang::LashlangHostEnvironment,
 ) -> Result<lashlang::LinkedModule, Diagnostic> {
     let program = parse(source)?;
-    lashlang::LinkedModule::link(program, host)
-        .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
+    lashlang::LinkedModule::link_with_dialect(
+        program,
+        host,
+        lashlang::CompilationDialect::Typescript,
+    )
+    .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
 }
 
 /// Compiles an already-linked TypeScript module with reference semantics.
 pub fn compile_linked(linked: &lashlang::LinkedModule) -> lashlang::CompiledProgram {
     lashlang::compile_linked_with_dialect(linked, lashlang::CompilationDialect::Typescript)
+}
+
+/// Compiles one process from a lowered TypeScript module with reference semantics.
+pub fn compile_process(
+    program: &lashlang::Program,
+    process_name: &str,
+) -> Result<lashlang::CompiledProgram, lashlang::RuntimeError> {
+    lashlang::compile_process_with_dialect(
+        program,
+        process_name,
+        lashlang::CompilationDialect::Typescript,
+    )
 }

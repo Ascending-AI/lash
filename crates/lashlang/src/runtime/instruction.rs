@@ -379,6 +379,7 @@ pub(crate) enum IntrinsicOp {
     Join,
     JavaScriptSplit,
     JavaScriptJoin,
+    JavaScriptStdlib(usize),
     Trim,
     Slice,
     ToString,
@@ -558,6 +559,7 @@ impl IntrinsicOp {
             IntrinsicOp::Find(argc)
             | IntrinsicOp::Format(argc)
             | IntrinsicOp::Range(argc)
+            | IntrinsicOp::JavaScriptStdlib(argc)
             | IntrinsicOp::InvalidArity { argc, .. }
             | IntrinsicOp::Unknown { argc, .. } => argc,
             IntrinsicOp::FormatCompiled(_)
@@ -581,6 +583,7 @@ impl IntrinsicOp {
             IntrinsicOp::Join => BuiltinProfileTag::Join,
             IntrinsicOp::JavaScriptSplit => BuiltinProfileTag::Split,
             IntrinsicOp::JavaScriptJoin => BuiltinProfileTag::Join,
+            IntrinsicOp::JavaScriptStdlib(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,
@@ -694,6 +697,7 @@ pub(crate) enum BuiltinProfileTag {
     Upper,
     Unique,
     Reverse,
+    TypeScriptStdlib,
     Unknown,
 }
 
@@ -810,6 +814,7 @@ const BUILTIN_PROFILE_NAMES: [&str; BUILTIN_PROFILE_COUNT] = [
     "upper",
     "unique",
     "reverse",
+    "typescript_stdlib",
     "unknown",
 ];
 

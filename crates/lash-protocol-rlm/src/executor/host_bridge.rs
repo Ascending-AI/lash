@@ -282,6 +282,19 @@ impl HostBridge<'_> {
         args: Vec<FlowValue>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
     ) -> Result<FlowValue, ExecutionHostError> {
+        if lash_lashlang_runtime::is_typescript_runtime_receiver(&receiver) {
+            let fallback_index = call_site.is_none().then(|| self.next_index());
+            let effect_id = self.resource_tool_call_id(
+                "typescript.runtime",
+                call_site.as_ref(),
+                fallback_index,
+            );
+            return lash_lashlang_runtime::journaled_typescript_runtime_value(
+                &self.ctx, effect_id, &receiver, &operation, &args,
+            )
+            .await
+            .expect("TypeScript runtime receiver checked above");
+        }
         let receiver = match &receiver {
             FlowValue::Resource(receiver) => receiver,
             _ => {
@@ -386,6 +399,25 @@ impl HostBridge<'_> {
         let mut invocations = Vec::new();
 
         for (source_index, operation) in batch.operations.into_iter().enumerate() {
+            if lash_lashlang_runtime::is_typescript_runtime_receiver(&operation.receiver) {
+                let effect_id = self.resource_tool_call_id(
+                    "typescript.runtime",
+                    operation.call_site.as_ref(),
+                    Some(source_index),
+                );
+                let result = lash_lashlang_runtime::journaled_typescript_runtime_value(
+                    &self.ctx,
+                    effect_id,
+                    &operation.receiver,
+                    &operation.operation,
+                    &operation.args,
+                )
+                .await
+                .expect("TypeScript runtime receiver checked above");
+                results[source_index] =
+                    Some(lashlang::ResourceOperationResult::from_result(result));
+                continue;
+            }
             let result = async {
                 let receiver = match &operation.receiver {
                     FlowValue::Resource(receiver) => receiver,

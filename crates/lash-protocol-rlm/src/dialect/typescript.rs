@@ -55,9 +55,32 @@ impl RlmDialect for TypescriptDialect {
     fn render_execution_section(
         &self,
         _features: crate::protocol::RlmPromptFeatures,
-        _tool_catalog: &lash_core::ToolCatalog,
+        tool_catalog: &lash_core::ToolCatalog,
     ) -> Result<String, SessionError> {
-        Ok("## TypeScript execution\n\nUse exactly one paired `<typescript>...</typescript>` block. The accepted TypeScript subset executes on the durable Lash VM. Call `finish(value)` to terminate and `print(value)` for observations. Unsupported JavaScript or TypeScript constructs fail before execution with a named diagnostic.".to_string())
+        let tools = tool_catalog
+            .tools
+            .iter()
+            .filter_map(|tool| {
+                let binding =
+                    lash_lashlang_runtime::required_tool_typescript_executable(&tool.manifest)
+                        .ok()?;
+                let contract = tool_catalog.resolve_contract(&tool.manifest.name)?;
+                Some(lash_typescript::render_tool_signature(
+                    &binding.call_path(),
+                    contract.input_schema.canonical(),
+                    Some(contract.output_schema.canonical()),
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tools = if tools.is_empty() {
+            String::new()
+        } else {
+            format!("\n\nAvailable tools (all calls require `await`):\n```typescript\n{tools}\n```")
+        };
+        Ok(format!(
+            "## TypeScript execution\n\nUse exactly one paired `<typescript>...</typescript>` block. Cells are plain durable scripts. Durable work is declared with a top-level `const process = defineProcess({{ name: \"literal\", signals: {{}}, run: async (...) => {{ ... }} }})`. Agent primitives are `start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`, and `finish`. Use `await` for tools and process handles; `Promise.all` and `Promise.allSettled` preserve aggregate concurrency. Inside `run`, `return` completes successfully after enclosing `finally` blocks and an uncaught `throw` fails the run. General async function authoring and `new Date()` are named rejections in v1.{tools}"
+        ))
     }
 
     fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> &'static str {
@@ -274,6 +297,7 @@ impl RlmDialectSession for TypescriptDialectSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
 
     #[test]
     fn identity_and_cell_tags_are_typescript() {
@@ -291,6 +315,45 @@ mod tests {
         assert_eq!(dialect.snapshot_engine_id(), "typescript");
         assert_eq!(dialect.cell_tags().open, "<typescript>");
         assert_eq!(dialect.cell_tags().close, "</typescript>");
+    }
+
+    #[test]
+    fn execution_section_renders_promise_tool_signatures_and_agent_contract() {
+        let dialect = TypescriptDialect::new(
+            LashlangSurface::default(),
+            LashlangDialectServices {
+                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+        );
+        let tool = lash_core::ToolDefinition::raw(
+            "tool:test/web_fetch",
+            "web_fetch",
+            "Fetch a URL",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "url": { "type": "string" } },
+                "required": ["url"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "string" }),
+        )
+        .with_lashlang_binding(LashlangToolBinding::new(["web"], "fetch"));
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
+        let section = dialect
+            .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog)
+            .expect("render execution section");
+        assert!(
+            section.contains(
+                "declare namespace web { function fetch(input: { url: string }): Promise<string>; }"
+            ),
+            "{section}"
+        );
+        assert!(section.contains("defineProcess"), "{section}");
+        assert!(section.contains("Promise.allSettled"), "{section}");
     }
 
     #[test]

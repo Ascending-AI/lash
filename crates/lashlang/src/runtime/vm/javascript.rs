@@ -1,3 +1,4 @@
+use super::super::{from_json, javascript_to_string, to_json_direct};
 use super::*;
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -105,4 +106,747 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .push(Value::String(javascript_join(&value, &separator)?.into()));
         Ok(())
     }
+
+    pub(super) fn execute_javascript_stdlib(&mut self, argc: usize) -> Result<(), RuntimeError> {
+        let mut values = Vec::with_capacity(argc);
+        for _ in 0..argc {
+            values.push(self.pop_stack()?);
+        }
+        values.reverse();
+        for value in &mut values {
+            if matches!(value, Value::Ref(_)) {
+                *value = self.heap.export_for_instruction(value)?;
+            }
+        }
+        self.stack.push(javascript_stdlib(&values)?);
+        Ok(())
+    }
+}
+
+fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
+    let Some(Value::String(method)) = values.first() else {
+        return Err(js_stdlib_error("missing method discriminator"));
+    };
+    let args = &values[1..];
+    if method.contains('.') {
+        return javascript_static_stdlib(method, args);
+    }
+    let Some((target, args)) = args.split_first() else {
+        return Err(js_stdlib_error("missing receiver"));
+    };
+    match target {
+        Value::String(value) => javascript_string_method(method, value, args),
+        Value::List(items) | Value::Tuple(items) => {
+            javascript_array_method(method, items.as_ref(), args)
+        }
+        _ if method == "toString" && args.is_empty() => {
+            Ok(Value::String(javascript_to_string(target).into()))
+        }
+        _ if method == "valueOf" && args.is_empty() => Ok(target.clone()),
+        _ => Err(js_stdlib_error(format!(
+            "TS_METHOD_UNSUPPORTED: method `{method}` is unavailable on this value"
+        ))),
+    }
+}
+
+fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    use crate::runtime::javascript::{javascript_strict_equal, javascript_to_number};
+    match (method, args) {
+        ("Object.keys", [Value::Record(record)]) => Ok(Value::List(
+            record
+                .keys()
+                .map(|key| Value::String(key.into()))
+                .collect::<Vec<_>>()
+                .into(),
+        )),
+        ("Object.values", [Value::Record(record)]) => Ok(Value::List(
+            record.values().cloned().collect::<Vec<_>>().into(),
+        )),
+        ("Object.entries", [Value::Record(record)]) => Ok(Value::List(
+            record
+                .iter()
+                .map(|(key, value)| {
+                    Value::List(vec![Value::String(key.into()), value.clone()].into())
+                })
+                .collect::<Vec<_>>()
+                .into(),
+        )),
+        ("Object.fromEntries", [Value::List(entries) | Value::Tuple(entries)]) => {
+            let mut record = record_with_capacity(entries.len());
+            for entry in entries.iter() {
+                let (Value::List(pair) | Value::Tuple(pair)) = entry else {
+                    return Err(js_stdlib_error("Object.fromEntries entry is not iterable"));
+                };
+                if pair.len() < 2 {
+                    return Err(js_stdlib_error(
+                        "Object.fromEntries entry has fewer than two values",
+                    ));
+                }
+                record.insert(javascript_to_string(&pair[0]), pair[1].clone());
+            }
+            Ok(Value::Record(std::sync::Arc::new(record)))
+        }
+        ("Object.hasOwn", [Value::Record(record), key]) => Ok(Value::Bool(
+            record.get(&javascript_to_string(key)).is_some(),
+        )),
+        ("Object.is", [left, right]) => Ok(Value::Bool(match (left, right) {
+            (Value::Number(left), Value::Number(right)) => {
+                (left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()
+            }
+            _ => javascript_strict_equal(left, right),
+        })),
+        ("Array.isArray", [value]) => Ok(Value::Bool(matches!(
+            value,
+            Value::List(_) | Value::Tuple(_)
+        ))),
+        ("Array.from", [Value::List(values) | Value::Tuple(values)]) => {
+            Ok(Value::List(values.to_vec().into()))
+        }
+        ("Array.from", [Value::String(value)]) => Ok(Value::List(
+            value
+                .chars()
+                .map(|character| Value::String(character.to_string().into()))
+                .collect::<Vec<_>>()
+                .into(),
+        )),
+        ("Array.of", values) => Ok(Value::List(values.to_vec().into())),
+        ("String.fromCharCode", values) => utf16_value(
+            values
+                .iter()
+                .map(|value| to_uint16(javascript_to_number(value)))
+                .collect(),
+        ),
+        ("String.fromCodePoint", values) => {
+            let mut output = String::new();
+            for value in values {
+                let point = javascript_to_number(value);
+                if !point.is_finite()
+                    || point.fract() != 0.0
+                    || !(0.0..=0x10ffff as f64).contains(&point)
+                    || (0xd800 as f64..=0xdfff as f64).contains(&point)
+                {
+                    return Err(js_stdlib_error(
+                        "String.fromCodePoint received an invalid code point",
+                    ));
+                }
+                output.push(char::from_u32(point as u32).expect("validated code point"));
+            }
+            Ok(Value::String(output.into()))
+        }
+        ("Number.isFinite", [Value::Number(value)]) => Ok(Value::Bool(value.is_finite())),
+        ("Number.isFinite", [_]) => Ok(Value::Bool(false)),
+        ("Number.isInteger", [Value::Number(value)]) => {
+            Ok(Value::Bool(value.is_finite() && value.fract() == 0.0))
+        }
+        ("Number.isInteger", [_]) => Ok(Value::Bool(false)),
+        ("Number.isNaN", [Value::Number(value)]) => Ok(Value::Bool(value.is_nan())),
+        ("Number.isNaN", [_]) => Ok(Value::Bool(false)),
+        ("Number.isSafeInteger", [Value::Number(value)]) => Ok(Value::Bool(
+            value.is_finite() && value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_991.0,
+        )),
+        ("Number.isSafeInteger", [_]) => Ok(Value::Bool(false)),
+        ("Number.parseFloat", [value]) => Ok(Value::Number(parse_float_prefix(
+            &javascript_to_string(value),
+        ))),
+        ("Number.parseInt", [value]) => Ok(Value::Number(parse_int_prefix(
+            &javascript_to_string(value),
+            None,
+        ))),
+        ("Number.parseInt", [value, radix]) => Ok(Value::Number(parse_int_prefix(
+            &javascript_to_string(value),
+            Some(javascript_to_number(radix)),
+        ))),
+        ("JSON.parse", [Value::String(value)]) => serde_json::from_str(value)
+            .map(from_json)
+            .map_err(|error| js_stdlib_error(format!("JSON.parse: {error}"))),
+        ("JSON.stringify", [Value::Undefined]) => Ok(Value::Undefined),
+        ("JSON.stringify", [value]) => serde_json::to_string(&to_json_direct(value))
+            .map(|value| Value::String(value.into()))
+            .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
+        ("Math.abs", [value]) => Ok(Value::Number(javascript_to_number(value).abs())),
+        ("Math.ceil", [value]) => Ok(Value::Number(javascript_to_number(value).ceil())),
+        ("Math.floor", [value]) => Ok(Value::Number(javascript_to_number(value).floor())),
+        ("Math.round", [value]) => Ok(Value::Number(javascript_round(javascript_to_number(value)))),
+        ("Math.trunc", [value]) => Ok(Value::Number(javascript_to_number(value).trunc())),
+        ("Math.max", values) => Ok(Value::Number(javascript_extreme(values, true))),
+        ("Math.min", values) => Ok(Value::Number(javascript_extreme(values, false))),
+        ("Math.pow", [base, exponent]) => Ok(Value::Number(
+            javascript_to_number(base).powf(javascript_to_number(exponent)),
+        )),
+        ("Math.sqrt", [value]) => Ok(Value::Number(javascript_to_number(value).sqrt())),
+        ("Math.sign", [value]) => {
+            let value = javascript_to_number(value);
+            Ok(Value::Number(if value.is_nan() || value == 0.0 {
+                value
+            } else {
+                value.signum()
+            }))
+        }
+        _ => Err(js_stdlib_error(format!(
+            "TS_METHOD_UNSUPPORTED: unsupported call `{method}` with {} argument(s)",
+            args.len()
+        ))),
+    }
+}
+
+fn javascript_string_method(
+    method: &str,
+    value: &str,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    use crate::runtime::javascript::javascript_to_number;
+    let units = value.encode_utf16().collect::<Vec<_>>();
+    match (method, args) {
+        ("at", [index]) => {
+            let index = relative_index(javascript_to_number(index), units.len());
+            index.map_or(Ok(Value::Undefined), |index| {
+                utf16_value(vec![units[index]])
+            })
+        }
+        ("charAt", []) => units
+            .first()
+            .copied()
+            .map_or(Ok(Value::String("".into())), |unit| utf16_value(vec![unit])),
+        ("charAt", [index]) => relative_nonnegative_index(javascript_to_number(index), units.len())
+            .map_or(Ok(Value::String("".into())), |index| {
+                utf16_value(vec![units[index]])
+            }),
+        ("charCodeAt", []) => Ok(Value::Number(
+            units.first().map_or(f64::NAN, |value| *value as f64),
+        )),
+        ("charCodeAt", [index]) => Ok(Value::Number(
+            relative_nonnegative_index(javascript_to_number(index), units.len())
+                .map_or(f64::NAN, |index| units[index] as f64),
+        )),
+        ("codePointAt", []) => code_point_at(&units, 0),
+        ("codePointAt", [index]) => {
+            relative_nonnegative_index(javascript_to_number(index), units.len())
+                .map_or(Ok(Value::Undefined), |index| code_point_at(&units, index))
+        }
+        ("concat", values) => Ok(Value::String(
+            values
+                .iter()
+                .fold(value.to_string(), |mut output, item| {
+                    output.push_str(&javascript_to_string(item));
+                    output
+                })
+                .into(),
+        )),
+        ("startsWith", [needle]) => string_starts_with(&units, needle, 0),
+        ("startsWith", [needle, position]) => string_starts_with(
+            &units,
+            needle,
+            clamp_nonnegative_index(javascript_to_number(position), units.len()),
+        ),
+        ("endsWith", [needle]) => string_ends_with(&units, needle, units.len()),
+        ("endsWith", [needle, position]) => string_ends_with(
+            &units,
+            needle,
+            clamp_nonnegative_index(javascript_to_number(position), units.len()),
+        ),
+        ("includes", [needle]) => string_includes(&units, needle, 0),
+        ("includes", [needle, position]) => string_includes(
+            &units,
+            needle,
+            clamp_nonnegative_index(javascript_to_number(position), units.len()),
+        ),
+        ("indexOf", [needle]) => string_index_of(&units, needle, 0),
+        ("indexOf", [needle, position]) => string_index_of(
+            &units,
+            needle,
+            clamp_nonnegative_index(javascript_to_number(position), units.len()),
+        ),
+        ("lastIndexOf", [needle]) => string_last_index_of(&units, needle, units.len()),
+        ("lastIndexOf", [needle, position]) => string_last_index_of(
+            &units,
+            needle,
+            clamp_nonnegative_index(javascript_to_number(position), units.len()),
+        ),
+        ("padStart", [length]) | ("padStart", [length, Value::Undefined]) => {
+            pad_string(value, javascript_to_number(length), " ", true)
+        }
+        ("padStart", [length, fill]) => pad_string(
+            value,
+            javascript_to_number(length),
+            &javascript_to_string(fill),
+            true,
+        ),
+        ("padEnd", [length]) | ("padEnd", [length, Value::Undefined]) => {
+            pad_string(value, javascript_to_number(length), " ", false)
+        }
+        ("padEnd", [length, fill]) => pad_string(
+            value,
+            javascript_to_number(length),
+            &javascript_to_string(fill),
+            false,
+        ),
+        ("repeat", [count]) => {
+            let count = javascript_to_number(count);
+            if !count.is_finite() || count < 0.0 {
+                return Err(js_stdlib_error("String.repeat count is out of range"));
+            }
+            Ok(Value::String(value.repeat(count.trunc() as usize).into()))
+        }
+        ("replace", [needle, replacement]) => Ok(Value::String(
+            value
+                .replacen(
+                    &javascript_to_string(needle),
+                    &javascript_to_string(replacement),
+                    1,
+                )
+                .into(),
+        )),
+        ("replaceAll", [needle, replacement]) => Ok(Value::String(
+            value
+                .replace(
+                    &javascript_to_string(needle),
+                    &javascript_to_string(replacement),
+                )
+                .into(),
+        )),
+        ("slice", bounds) => slice_utf16(&units, bounds, true),
+        ("substring", bounds) => substring_utf16(&units, bounds),
+        ("split", []) => Ok(Value::List(vec![Value::String(value.into())].into())),
+        ("split", [separator]) => Ok(Value::List(
+            javascript_split(&Value::String(value.into()), separator)?.into(),
+        )),
+        ("split", [separator, limit]) => {
+            let mut values = javascript_split(&Value::String(value.into()), separator)?;
+            let limit = javascript_to_number(limit);
+            let limit = if limit.is_nan() || limit <= 0.0 {
+                0
+            } else {
+                (limit.trunc() as usize).min(u32::MAX as usize)
+            };
+            values.truncate(limit);
+            Ok(Value::List(values.into()))
+        }
+        ("toLowerCase", []) => Ok(Value::String(value.to_lowercase().into())),
+        ("toUpperCase", []) => Ok(Value::String(value.to_uppercase().into())),
+        ("trim", []) => Ok(Value::String(
+            value
+                .trim_matches(super::super::javascript::is_ecma_string_whitespace)
+                .into(),
+        )),
+        ("trimStart", []) => Ok(Value::String(
+            value
+                .trim_start_matches(super::super::javascript::is_ecma_string_whitespace)
+                .into(),
+        )),
+        ("trimEnd", []) => Ok(Value::String(
+            value
+                .trim_end_matches(super::super::javascript::is_ecma_string_whitespace)
+                .into(),
+        )),
+        ("toString", []) | ("valueOf", []) => Ok(Value::String(value.into())),
+        _ => Err(js_stdlib_error(format!(
+            "TS_METHOD_UNSUPPORTED: String.{method}"
+        ))),
+    }
+}
+
+fn javascript_array_method(
+    method: &str,
+    items: &[Value],
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    use crate::runtime::javascript::javascript_to_number;
+    match (method, args) {
+        ("at", [index]) => Ok(relative_index(javascript_to_number(index), items.len())
+            .map_or(Value::Undefined, |index| items[index].clone())),
+        ("concat", values) => {
+            let mut output = items.to_vec();
+            for value in values {
+                match value {
+                    Value::List(values) | Value::Tuple(values) => {
+                        output.extend(values.iter().cloned())
+                    }
+                    value => output.push(value.clone()),
+                }
+            }
+            Ok(Value::List(output.into()))
+        }
+        ("includes", [needle]) => array_includes(items, needle, 0),
+        ("includes", [needle, from]) => array_includes(
+            items,
+            needle,
+            clamp_relative_index(javascript_to_number(from), items.len()),
+        ),
+        ("indexOf", [needle]) => array_index_of(items, needle, 0),
+        ("indexOf", [needle, from]) => array_index_of(
+            items,
+            needle,
+            clamp_relative_index(javascript_to_number(from), items.len()),
+        ),
+        ("lastIndexOf", [needle]) => array_last_index_of(items, needle, items.len()),
+        ("lastIndexOf", [needle, from]) => {
+            last_index_exclusive(javascript_to_number(from), items.len())
+                .map_or(Ok(Value::Number(-1.0)), |end| {
+                    array_last_index_of(items, needle, end)
+                })
+        }
+        ("join", []) => Ok(Value::String(
+            javascript_join(&Value::List(items.to_vec().into()), &Value::Undefined)?.into(),
+        )),
+        ("join", [separator]) => Ok(Value::String(
+            javascript_join(&Value::List(items.to_vec().into()), separator)?.into(),
+        )),
+        ("slice", bounds) => {
+            let start = bounds.first().map_or(0.0, javascript_to_number);
+            let end = bounds
+                .get(1)
+                .map_or(items.len() as f64, javascript_to_number);
+            let start = clamp_relative_index(start, items.len());
+            let end = clamp_relative_index(end, items.len()).max(start);
+            Ok(Value::List(items[start..end].to_vec().into()))
+        }
+        ("toString", []) => Ok(Value::String(
+            javascript_join(&Value::List(items.to_vec().into()), &Value::Undefined)?.into(),
+        )),
+        _ => Err(js_stdlib_error(format!(
+            "TS_METHOD_UNSUPPORTED: Array.{method}"
+        ))),
+    }
+}
+
+fn js_stdlib_error(reason: impl Into<String>) -> RuntimeError {
+    RuntimeError::ValidationFailed {
+        reason: reason.into(),
+    }
+}
+
+fn relative_index(value: f64, len: usize) -> Option<usize> {
+    let value = if value.is_nan() {
+        0
+    } else {
+        value.trunc() as isize
+    };
+    let index = if value < 0 {
+        len as isize + value
+    } else {
+        value
+    };
+    (index >= 0 && index < len as isize).then_some(index as usize)
+}
+
+fn relative_nonnegative_index(value: f64, len: usize) -> Option<usize> {
+    let value = if value.is_nan() {
+        0
+    } else {
+        value.trunc() as isize
+    };
+    (value >= 0 && value < len as isize).then_some(value as usize)
+}
+
+fn clamp_relative_index(value: f64, len: usize) -> usize {
+    if value.is_nan() {
+        return 0;
+    }
+    if value <= -(len as f64) {
+        0
+    } else if value < 0.0 {
+        (len as f64 + value.trunc()) as usize
+    } else {
+        value.trunc().min(len as f64) as usize
+    }
+}
+
+fn clamp_nonnegative_index(value: f64, len: usize) -> usize {
+    if value.is_nan() || value <= 0.0 {
+        0
+    } else {
+        (value.trunc() as usize).min(len)
+    }
+}
+
+fn string_starts_with(
+    units: &[u16],
+    needle: &Value,
+    position: usize,
+) -> Result<Value, RuntimeError> {
+    let needle = javascript_to_string(needle)
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    Ok(Value::Bool(
+        units.get(position..position.saturating_add(needle.len())) == Some(needle.as_slice()),
+    ))
+}
+
+fn string_ends_with(units: &[u16], needle: &Value, end: usize) -> Result<Value, RuntimeError> {
+    let needle = javascript_to_string(needle)
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    let start = end.saturating_sub(needle.len());
+    Ok(Value::Bool(
+        needle.len() <= end && units.get(start..end) == Some(needle.as_slice()),
+    ))
+}
+
+fn string_includes(units: &[u16], needle: &Value, position: usize) -> Result<Value, RuntimeError> {
+    let needle = javascript_to_string(needle)
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    Ok(Value::Bool(
+        needle.is_empty()
+            || units
+                .get(position..)
+                .is_some_and(|tail| tail.windows(needle.len()).any(|window| window == needle)),
+    ))
+}
+
+fn string_index_of(units: &[u16], needle: &Value, position: usize) -> Result<Value, RuntimeError> {
+    let needle = javascript_to_string(needle)
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    let index = if needle.is_empty() {
+        Some(position.min(units.len()))
+    } else {
+        units
+            .get(position..)
+            .and_then(|tail| {
+                tail.windows(needle.len())
+                    .position(|window| window == needle)
+            })
+            .map(|index| position + index)
+    };
+    Ok(Value::Number(index.map_or(-1.0, |index| index as f64)))
+}
+
+fn string_last_index_of(
+    units: &[u16],
+    needle: &Value,
+    position: usize,
+) -> Result<Value, RuntimeError> {
+    let needle = javascript_to_string(needle)
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    let position = position.min(units.len());
+    let index = if needle.is_empty() {
+        Some(position)
+    } else {
+        let last_start = position.min(units.len().saturating_sub(needle.len()));
+        (0..=last_start)
+            .rev()
+            .find(|start| units.get(*start..start + needle.len()) == Some(needle.as_slice()))
+    };
+    Ok(Value::Number(index.map_or(-1.0, |index| index as f64)))
+}
+
+fn array_includes(items: &[Value], needle: &Value, start: usize) -> Result<Value, RuntimeError> {
+    use crate::runtime::javascript::javascript_strict_equal;
+    Ok(Value::Bool(items.get(start..).is_some_and(|tail| {
+        tail.iter().any(|item| {
+            javascript_strict_equal(item, needle)
+                || matches!((item, needle), (Value::Number(left), Value::Number(right)) if left.is_nan() && right.is_nan())
+        })
+    })))
+}
+
+fn array_index_of(items: &[Value], needle: &Value, start: usize) -> Result<Value, RuntimeError> {
+    use crate::runtime::javascript::javascript_strict_equal;
+    Ok(Value::Number(
+        items
+            .get(start..)
+            .and_then(|tail| {
+                tail.iter()
+                    .position(|item| javascript_strict_equal(item, needle))
+            })
+            .map_or(-1.0, |index| (start + index) as f64),
+    ))
+}
+
+fn array_last_index_of(items: &[Value], needle: &Value, end: usize) -> Result<Value, RuntimeError> {
+    use crate::runtime::javascript::javascript_strict_equal;
+    Ok(Value::Number(
+        items[..end.min(items.len())]
+            .iter()
+            .rposition(|item| javascript_strict_equal(item, needle))
+            .map_or(-1.0, |index| index as f64),
+    ))
+}
+
+fn last_index_exclusive(value: f64, len: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    let value = if value.is_nan() { 0.0 } else { value.trunc() };
+    if value < -(len as f64) {
+        None
+    } else if value < 0.0 {
+        Some((len as f64 + value) as usize + 1)
+    } else {
+        Some(value.min((len - 1) as f64) as usize + 1)
+    }
+}
+
+fn to_uint16(value: f64) -> u16 {
+    if !value.is_finite() || value == 0.0 {
+        return 0;
+    }
+    value.trunc().rem_euclid(65_536.0) as u16
+}
+
+fn javascript_round(value: f64) -> f64 {
+    if !value.is_finite() || value == 0.0 {
+        return value;
+    }
+    if (-0.5..0.0).contains(&value) {
+        return -0.0;
+    }
+    (value + 0.5).floor()
+}
+
+fn javascript_extreme(values: &[Value], maximum: bool) -> f64 {
+    use crate::runtime::javascript::javascript_to_number;
+    let mut result = if maximum {
+        f64::NEG_INFINITY
+    } else {
+        f64::INFINITY
+    };
+    for value in values {
+        let value = javascript_to_number(value);
+        if value.is_nan() {
+            return f64::NAN;
+        }
+        if (maximum
+            && (value > result || value == 0.0 && result == 0.0 && value.is_sign_positive()))
+            || (!maximum
+                && (value < result || value == 0.0 && result == 0.0 && value.is_sign_negative()))
+        {
+            result = value;
+        }
+    }
+    result
+}
+
+fn utf16_value(units: Vec<u16>) -> Result<Value, RuntimeError> {
+    String::from_utf16(&units)
+        .map(|value| Value::String(value.into()))
+        .map_err(|_| js_stdlib_error("TS_LONE_SURROGATE_UNSUPPORTED: result is not representable"))
+}
+
+fn code_point_at(units: &[u16], index: usize) -> Result<Value, RuntimeError> {
+    let Some(first) = units.get(index).copied() else {
+        return Ok(Value::Undefined);
+    };
+    let point = if (0xd800..=0xdbff).contains(&first)
+        && let Some(second @ 0xdc00..=0xdfff) = units.get(index + 1).copied()
+    {
+        0x10000 + (((first as u32 - 0xd800) << 10) | (second as u32 - 0xdc00))
+    } else {
+        first as u32
+    };
+    Ok(Value::Number(point as f64))
+}
+
+fn slice_utf16(units: &[u16], bounds: &[Value], relative: bool) -> Result<Value, RuntimeError> {
+    let to_number = crate::runtime::javascript::javascript_to_number;
+    let start_value = bounds.first().map_or(0.0, to_number);
+    let end_value = bounds.get(1).map_or(units.len() as f64, to_number);
+    let start = if relative {
+        clamp_relative_index(start_value, units.len())
+    } else {
+        start_value.max(0.0) as usize
+    };
+    let end = if relative {
+        clamp_relative_index(end_value, units.len())
+    } else {
+        (end_value.max(0.0) as usize).min(units.len())
+    };
+    utf16_value(units[start..end.max(start)].to_vec())
+}
+
+fn substring_utf16(units: &[u16], bounds: &[Value]) -> Result<Value, RuntimeError> {
+    let to_number = crate::runtime::javascript::javascript_to_number;
+    let mut start = bounds.first().map_or(0.0, to_number).max(0.0) as usize;
+    let mut end = bounds.get(1).map_or(units.len() as f64, to_number).max(0.0) as usize;
+    start = start.min(units.len());
+    end = end.min(units.len());
+    if start > end {
+        std::mem::swap(&mut start, &mut end);
+    }
+    utf16_value(units[start..end].to_vec())
+}
+
+fn pad_string(value: &str, length: f64, fill: &str, start: bool) -> Result<Value, RuntimeError> {
+    let current = value.encode_utf16().count();
+    let length = if length.is_nan() {
+        0
+    } else {
+        length.max(0.0).trunc() as usize
+    };
+    if length <= current || fill.is_empty() {
+        return Ok(Value::String(value.into()));
+    }
+    let fill_units = fill.encode_utf16().collect::<Vec<_>>();
+    let padding = (0..length - current)
+        .map(|index| fill_units[index % fill_units.len()])
+        .collect::<Vec<_>>();
+    let padding = match utf16_value(padding)? {
+        Value::String(value) => value,
+        _ => unreachable!(),
+    };
+    Ok(Value::String(
+        if start {
+            format!("{padding}{value}")
+        } else {
+            format!("{value}{padding}")
+        }
+        .into(),
+    ))
+}
+
+fn parse_float_prefix(value: &str) -> f64 {
+    let value = value.trim_start_matches(super::super::javascript::is_ecma_string_whitespace);
+    for end in (1..=value.len()).rev() {
+        if let Some(prefix) = value.get(..end)
+            && let Ok(number) = prefix.parse::<f64>()
+        {
+            return number;
+        }
+    }
+    f64::NAN
+}
+
+fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
+    let value = value.trim_start_matches(super::super::javascript::is_ecma_string_whitespace);
+    let (negative, value) = value
+        .strip_prefix('-')
+        .map_or((false, value), |value| (true, value));
+    let value = value.strip_prefix('+').unwrap_or(value);
+    let radix = radix.map_or(0, |value| {
+        if !value.is_finite() || value == 0.0 {
+            0
+        } else {
+            value.trunc() as i64
+        }
+    });
+    if radix != 0 && !(2..=36).contains(&radix) {
+        return f64::NAN;
+    }
+    let (radix, value) = if radix == 0 {
+        value
+            .strip_prefix("0x")
+            .or_else(|| value.strip_prefix("0X"))
+            .map_or((10, value), |value| (16, value))
+    } else if radix == 16 {
+        (
+            16,
+            value
+                .strip_prefix("0x")
+                .or_else(|| value.strip_prefix("0X"))
+                .unwrap_or(value),
+        )
+    } else {
+        (radix as u32, value)
+    };
+    let digits = value
+        .chars()
+        .take_while(|character| character.is_digit(radix))
+        .collect::<String>();
+    if digits.is_empty() {
+        return f64::NAN;
+    }
+    let number = u128::from_str_radix(&digits, radix).map_or(f64::INFINITY, |value| value as f64);
+    if negative { -number } else { number }
 }

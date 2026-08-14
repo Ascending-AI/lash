@@ -8,6 +8,9 @@ use thiserror::Error;
 #[path = "artifact_hash_writer.rs"]
 mod hash_writer;
 use hash_writer::HashWriter;
+#[path = "artifact_dialect.rs"]
+mod dialect;
+use dialect::{is_lashlang_dialect, module_ref};
 #[path = "artifact_write_helpers.rs"]
 mod write_helpers;
 use write_helpers::{
@@ -30,7 +33,6 @@ pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v4";
 
 /// Durability tier established by the execution path's concrete store or host.
-/// `Inline` is in-memory/build-time; `Durable` is crash-recoverable wiring.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -141,6 +143,8 @@ pub struct ModuleArtifact {
     pub host_requirements_ref: HostRequirementsRef,
     pub host_requirements: HostRequirements,
     pub exports: ModuleExports,
+    #[serde(default, skip_serializing_if = "is_lashlang_dialect")]
+    pub compilation_dialect: crate::CompilationDialect,
     #[serde(default)]
     pub trigger_key_manifest: TriggerKeyManifest,
     pub canonical_ir: Program,
@@ -152,30 +156,42 @@ impl ModuleArtifact {
     pub fn from_program(program: Program) -> Result<Self, ModuleArtifactError> {
         let canonical_ir = canonical_program_ir(program);
         let requirements = host_requirements_for_program(&canonical_ir);
-        Self::from_canonical_ir_and_requirements(canonical_ir, requirements)
+        Self::from_canonical_ir_and_requirements(
+            canonical_ir,
+            requirements,
+            crate::CompilationDialect::Lashlang,
+        )
     }
 
-    pub(crate) fn from_program_with_requirements(
+    pub(crate) fn from_program_with_requirements_and_dialect(
         program: Program,
         requirements: HostRequirements,
+        compilation_dialect: crate::CompilationDialect,
     ) -> Result<Self, ModuleArtifactError> {
         let canonical_ir = canonical_program_ir(program);
-        Self::from_canonical_ir_and_requirements(canonical_ir, requirements)
+        Self::from_canonical_ir_and_requirements(canonical_ir, requirements, compilation_dialect)
     }
 
     fn from_canonical_ir_and_requirements(
         canonical_ir: Program,
         requirements: HostRequirements,
+        compilation_dialect: crate::CompilationDialect,
     ) -> Result<Self, ModuleArtifactError> {
         let host_requirements_ref = host_requirements_ref(&requirements);
         let exports = module_exports(&canonical_ir);
         let trigger_key_manifest = TriggerKeyManifest::from_program(&canonical_ir);
-        let module_ref = module_ref(&canonical_ir, &host_requirements_ref, &exports);
+        let module_ref = module_ref(
+            &canonical_ir,
+            &host_requirements_ref,
+            &exports,
+            compilation_dialect,
+        );
         Ok(Self {
             module_ref,
             host_requirements_ref,
             host_requirements: requirements,
             exports,
+            compilation_dialect,
             trigger_key_manifest,
             canonical_ir,
             dependencies: Vec::new(),
@@ -233,9 +249,10 @@ impl ModuleArtifact {
     }
 
     pub fn verify(&self) -> Result<(), ModuleArtifactError> {
-        let rebuilt = Self::from_program_with_requirements(
+        let rebuilt = Self::from_program_with_requirements_and_dialect(
             self.canonical_ir.clone(),
             self.host_requirements.clone(),
+            self.compilation_dialect,
         )?;
         if rebuilt.module_ref != self.module_ref {
             return Err(ModuleArtifactError::HashMismatch {
@@ -504,20 +521,6 @@ fn module_exports(program: &Program) -> ModuleExports {
         }
     }
     exports
-}
-
-fn module_ref(
-    program: &Program,
-    host_requirements_ref: &HostRequirementsRef,
-    exports: &ModuleExports,
-) -> ModuleRef {
-    let mut writer = HashWriter::new();
-    writer.atom(LASHLANG_SEMANTIC_HASH_VERSION);
-    writer.atom("module");
-    writer.atom(host_requirements_ref.as_str());
-    write_exports(&mut writer, exports);
-    write_program(&mut writer, program);
-    ModuleRef::new(&writer.finish())
 }
 
 fn host_requirements_ref(requirements: &HostRequirements) -> HostRequirementsRef {

@@ -12,6 +12,8 @@ use tokio_util::sync::CancellationToken;
 pub(crate) mod control;
 mod controller_error;
 mod process_local;
+
+mod language_runtime;
 mod scoped;
 mod task_panic;
 mod trigger;
@@ -26,6 +28,7 @@ pub(crate) use control::{
     drive_effect_controller_task,
 };
 pub use controller_error::RuntimeEffectControllerError;
+use language_runtime::LanguageRuntimeValueRunner;
 pub use trigger::TriggerLocalExecution;
 
 use crate::LlmRequest as CoreLlmRequest;
@@ -243,8 +246,7 @@ impl Drop for AbortEffectTaskOnDrop {
 }
 
 impl<'run> RuntimeEffectLocalExecutor<'run> {
-    /// Constructs a local path that rejects execution for effect-host implementors whose durable
-    /// controller must not fall back to inline nondeterministic work.
+    /// Constructs a local path that rejects unavailable inline execution.
     pub fn unavailable() -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Unavailable,
@@ -252,8 +254,18 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the inline sleep path for effect-host implementors; cancellation is observed through
-    /// the supplied token and the system clock sets the deadline behavior.
+    pub fn language_runtime_value(
+        clock: Arc<dyn crate::Clock>,
+    ) -> RuntimeEffectLocalExecutor<'static> {
+        RuntimeEffectLocalExecutor {
+            state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
+                LanguageRuntimeValueRunner { clock },
+            )),
+            replay_trace: None,
+        }
+    }
+
+    /// Builds the cancellable inline sleep path using the system clock.
     pub fn sleep(cancellation: CancellationToken) -> Self {
         Self::sleep_with_clock(cancellation, Arc::new(crate::SystemClock))
     }

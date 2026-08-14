@@ -11,8 +11,8 @@ Selection rule: take at least one positive case for every accepted semantic clas
 that does not depend on an explicitly rejected feature. Prefer primitive-only tests
 whose assertion can be represented exactly by `finish(boolean)`. The slice covers
 expressions/statements, coercion, strict and loose equality, template literals,
-closures, exceptions, ternary/logical selection, Number edge display, and accepted
-String methods. The native integration suite covers aliasing, host JSON boundaries,
+closures, exceptions, ternary/logical selection, Number edge display, and the
+accepted String/Array/Object/Number/JSON/Math methods. The native integration suite covers aliasing, host JSON boundaries,
 diagnostics, signatures, and durability, which are Lash-specific rather than test262.
 
 Do not add a test262 case by weakening the dialect. If its dependencies are outside

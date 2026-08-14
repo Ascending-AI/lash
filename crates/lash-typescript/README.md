@@ -6,37 +6,51 @@ which lowers into `lashlang::Program`. Runtime type annotations are erased.
 
 ## Dialect contract
 
-The accepted v1 surface is deliberately small: `let`/`const`, functions and
-arrows with immutable captures, blocks, `if`, `while`, `break`, `continue`,
+The accepted v1 surface is deliberately bounded: `let`/`const`, functions and
+arrows with immutable captures, blocks, `if`, `while`, the canonical
+`for (let i = start; i < end; i++)` form, `for...of`, `break`, `continue`,
 `try`/`catch`/`finally`, `throw`, `return`, arrays, records, field/index access
 and assignment, calls, primitive unary/arithmetic/comparison/equality/logical
-operators, conditionals, templates, array/string `.length`, the explicitly
-mapped String methods, array `join`, and free `console.log` calls. `console.log`
+operators, conditionals, templates, array/string `.length`, the standard-library
+inventory below, and free `console.log` calls. `console.log`
 accepts any arity and prints its arguments after ECMA `ToString` conversion,
 joined by one space; lexical bindings named `console` take precedence.
 Accepted operations follow ECMA-262 coercion, truthiness, operand-return, and
 reference rules. TypeScript type annotations, aliases, and interfaces are
 erased after parsing or used for signature/type work.
 
-This layer treats a TypeScript cell as a pure calculator: it has no tool calls,
-no `await`, and no deferred tool resolution. Tool signatures are synchronous
-descriptions for a later integration layer; execution support is FIG-1305.
+Cells are scripts and may use top-level `await` for tools, process handles,
+`sleep`, `waitSignal`, `Promise.all`, and `Promise.allSettled`. General async
+function authoring remains a named rejection; the one async function literal
+surface is the `run` field of a top-level literal `defineProcess` definition.
+Tool calls require `await` and use explicit `typescript.tool` module paths;
+their prompt signatures return `Promise<T>`. Unknown module paths participate
+in the executor's deferred tool-resolution path.
+
+Durable work has the static shape
+`const worker = defineProcess({ name: "worker", signals: {}, run: async (...) => { ... } })`.
+`start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`, and `finish` lower to
+the shared process/effect machinery. A normal return from `run` finishes the
+process only after all enclosing `finally` blocks execute; an uncaught throw
+fails it. Dynamic process definitions and targets reject with dedicated
+`TS_PROCESS_*` diagnostics.
+
+`Date.now()` and `Math.random()` are host effects, so their result is recorded
+at the same journal boundary as other effects and replay never samples the VM's
+clock or RNG. `new Date()` rejects with `TS_NEW_UNSUPPORTED`.
 
 Everything outside the accepted surface is rejected with a stable `TS_*`
 diagnostic. Most rejection is static; the deviation register names every
 shape-dependent runtime rejection. The executable inventories in
 `tests/rejections.rs`, `tests/structural_contract.rs`, and the checked-in Node
 differential suite under `tests/differential/` are the source of truth. In
-particular, v1 excludes classes, generators, async/await, `var`,
-destructuring, all `for` variants, modules/imports, JSX, enums, namespaces,
+particular, v1 excludes classes, generators, general async functions, `var`,
+destructuring, `for...in` and non-canonical classic `for` forms, modules/imports, JSX, enums, namespaces,
 decorators, `eval`/`Function`, prototype access, accessors, methods, regular
 expressions, BigInt, spread, optional chaining, compound assignment operators
 (`x += 1` and `a[0] += 5` alike reject with
 `TS_ASSIGNMENT_OPERATOR_UNSUPPORTED`), and operators not represented by the
-accepted VM semantics. The mapped String methods take exactly one argument:
-their optional second parameter (`'abc'.startsWith('bc', 1)`,
-`'abc'.includes('b', 2)`, `'abc'.endsWith('b', 2)`, `'abc'.split('', 2)`)
-rejects. Identifiers beginning with `__typescript_` are reserved for the
+accepted VM semantics. Identifiers beginning with `__typescript_` are reserved for the
 lowerer's generated bindings and reject with `TS_RESERVED_IDENTIFIER`.
 Mutually recursive function declarations reject with
 `TS_MUTUAL_RECURSION_UNSUPPORTED`; a function *expression* may still be named
@@ -83,7 +97,26 @@ language semantics:
   would run and then fail to suspend or snapshot. Failing closed at compile time
   is the honest form of that same deferral. Self-recursion, named self-recursive
   function expressions, nested declarations, and acyclic declaration chains are
-  all unaffected.
+all unaffected.
+
+## Standard-library inventory
+
+The shipped static methods are `Object.keys`, `values`, `entries`,
+`fromEntries`, `hasOwn`, and `is`; `Array.isArray`, `from`, and `of`;
+`String.fromCharCode` and `fromCodePoint`; `Number.isFinite`, `isInteger`,
+`isNaN`, `isSafeInteger`, `parseFloat`, and `parseInt`; `JSON.parse` and
+`stringify`; and `Math.abs`, `ceil`, `floor`, `round`, `trunc`, `max`, `min`,
+`pow`, `sqrt`, and `sign`.
+
+The shipped instance methods are `at`, `charAt`, `charCodeAt`, `codePointAt`,
+`concat`, `endsWith`, `includes`, `indexOf`, `lastIndexOf`, `padEnd`,
+`padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`,
+`substring`, `toLowerCase`, `toUpperCase`, `trim`, `trimStart`, `trimEnd`,
+`toString`, `valueOf`, `join`, and `map`. Missing methods reject with
+`TS_METHOD_UNSUPPORTED` when the receiver is statically known and with the same
+named typed runtime failure when only its runtime type is known. Mutating array
+methods are deliberately absent; index assignment remains the supported
+mutation surface.
 - Cyclic heap objects are rejected at durable capture. Shared acyclic object
   identity is preserved byte-for-byte. Cycle-capable durable graph encoding is
   deferred; the front-end does not silently copy a cycle.

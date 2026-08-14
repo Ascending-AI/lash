@@ -43,6 +43,17 @@ pub(crate) enum Stmt {
         test: Expr,
         body: Box<Stmt>,
     },
+    For {
+        init: Option<Box<Stmt>>,
+        test: Option<Expr>,
+        update: Option<Expr>,
+        body: Box<Stmt>,
+    },
+    ForOf {
+        binding: String,
+        iterable: Expr,
+        body: Box<Stmt>,
+    },
     Break,
     Continue,
     Throw(Expr),
@@ -76,6 +87,7 @@ pub(crate) struct Function {
     pub(crate) name: Option<String>,
     pub(crate) params: Vec<String>,
     pub(crate) body: FunctionBody,
+    pub(crate) is_async: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -129,6 +141,11 @@ pub(crate) enum Expr {
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
+    },
+    Await(Box<Expr>),
+    Update {
+        name: String,
+        delta: f64,
     },
 }
 
@@ -400,7 +417,12 @@ impl Adapter {
     fn convert_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
         if !matches!(
             stmt,
-            swc::Stmt::If(_) | swc::Stmt::While(_) | swc::Stmt::Try(_) | swc::Stmt::Decl(_)
+            swc::Stmt::If(_)
+                | swc::Stmt::While(_)
+                | swc::Stmt::For(_)
+                | swc::Stmt::ForOf(_)
+                | swc::Stmt::Try(_)
+                | swc::Stmt::Decl(_)
         ) {
             return self.convert_stmt_inner(stmt);
         }
@@ -487,13 +509,31 @@ impl Adapter {
                     span,
                 ));
             }
-            swc::Stmt::For(_) => {
-                return Err(reject(
-                    DiagnosticCode::ForUnsupported,
-                    "classic for statements",
-                    span,
-                ));
-            }
+            swc::Stmt::For(stmt) => Stmt::For {
+                init: stmt
+                    .init
+                    .as_ref()
+                    .map(|init| match init {
+                        swc::VarDeclOrExpr::VarDecl(decl) => self
+                            .convert_decl(&swc::Decl::Var(decl.clone()))
+                            .map(Box::new),
+                        swc::VarDeclOrExpr::Expr(expr) => self
+                            .convert_expr(expr)
+                            .map(|expr| Box::new(Stmt::Expr(expr))),
+                    })
+                    .transpose()?,
+                test: stmt
+                    .test
+                    .as_deref()
+                    .map(|expr| self.convert_expr(expr))
+                    .transpose()?,
+                update: stmt
+                    .update
+                    .as_deref()
+                    .map(|expr| self.convert_expr(expr))
+                    .transpose()?,
+                body: Box::new(self.convert_stmt(&stmt.body)?),
+            },
             swc::Stmt::ForIn(_) => {
                 return Err(reject(
                     DiagnosticCode::ForInUnsupported,
@@ -501,12 +541,40 @@ impl Adapter {
                     span,
                 ));
             }
-            swc::Stmt::ForOf(_) => {
-                return Err(reject(
-                    DiagnosticCode::ForOfUnsupported,
-                    "for/of statements",
-                    span,
-                ));
+            swc::Stmt::ForOf(stmt) => {
+                if stmt.is_await {
+                    return Err(reject(
+                        DiagnosticCode::ForOfUnsupported,
+                        "for await/of statements",
+                        span,
+                    ));
+                }
+                let swc::ForHead::VarDecl(decl) = &stmt.left else {
+                    return Err(reject(
+                        DiagnosticCode::ForOfUnsupported,
+                        "for/of assignment targets",
+                        span,
+                    ));
+                };
+                if decl.decls.len() != 1 || decl.kind == swc::VarDeclKind::Var {
+                    return Err(reject(
+                        DiagnosticCode::ForOfUnsupported,
+                        "for/of requires one let or const binding",
+                        span,
+                    ));
+                }
+                let swc::Pat::Ident(binding) = &decl.decls[0].name else {
+                    return Err(reject(
+                        DiagnosticCode::DestructuringUnsupported,
+                        "for/of destructuring",
+                        span,
+                    ));
+                };
+                Stmt::ForOf {
+                    binding: binding.id.sym.to_string(),
+                    iterable: self.convert_expr(&stmt.right)?,
+                    body: Box::new(self.convert_stmt(&stmt.body)?),
+                }
             }
             swc::Stmt::Debugger(_) => {
                 return Err(reject(
@@ -623,13 +691,6 @@ impl Adapter {
                 span,
             ));
         }
-        if function.is_async {
-            return Err(reject(
-                DiagnosticCode::AsyncUnsupported,
-                "async functions",
-                span,
-            ));
-        }
         if !function.decorators.is_empty() {
             return Err(reject(
                 DiagnosticCode::DecoratorUnsupported,
@@ -656,6 +717,7 @@ impl Adapter {
             name,
             params,
             body: FunctionBody::Block(self.convert_statements(&body.stmts)?),
+            is_async: function.is_async,
         })
     }
 
@@ -742,13 +804,6 @@ impl Adapter {
                         span,
                     ));
                 }
-                if function.is_async {
-                    return Err(reject(
-                        DiagnosticCode::AsyncUnsupported,
-                        "async functions",
-                        span,
-                    ));
-                }
                 let params = function
                     .params
                     .iter()
@@ -769,6 +824,7 @@ impl Adapter {
                     name: None,
                     params,
                     body,
+                    is_async: function.is_async,
                 })
             }
             swc::Expr::Unary(expr) => {
@@ -883,12 +939,27 @@ impl Adapter {
             swc::Expr::This(_) => {
                 return Err(reject(DiagnosticCode::ThisUnsupported, "this", span));
             }
-            swc::Expr::Update(_) => {
-                return Err(reject(
-                    DiagnosticCode::UpdateUnsupported,
-                    "update operators",
-                    span,
-                ));
+            swc::Expr::Update(update) => {
+                let swc::Expr::Ident(name) = update.arg.as_ref() else {
+                    return Err(reject(
+                        DiagnosticCode::UpdateUnsupported,
+                        "update operators on non-identifiers",
+                        span,
+                    ));
+                };
+                if !update.prefix {
+                    // In statement/update position the discarded postfix value is
+                    // observationally identical to the assignment below. Other
+                    // positions are rejected by the lowerer's statement contract.
+                }
+                Expr::Update {
+                    name: name.sym.to_string(),
+                    delta: if update.op == swc::UpdateOp::PlusPlus {
+                        1.0
+                    } else {
+                        -1.0
+                    },
+                }
             }
             swc::Expr::New(_) => {
                 return Err(reject(
@@ -924,8 +995,8 @@ impl Adapter {
                     span,
                 ));
             }
-            swc::Expr::Await(_) => {
-                return Err(reject(DiagnosticCode::AwaitUnsupported, "await", span));
+            swc::Expr::Await(await_expr) => {
+                Expr::Await(Box::new(self.convert_expr(&await_expr.arg)?))
             }
             swc::Expr::SuperProp(_) => {
                 return Err(reject(

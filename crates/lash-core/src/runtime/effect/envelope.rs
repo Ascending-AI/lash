@@ -59,6 +59,7 @@ pub enum RuntimeEffectKind {
     Sleep,
     AwaitEvent,
     PeekAwaitEvent,
+    LanguageRuntimeValue,
 }
 
 impl RuntimeEffectKind {
@@ -79,6 +80,7 @@ impl RuntimeEffectKind {
             Self::Sleep => "sleep",
             Self::AwaitEvent => "await_event",
             Self::PeekAwaitEvent => "peek_await_event",
+            Self::LanguageRuntimeValue => "language_runtime_value",
         }
     }
 }
@@ -451,6 +453,9 @@ pub enum RuntimeEffectCommand {
     PeekAwaitEvent {
         key: crate::AwaitEventKey,
     },
+    LanguageRuntimeValue {
+        operation: String,
+    },
 }
 
 // Measured 200 B on rustc 1.97.0, x86_64-unknown-linux-gnu (FIG-595).
@@ -481,6 +486,7 @@ impl RuntimeEffectCommand {
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
             Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
+            Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }
 }
@@ -773,6 +779,9 @@ pub enum RuntimeEffectOutcome {
     PeekAwaitEvent {
         resolution: Option<crate::Resolution>,
     },
+    LanguageRuntimeValue {
+        value: serde_json::Value,
+    },
 }
 
 // Measured 96 B on rustc 1.97.0, x86_64-unknown-linux-gnu (FIG-595).
@@ -1052,6 +1061,19 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Extracts a journaled language-runtime value.
+    pub fn into_language_runtime_value(
+        self,
+    ) -> Result<serde_json::Value, RuntimeEffectControllerError> {
+        match self {
+            Self::LanguageRuntimeValue { value } => Ok(value),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::LanguageRuntimeValue,
+                other.kind(),
+            )),
+        }
+    }
+
     /// Exposes kind to effect-host implementors while executing or replaying a runtime effect.
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
@@ -1067,6 +1089,7 @@ impl RuntimeEffectOutcome {
             Self::Sleep => RuntimeEffectKind::Sleep,
             Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
+            Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }
 }

@@ -977,6 +977,7 @@ pub enum RemoteRuntimeEffectKind {
     Sleep,
     AwaitEvent,
     PeekAwaitEvent,
+    LanguageRuntimeValue,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

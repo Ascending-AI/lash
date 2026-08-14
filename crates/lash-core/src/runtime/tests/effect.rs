@@ -85,7 +85,7 @@ impl RecordingEffectController {
         self.envelopes.lock_recover().clone()
     }
 
-    fn count_kind(&self, kind: RuntimeEffectKind) -> usize {
+    pub(super) fn count_kind(&self, kind: RuntimeEffectKind) -> usize {
         self.records()
             .iter()
             .filter(|record| record.kind == kind)
@@ -358,6 +358,14 @@ impl RuntimeEffectController for RecordingEffectController {
             RuntimeEffectCommand::PeekAwaitEvent { .. } => {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
             }
+            RuntimeEffectCommand::LanguageRuntimeValue { operation } => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        RuntimeEffectCommand::LanguageRuntimeValue { operation },
+                    ))
+                    .await
+            }
             RuntimeEffectCommand::Direct { request, .. } => {
                 if let Some(gate) = &self.direct_gate
                     && gate.2.swap(false, Ordering::SeqCst)
@@ -365,12 +373,6 @@ impl RuntimeEffectController for RecordingEffectController {
                     gate.0.notify_one();
                     gate.1.notified().await;
                 }
-                // Both the text-only (`direct_completion`) and full-response
-                // (`direct_llm_completion`) client methods now flow through the
-                // single `Direct` effect; they differ only in how the caller
-                // projects the resulting `LlmResponse`. The full-response tests
-                // finish with a "raw prompt" message or an image attachment, so use
-                // those to pick the response text/usage the assertions expect.
                 let prompt = format!("{:?}", request.messages);
                 let is_full = prompt.contains("raw prompt") || !request.attachments.is_empty();
                 let (text, usage) = if is_full {
@@ -2003,7 +2005,6 @@ fn effect_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
 }
 
 #[test]
-// Architecture lint: lexical guard for a completed cutover, not behavior proof.
 fn lint_runtime_effect_executor_has_no_legacy_future_api() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source_files = effect_module_sources(&manifest_dir)
@@ -2031,7 +2032,6 @@ fn lint_runtime_effect_executor_has_no_legacy_future_api() {
 }
 
 #[test]
-// Architecture lint: lexical guard for a completed cutover, not behavior proof.
 fn lint_runtime_effect_controller_cutover_has_no_legacy_host_request_or_fallback_symbols() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source_files = effect_module_sources(&manifest_dir)

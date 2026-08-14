@@ -91,7 +91,7 @@ pub(crate) fn eval_javascript_binary(left: Value, op: JavaScriptBinaryOp, right:
     }
 }
 
-fn javascript_strict_equal(left: &Value, right: &Value) -> bool {
+pub(crate) fn javascript_strict_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
         (Value::Bool(left), Value::Bool(right)) => left == right,
@@ -165,7 +165,7 @@ fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
     }
 }
 
-fn javascript_to_number(value: &Value) -> f64 {
+pub(crate) fn javascript_to_number(value: &Value) -> f64 {
     match value {
         Value::Undefined => f64::NAN,
         Value::Null => 0.0,
@@ -179,7 +179,7 @@ fn javascript_to_number(value: &Value) -> f64 {
 /// ECMA-262 `StrWhiteSpace`: `WhiteSpace` plus `LineTerminator`. It differs
 /// from Rust's Unicode `White_Space` property in both directions — ZWNBSP is
 /// ECMA whitespace and NEL is not.
-fn is_ecma_string_whitespace(value: char) -> bool {
+pub(crate) fn is_ecma_string_whitespace(value: char) -> bool {
     matches!(
         value,
         '\u{0009}'

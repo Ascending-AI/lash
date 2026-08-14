@@ -326,11 +326,13 @@ async fn execute_code_inner(
     // Catalog is never mutated — resolution is link-scoped only. A resolver is
     // present only under hosts that configure RLM deferral; most hosts ship
     // none and this is a no-op.
-    if source_dialect == SourceDialect::Lashlang
-        && (deferred_tool_resolver.is_some() || !state.deferred_resolutions.is_empty())
-    {
+    if deferred_tool_resolver.is_some() || !state.deferred_resolutions.is_empty() {
         let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve");
-        if let Ok(program) = lashlang::parse(code) {
+        let program = match source_dialect {
+            SourceDialect::Lashlang => lashlang::parse(code).ok(),
+            SourceDialect::Typescript => lash_typescript::parse(code).ok(),
+        };
+        if let Some(program) = program {
             host_environment = lash_lashlang_runtime::resolve_and_fold_deferred(
                 &program,
                 host_environment,
@@ -1652,6 +1654,60 @@ mod tests {
     }
 
     #[test]
+    fn typescript_deferred_call_executes_through_the_same_grant_path() {
+        block_on(async {
+            let resolver_calls = Arc::new(AtomicUsize::new(0));
+            let executions = Arc::new(AtomicUsize::new(0));
+            let observed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+                Arc::new(BindingDeferredResolver {
+                    calls: Arc::clone(&resolver_calls),
+                });
+            let provider: Arc<dyn lash_core::ToolProvider> =
+                Arc::new(BindingRecordingDeferredProvider {
+                    executions: Arc::clone(&executions),
+                    observed_bindings: Arc::clone(&observed_bindings),
+                });
+            let ctx = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+                provider,
+                lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+            );
+
+            let (state, response) = execute_typescript_code_with_bounds(
+                RlmExecutionState::for_engine("typescript").expect("TypeScript state"),
+                ctx.clone(),
+                ExecRequest {
+                    language: "typescript".to_string(),
+                    code: "const result = await web.fetch({ url: 'https://example.test' }); finish(result);".to_string(),
+                    accept_finish: true,
+                },
+                lashlang::global_in_memory_lashlang_artifact_store(),
+                LashlangSurface::default(),
+                Some(resolver),
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
+            )
+            .await
+            .expect("execute TypeScript deferred call");
+
+            assert!(response.error.is_none(), "{:?}", response.error);
+            assert_eq!(
+                response.terminal_finish,
+                Some(serde_json::json!("deferred ok"))
+            );
+            assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(executions.load(Ordering::SeqCst), 1);
+            assert!(ctx.tool_catalog().tools.is_empty());
+            assert!(matches!(
+                state.deferred_resolutions.get("web.fetch"),
+                Some(lash_lashlang_runtime::Resolution::Resolved(_))
+            ));
+        });
+    }
+
+    #[test]
     fn execute_code_stores_process_module_artifact_once() {
         block_on(async {
             let state = RlmExecutionState::new().expect("state");
@@ -1854,6 +1910,71 @@ mod tests {
             timer_trigger_resources(),
         )
         .await
+    }
+
+    async fn execute_typescript_with_trigger_environment(code: &str) -> ExecResponse {
+        let state = RlmExecutionState::for_engine("typescript").expect("TypeScript state");
+        let (_, response) = execute_typescript_code_with_bounds(
+            state,
+            lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
+                lash_core::facade_support::InMemoryTriggerStore::default(),
+            )),
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: code.to_string(),
+                accept_finish: true,
+            },
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+            LashlangSurface::new(
+                lashlang::LashlangAbilities::default()
+                    .with_processes()
+                    .with_triggers(),
+                lashlang::LashlangLanguageFeatures::default(),
+                timer_trigger_resources(),
+            ),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+        )
+        .await
+        .expect("execute TypeScript trigger code");
+        response
+    }
+
+    #[test]
+    fn typescript_register_trigger_executes_end_to_end() {
+        block_on(async {
+            let response = execute_typescript_with_trigger_environment(
+                r#"
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (tick: unknown) => { return true; }
+                });
+                const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                const handle = await registerTrigger({
+                  source,
+                  target: remember,
+                  inputs: { tick: trigger.event },
+                  name: "remembered"
+                });
+                finish(handle);
+                "#,
+            )
+            .await;
+
+            assert!(response.error.is_none(), "{:?}", response.error);
+            let handle = response.terminal_finish.expect("terminal finish");
+            assert_eq!(handle["type"], serde_json::json!("trigger_handle"));
+            assert_eq!(
+                response.executed_calls,
+                vec![lash_core::ExecutedCallRecord {
+                    operation: "triggers.register".to_string(),
+                    outcome: lash_core::ExecutedCallOutcome::Ok,
+                }]
+            );
+        });
     }
 
     #[test]

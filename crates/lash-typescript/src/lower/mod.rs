@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lashlang::{
-    AssignPathStep, AssignTarget, CatchClause, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp,
-    JavaScriptLogicalOp, JavaScriptUnaryOp, Program as LashProgram, TryExpr,
+    AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessParam,
+    ProcessSignalDecl, ProcessStartExpr, Program as LashProgram, ResourceRefExpr, TryExpr,
+    TypeExpr,
 };
 
 use crate::adapter::{
@@ -10,6 +12,11 @@ use crate::adapter::{
     MemberProperty, Stmt, UnaryOp, VarKind,
 };
 use crate::{Diagnostic, DiagnosticCode};
+
+mod stdlib;
+use stdlib::*;
+mod graph;
+use graph::{shortest_cycle_through, strongly_connected_components};
 
 /// Every binding the lowerer generates carries this prefix, which the dialect
 /// reserves so a source identifier can never collide with one.
@@ -19,7 +26,13 @@ pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnosti
     let mut lowerer = Lowerer::default();
     lowerer.scopes.push(Scope::default());
     let expressions = lowerer.lower_statements(&program.statements, true)?;
-    Ok(LashProgram::block(expressions))
+    Ok(LashProgram {
+        declarations: lowerer.declarations,
+        main: LashExpr::Block(expressions),
+        declaration_spans: Vec::new(),
+        expression_spans: Vec::new(),
+        expression_source_spans: Vec::new(),
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +91,11 @@ struct Lowerer {
     next_binding: usize,
     next_function: usize,
     loop_depth: usize,
+    continue_epilogues: Vec<Option<LashExpr>>,
+    process_depth: usize,
+    await_depth: usize,
+    declarations: Vec<Declaration>,
+    process_bindings: BTreeMap<String, String>,
     allow_uninitialized_declaration_capture: bool,
 }
 
@@ -355,6 +373,9 @@ impl Lowerer {
     fn lower_stmt(&mut self, stmt: &Stmt) -> Result<Vec<LashExpr>, Diagnostic> {
         Ok(match stmt {
             Stmt::Empty => Vec::new(),
+            Stmt::Expr(Expr::Update { name, delta, .. }) => {
+                vec![self.lower_update_statement(name, *delta)?]
+            }
             Stmt::Expr(expr) => vec![self.lower_expr(expr)?],
             Stmt::Block(statements) => {
                 vec![LashExpr::Block(self.lower_statements(statements, false)?)]
@@ -369,12 +390,32 @@ impl Lowerer {
                             None,
                         ));
                     }
-                    let value = declaration
-                        .init
-                        .as_ref()
-                        .map(|expr| self.lower_expr(expr))
-                        .transpose()?
-                        .unwrap_or(LashExpr::Undefined);
+                    let value = if let Some(init) = declaration.init.as_ref()
+                        && is_define_process_call(init)
+                    {
+                        if *kind != VarKind::Const {
+                            return Err(Diagnostic::new(
+                                DiagnosticCode::ProcessDefinitionNotTopLevel,
+                                "defineProcess must initialize a top-level const binding",
+                                None,
+                            ));
+                        }
+                        if self.scopes.len() != 1 || !self.functions.is_empty() {
+                            return Err(Diagnostic::new(
+                                DiagnosticCode::ProcessDefinitionNotTopLevel,
+                                "defineProcess must initialize a top-level binding",
+                                None,
+                            ));
+                        }
+                        self.lower_process_definition(&declaration.name, init)?
+                    } else {
+                        declaration
+                            .init
+                            .as_ref()
+                            .map(|expr| self.lower_expr(expr))
+                            .transpose()?
+                            .unwrap_or(LashExpr::Undefined)
+                    };
                     let target = self.binding(&declaration.name)?.internal.clone();
                     self.initialize(&declaration.name);
                     output.push(LashExpr::Assign {
@@ -418,10 +459,44 @@ impl Lowerer {
             }],
             Stmt::While { test, body } => {
                 self.loop_depth += 1;
+                self.continue_epilogues.push(None);
                 let body = self.lower_stmt_block(body)?;
+                self.continue_epilogues.pop();
                 self.loop_depth -= 1;
                 vec![LashExpr::While {
                     condition: Box::new(self.lower_expr(test)?),
+                    body: Box::new(body),
+                }]
+            }
+            Stmt::For {
+                init,
+                test,
+                update,
+                body,
+            } => vec![self.lower_classic_for(
+                init.as_deref(),
+                test.as_ref(),
+                update.as_ref(),
+                body,
+            )?],
+            Stmt::ForOf {
+                binding,
+                iterable,
+                body,
+            } => {
+                self.scopes.push(Scope::default());
+                self.declare(binding, BindingKind::Const, true, false)?;
+                let internal = self.binding(binding)?.internal.clone();
+                let iterable = self.lower_expr(iterable)?;
+                self.loop_depth += 1;
+                self.continue_epilogues.push(None);
+                let body = self.lower_stmt_block(body)?;
+                self.continue_epilogues.pop();
+                self.loop_depth -= 1;
+                self.scopes.pop();
+                vec![LashExpr::For {
+                    binding: internal.into(),
+                    iterable: Box::new(iterable),
                     body: Box::new(body),
                 }]
             }
@@ -443,7 +518,14 @@ impl Lowerer {
                         None,
                     ));
                 }
-                vec![LashExpr::Continue]
+                vec![
+                    self.continue_epilogues
+                        .last()
+                        .and_then(Clone::clone)
+                        .map_or(LashExpr::Continue, |epilogue| {
+                            LashExpr::Block(vec![epilogue, LashExpr::Continue])
+                        }),
+                ]
             }
             Stmt::Throw(value) => vec![LashExpr::Throw(Box::new(self.lower_expr(value)?))],
             Stmt::Try {
@@ -496,6 +578,13 @@ impl Lowerer {
         function: &Function,
         internal_name: Option<String>,
     ) -> Result<LashExpr, Diagnostic> {
+        if function.is_async && self.process_depth == 0 {
+            return Err(Diagnostic::new(
+                DiagnosticCode::AsyncUnsupported,
+                "async function authoring is limited to defineProcess run bodies in v1",
+                None,
+            ));
+        }
         let outer_loop_depth = std::mem::take(&mut self.loop_depth);
         self.next_function += 1;
         let id = self.next_function;
@@ -647,7 +736,334 @@ impl Lowerer {
             }
             Expr::Function(function) => self.lower_function(function, None)?,
             Expr::Call { callee, args } => self.lower_call(callee, args)?,
+            Expr::Await(inner) => self.lower_await(inner)?,
+            Expr::Update { .. } => {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::UpdateUnsupported,
+                    "update expressions are supported only as standalone statements and classic-for updates in v1",
+                    None,
+                ));
+            }
         })
+    }
+
+    fn lower_classic_for(
+        &mut self,
+        init: Option<&Stmt>,
+        test: Option<&Expr>,
+        update: Option<&Expr>,
+        body: &Stmt,
+    ) -> Result<LashExpr, Diagnostic> {
+        let Some(Stmt::Var {
+            kind: VarKind::Let,
+            declarations,
+        }) = init
+        else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for requires `let i = start; i < end; i++` in v1",
+                None,
+            ));
+        };
+        let [declaration] = declarations.as_slice() else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for requires exactly one loop binding",
+                None,
+            ));
+        };
+        let Some(start) = declaration.init.as_ref() else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for loop binding requires an initializer",
+                None,
+            ));
+        };
+        let Some(Expr::Binary {
+            left,
+            op: BinaryOp::Less,
+            ..
+        }) = test
+        else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for condition must be `i < end`",
+                None,
+            ));
+        };
+        let Expr::Ident(condition_name) = left.as_ref() else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for condition must read its loop binding",
+                None,
+            ));
+        };
+        let Some(Expr::Update {
+            name: update_name,
+            delta,
+            ..
+        }) = update
+        else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for update must be `i++`",
+                None,
+            ));
+        };
+        if condition_name != &declaration.name || update_name != &declaration.name || *delta != 1.0
+        {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for binding, condition, and update must name the same identifier",
+                None,
+            ));
+        }
+
+        self.scopes.push(Scope::default());
+        self.declare(&declaration.name, BindingKind::Let, true, false)?;
+        let internal = self.binding(&declaration.name)?.internal.clone();
+        let start = self.lower_expr(start)?;
+        let condition = self.lower_expr(test.expect("validated classic for condition"))?;
+        let update = self.lower_update_statement(&declaration.name, *delta)?;
+        self.loop_depth += 1;
+        self.continue_epilogues.push(Some(update.clone()));
+        let body = self.lower_stmt_block(body)?;
+        self.continue_epilogues.pop();
+        self.loop_depth -= 1;
+        self.scopes.pop();
+        Ok(LashExpr::Block(vec![
+            LashExpr::Assign {
+                target: AssignTarget::variable(internal.as_str().into()),
+                expr: Box::new(start),
+            },
+            LashExpr::While {
+                condition: Box::new(condition),
+                body: Box::new(LashExpr::Block(vec![body, update])),
+            },
+        ]))
+    }
+
+    fn lower_update_statement(&mut self, name: &str, delta: f64) -> Result<LashExpr, Diagnostic> {
+        let target = self.lower_assign_target(&TsAssignTarget::Ident(name.to_string()))?;
+        Ok(LashExpr::Assign {
+            target,
+            expr: Box::new(LashExpr::JavaScriptBinary {
+                left: Box::new(LashExpr::Variable(self.resolve(name)?.into())),
+                op: if delta > 0.0 {
+                    JavaScriptBinaryOp::Add
+                } else {
+                    JavaScriptBinaryOp::Subtract
+                },
+                right: Box::new(LashExpr::Number(delta.abs())),
+            }),
+        })
+    }
+
+    fn lower_process_definition(
+        &mut self,
+        binding_name: &str,
+        expression: &Expr,
+    ) -> Result<LashExpr, Diagnostic> {
+        let Expr::Call { args, .. } = expression else {
+            unreachable!("caller identifies defineProcess calls")
+        };
+        let [Expr::Object(entries)] = args.as_slice() else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessConfigLiteralRequired,
+                "defineProcess expects one object literal",
+                None,
+            ));
+        };
+        let field = |name: &str| {
+            entries
+                .iter()
+                .find_map(|(key, value)| (key == name).then_some(value))
+        };
+        let mut seen_fields = BTreeSet::new();
+        if entries.iter().any(|(key, _)| {
+            !matches!(key.as_str(), "name" | "signals" | "run") || !seen_fields.insert(key.as_str())
+        }) {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessConfigFieldUnsupported,
+                "defineProcess accepts only name, signals, and run",
+                None,
+            ));
+        }
+        let Some(Expr::String(process_name)) = field("name") else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessNameLiteralRequired,
+                "defineProcess.name must be a string literal",
+                None,
+            ));
+        };
+        let signals = match field("signals") {
+            None => Vec::new(),
+            Some(Expr::Object(signals)) => signals
+                .iter()
+                .map(|(name, _)| ProcessSignalDecl {
+                    name: name.as_str().into(),
+                    ty: TypeExpr::Any,
+                })
+                .collect(),
+            Some(_) => {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::ProcessSignalsLiteralRequired,
+                    "defineProcess.signals must be an object literal",
+                    None,
+                ));
+            }
+        };
+        let Some(Expr::Function(run)) = field("run") else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessRunLiteralRequired,
+                "defineProcess.run must be a function literal",
+                None,
+            ));
+        };
+        if !run.is_async {
+            return Err(Diagnostic::new(
+                DiagnosticCode::AsyncUnsupported,
+                "defineProcess.run must be async",
+                None,
+            ));
+        }
+        if self
+            .declarations
+            .iter()
+            .any(|declaration| matches!(declaration, Declaration::Process(process) if process.name.as_str() == process_name))
+        {
+            return Err(Diagnostic::new(
+                DiagnosticCode::DuplicateBinding,
+                format!("duplicate process name `{process_name}`"),
+                None,
+            ));
+        }
+
+        self.process_depth += 1;
+        let function = self.lower_function(run, None)?;
+        self.process_depth -= 1;
+        let LashExpr::Function(function) = function else {
+            unreachable!("run lowering returns a function")
+        };
+        if !function.captures.is_empty() {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessCaptureUnsupported,
+                "defineProcess.run must receive durable inputs as parameters",
+                None,
+            ));
+        }
+        let params = function
+            .params
+            .iter()
+            .map(|name| ProcessParam {
+                name: name.clone(),
+                ty: TypeExpr::Any,
+            })
+            .collect::<Vec<_>>();
+        let call_args = function
+            .params
+            .iter()
+            .map(|name| LashExpr::Variable(name.clone()))
+            .collect();
+        let failure_name = format!("{GENERATED_BINDING_PREFIX}process_error");
+        self.declarations.push(Declaration::Process(ProcessDecl {
+            name: process_name.as_str().into(),
+            params,
+            signals,
+            return_ty: Some(TypeExpr::Any),
+            label: None,
+            body: LashExpr::Try(Box::new(TryExpr {
+                body: Box::new(LashExpr::Finish(Box::new(LashExpr::Call {
+                    function: Box::new(LashExpr::Function(function)),
+                    args: call_args,
+                }))),
+                catch: Some(CatchClause {
+                    binding: failure_name.as_str().into(),
+                    body: Box::new(LashExpr::Fail(Box::new(LashExpr::Variable(
+                        failure_name.as_str().into(),
+                    )))),
+                }),
+                finally: None,
+            })),
+        }));
+        self.process_bindings
+            .insert(binding_name.to_string(), process_name.clone());
+        Ok(LashExpr::ProcessRef {
+            process: process_name.as_str().into(),
+        })
+    }
+
+    fn lower_await(&mut self, inner: &Expr) -> Result<LashExpr, Diagnostic> {
+        let promise_kind = match inner {
+            Expr::Call { callee, args }
+                if matches!(
+                    callee.as_ref(),
+                    Expr::Member {
+                        object,
+                        property: MemberProperty::Field(method),
+                    } if matches!(object.as_ref(), Expr::Ident(name) if name == "Promise" && !self.has_binding(name))
+                        && matches!(method.as_str(), "all" | "allSettled")
+                ) =>
+            {
+                let Expr::Member {
+                    property: MemberProperty::Field(method),
+                    ..
+                } = callee.as_ref()
+                else {
+                    unreachable!()
+                };
+                let [value] = args.as_slice() else {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        format!("Promise.{method} expects one iterable"),
+                        None,
+                    ));
+                };
+                Some((method.as_str(), value))
+            }
+            _ => None,
+        };
+        self.await_depth += 1;
+        let (mode, lowered) = if let Some((mode, value)) = promise_kind {
+            (Some(mode), self.lower_expr(value))
+        } else {
+            (None, self.lower_expr(inner))
+        };
+        self.await_depth -= 1;
+        let lowered = lowered?;
+        if matches!(
+            lowered,
+            LashExpr::SleepFor(_)
+                | LashExpr::SleepUntil(_)
+                | LashExpr::WaitSignal { .. }
+                | LashExpr::SignalRun { .. }
+                | LashExpr::Wake(_)
+                | LashExpr::Finish(_)
+                | LashExpr::Fail(_)
+        ) {
+            return Ok(lowered);
+        }
+        if mode == Some("allSettled") {
+            return Ok(all_settled_results(LashExpr::Await(Box::new(lowered))));
+        }
+        if mode == Some("all") {
+            return Ok(LashExpr::Await(Box::new(unwrap_aggregate_leaves(lowered))));
+        }
+        if matches!(lowered, LashExpr::ReceiverCall { .. }) {
+            return Ok(LashExpr::Await(Box::new(LashExpr::ResultUnwrap(Box::new(
+                lowered,
+            )))));
+        }
+        if matches!(lowered, LashExpr::StartProcess(_)) {
+            return Ok(LashExpr::ResultUnwrap(Box::new(LashExpr::Await(Box::new(
+                lowered,
+            )))));
+        }
+        Err(Diagnostic::new(
+            DiagnosticCode::AwaitUnsupported,
+            "await supports tools, process handles, sleep, waitSignal, and Promise.all/allSettled",
+            None,
+        ))
     }
 
     fn lower_assign_target(&mut self, target: &TsAssignTarget) -> Result<AssignTarget, Diagnostic> {
@@ -730,6 +1146,30 @@ impl Lowerer {
         object: &Expr,
         property: &MemberProperty,
     ) -> Result<LashExpr, Diagnostic> {
+        if let Expr::Ident(owner) = object
+            && is_known_runtime_global(owner)
+            && !self.has_binding(owner)
+        {
+            let name = match property {
+                MemberProperty::Field(field) => field.as_str(),
+                MemberProperty::Index(_) => "computed property",
+            };
+            return Err(Diagnostic::new(
+                DiagnosticCode::MethodUnsupported,
+                format!("property `{owner}.{name}` is not in the TypeScript runtime surface"),
+                None,
+            ));
+        }
+        if let MemberProperty::Field(field) = property
+            && let Some(mut path) = module_path(object)
+            && path.first().is_some_and(|root| root == "trigger")
+            && !self.has_binding("trigger")
+        {
+            path.push(field.clone());
+            return Ok(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
+                path.into_iter().map(Into::into).collect(),
+            )));
+        }
         let target = Box::new(self.lower_expr(object)?);
         Ok(match property {
             MemberProperty::Field(field) => LashExpr::Field {
@@ -750,9 +1190,47 @@ impl Lowerer {
             return match (name.as_str(), args) {
                 ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
                 ("print", [value]) => Ok(LashExpr::Print(Box::new(self.lower_expr(value)?))),
-                ("finish" | "print", _) => Err(Diagnostic::new(
+                ("wake", [value]) => Ok(LashExpr::Wake(Box::new(self.lower_expr(value)?))),
+                ("sleep", [milliseconds]) if self.await_depth > 0 => {
+                    Ok(LashExpr::SleepFor(Box::new(self.lower_expr(milliseconds)?)))
+                }
+                ("waitSignal", [Expr::String(name)]) if self.await_depth > 0 => {
+                    Ok(LashExpr::WaitSignal {
+                        name: name.as_str().into(),
+                    })
+                }
+                ("start", [Expr::Ident(target)]) => self.lower_start(target, &[]),
+                ("start", [Expr::Ident(target), Expr::Object(entries)]) => {
+                    self.lower_start(target, entries)
+                }
+                ("registerTrigger", [config]) if self.await_depth > 0 => {
+                    Ok(LashExpr::ReceiverCall {
+                        receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
+                            vec!["triggers".into()],
+                        ))),
+                        operation: "register".into(),
+                        args: vec![self.lower_expr(config)?],
+                    })
+                }
+                ("defineProcess", _) => Err(Diagnostic::new(
+                    DiagnosticCode::ProcessDefinitionNotTopLevel,
+                    "defineProcess must initialize a top-level binding",
+                    None,
+                )),
+                ("sleep" | "waitSignal" | "registerTrigger", _) if self.await_depth == 0 => {
+                    Err(Diagnostic::new(
+                        DiagnosticCode::AwaitRequired,
+                        format!("agent primitive `{name}` requires await"),
+                        None,
+                    ))
+                }
+                (
+                    "finish" | "print" | "wake" | "sleep" | "waitSignal" | "start"
+                    | "registerTrigger",
+                    _,
+                ) => Err(Diagnostic::new(
                     DiagnosticCode::UnsupportedExpression,
-                    format!("{name} expects one argument"),
+                    format!("invalid arguments for agent primitive `{name}`"),
                     None,
                 )),
                 _ => Ok(LashExpr::Call {
@@ -796,36 +1274,127 @@ impl Lowerer {
                     });
                 }
             }
-            let target = self.lower_expr(object)?;
-            let lowered = args
-                .iter()
-                .map(|arg| self.lower_expr(arg))
-                .collect::<Result<Vec<_>, _>>()?;
-            let (builtin, builtin_args) = match (method.as_str(), lowered.as_slice()) {
-                ("toUpperCase", []) => ("upper", vec![target]),
-                ("toLowerCase", []) => ("lower", vec![target]),
-                ("trim", []) => ("trim", vec![target]),
-                ("startsWith", [arg]) => ("starts_with", vec![target, arg.clone()]),
-                ("endsWith", [arg]) => ("ends_with", vec![target, arg.clone()]),
-                ("includes", [arg]) => ("contains", vec![target, arg.clone()]),
-                ("split", []) => ("__typescript_split", vec![target, LashExpr::Undefined]),
-                ("split", [arg]) => ("__typescript_split", vec![target, arg.clone()]),
-                ("join", []) => (
-                    "__typescript_join",
-                    vec![target, LashExpr::String(",".into())],
-                ),
-                ("join", [arg]) => ("__typescript_join", vec![target, arg.clone()]),
-                _ => {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::UnsupportedExpression,
-                        format!("method `{method}` is not in the accepted dialect"),
-                        None,
-                    ));
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "Date")
+                && method == "now"
+                && args.is_empty()
+                && !self.has_binding("Date")
+            {
+                return Ok(LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
+                    "now",
+                ))));
+            }
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "Math")
+                && method == "random"
+                && args.is_empty()
+                && !self.has_binding("Math")
+            {
+                return Ok(LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
+                    "random",
+                ))));
+            }
+            if let Some(static_owner) = static_stdlib_owner(object)
+                && !self.has_binding(static_owner)
+                && is_static_stdlib_method(static_owner, method)
+            {
+                let mut builtin_args =
+                    vec![LashExpr::String(format!("{static_owner}.{method}").into())];
+                builtin_args.extend(
+                    args.iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: builtin_args,
+                });
+            }
+            if is_instance_stdlib_method(method) {
+                if method == "map" {
+                    let [function] = args else {
+                        return Err(Diagnostic::new(
+                            DiagnosticCode::UnsupportedExpression,
+                            "Array.prototype.map expects one callback",
+                            None,
+                        ));
+                    };
+                    return Ok(LashExpr::Map {
+                        items: Box::new(self.lower_expr(object)?),
+                        function: Box::new(self.lower_expr(function)?),
+                    });
                 }
+                let mut builtin_args = vec![
+                    LashExpr::String(method.as_str().into()),
+                    self.lower_expr(object)?,
+                ];
+                builtin_args.extend(
+                    args.iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: builtin_args,
+                });
+            }
+
+            if method.starts_with(|character: char| character.is_ascii_uppercase())
+                && module_path(object)
+                    .and_then(|path| path.first().cloned())
+                    .is_some_and(|root| !self.has_binding(&root))
+            {
+                return Ok(LashExpr::ReceiverCall {
+                    receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
+                        module_path(object)
+                            .expect("constructor path checked above")
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                    ))),
+                    operation: method.as_str().into(),
+                    args: args
+                        .iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<_, _>>()?,
+                });
+            }
+
+            if matches!(object.as_ref(), Expr::Ident(owner) if is_known_runtime_global(owner) && !self.has_binding(owner))
+                || has_literal_stdlib_receiver(object)
+            {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    format!("method `{method}` is not in the TypeScript runtime surface"),
+                    None,
+                ));
+            }
+
+            if self.await_depth == 0 {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::AwaitRequired,
+                    format!(
+                        "tool call `{method}` must appear under await or Promise.all/allSettled"
+                    ),
+                    None,
+                ));
+            }
+            let receiver = if let Some(path) = module_path(object)
+                && path
+                    .first()
+                    .is_some_and(|root| !self.has_binding(root.as_str()))
+            {
+                LashExpr::ResourceRef(ResourceRefExpr::unresolved(
+                    path.into_iter().map(Into::into).collect(),
+                ))
+            } else {
+                self.lower_expr(object)?
             };
-            return Ok(LashExpr::BuiltinCall {
-                name: builtin.into(),
-                args: builtin_args,
+            return Ok(LashExpr::ReceiverCall {
+                receiver: Box::new(receiver),
+                operation: method.as_str().into(),
+                args: args
+                    .iter()
+                    .map(|arg| self.lower_expr(arg))
+                    .collect::<Result<_, _>>()?,
             });
         }
         Ok(LashExpr::Call {
@@ -836,6 +1405,35 @@ impl Lowerer {
                 .collect::<Result<_, _>>()?,
         })
     }
+
+    fn lower_start(
+        &mut self,
+        target: &str,
+        entries: &[(String, Expr)],
+    ) -> Result<LashExpr, Diagnostic> {
+        let Some(process) = self.process_bindings.get(target).cloned() else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessTargetStaticRequired,
+                format!("`{target}` is not a top-level defineProcess binding"),
+                None,
+            ));
+        };
+        Ok(LashExpr::StartProcess(ProcessStartExpr {
+            process: process.into(),
+            args: entries
+                .iter()
+                .map(|(name, value)| Ok((name.as_str().into(), self.lower_expr(value)?)))
+                .collect::<Result<_, Diagnostic>>()?,
+        }))
+    }
+}
+
+fn is_define_process_call(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Call { callee, .. }
+            if matches!(callee.as_ref(), Expr::Ident(name) if name == "defineProcess")
+    )
 }
 
 /// v1 lowers a closure's captures by value, so a cycle of hoisted function
@@ -897,92 +1495,6 @@ fn reject_mutual_recursion(
         format!("mutually recursive function declarations are not supported in v1; cycle: {cycle}"),
         None,
     ))
-}
-
-/// The shortest cycle through `start`, as `start -> … -> start`.
-fn shortest_cycle_through(edges: &[Vec<usize>], start: usize) -> Vec<usize> {
-    let mut parent = vec![None; edges.len()];
-    let mut queue = std::collections::VecDeque::from([start]);
-    let mut seen = vec![false; edges.len()];
-    seen[start] = true;
-    while let Some(node) = queue.pop_front() {
-        for target in &edges[node] {
-            if *target == start {
-                let mut path = vec![start];
-                let mut step = Some(node);
-                while let Some(current) = step {
-                    path.push(current);
-                    step = parent[current];
-                }
-                path.reverse();
-                path.push(start);
-                path.dedup();
-                return path;
-            }
-            if !seen[*target] {
-                seen[*target] = true;
-                parent[*target] = Some(node);
-                queue.push_back(*target);
-            }
-        }
-    }
-    vec![start]
-}
-
-/// Kosaraju's algorithm over the capture graph, iterative so that a deeply
-/// chained set of declarations cannot exhaust the native stack.
-fn strongly_connected_components(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
-    let mut reversed = vec![Vec::new(); edges.len()];
-    for (from, targets) in edges.iter().enumerate() {
-        for to in targets {
-            reversed[*to].push(from);
-        }
-    }
-
-    let mut order = Vec::with_capacity(edges.len());
-    let mut visited = vec![false; edges.len()];
-    for start in 0..edges.len() {
-        if visited[start] {
-            continue;
-        }
-        visited[start] = true;
-        let mut stack = vec![(start, 0usize)];
-        while let Some((node, next)) = stack.pop() {
-            match edges[node].get(next) {
-                Some(target) => {
-                    stack.push((node, next + 1));
-                    if !visited[*target] {
-                        visited[*target] = true;
-                        stack.push((*target, 0));
-                    }
-                }
-                None => order.push(node),
-            }
-        }
-    }
-
-    let mut components = Vec::new();
-    let mut assigned = vec![false; edges.len()];
-    for start in order.into_iter().rev() {
-        if assigned[start] {
-            continue;
-        }
-        assigned[start] = true;
-        let mut component = vec![start];
-        let mut stack = vec![start];
-        while let Some(node) = stack.pop() {
-            for target in &reversed[node] {
-                if !assigned[*target] {
-                    assigned[*target] = true;
-                    component.push(*target);
-                    stack.push(*target);
-                }
-            }
-        }
-        component.sort_unstable();
-        components.push(component);
-    }
-    components
 }
 
 fn reserved_identifier(name: &str) -> Diagnostic {

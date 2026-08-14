@@ -106,7 +106,32 @@ rejection_test!(
     Code::OptionalChainingUnsupported
 );
 rejection_test!(rejects_new, "new Date();", Code::NewUnsupported);
-rejection_test!(rejects_update, "x++;", Code::UpdateUnsupported);
+rejection_test!(
+    rejects_unsupported_await,
+    "await 1;",
+    Code::AwaitUnsupported
+);
+rejection_test!(
+    rejects_unawaited_tool_call,
+    "web.fetch({});",
+    Code::AwaitRequired
+);
+rejection_test!(rejects_unawaited_sleep, "sleep(1);", Code::AwaitRequired);
+rejection_test!(
+    rejects_missing_literal_method,
+    "'x'.missing();",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_missing_runtime_property,
+    "finish(Math.PI);",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_dynamic_process_config,
+    "const config = {}; const worker = defineProcess(config);",
+    Code::ProcessConfigLiteralRequired
+);
 rejection_test!(
     rejects_switch,
     "switch (x) { case 1: break; }",
@@ -118,26 +143,15 @@ rejection_test!(
     Code::DoWhileUnsupported
 );
 rejection_test!(
-    rejects_classic_for,
-    "for (let i = 0; i < 1; i++) {}",
-    Code::ForUnsupported
-);
-rejection_test!(
     rejects_for_in,
     "for (const key in value) {}",
     Code::ForInUnsupported
-);
-rejection_test!(
-    rejects_for_of,
-    "for (const value of values) {}",
-    Code::ForOfUnsupported
 );
 rejection_test!(
     rejects_delete,
     "delete value.field;",
     Code::DeleteUnsupported
 );
-rejection_test!(rejects_await, "await value;", Code::AwaitUnsupported);
 rejection_test!(
     rejects_yield,
     "function* f() { yield 1; }",
@@ -214,14 +228,23 @@ rejection_test!(
 );
 
 #[test]
-fn mapped_string_methods_accept_exactly_one_argument() {
+fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
     for source in [
+        "let x = 0; x++; finish(x);",
+        "for (let i = 0; i < 1; i++) {}",
+        "const values = [1]; for (const value of values) { print(value); }",
+        "await web.fetch({ url: 'https://example.com' });",
         "finish(`${'abc'.startsWith('bc', 1)}`);",
         "finish(`${'abc'.includes('b', 2)}`);",
         "finish(`${'abc'.endsWith('b', 2)}`);",
         "finish(`${'abc'.split('', 2)}`);",
     ] {
-        let error = lash_typescript::validate(source).expect_err(source);
-        assert_eq!(error.code, Code::UnsupportedExpression, "{source}");
+        lash_typescript::validate(source).expect(source);
     }
 }
+
+rejection_test!(
+    rejects_update_in_value_position,
+    "let x = 1; const old = x++;",
+    Code::UpdateUnsupported
+);

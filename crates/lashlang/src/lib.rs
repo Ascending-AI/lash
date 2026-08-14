@@ -35,7 +35,7 @@ pub use ast::{
     fold_expr_children, format_type_expr, validate_ast, walk_expr,
 };
 
-/// Names of every builtin accepted by the linker and runtime, in registry order.
+/// Names of every source Lashlang builtin, in registry order.
 pub fn builtin_names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
     builtins::names()
 }
@@ -82,8 +82,8 @@ pub use runtime::{
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmPendingErrorOriginContinuation,
     VmProfileContinuation, VmRunOutcome, compile, compile_ast, compile_ast_with_dialect,
     compile_linked, compile_linked_process, compile_linked_with_dialect,
-    compile_module_artifact_process, compile_process, execute, from_json, prewarm,
-    unwrap_type_value,
+    compile_module_artifact_process, compile_process, compile_process_with_dialect, execute,
+    from_json, prewarm, unwrap_type_value,
 };
 #[doc(hidden)]
 pub use runtime::{

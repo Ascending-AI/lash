@@ -1408,6 +1408,7 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
         | RuntimeEffectCommand::Direct { .. }
         | RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::Trigger { .. }
+        | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {
             RestateEffectExecution::JournaledRun {
