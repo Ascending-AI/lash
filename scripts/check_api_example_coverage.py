@@ -33,7 +33,7 @@ noticed.  Adding, removing, or moving any path fails the gate; only the
 *disposition* is centralized, never the path set.  `--dump-surface` prints the
 same projection the check compares against.
 
-Evidence prose carries six lints, because the prose is the evidence:
+Evidence prose carries eight lints, because the prose is the evidence:
 
 * No machine-local paths.  `/workspace/...`, `~/...`, and `C:\...` are one
   developer's checkout, not a contract another reader can verify.  Evidence
@@ -55,6 +55,14 @@ Evidence prose carries six lints, because the prose is the evidence:
   or the `assert!(matches!(` the FIG-955 round's tautology lint could not see --
   and an anchor quoting a prefix of its line, which can hide the whole assertion
   behind `assert!(`.  See `uninformative_assertion`.
+* No syntax-only exercise claims. Imports, type construction/declarations, and
+  variant patterns prove only that an item resolves. They do not exercise its
+  contract; a `used-unasserted` disposition may retain that reachability. See
+  `perfunctory_exercise`.
+* No inherited callback assertions. A fluent setup call cannot borrow a closure
+  operand or match guard as its assertion: those lines can observe an unrelated
+  callback while making every call in the surrounding chain look asserted. See
+  `unrelated_fluent_assertion`.
 * No reason that describes a disposition the row does not hold.  "Add X to the
   example and assert its result" is the instruction an `unused-add` row carries;
   on a row that records real usage and a real assertion it is simply false, and
@@ -798,6 +806,42 @@ TAUTOLOGICAL_ASSERTION = re.compile(r"\b(?:size_of|align_of)\b")
 OPERANDLESS_ASSERTION = re.compile(
     r"^(?:debug_)?assert(?:_eq|_ne)?!\(\s*(?:[a-z_]+!\(\s*)*$"
 )
+#: Rust lines that only import a path into scope.
+IMPORT_ONLY_EXERCISE = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?use\b")
+#: Rust lines that only name or construct a type. These shapes can make a type
+#: reachable to the compiler without observing any behavior of the value.
+TYPE_ONLY_EXERCISE = re.compile(
+    r"(?:\bfn\b[^\n{;]*(?:->|\([^)]*\))"
+    r"|\blet\s+[^=;]+:\s*[^=;]+="
+    r"|::[a-z_][A-Za-z0-9_]*\s*\("
+    r"|(?:^|\W)[A-Z][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*\s*\{)"
+)
+#: Associated functions whose API contract is construction rather than an
+#: independently observable operation. The symbol, not merely the source line,
+#: distinguishes `ModelSpec::builder(...)` from a behavioral associated call.
+CONSTRUCTOR_FUNCTION = re.compile(
+    r"^(?:new|default|builder|build|parse|opaque|text|stored|unit|bounded|unbounded"
+    r"|any|create|with_.+|for_.+|child_.+|from(?:_.+)?|try_from(?:_.+)?)$"
+)
+#: A field binding inside a destructuring pattern, such as
+#: `TurnEvent::Usage { usage, cumulative, .. }` split across lines.
+DESTRUCTURED_FIELD = re.compile(r"^\s*(?:ref\s+|mut\s+)?[A-Za-z_][A-Za-z0-9_]*\s*,")
+#: Assigning an associated function's result makes the value available to the
+#: example but does not itself observe the function's contract. This catches
+#: factory constructors without relying on naming conventions (`success`,
+#: `failure`, and project-specific factories are constructors too).
+ASSIGNED_RESULT = re.compile(
+    r"\blet\s+(?:mut\s+)?[A-Za-z_][A-Za-z0-9_]*\b[^=]*="
+)
+#: Variant destructuring and equality guards identify a shape but do not
+#: observe what handling that shape means to a host.
+VARIANT_PATTERN_EXERCISE = re.compile(
+    r"(?:\b(?:if|while)\s+let\b|\bmatches!\s*\(|=>|\{)"
+)
+#: Operand lines inside a closure or guarded match. They are useful assertion
+#: anchors for the callback itself, but not for fluent setup elsewhere.
+CLOSURE_ASSERTION_OPERAND = re.compile(r"\|[^|\n]*\|")
+MATCH_GUARD_ASSERTION_OPERAND = re.compile(r"\bif\b")
 #: The `unused-add` instruction template: "Add <path> to the <name> example ...".
 ADD_INSTRUCTION_REASON = re.compile(
     r"^\s*Add\b[^.]*?\bto\b[^.]*?\bexample\b", re.IGNORECASE
@@ -896,6 +940,63 @@ def uninformative_assertion(assertion: str, source: str) -> str | None:
         )
     if line and quoted != line:
         return f"quotes part of its line, which reads {line!r}"
+    return None
+
+
+def perfunctory_exercise(
+    symbol: str,
+    kind: str,
+    source: str,
+    disposition: str = "",
+) -> str | None:
+    """Why a usage line proves syntax reachability rather than exercise."""
+    line = source.strip()
+    explicitly_unasserted = disposition == "used-unasserted"
+    # A direct assertion is an observation even when one operand constructs a
+    # comparison value or names a variant. The rejected shape is using that
+    # syntax as the usage anchor and borrowing some other assertion later.
+    if re.match(r"^(?:debug_)?assert(?:_eq|_ne)?!\s*\(", line):
+        return None
+    if IMPORT_ONLY_EXERCISE.match(line):
+        if explicitly_unasserted:
+            return None
+        return "is an import, which only brings the item into scope"
+    variant_shape = VARIANT_PATTERN_EXERCISE.search(line) or re.search(
+        r"::[A-Z][A-Za-z0-9_]*\b", line
+    )
+    if kind in {"enum", "variant"} and variant_shape:
+        if explicitly_unasserted:
+            return None
+        return "is a variant pattern, which only distinguishes an enum shape"
+    if kind == "field" and DESTRUCTURED_FIELD.match(line):
+        if explicitly_unasserted:
+            return None
+        return "is a variant pattern, which only destructures a field"
+    symbol_leaf = symbol.rsplit("::", 1)[-1]
+    names_function = re.search(rf"\b{re.escape(symbol_leaf)}\s*\(", line)
+    constructor_function = kind == "function" and (
+        CONSTRUCTOR_FUNCTION.match(symbol_leaf)
+        or (ASSIGNED_RESULT.search(line) and names_function)
+    )
+    if (
+        kind in {"enum", "struct", "trait", "type_alias", "union"}
+        and TYPE_ONLY_EXERCISE.search(line)
+    ) or (constructor_function and names_function):
+        if explicitly_unasserted:
+            return None
+        return "only constructs or declares the type, without observing its behavior"
+    return None
+
+
+def unrelated_fluent_assertion(usage_source: str, assertion_source: str) -> str | None:
+    """Why a fluent call's assertion line belongs to a callback instead."""
+    if not usage_source.strip().startswith("."):
+        return None
+    assertion = assertion_source.strip()
+    if CLOSURE_ASSERTION_OPERAND.search(assertion):
+        return "inherits a closure operand that can observe an unrelated callback"
+    if MATCH_GUARD_ASSERTION_OPERAND.search(assertion):
+        return "inherits a match guard that can observe an unrelated callback"
     return None
 
 
@@ -1019,6 +1120,30 @@ def anchored_source(reference: str) -> str | None:
     return lines[line_number - 1]
 
 
+def anchored_exercise_source(reference: str) -> str | None:
+    """The source line, widened to its `use` prefix for multiline imports."""
+    source = anchored_source(reference)
+    if source is None:
+        return None
+    try:
+        location, _ = reference.split("#", 1)
+        relative, line_text = location.rsplit(":", 1)
+        line_number = int(line_text)
+    except (ValueError, TypeError):
+        return source
+    lines = (REPO / relative).read_text(encoding="utf-8").splitlines()
+    target = line_number - 1
+    for index in range(target, max(-1, target - 20), -1):
+        candidate = lines[index].strip()
+        if IMPORT_ONLY_EXERCISE.match(candidate):
+            if index == target or ";" not in candidate:
+                return "\n".join(lines[index : target + 1])
+            break
+        if index < target and ";" in candidate:
+            break
+    return source
+
+
 def reference_exists(reference: str) -> bool:
     source = anchored_source(reference)
     return source is not None and reference.split("#", 1)[-1] in source
@@ -1139,6 +1264,18 @@ def check() -> int:
         if disposition in {"used-asserted", "used-unasserted"}:
             if not reference_exists(usage):
                 errors.append(f"{symbol}: stale or invalid example usage reference {usage!r}")
+            else:
+                defect = perfunctory_exercise(
+                    symbol,
+                    kind,
+                    anchored_exercise_source(usage) or "",
+                    disposition or "",
+                )
+                if defect:
+                    errors.append(
+                        f"{symbol}: example usage anchor {usage!r} {defect}. "
+                        "Anchor an executed operation or observed outcome instead."
+                    )
         if disposition == "used-asserted":
             if not reference_exists(assertion):
                 errors.append(
@@ -1158,6 +1295,20 @@ def check() -> int:
                     errors.append(
                         f"{symbol}: assertion anchor {assertion!r} {defect}. "
                         "Anchor the line that states what the example observed."
+                    )
+                inherited = (
+                    None
+                    if usage == assertion
+                    else unrelated_fluent_assertion(
+                        anchored_source(usage) or "",
+                        anchored_source(assertion) or "",
+                    )
+                )
+                if inherited:
+                    errors.append(
+                        f"{symbol}: fluent usage anchor {usage!r} {inherited}; "
+                        f"assertion {assertion!r} does not establish this call's outcome. "
+                        "Anchor a direct outcome or downgrade the disposition."
                     )
         elif assertion:
             errors.append(f"{symbol}: only used-asserted entries may name an assertion")

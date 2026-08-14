@@ -11,9 +11,11 @@ from check_api_example_coverage import (
     lash_core_surface,
     machine_local_path,
     missing_repository_path,
+    perfunctory_exercise,
     primary_path,
     stale_disposition_reason,
     tautological_assertion,
+    unrelated_fluent_assertion,
     uninformative_assertion,
 )
 
@@ -378,6 +380,175 @@ class UninformativeAssertionTests(unittest.TestCase):
     def test_says_nothing_about_an_anchor_whose_line_cannot_be_read(self):
         # Resolution failures are already reported as stale references.
         self.assertIsNone(self.defect("assert_eq!(left, right);", ""))
+
+
+class PerfunctoryExerciseTests(unittest.TestCase):
+    """FIG-1345: syntax-only reachability is not example exercise."""
+
+    def test_rejects_import_only_evidence(self):
+        self.assertIn(
+            "import",
+            perfunctory_exercise(
+                "lash::ModelSpec",
+                "struct",
+                "use lash::{LashCore, LashSession, ModelSpec, TurnWorkDriver};",
+            )
+            or "",
+        )
+
+    def test_rejects_constructor_and_type_signature_only_evidence(self):
+        for source in (
+            "let owner = LeaseOwnerIdentity::opaque(incarnation);",
+            "let request = SessionCreateRequest::child_session(parent);",
+            "Message {",
+            "pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {",
+        ):
+            self.assertIn(
+                "construct",
+                perfunctory_exercise("lash::LeaseOwnerIdentity", "struct", source) or "",
+                source,
+            )
+
+    def test_rejects_a_constructor_function_call(self):
+        for symbol, source in (
+            (
+                "lash::ModelSpec::builder",
+                'let model = ModelSpec::builder("anthropic/claude-sonnet-4.6");',
+            ),
+            ("lash::PromptLayer::with_template", "PromptLayer::with_template(template)"),
+            ("lash::Foo::create", "let foo = Foo::create(value);"),
+            ("lash::Foo::project", "let projected = Foo::project(value);"),
+        ):
+            self.assertIn(
+                "construct",
+                perfunctory_exercise(symbol, "function", source) or "",
+                symbol,
+            )
+
+    def test_rejects_a_multiline_import_continuation(self):
+        self.assertIn(
+            "import",
+            perfunctory_exercise(
+                "lash::ModelSpec",
+                "struct",
+                "use lash::{\n    LashCore, LashSession, ModelSpec, TurnWorkDriver,",
+            )
+            or "",
+        )
+
+    def test_rejects_variant_pattern_evidence(self):
+        for source in (
+            "SessionObservationEventPayload::ProcessChanged { process_ids, .. } => {",
+            "TurnEvent::Usage {",
+            "if err.code == RuntimeErrorCode::StoreCommitFailed =>",
+            "SessionStartPoint::Empty,",
+        ):
+            self.assertIn(
+                "variant pattern",
+                perfunctory_exercise(
+                    "lash::RuntimeErrorCode"
+                    if "RuntimeErrorCode" in source
+                    else "lash::SessionStartPoint"
+                    if "SessionStartPoint" in source
+                    else "lash::SessionObservationEventPayload::ProcessChanged",
+                    "enum"
+                    if "RuntimeErrorCode" in source or "SessionStartPoint" in source
+                    else "variant",
+                    source,
+                )
+                or "",
+                source,
+            )
+
+    def test_rejects_fields_only_destructured_from_a_variant(self):
+        self.assertIn(
+            "variant pattern",
+            perfunctory_exercise(
+                "lash::TurnEvent::Usage::usage",
+                "field",
+                "usage, cumulative, ..",
+            )
+            or "",
+        )
+
+    def test_accepts_an_outcome_observation(self):
+        self.assertIsNone(
+            perfunctory_exercise(
+                "lash::AttachmentCreateMeta",
+                "struct",
+                'assert_eq!(uploaded_ref.media_type().as_str(), "image/png");',
+            )
+        )
+
+    def test_accepts_a_direct_variant_outcome_assertion(self):
+        self.assertIsNone(
+            perfunctory_exercise(
+                "lash::CommitBudgetLimit::Bounded",
+                "variant",
+                "assert_eq!(budget.bytes, CommitBudgetLimit::Bounded(expected_bytes));",
+            )
+        )
+
+    def test_does_not_let_a_separate_assertion_rescue_a_constructor_anchor(self):
+        self.assertIn(
+            "construct",
+            perfunctory_exercise(
+                "lash::CommitBudget",
+                "struct",
+                "let budget = CommitBudget::new(",
+            )
+            or "",
+        )
+
+    def test_accepts_a_syntax_only_unasserted_disposition(self):
+        self.assertIsNone(
+            perfunctory_exercise(
+                "lash::persistence::AttachmentStore",
+                "trait",
+                "use lash::persistence::AttachmentStore;",
+                "used-unasserted",
+            )
+        )
+
+
+class UnrelatedFluentAssertionTests(unittest.TestCase):
+    """FIG-1345: a setup call cannot inherit a callback's assertion."""
+
+    def test_rejects_a_fluent_call_inheriting_a_match_guard(self):
+        defect = unrelated_fluent_assertion(
+            ".model(model)",
+            '}) if turn_id == "transient-turn"',
+        )
+        self.assertIn("match guard", defect or "")
+
+    def test_rejects_a_fluent_call_inheriting_a_closure_operand(self):
+        defect = unrelated_fluent_assertion(
+            ".admin()",
+            ".map(|message| (message.id.as_str(), message.text.as_str()))",
+        )
+        self.assertIn("closure", defect or "")
+
+    def test_accepts_a_fluent_call_with_a_direct_outcome_assertion(self):
+        self.assertIsNone(
+            unrelated_fluent_assertion(
+                ".with_max_rows(8)",
+                "assert_eq!(batching.max_rows(), 8);",
+            )
+        )
+
+    def test_does_not_accept_free_form_prose_as_a_callback_exemption(self):
+        defect = unrelated_fluent_assertion(
+            ".active_manifests()",
+            "assert!(!tool_names.iter().any(|name| name == removed));",
+        )
+        self.assertIn("closure", defect or "")
+
+    def test_requires_an_explicit_relationship_value(self):
+        defect = unrelated_fluent_assertion(
+            ".model(model)",
+            '}) if turn_id == "transient-turn"',
+        )
+        self.assertIn("match guard", defect or "")
 
 
 class StaleDispositionReasonTests(unittest.TestCase):
