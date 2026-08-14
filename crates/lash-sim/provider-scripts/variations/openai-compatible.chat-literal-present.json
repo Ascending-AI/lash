@@ -1,0 +1,42 @@
+{
+  "schema": "lash.provider-wire-script.v1",
+  "name": "openai-compatible.chat-literal-present",
+  "provider_kind": "openai-compatible",
+  "endpoint": { "method": "POST", "path": "/chat/completions" },
+  "request_match": {
+    "body": {
+      "stream": { "equals": true },
+      "stop": { "present": false }
+    },
+    "headers": {
+      "authorization": { "present": true },
+      "content-type": { "contains": "application/json" }
+    }
+  },
+  "timeline": [
+    {
+      "at": 10,
+      "event": "response_start",
+      "status": 200,
+      "headers": [{ "name": "content-type", "value": "text/event-stream" }]
+    },
+    {
+      "at": 20,
+      "event": "sse",
+      "data": "{\"choices\":[{\"delta\":{\"content\":\"<lashlang>\\nfinish \\\"settled\\\"\\n</lashlang>\\n\"}}]}"
+    },
+    {
+      "at": 21,
+      "event": "sse",
+      "data": "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}"
+    },
+    { "at": 22, "event": "sse", "data": "[DONE]" },
+    { "at": 23, "event": "end" }
+  ],
+  "expected_provider": {
+    "variation": "literal_present",
+    "terminal_reason": "stop",
+    "provider_finish_reason": "stop",
+    "literal_present": true
+  }
+}

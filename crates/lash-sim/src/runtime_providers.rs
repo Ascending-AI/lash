@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::canonical_scripts::{
     ANTHROPIC_MESSAGES_TEXT, GOOGLE_STREAM_GENERATE_TEXT, OPENAI_RESPONSES_TEXT,
 };
-use crate::provider::{ProviderWireScript, ScriptedLlmHttpTransport};
+use crate::provider::ProviderWireScript;
 
 pub const OPENAI_COMPATIBLE: &str = "openai-compatible";
 pub const OPENAI: &str = "openai";
@@ -372,10 +372,13 @@ pub fn suspend_roundtrip_scripts(
     Ok(vec![tool_call_script, resumed_script])
 }
 
-pub fn runtime_provider_components(
+pub fn runtime_provider_components<T>(
     provider_kind: &str,
-    transport: &Arc<ScriptedLlmHttpTransport>,
-) -> Result<(ProviderHandle, lash::ModelSpec, String), RuntimeProviderError> {
+    transport: &Arc<T>,
+) -> Result<(ProviderHandle, lash::ModelSpec, String), RuntimeProviderError>
+where
+    T: LlmHttpTransport + 'static,
+{
     let transport = provider_transport(transport);
     let (provider, model_name): (ProviderHandle, &str) = match provider_kind {
         OPENAI_COMPATIBLE => {
@@ -440,6 +443,9 @@ fn set_sse_data(
     Ok(())
 }
 
-fn provider_transport(transport: &Arc<ScriptedLlmHttpTransport>) -> Arc<dyn LlmHttpTransport> {
+fn provider_transport<T>(transport: &Arc<T>) -> Arc<dyn LlmHttpTransport>
+where
+    T: LlmHttpTransport + 'static,
+{
     transport.clone()
 }

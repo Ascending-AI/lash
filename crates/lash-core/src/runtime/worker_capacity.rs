@@ -119,6 +119,7 @@ pub(crate) struct WorkerCapacityMetrics {
     inner: lash_trace::otel::WorkerCapacityMetrics,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for WorkerCapacityMetrics {
     fn default() -> Self {
         Self {
