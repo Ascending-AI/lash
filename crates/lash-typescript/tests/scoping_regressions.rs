@@ -150,6 +150,22 @@ fn hoisted_function_bodies_can_capture_later_const_bindings() {
 }
 
 #[test]
+fn hoisted_functions_support_cycles_and_nested_outer_captures() {
+    assert_eq!(
+        finished(
+            "function isEven(n: number): boolean { if (n === 0) { return true; } return isOdd(n - 1); } function isOdd(n: number): boolean { if (n === 0) { return false; } return isEven(n - 1); } finish(isEven(4));"
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        finished(
+            "const top = 9; function outerFn(): number { function innerFn(): number { return top; } return innerFn(); } finish(outerFn());"
+        ),
+        Value::Number(9.0)
+    );
+}
+
+#[test]
 fn lexical_bindings_shadow_host_intrinsic_names() {
     assert_eq!(
         finished("const print = (value: number): number => value; finish(print(5));"),
