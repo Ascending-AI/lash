@@ -344,6 +344,31 @@ const FUZZ_LEXICAL_ATOMS: &[&str] = &[
     // ASCII controls, so the pairing is exercised both ways.
     "a",
     "a1",
+    // Contextual keywords: identifiers to the parser, reserved words to the
+    // automatic-semicolon-insertion rules. Any charge that conflates those two
+    // classifications is disarmed by exactly this pairing.
+    "type",
+    "of",
+    "let",
+    "keyof",
+    "readonly",
+    "as",
+    "satisfies",
+    "infer",
+    "unique",
+    "asserts",
+    "is",
+    "async",
+    "get",
+    "set",
+    "from",
+    "declare",
+    "namespace",
+    "module",
+    "abstract",
+    "out",
+    "accessor",
+    "using",
 ];
 
 /// Tokens that carry a charge, or end a line, immediately after an atom.
@@ -412,10 +437,17 @@ fn fuzz_source(seed: u64, tokens: usize) -> String {
     source
 }
 
-/// The differential guard: no source built from the charged alphabet may drive
-/// SWC past the stack budget. The child parses each one on the 2 MiB contract,
-/// so a shape the preflight fails to charge takes the child down and fails the
-/// test instead of the host.
+/// The differential guard: no source built from the charged alphabet may reach
+/// the end of the parse thread's stack.
+///
+/// Since the front end bounds the source and reserves a proportional stack,
+/// this can no longer be broken by removing a charge from the preflight — and
+/// that is the point of the change, not a weakness of the test. A missing
+/// charge is now a diagnostic-quality regression rather than a dead process,
+/// and `depth_guard.rs`'s unit sweep is the mutation-verified guard for that;
+/// `no_abort_guarantee.rs` proves the same property with the preflight removed
+/// entirely. What this test still catches is a source shape that defeats the
+/// reservation itself.
 #[test]
 fn fuzzed_token_sequences_never_abort_the_parser() {
     const CHILD_ENV: &str = "LASH_TS_FUZZ_CHILD";

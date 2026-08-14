@@ -112,6 +112,24 @@ impl PreviousToken {
             Self::None => false,
         }
     }
+
+    /// Whether this token can be a label name, which is a narrower question
+    /// than either of the two above and must be answered on its own.
+    ///
+    /// `LabelledStatement := Identifier ':' Statement` accepts any identifier,
+    /// and a contextual keyword — `type`, `of`, `let`, `keyof`, `as` — is an
+    /// identifier. Deriving this from the automatic-semicolon-insertion
+    /// exclusion list, which is about which *reserved words* can end a
+    /// statement, made one predicate answer two different questions and left
+    /// `type: type: type: …` charging nothing. Every word can name a label; so
+    /// can a token the scanner classified as a bare identifier byte.
+    fn can_name_a_label(self) -> bool {
+        match self {
+            Self::Word { .. } => true,
+            Self::Byte(byte) => byte.is_ascii_alphanumeric() || byte >= 0x80,
+            Self::None => false,
+        }
+    }
 }
 
 /// Whether a word can end an expression, which is what makes a following `(`
@@ -463,7 +481,7 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                             // The second arm of a conditional, already charged
                             // by its `?`.
                             open_conditionals -= 1;
-                        } else if previous.can_end_expression()
+                        } else if previous.can_name_a_label()
                             && frames.last().is_none_or(|frame: &SourceNestingFrame| {
                                 frame.delimiter == SourceDelimiter::StatementBrace
                             })
