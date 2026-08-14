@@ -438,7 +438,32 @@ mod durability {
         "const base = 10; const outer = () => { const inner = () => base; return inner; }; print('x'); finish(`${outer()()}`);",
         "const items = [1, 2, 3]; const total = items.length; print('x'); finish(`${total}`);",
         "const g = (n: number): number => n + 1; const h = (n: number): number => g(n) * 2; print('x'); finish(`${h(3)}`);",
+        // Root-level block scopes: their bindings must not publish generated
+        // names into the durable global surface.
+        "let r = 'x'; try { throw 'boom'; } catch (e) { r = e; } print('x'); finish(r);",
+        "{ const inner = 1; } print('x'); finish('done');",
+        "if (1) { const branch = 2; } print('x'); finish('done');",
+        "try { const attempted = 1; } finally { const cleaned = 2; } print('x'); finish('done');",
+        "const g = function self(n: number): number { if (n <= 0) { return 0; } return self(n - 1); }; print('x'); finish(`${g(3)}`);",
     ];
+
+    fn suspended_continuation_json(source: &str) -> String {
+        futures::executor::block_on(async move {
+            let program = lash_typescript::compile(source)
+                .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
+            let mut state = State::new();
+            let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
+            assert_eq!(
+                vm.run_process_until_effect().await.expect("run to print"),
+                VmRunOutcome::EffectCompleted,
+                "{source}"
+            );
+            let continuation = vm
+                .suspend()
+                .unwrap_or_else(|error| panic!("suspend `{source}`: {error}"));
+            serde_json::to_string(&continuation).expect("encode continuation")
+        })
+    }
 
     fn suspend_and_snapshot(source: &str) -> Vec<String> {
         futures::executor::block_on(async move {
@@ -482,15 +507,46 @@ mod durability {
         }
     }
 
+    /// The globals an RLM session carries between turns, which is also what the
+    /// bound-variables prompt renders from.
+    fn persisted_globals(source: &str) -> Vec<String> {
+        let program = lash_typescript::compile(source)
+            .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
+        let mut state = State::new();
+        futures::executor::block_on(lashlang::execute(&program, &mut state, &Host))
+            .unwrap_or_else(|error| panic!("execute `{source}`: {error}"));
+        state
+            .snapshot()
+            .globals()
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect()
+    }
+
     #[test]
     fn no_generated_binding_reaches_the_global_surface() {
         for source in DURABLE_CORPUS {
-            for name in suspend_and_snapshot(source) {
+            for name in persisted_globals(source) {
                 assert!(
                     !name.starts_with("__typescript"),
                     "generated binding `{name}` leaked into the globals of `{source}`"
                 );
             }
+            // The suspended continuation is the other durable artifact.
+            assert!(
+                !suspended_continuation_json(source).contains("__typescript"),
+                "a generated binding leaked into the continuation of `{source}`"
+            );
+        }
+        // A shadowing block binding still needs a generated name; it must stay
+        // out of the surface all the same.
+        for name in persisted_globals(
+            "const e = 'outer'; let seen = ''; try { throw 'boom'; } catch (e) { seen = e; } finish(`${e}|${seen}`);",
+        ) {
+            assert!(
+                !name.starts_with("__typescript"),
+                "a shadowing block binding leaked `{name}` into the globals"
+            );
         }
     }
 

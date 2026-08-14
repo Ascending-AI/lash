@@ -171,6 +171,55 @@ fn semicolon_free_statement_sequences_do_not_accumulate_source_nesting() {
             )
         });
     }
+    // The verifier's legal-direction corpus: ordinary semicolon-free
+    // TypeScript, including the shapes that carry a newline past a comment or
+    // across a construct.
+    let trailing_comments = (0..120)
+        .map(|index| format!("const t{index} = {index} // note\n"))
+        .collect::<String>();
+    let block_comments = (0..120)
+        .map(|index| format!("const u{index} = {index} /* note */\n"))
+        .collect::<String>();
+    let crlf = (0..120)
+        .map(|index| format!("const w{index} = {index}\r\n"))
+        .collect::<String>();
+    let calls = format!(
+        "const f = (n: number): number => n\n{}",
+        (0..120)
+            .map(|index| format!("f({index})\n"))
+            .collect::<String>()
+    );
+    let arrows = (0..60)
+        .map(|index| format!("const g{index} = (n: number): number => n + {index}\n"))
+        .collect::<String>();
+    let newline_arrow_bodies = (0..60)
+        .map(|index| format!("const h{index} = (n: number): number =>\n  n + {index}\n"))
+        .collect::<String>();
+    let multiline_templates = (0..60)
+        .map(|index| format!("const m{index} = `line {index}\nnext line`\n"))
+        .collect::<String>();
+    let if_blocks = (0..60)
+        .map(|index| format!("if (1) {{ const p{index} = {index} }}\n"))
+        .collect::<String>();
+    let mixed = (0..60)
+        .map(|index| {
+            format!("const q{index} = 1 > 0 ? {index} : 0\nwhile (0) {{ const r{index} = 1 }}\n")
+        })
+        .collect::<String>();
+    for (name, source) in [
+        ("trailing line comments", trailing_comments),
+        ("trailing block comments", block_comments),
+        ("CRLF line endings", crlf),
+        ("semicolon-free calls", calls),
+        ("semicolon-free arrows", arrows),
+        ("newline arrow bodies", newline_arrow_bodies),
+        ("multiline templates", multiline_templates),
+        ("semicolon-free if blocks", if_blocks),
+        ("mixed semicolon-free program", mixed),
+    ] {
+        lash_typescript::parse(&source)
+            .unwrap_or_else(|error| panic!("{name} must parse: {}", error.code.as_str()));
+    }
     // A newline that does not end a statement is not a release point: the
     // continuation still counts against the same budget.
     let error = lash_typescript::parse(&format!("const x = 1\n{}1\n", "+ 1\n".repeat(200)))
@@ -293,5 +342,149 @@ fn no_accepted_grammar_shape_leaks_the_shared_ast_diagnostic() {
                 }
             }
         }
+    }
+}
+
+/// Every recursive production of the accepted grammar, one repeatable unit each.
+///
+/// A recursive production is one whose right-hand side can contain the
+/// non-terminal it defines, so repeating its unit deepens the tree without
+/// bound. Walking the accepted grammar (see the scanner's module comment in
+/// `src/adapter/mod.rs`) they fall into five families, and the source-nesting
+/// budget must charge every one of them:
+///
+/// * prefix — `UnaryExpression := <op> UnaryExpression`, for punctuation
+///   operators and keyword operators alike;
+/// * infix — `BinaryExpression := Expression <op> Expression`, including the
+///   conditional and logical forms;
+/// * postfix — `LeftHandSideExpression := LeftHandSideExpression <tail>`, where
+///   the tail is a call, a subscript, a member step, or a tagged template;
+/// * delimiter — the bracketed primary forms and template holes;
+/// * statement form — `Statement := <keyword> ( Expression ) Statement`.
+///
+/// Newline-separated variants are listed separately because automatic
+/// semicolon insertion releases the budget, and a release that fires where no
+/// statement ends would leave the family uncharged.
+const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
+    // prefix — punctuation operators
+    ("prefix-not", "!", "1;"),
+    ("prefix-tilde", "~", "1;"),
+    ("prefix-minus", "- ", "1;"),
+    ("prefix-plus", "+ ", "1;"),
+    ("prefix-not-newline", "!\n", "1;"),
+    ("prefix-minus-newline", "-\n", "1;"),
+    // prefix — keyword operators
+    ("prefix-typeof", "typeof ", "1;"),
+    ("prefix-void", "void ", "1;"),
+    ("prefix-delete", "delete ", "1;"),
+    ("prefix-new", "new ", "1;"),
+    ("prefix-typeof-newline", "typeof\n", "1;"),
+    ("prefix-void-newline", "void\n", "1;"),
+    ("prefix-delete-newline", "delete\n", "1;"),
+    ("prefix-new-newline", "new\n", "1;"),
+    // infix
+    ("infix-add", "1+", "1;"),
+    ("infix-strict-equal", "1===", "1;"),
+    ("infix-and", "1&&", "1;"),
+    ("infix-or", "1||", "1;"),
+    ("infix-ternary", "1?1:", "1;"),
+    ("infix-add-newline", "1+\n", "1;"),
+    ("infix-ternary-newline", "1?1:\n", "1;"),
+    // postfix
+    ("postfix-call", "(1)", ";"),
+    ("postfix-subscript", "[0]", ";"),
+    ("postfix-member", ".a", ";"),
+    ("postfix-optional-member", "?.a", ";"),
+    ("postfix-tagged-template", "`x`", ";"),
+    ("postfix-call-newline", "(1)\n", ";"),
+    ("postfix-subscript-newline", "[0]\n", ";"),
+    ("postfix-member-newline", ".a\n", ";"),
+    ("postfix-mixed-tails", "(1)[0].a", ";"),
+    // delimiter
+    ("delimiter-paren", "(", "1"),
+    ("delimiter-bracket", "[", "1"),
+    ("delimiter-brace", "{a:", "1"),
+    ("delimiter-arrow", "(() => ", "1"),
+    ("delimiter-template-hole", "${a}", ""),
+    // statement form
+    ("statement-if-block", "if (1) {", "const q = 1;"),
+    ("statement-while-block", "while (0) {", "const q = 1;"),
+    ("statement-if-bare", "if (1) ", "const q = 1;"),
+    ("statement-if-newline", "if (1)\n", "const q = 1;"),
+    ("statement-while-newline", "while (0)\n", "const q = 1;"),
+    ("statement-block", "{", "const q = 1;"),
+    // mixed families
+    ("mixed-prefix-in-delimiter", "(!", "1"),
+    ("mixed-prefix-in-bracket", "[!", "1"),
+    ("mixed-postfix-after-prefix", "!a(1)", ";"),
+    ("mixed-postfix-after-keyword", "typeof a(1)", ";"),
+    ("mixed-infix-postfix", "1+a[0]", ";"),
+    ("mixed-alternating", "!(1)[0].a typeof ", "1;"),
+    ("mixed-newline-alternation", "!\na(1)\n.a\n", ";"),
+    ("mixed-delimiter-statement", "if (1) { (", "1"),
+];
+
+fn family_source(unit: &str, tail: &str, repeats: usize) -> String {
+    // A leading binding keeps the postfix and member families applied to a real
+    // expression, which is the shape that recurses.
+    match unit {
+        "${a}" => format!("const a = 1; const x = `{}`;", unit.repeat(repeats)),
+        "`x`" => format!("const a = 1; const x = a{};", unit.repeat(repeats)),
+        _ if unit.starts_with('(') && tail == ";" => {
+            format!("const a = 1; const x = a{}{tail}", unit.repeat(repeats))
+        }
+        _ if unit.starts_with('[') && tail == ";" => {
+            format!("const a = 1; const x = a{}{tail}", unit.repeat(repeats))
+        }
+        _ if unit.starts_with('.') || unit.starts_with("?.") => {
+            format!("const a = 1; const x = a{}{tail}", unit.repeat(repeats))
+        }
+        _ if tail == ";" => format!("const a = 1; const x = a{}{tail}", unit.repeat(repeats)),
+        _ => format!("const a = 1; const x = {}{tail}", unit.repeat(repeats)),
+    }
+}
+
+/// The standing guard on the no-abort property: every recursive production,
+/// repeated far past any stack, must return the named diagnostic from a child
+/// process that exits cleanly.
+#[test]
+fn every_recursive_production_family_rejects_without_aborting() {
+    const CHILD_ENV: &str = "LASH_TS_FAMILY_CHILD";
+    const REPEATS: usize = 100_000;
+    if let Some(family) = std::env::var_os(CHILD_ENV) {
+        let family = family.to_string_lossy().to_string();
+        let (_, unit, tail) = RECURSIVE_FAMILIES
+            .iter()
+            .find(|(name, _, _)| *name == family)
+            .expect("known family");
+        let source = family_source(unit, tail, REPEATS);
+        std::thread::Builder::new()
+            .stack_size(STACK_BUDGET_BYTES)
+            .spawn(move || {
+                let error = lash_typescript::parse(&source)
+                    .expect_err("a repeated recursive production must reject");
+                assert_eq!(
+                    error.code.as_str(),
+                    "TS_SOURCE_NESTING_LIMIT",
+                    "{family} rejected for the wrong reason"
+                );
+            })
+            .expect("family thread starts")
+            .join()
+            .expect("family thread does not abort or panic");
+        return;
+    }
+
+    for (family, _, _) in RECURSIVE_FAMILIES {
+        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "every_recursive_production_family_rejects_without_aborting",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, family)
+            .status()
+            .expect("family child starts");
+        assert!(status.success(), "{family} did not fail closed: {status}");
     }
 }
