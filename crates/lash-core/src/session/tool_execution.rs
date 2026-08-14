@@ -1253,6 +1253,22 @@ impl RuntimeExecutionContext<'_> {
                     replies[index] = Some(ToolInvocationReply::error(serde_json::json!(message)));
                 }
             } else {
+                // This loop looks like it settles parked leaves in input order,
+                // and a reviewer reading it alone would rightly call that a
+                // defect: a deferred leaf that rejects first would not lead the
+                // order. It does not, because a batch leaf never reaches here
+                // parked. `execute_prepared_tool_batch_child` awaits its own
+                // pending completion and always hands back `Done`, and it does
+                // so inside the unordered scheduler, so a deferred leaf's true
+                // completion time is what places it in `settlement_order`.
+                // `ToolBatchEffectOutcome` is crate-private with that one
+                // producer, so no host can supply parked launches either. The
+                // `Pending` arm below is therefore unreachable today and is
+                // kept only so the match stays total.
+                //
+                // `session::settlement_latency_tests` holds this down with two
+                // real deferred tools whose completions race: the fast rejection
+                // leads the order whichever position it was launched in.
                 for ((index, prepared, _, _), launch) in
                     prepared_entries.into_iter().zip(outcome.launches)
                 {

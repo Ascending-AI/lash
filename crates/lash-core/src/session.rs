@@ -9,6 +9,8 @@ mod execution_context;
 #[cfg(test)]
 mod fig790_tests;
 mod process_handles;
+#[cfg(test)]
+mod settlement_latency_tests;
 mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
