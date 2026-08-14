@@ -226,7 +226,7 @@
           "post_commit_delivery": 11.43,
           "prepared_turn": 30.26,
           "prompt_build": 3.97,
-          "rlm_lashlang.compile_link": 7.137,
+          "rlm_lashlang.compile_link": 3.078,
           "rlm_lashlang.execute": 64.384,
           "rlm_lashlang.rehydrate_projected_globals": 4.3,
           "rlm_lashlang.resolve_projected_bindings": 9.41,
@@ -788,11 +788,11 @@
     "perf": {
       "baseline": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 400935,
+          "allocated_bytes_per_iter_max": 496249,
           "allocations_per_iter_max": 3752
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 400936,
+          "allocated_bytes_per_iter_max": 496260,
           "allocations_per_iter_max": 3752
         },
         "link_artifact": {
@@ -800,12 +800,12 @@
           "allocations_per_iter_max": 2992
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 65271,
-          "allocations_per_iter_max": 260
+          "allocated_bytes_per_iter_max": 153513,
+          "allocations_per_iter_max": 611
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 72712,
-          "allocations_per_iter_max": 401
+          "allocated_bytes_per_iter_max": 171028,
+          "allocations_per_iter_max": 1286
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 13497,
@@ -824,30 +824,30 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 416478,
+          "allocated_bytes_per_iter_max": 511779,
           "allocations_per_iter_max": 3953
         }
       },
       "language_host_environment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 1188605,
-          "allocations_per_iter_max": 9938
+          "allocated_bytes_per_iter_max": 1760850,
+          "allocations_per_iter_max": 12109
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 1188605,
-          "allocations_per_iter_max": 9938
+          "allocated_bytes_per_iter_max": 1760843,
+          "allocations_per_iter_max": 12109
         },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 747422,
           "allocations_per_iter_max": 7927
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 182788,
-          "allocations_per_iter_max": 767
+          "allocated_bytes_per_iter_max": 712589,
+          "allocations_per_iter_max": 2904
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 190229,
-          "allocations_per_iter_max": 908
+          "allocated_bytes_per_iter_max": 730104,
+          "allocations_per_iter_max": 3579
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 34617,
@@ -866,17 +866,17 @@
           "allocations_per_iter_max": 4
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 1230029,
-          "allocations_per_iter_max": 10491
+          "allocated_bytes_per_iter_max": 1802277,
+          "allocations_per_iter_max": 12662
         }
       },
       "async_await": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 153873,
+          "allocated_bytes_per_iter_max": 189701,
           "allocations_per_iter_max": 1637
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 153868,
+          "allocated_bytes_per_iter_max": 189693,
           "allocations_per_iter_max": 1637
         },
         "link_artifact": {
@@ -884,12 +884,12 @@
           "allocations_per_iter_max": 1213
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 33559,
-          "allocations_per_iter_max": 222
+          "allocated_bytes_per_iter_max": 66781,
+          "allocations_per_iter_max": 374
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 41000,
-          "allocations_per_iter_max": 363
+          "allocated_bytes_per_iter_max": 84295,
+          "allocations_per_iter_max": 1050
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 6332,
@@ -908,7 +908,7 @@
           "allocations_per_iter_max": 1
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 159344,
+          "allocated_bytes_per_iter_max": 195183,
           "allocations_per_iter_max": 1704
         }
       },
@@ -926,12 +926,12 @@
           "allocations_per_iter_max": 1431
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 18006,
-          "allocations_per_iter_max": 181
+          "allocated_bytes_per_iter_max": 31690,
+          "allocations_per_iter_max": 253
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 25447,
-          "allocations_per_iter_max": 322
+          "allocated_bytes_per_iter_max": 49204,
+          "allocations_per_iter_max": 928
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 11367,
@@ -956,11 +956,11 @@
       },
       "general_fanout": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 168122,
+          "allocated_bytes_per_iter_max": 195883,
           "allocations_per_iter_max": 1733
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 168122,
+          "allocated_bytes_per_iter_max": 195888,
           "allocations_per_iter_max": 1733
         },
         "link_artifact": {
@@ -968,12 +968,12 @@
           "allocations_per_iter_max": 1352
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 27447,
-          "allocations_per_iter_max": 167
+          "allocated_bytes_per_iter_max": 53855,
+          "allocations_per_iter_max": 291
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 34887,
-          "allocations_per_iter_max": 308
+          "allocated_bytes_per_iter_max": 71370,
+          "allocations_per_iter_max": 966
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 6862,
@@ -992,17 +992,17 @@
           "allocations_per_iter_max": 1
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 174745,
+          "allocated_bytes_per_iter_max": 202521,
           "allocations_per_iter_max": 1812
         }
       },
       "loop_control": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 242322,
+          "allocated_bytes_per_iter_max": 311927,
           "allocations_per_iter_max": 5247
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 242331,
+          "allocated_bytes_per_iter_max": 311922,
           "allocations_per_iter_max": 5247
         },
         "link_artifact": {
@@ -1010,12 +1010,12 @@
           "allocations_per_iter_max": 1900
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 53621,
+          "allocated_bytes_per_iter_max": 119655,
           "allocations_per_iter_max": 2997
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 61062,
-          "allocations_per_iter_max": 3139
+          "allocated_bytes_per_iter_max": 137170,
+          "allocations_per_iter_max": 3657
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 8173,
@@ -1034,30 +1034,30 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 250706,
+          "allocated_bytes_per_iter_max": 320277,
           "allocations_per_iter_max": 5361
         }
       },
       "indexed_assignment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 301466,
-          "allocations_per_iter_max": 2832
+          "allocated_bytes_per_iter_max": 394240,
+          "allocations_per_iter_max": 3285
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 301475,
-          "allocations_per_iter_max": 2832
+          "allocated_bytes_per_iter_max": 394241,
+          "allocations_per_iter_max": 3285
         },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 212689,
           "allocations_per_iter_max": 2428
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 37316,
-          "allocations_per_iter_max": 123
+          "allocated_bytes_per_iter_max": 126667,
+          "allocations_per_iter_max": 554
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 44757,
-          "allocations_per_iter_max": 264
+          "allocated_bytes_per_iter_max": 144182,
+          "allocations_per_iter_max": 1229
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 10106,
@@ -1076,17 +1076,17 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 312875,
-          "allocations_per_iter_max": 2976
+          "allocated_bytes_per_iter_max": 405600,
+          "allocations_per_iter_max": 3428
         }
       },
       "projected_values": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 262732,
+          "allocated_bytes_per_iter_max": 316452,
           "allocations_per_iter_max": 2413
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 262732,
+          "allocated_bytes_per_iter_max": 316459,
           "allocations_per_iter_max": 2413
         },
         "link_artifact": {
@@ -1094,12 +1094,12 @@
           "allocations_per_iter_max": 1962
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 45174,
-          "allocations_per_iter_max": 158
+          "allocated_bytes_per_iter_max": 89070,
+          "allocations_per_iter_max": 336
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 52614,
-          "allocations_per_iter_max": 299
+          "allocated_bytes_per_iter_max": 106585,
+          "allocations_per_iter_max": 1011
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 9923,
@@ -1118,17 +1118,17 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 272386,
+          "allocated_bytes_per_iter_max": 326094,
           "allocations_per_iter_max": 2545
         }
       },
       "large_data": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 2144772,
+          "allocated_bytes_per_iter_max": 2590682,
           "allocations_per_iter_max": 13310
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 2144768,
+          "allocated_bytes_per_iter_max": 2590697,
           "allocations_per_iter_max": 13310
         },
         "link_artifact": {
@@ -1136,11 +1136,11 @@
           "allocations_per_iter_max": 2668
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 1817958,
+          "allocated_bytes_per_iter_max": 2259100,
           "allocations_per_iter_max": 10255
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 1825399,
+          "allocated_bytes_per_iter_max": 2276614,
           "allocations_per_iter_max": 10397
         },
         "artifact_roundtrip": {
@@ -1160,17 +1160,17 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 2157676,
+          "allocated_bytes_per_iter_max": 2603567,
           "allocations_per_iter_max": 13480
         }
       },
       "cache_pressure": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 504128,
+          "allocated_bytes_per_iter_max": 600186,
           "allocations_per_iter_max": 4280
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 504136,
+          "allocated_bytes_per_iter_max": 600177,
           "allocations_per_iter_max": 4280
         },
         "link_artifact": {
@@ -1178,12 +1178,12 @@
           "allocations_per_iter_max": 3575
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 55160,
-          "allocations_per_iter_max": 127
+          "allocated_bytes_per_iter_max": 134313,
+          "allocations_per_iter_max": 471
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 62601,
-          "allocations_per_iter_max": 268
+          "allocated_bytes_per_iter_max": 151828,
+          "allocations_per_iter_max": 1146
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 17653,
@@ -1202,7 +1202,7 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 527102,
+          "allocated_bytes_per_iter_max": 623174,
           "allocations_per_iter_max": 4566
         }
       },
@@ -1220,12 +1220,12 @@
           "allocations_per_iter_max": 2061
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 67659,
-          "allocations_per_iter_max": 169
+          "allocated_bytes_per_iter_max": 100567,
+          "allocations_per_iter_max": 309
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 75100,
-          "allocations_per_iter_max": 311
+          "allocated_bytes_per_iter_max": 118081,
+          "allocations_per_iter_max": 984
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 10673,
@@ -1250,24 +1250,24 @@
       },
       "type_system_stress": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 961651,
-          "allocations_per_iter_max": 4538
+          "allocated_bytes_per_iter_max": 2390709,
+          "allocations_per_iter_max": 10453
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 961652,
-          "allocations_per_iter_max": 4538
+          "allocated_bytes_per_iter_max": 2390710,
+          "allocations_per_iter_max": 10453
         },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 212490,
           "allocations_per_iter_max": 2433
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 681317,
-          "allocations_per_iter_max": 1669
+          "allocated_bytes_per_iter_max": 2101294,
+          "allocations_per_iter_max": 7563
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 688757,
-          "allocations_per_iter_max": 1811
+          "allocated_bytes_per_iter_max": 2118808,
+          "allocations_per_iter_max": 8238
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 11526,
@@ -1286,17 +1286,17 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 974205,
-          "allocations_per_iter_max": 4692
+          "allocated_bytes_per_iter_max": 2403222,
+          "allocations_per_iter_max": 10607
         }
       },
       "wrapped_error_paths": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 204217,
+          "allocated_bytes_per_iter_max": 258249,
           "allocations_per_iter_max": 2375
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 204211,
+          "allocated_bytes_per_iter_max": 258237,
           "allocations_per_iter_max": 2375
         },
         "link_artifact": {
@@ -1304,12 +1304,12 @@
           "allocations_per_iter_max": 1829
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 35498,
-          "allocations_per_iter_max": 245
+          "allocated_bytes_per_iter_max": 78181,
+          "allocations_per_iter_max": 441
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 42939,
-          "allocations_per_iter_max": 387
+          "allocated_bytes_per_iter_max": 95696,
+          "allocations_per_iter_max": 1117
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 15553,
@@ -1328,30 +1328,30 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 212505,
+          "allocated_bytes_per_iter_max": 266536,
           "allocations_per_iter_max": 2482
         }
       },
       "tool_control_host_environment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 261356,
-          "allocations_per_iter_max": 2712
+          "allocated_bytes_per_iter_max": 368082,
+          "allocations_per_iter_max": 3143
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 261362,
-          "allocations_per_iter_max": 2712
+          "allocated_bytes_per_iter_max": 368084,
+          "allocations_per_iter_max": 3143
         },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 163432,
           "allocations_per_iter_max": 2019
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 53559,
-          "allocations_per_iter_max": 360
+          "allocated_bytes_per_iter_max": 158718,
+          "allocations_per_iter_max": 770
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 61000,
-          "allocations_per_iter_max": 502
+          "allocated_bytes_per_iter_max": 176232,
+          "allocations_per_iter_max": 1446
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 13308,
@@ -1370,17 +1370,17 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 270059,
-          "allocations_per_iter_max": 2820
+          "allocated_bytes_per_iter_max": 376807,
+          "allocations_per_iter_max": 3251
         }
       },
       "snapshot_projected_state": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 184503,
+          "allocated_bytes_per_iter_max": 231030,
           "allocations_per_iter_max": 1848
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 184490,
+          "allocated_bytes_per_iter_max": 231015,
           "allocations_per_iter_max": 1848
         },
         "link_artifact": {
@@ -1388,12 +1388,12 @@
           "allocations_per_iter_max": 1551
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 28615,
-          "allocations_per_iter_max": 109
+          "allocated_bytes_per_iter_max": 71152,
+          "allocations_per_iter_max": 299
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 59959,
-          "allocations_per_iter_max": 578
+          "allocated_bytes_per_iter_max": 140707,
+          "allocations_per_iter_max": 2556
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 8187,
@@ -1412,30 +1412,30 @@
           "allocations_per_iter_max": 1
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 192238,
+          "allocated_bytes_per_iter_max": 238786,
           "allocations_per_iter_max": 1945
         }
       },
       "continue_as_seed_host_environment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 229096,
-          "allocations_per_iter_max": 2352
+          "allocated_bytes_per_iter_max": 318712,
+          "allocations_per_iter_max": 2744
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 229087,
-          "allocations_per_iter_max": 2352
+          "allocated_bytes_per_iter_max": 318712,
+          "allocations_per_iter_max": 2744
         },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 147657,
           "allocations_per_iter_max": 1800
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 40924,
-          "allocations_per_iter_max": 252
+          "allocated_bytes_per_iter_max": 122378,
+          "allocations_per_iter_max": 622
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 48365,
-          "allocations_per_iter_max": 394
+          "allocated_bytes_per_iter_max": 139893,
+          "allocations_per_iter_max": 1297
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 15918,
@@ -1454,17 +1454,17 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 237513,
-          "allocations_per_iter_max": 2454
+          "allocated_bytes_per_iter_max": 327130,
+          "allocations_per_iter_max": 2846
         }
       },
       "trigger_registry_host_environment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 367280,
+          "allocated_bytes_per_iter_max": 507701,
           "allocations_per_iter_max": 3965
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 367279,
+          "allocated_bytes_per_iter_max": 507715,
           "allocations_per_iter_max": 3965
         },
         "link_artifact": {
@@ -1472,12 +1472,12 @@
           "allocations_per_iter_max": 3207
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 42917,
-          "allocations_per_iter_max": 322
+          "allocated_bytes_per_iter_max": 166879,
+          "allocations_per_iter_max": 863
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 50358,
-          "allocations_per_iter_max": 463
+          "allocated_bytes_per_iter_max": 184394,
+          "allocations_per_iter_max": 1538
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 23397,
@@ -1496,7 +1496,7 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 381082,
+          "allocated_bytes_per_iter_max": 521548,
           "allocations_per_iter_max": 4126
         }
       },
@@ -1514,12 +1514,12 @@
           "allocations_per_iter_max": 1464
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 23612,
-          "allocations_per_iter_max": 90
+          "allocated_bytes_per_iter_max": 40038,
+          "allocations_per_iter_max": 181
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 31053,
-          "allocations_per_iter_max": 231
+          "allocated_bytes_per_iter_max": 57552,
+          "allocations_per_iter_max": 856
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 8000,
@@ -1544,11 +1544,11 @@
       },
       "integer_range_host_environment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 329703,
+          "allocated_bytes_per_iter_max": 408467,
           "allocations_per_iter_max": 2997
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 329576,
+          "allocated_bytes_per_iter_max": 408432,
           "allocations_per_iter_max": 2997
         },
         "link_artifact": {
@@ -1556,12 +1556,12 @@
           "allocations_per_iter_max": 2501
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 38505,
-          "allocations_per_iter_max": 120
+          "allocated_bytes_per_iter_max": 107007,
+          "allocations_per_iter_max": 423
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 45945,
-          "allocations_per_iter_max": 262
+          "allocated_bytes_per_iter_max": 124522,
+          "allocations_per_iter_max": 1098
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 12717,
@@ -1580,17 +1580,17 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 344327,
+          "allocated_bytes_per_iter_max": 423057,
           "allocations_per_iter_max": 3183
         }
       },
       "fanout_expression_host_environment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 252221,
+          "allocated_bytes_per_iter_max": 327065,
           "allocations_per_iter_max": 2543
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 252224,
+          "allocated_bytes_per_iter_max": 327058,
           "allocations_per_iter_max": 2543
         },
         "link_artifact": {
@@ -1598,12 +1598,12 @@
           "allocations_per_iter_max": 1943
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 47247,
-          "allocations_per_iter_max": 265
+          "allocated_bytes_per_iter_max": 104648,
+          "allocations_per_iter_max": 514
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 54688,
-          "allocations_per_iter_max": 406
+          "allocated_bytes_per_iter_max": 122162,
+          "allocations_per_iter_max": 1189
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 14284,
@@ -1622,17 +1622,17 @@
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 262023,
+          "allocated_bytes_per_iter_max": 336850,
           "allocations_per_iter_max": 2670
         }
       },
       "image_host_environment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 174915,
+          "allocated_bytes_per_iter_max": 202654,
           "allocations_per_iter_max": 1701
         },
         "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 174945,
+          "allocated_bytes_per_iter_max": 202651,
           "allocations_per_iter_max": 1701
         },
         "link_artifact": {
@@ -1640,12 +1640,12 @@
           "allocations_per_iter_max": 1419
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 30641,
-          "allocations_per_iter_max": 93
+          "allocated_bytes_per_iter_max": 52009,
+          "allocations_per_iter_max": 261
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 41131,
-          "allocations_per_iter_max": 293
+          "allocated_bytes_per_iter_max": 75385,
+          "allocations_per_iter_max": 1183
         },
         "artifact_roundtrip": {
           "allocated_bytes_per_iter_max": 7795,
@@ -1664,14 +1664,425 @@
           "allocations_per_iter_max": 1
         },
         "phase_breakdown": {
-          "allocated_bytes_per_iter_max": 182033,
+          "allocated_bytes_per_iter_max": 209740,
           "allocations_per_iter_max": 1784
+        }
+      },
+      "heap_list_iteration": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 3654006,
+          "allocations_per_iter_max": 3985
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 3654039,
+          "allocations_per_iter_max": 3985
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 109330,
+          "allocations_per_iter_max": 1414
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 3517781,
+          "allocations_per_iter_max": 2419,
+          "ns_per_iter_max": 6300000
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 3535295,
+          "allocations_per_iter_max": 3094
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 6556,
+          "allocations_per_iter_max": 55
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 254,
+          "allocations_per_iter_max": 3
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 27,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 71,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 3659399,
+          "allocations_per_iter_max": 4058
+        }
+      },
+      "heap_nested_loop": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 4144969,
+          "allocations_per_iter_max": 22584
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 4144985,
+          "allocations_per_iter_max": 22584
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 115084,
+          "allocations_per_iter_max": 1452
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 4000038,
+          "allocations_per_iter_max": 20980,
+          "ns_per_iter_max": 9100000
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 4017552,
+          "allocations_per_iter_max": 21655
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 6641,
+          "allocations_per_iter_max": 57
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 256,
+          "allocations_per_iter_max": 3
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 30,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 74,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 4150707,
+          "allocations_per_iter_max": 22661
+        }
+      },
+      "heap_allocation_churn": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 2325071,
+          "allocations_per_iter_max": 18138
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 2325073,
+          "allocations_per_iter_max": 18138
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 125751,
+          "allocations_per_iter_max": 1515
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 2165928,
+          "allocations_per_iter_max": 16410,
+          "ns_per_iter_max": 4400000
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 2183442,
+          "allocations_per_iter_max": 17085
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 6949,
+          "allocations_per_iter_max": 60
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 260,
+          "allocations_per_iter_max": 3
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 33,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 80,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 2331318,
+          "allocations_per_iter_max": 18221
+        }
+      },
+      "heap_deep_chain_mutation": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 4334422,
+          "allocations_per_iter_max": 30988
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 4334429,
+          "allocations_per_iter_max": 30988
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 159458,
+          "allocations_per_iter_max": 1993
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 4141321,
+          "allocations_per_iter_max": 28799,
+          "ns_per_iter_max": 6700000
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 4158835,
+          "allocations_per_iter_max": 29474
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 8067,
+          "allocations_per_iter_max": 71
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 274,
+          "allocations_per_iter_max": 3
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 37,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 94,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 4342333,
+          "allocations_per_iter_max": 31093
+        }
+      },
+      "heap_comprehension_build": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 2293124,
+          "allocations_per_iter_max": 7180
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 2293122,
+          "allocations_per_iter_max": 7180
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 126703,
+          "allocations_per_iter_max": 1612
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 2129502,
+          "allocations_per_iter_max": 5393,
+          "ns_per_iter_max": 5000000
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 2147017,
+          "allocations_per_iter_max": 6068
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 7419,
+          "allocations_per_iter_max": 65
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 261,
+          "allocations_per_iter_max": 3
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 35,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 82,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 2299639,
+          "allocations_per_iter_max": 7273
+        }
+      },
+      "heap_variable_concat": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 409092,
+          "allocations_per_iter_max": 2137
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 409093,
+          "allocations_per_iter_max": 2137
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 92781,
+          "allocations_per_iter_max": 1194
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 298541,
+          "allocations_per_iter_max": 815,
+          "ns_per_iter_max": 490000
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 316055,
+          "allocations_per_iter_max": 1490
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 5886,
+          "allocations_per_iter_max": 49
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 247,
+          "allocations_per_iter_max": 3
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 21,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 60,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 413362,
+          "allocations_per_iter_max": 2195
+        }
+      },
+      "heap_shallow_chain_mutation": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 2478218,
+          "allocations_per_iter_max": 18301
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 2478223,
+          "allocations_per_iter_max": 18301
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 170878,
+          "allocations_per_iter_max": 2116
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 2281772,
+          "allocations_per_iter_max": 16025,
+          "ns_per_iter_max": 3000000
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 2299286,
+          "allocations_per_iter_max": 16700
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 7160,
+          "allocations_per_iter_max": 61
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 278,
+          "allocations_per_iter_max": 3
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 31,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 95,
+          "allocations_per_iter_max": 1
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 2484331,
+          "allocations_per_iter_max": 18378
+        }
+      },
+      "heap_deep_chain_mutation_24": {
+        "one_shot": {
+          "allocated_bytes_per_iter_max": 6679535,
+          "allocations_per_iter_max": 54041
+        },
+        "prewarmed_one_shot": {
+          "allocated_bytes_per_iter_max": 6679530,
+          "allocations_per_iter_max": 54041
+        },
+        "link_artifact": {
+          "allocated_bytes_per_iter_max": 735392,
+          "allocations_per_iter_max": 9208
+        },
+        "compiled_execute": {
+          "allocated_bytes_per_iter_max": 5881761,
+          "allocations_per_iter_max": 44545,
+          "ns_per_iter_max": 8500000
+        },
+        "snapshot": {
+          "allocated_bytes_per_iter_max": 5899276,
+          "allocations_per_iter_max": 45220
+        },
+        "artifact_roundtrip": {
+          "allocated_bytes_per_iter_max": 12357,
+          "allocations_per_iter_max": 105
+        },
+        "compiled_process_cache": {
+          "allocated_bytes_per_iter_max": 504,
+          "allocations_per_iter_max": 6
+        },
+        "compiled_program_cache": {
+          "allocated_bytes_per_iter_max": 95,
+          "allocations_per_iter_max": 1
+        },
+        "linked_program_cache": {
+          "allocated_bytes_per_iter_max": 336,
+          "allocations_per_iter_max": 4
+        },
+        "phase_breakdown": {
+          "allocated_bytes_per_iter_max": 6695476,
+          "allocations_per_iter_max": 54200
+        }
+      },
+      "function_call_noncapturing": {
+        "compiled_ast_execute": {
+          "allocated_bytes_per_iter_max": 5335,
+          "allocations_per_iter_max": 20,
+          "ns_per_iter_max": 7000
+        }
+      },
+      "function_call_captured": {
+        "compiled_ast_execute": {
+          "allocated_bytes_per_iter_max": 10191,
+          "allocations_per_iter_max": 59,
+          "ns_per_iter_max": 14000
+        }
+      },
+      "function_deep_recursion": {
+        "compiled_ast_execute": {
+          "allocated_bytes_per_iter_max": 974612,
+          "allocations_per_iter_max": 2678,
+          "ns_per_iter_max": 1600000
+        }
+      },
+      "function_map_64": {
+        "compiled_ast_execute": {
+          "allocated_bytes_per_iter_max": 54430,
+          "allocations_per_iter_max": 283,
+          "ns_per_iter_max": 100000
+        }
+      },
+      "function_map_256": {
+        "compiled_ast_execute": {
+          "allocated_bytes_per_iter_max": 195963,
+          "allocations_per_iter_max": 954,
+          "ns_per_iter_max": 340000
+        }
+      },
+      "function_map_1024": {
+        "compiled_ast_execute": {
+          "allocated_bytes_per_iter_max": 762094,
+          "allocations_per_iter_max": 3613,
+          "ns_per_iter_max": 1700000
+        }
+      },
+      "function_frame_heavy": {
+        "compiled_ast_execute": {
+          "allocated_bytes_per_iter_max": 1922565,
+          "allocations_per_iter_max": 8415,
+          "ns_per_iter_max": 1700000,
+          "heap_allocations_max": 8,
+          "live_logical_bytes_max": 1024
         }
       }
     },
     "profile": {
       "default": {
-        "instructions_per_iter_max": 10280
+        "instructions_per_iter_max": 83199
+      }
+    },
+    "perf_ratios": {
+      "chain_depth_scaling": {
+        "numerator": "heap_deep_chain_mutation_24",
+        "denominator": "heap_shallow_chain_mutation",
+        "mode": "compiled_execute",
+        "metric": "ns_per_iter",
+        "max": 5.0
+      },
+      "function_map_scaling_16x": {
+        "numerator": "function_map_1024",
+        "denominator": "function_map_64",
+        "mode": "compiled_ast_execute",
+        "metric": "ns_per_iter",
+        "max": 20.0
       }
     }
   }
