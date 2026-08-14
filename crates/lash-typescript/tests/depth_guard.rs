@@ -23,6 +23,27 @@ fn nested_if_source(depth: usize) -> String {
     source
 }
 
+fn delimiter_free_source(shape: &str, depth: usize) -> String {
+    match shape {
+        "not" => format!("finish({}1);", "!".repeat(depth)),
+        "minus" => format!("finish({}1);", "- ".repeat(depth)),
+        "typeof" => format!("finish({}1);", "typeof ".repeat(depth)),
+        "ternary" => format!("finish({}1);", "1?1:".repeat(depth)),
+        "binary" => format!("finish(1{});", "+1".repeat(depth)),
+        _ => panic!("unknown delimiter-free nesting shape: {shape}"),
+    }
+}
+
+fn mixed_delimiter_source(braces: usize, brackets: usize) -> String {
+    format!(
+        "{}finish({}1{});{}",
+        "{".repeat(braces),
+        "[".repeat(brackets),
+        "]".repeat(brackets),
+        "}".repeat(braces),
+    )
+}
+
 #[test]
 fn ten_thousand_nested_parens_return_a_named_diagnostic_without_aborting() {
     const CHILD_ENV: &str = "LASH_TS_DEPTH_GUARD_CHILD";
@@ -46,6 +67,45 @@ fn ten_thousand_nested_parens_return_a_named_diagnostic_without_aborting() {
         status.success(),
         "depth child did not fail closed: {status}"
     );
+}
+
+#[test]
+fn delimiter_free_nesting_returns_a_named_diagnostic_without_aborting() {
+    const CHILD_ENV: &str = "LASH_TS_DELIMITER_FREE_DEPTH_CHILD";
+    const SHAPES: [&str; 5] = ["not", "minus", "typeof", "ternary", "binary"];
+    if let Some(shape) = std::env::var_os(CHILD_ENV) {
+        let shape = shape.to_string_lossy();
+        let source = delimiter_free_source(&shape, 10_000);
+        let error = lash_typescript::parse(&source).expect_err("nesting must be rejected");
+        assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+        return;
+    }
+
+    for shape in SHAPES {
+        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "delimiter_free_nesting_returns_a_named_diagnostic_without_aborting",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, shape)
+            .status()
+            .expect("depth child starts");
+        assert!(
+            status.success(),
+            "{shape} depth child did not fail closed: {status}"
+        );
+    }
+}
+
+#[test]
+fn mixed_delimiters_share_one_source_nesting_budget() {
+    // The surrounding `finish(` call is one level too.
+    lash_typescript::parse(&mixed_delimiter_source(13, 14))
+        .expect("28 total delimiter levels should parse");
+    let error = lash_typescript::parse(&mixed_delimiter_source(14, 14))
+        .expect_err("29 total delimiter levels must reject");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
 }
 
 #[test]
