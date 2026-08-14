@@ -446,10 +446,10 @@ pub use attachments::{
 };
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence,
-    ExecutionEvidenceCollectionInterruption, GenerationDisposition, GenerationOptionDisposition,
-    GenerationOptions, LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope,
-    LlmResponse, LlmStreamEvidence, LlmTerminalReason, NonNegativeFiniteF64, NormalizedError,
-    ProtocolPosition, ProviderFileScope, RetryDecision,
+    ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, GenerationDisposition,
+    GenerationOptionDisposition, GenerationOptions, LlmCallId, LlmCallRecord, LlmOutputPart,
+    LlmRequest, LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTerminalReason,
+    NonNegativeFiniteF64, NormalizedError, ProtocolPosition, ProviderFileScope, RetryDecision,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CheckpointDelivery,

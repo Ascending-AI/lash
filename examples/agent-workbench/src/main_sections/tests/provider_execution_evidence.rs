@@ -118,7 +118,13 @@ fn assert_delivered_provider_evidence(
         .pointer("/event/activity/record")
         .expect("remote observation carries the model-call record");
     assert_eq!(remote_record["call_id"], runtime_record.call_id.0);
-    let evidence = &remote_record["attempts"][0]["evidence"];
+    let remote_attempts = remote_record["attempts"]
+        .as_array()
+        .expect("remote observation carries attempt rows");
+    assert_eq!(remote_attempts.len(), runtime_record.attempts.len());
+    let evidence = &remote_attempts
+        .last()
+        .expect("provider call has a terminal attempt")["evidence"];
     assert_eq!(evidence["provider_response_id"], response_id);
     assert_eq!(evidence["served_model"], served_model);
     assert_eq!(evidence["provider_finish_reason"], finish);
@@ -155,15 +161,35 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             lash_sim::runtime_providers::runtime_script_for_text(provider_kind, &answer)
                 .expect("provider evidence fixture")
         };
+        let mut failed_before_response = script.clone();
+        failed_before_response.name = format!("{provider_kind}.retryable-before-response");
+        failed_before_response.timeline = vec![lash_sim::ProviderWireEvent::TransportError {
+            at: 0,
+            message: "connection failed before response".to_string(),
+            retryable: Some(true),
+        }];
+        failed_before_response.expected_provider = Some(serde_json::json!({
+            "failure": "transport",
+            "response_started": false,
+            "retryable": true,
+        }));
         let transport = Arc::new(lash_sim::ScriptedLlmHttpTransport::from_scripts([
+            failed_before_response,
             script.clone(),
             script,
         ]));
-        let (provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
+        let (mut provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
             provider_kind,
             &transport,
         )
         .expect("provider fixture components");
+        let mut provider_options = provider.options();
+        provider_options.reliability = provider_options
+            .reliability
+            .max_attempts(2)
+            .base_delay_ms(0)
+            .max_delay_ms(0);
+        provider.set_options(provider_options);
         let data_dir = tempfile::tempdir().expect("provider evidence workbench tempdir");
         let state = recoverable_chat_test_state_with_provider(data_dir.path(), 64, provider).await;
         let session_id = state.current_session_id();
@@ -203,6 +229,30 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             .first()
             .expect("first runtime turn seals one model-call ledger")
             .clone();
+        assert_eq!(first_record.attempts.len(), 2);
+        let failed_attempt = &first_record.attempts[0];
+        assert_eq!(failed_attempt.outcome, lash_core::AttemptOutcome::Failed);
+        assert_eq!(
+            failed_attempt.protocol_position,
+            lash_core::ProtocolPosition::NoResponse
+        );
+        assert!(failed_attempt.evidence.is_none());
+        let failed_error = failed_attempt
+            .error
+            .as_ref()
+            .expect("failed retry attempt keeps its normalized error");
+        assert_eq!(failed_error.class, "transport");
+        let retry = failed_attempt
+            .retry_decision
+            .as_ref()
+            .expect("failed first attempt records its retry decision");
+        assert!(retry.scheduled);
+        assert_eq!(retry.delay, Some(Duration::ZERO));
+        assert_eq!(first_record.attempts[1].ordinal, 2);
+        assert_eq!(
+            first_record.attempts[1].outcome,
+            lash_core::AttemptOutcome::Completed
+        );
         assert_delivered_provider_evidence(
             &first_observation_line,
             &first_record,
@@ -286,6 +336,7 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
                 "served_model": served_model,
                 "finish": finish,
                 "reasoning_tokens": reasoning_tokens,
+                "failed_attempt_error_class": failed_error.class,
             },
         }));
         drop(observation_recovery);

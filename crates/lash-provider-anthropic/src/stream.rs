@@ -88,55 +88,11 @@ fn merge_execution_evidence(
     accumulated: &mut Option<ExecutionEvidence>,
     next: ExecutionEvidence,
 ) -> Result<(), LlmTransportError> {
-    if next == ExecutionEvidence::default() {
-        return Ok(());
-    }
-    let ExecutionEvidence {
-        served_model,
-        provider_response_id,
-        provider_request_id,
-        reasoning_output_tokens,
-        provider_finish_reason,
-        collection_interruption,
-    } = next;
-    let current = accumulated.get_or_insert_with(ExecutionEvidence::default);
-    merge_stable_identity(&mut current.served_model, served_model, "served_model")?;
-    merge_stable_identity(
-        &mut current.provider_response_id,
-        provider_response_id,
-        "provider_response_id",
-    )?;
-    merge_stable_identity(
-        &mut current.provider_request_id,
-        provider_request_id,
-        "provider_request_id",
-    )?;
-    current.reasoning_output_tokens =
-        match (current.reasoning_output_tokens, reasoning_output_tokens) {
-            (Some(current), Some(next)) => Some(current.max(next)),
-            (current, next) => current.or(next),
-        };
-    current.provider_finish_reason =
-        provider_finish_reason.or_else(|| current.provider_finish_reason.take());
-    current.collection_interruption = collection_interruption.or(current.collection_interruption);
-    Ok(())
-}
-
-fn merge_stable_identity(
-    current: &mut Option<String>,
-    next: Option<String>,
-    field: &'static str,
-) -> Result<(), LlmTransportError> {
-    match (current.as_deref(), next) {
-        (Some(existing), Some(next)) if existing != next => Err(LlmTransportError::new(format!(
-            "Anthropic stream changed {field} from `{existing}` to `{next}`"
-        ))),
-        (None, Some(next)) => {
-            *current = Some(next);
-            Ok(())
-        }
-        _ => Ok(()),
-    }
+    ExecutionEvidence::merge_optional(accumulated, Some(next)).map_err(|error| {
+        LlmTransportError::new(format!("Anthropic stream {error}"))
+            .with_kind(ProviderFailureKind::Stream)
+            .with_code(error.code())
+    })
 }
 
 fn reasoning_output_tokens(usage: &Value) -> Option<u64> {

@@ -41,6 +41,7 @@ mod tests {
     include!("tests/commit_budget.rs");
     include!("tests/provider_execution_evidence.rs");
     include!("tests/remote_execution_evidence.rs");
+    include!("tests/product_event_persistence.rs");
     include!("tests/recoverable_chat.rs");
     include!("tests/recoverable_chat_bare_prose.rs");
     include!("tests/recoverable_chat_failures.rs");

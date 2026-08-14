@@ -1135,7 +1135,8 @@ fn legacy_product_event_file_defaults_new_fields_and_keeps_them_omitted() {
         &std::fs::read(&path).expect("read reserialized product events"),
     )
     .expect("decode reserialized product events");
-    let events = persisted["legacy-session"]["events"]
+    assert_eq!(persisted["format_version"], 1);
+    let events = persisted["histories"]["legacy-session"]["events"]
         .as_array()
         .expect("persisted legacy events");
     assert!(events[0]["message"].get("attachments").is_none());
@@ -1201,20 +1202,6 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
 
 #[test]
 fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
-    let facade_outcomes = [
-        lash::remote::llm::RemoteAttemptOutcome::Aborted,
-        lash::remote::llm::RemoteAttemptOutcome::Completed,
-        lash::remote::llm::RemoteAttemptOutcome::Failed,
-        lash::remote::llm::RemoteAttemptOutcome::Interrupted,
-    ];
-    assert_eq!(facade_outcomes.len(), 4);
-    let facade_positions = [
-        lash::remote::llm::RemoteProtocolPosition::NoResponse,
-        lash::remote::llm::RemoteProtocolPosition::ResponseObserved,
-        lash::remote::llm::RemoteProtocolPosition::OutputStarted,
-        lash::remote::llm::RemoteProtocolPosition::TerminalObserved,
-    ];
-    assert_eq!(facade_positions.len(), 4);
     let registry = SessionEventRegistry::new(4);
     let session_id = "reconciled-session";
     let committed_id = workbench_turn_user_message_id("reconciled-turn");
@@ -1249,10 +1236,10 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 }),
                 error: Some(lash::remote::llm::RemoteNormalizedError {
                     class: "transport".to_string(),
-                    provider_code: None,
-                    http_status: None,
-                    provider_request_id: None,
-                    retry_after_ms: None,
+                    provider_code: Some("connection_reset".to_string()),
+                    http_status: Some(503),
+                    provider_request_id: Some("request-1".to_string()),
+                    retry_after_ms: Some(25),
                 }),
                 evidence: Some(lash::remote::llm::RemoteExecutionEvidence {
                     collection_interruption: Some(
@@ -1260,8 +1247,23 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                     ),
                     ..Default::default()
                 }),
-                generation_disposition: None,
-                usage: None,
+                generation_disposition: Some(lash::remote::llm::RemoteGenerationDisposition {
+                    output_token_cap:
+                        lash::remote::llm::RemoteGenerationOptionDisposition::ClampedToCapacity,
+                    temperature:
+                        lash::remote::llm::RemoteGenerationOptionDisposition::OmittedSamplingPinned,
+                    seed: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported,
+                    stop_sequences:
+                        lash::remote::llm::RemoteGenerationOptionDisposition::SuppressedProtocolOwned,
+                    cache: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
+                }),
+                usage: Some(lash::remote::usage::RemoteUsage {
+                    input_tokens: 11,
+                    output_tokens: 7,
+                    cache_read_input_tokens: 3,
+                    cache_write_input_tokens: 2,
+                    reasoning_output_tokens: 5,
+                }),
             },
             lash::remote::llm::RemoteAttemptRecord {
                 ordinal: 2,

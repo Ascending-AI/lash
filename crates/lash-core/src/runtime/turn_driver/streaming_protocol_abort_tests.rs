@@ -61,10 +61,12 @@ fn abort_retains_provider_usage_delivered_before_preemption() {
         generation_disposition: Some(request_disposition()),
         ..Default::default()
     };
-    evidence.merge(crate::LlmStreamEvidence {
-        provider_usage: Some(provider_usage.clone()),
-        ..Default::default()
-    });
+    evidence
+        .merge(crate::LlmStreamEvidence {
+            provider_usage: Some(provider_usage.clone()),
+            ..Default::default()
+        })
+        .expect("provider usage without execution identity remains mergeable");
 
     let (response, record) = synthesize_protocol_abort(
         &LlmStreamAccumulator::default(),

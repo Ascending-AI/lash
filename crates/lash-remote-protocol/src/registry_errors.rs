@@ -79,6 +79,18 @@ pub enum RemoteProtocolError {
         type_name: &'static str,
         message: String,
     },
+    #[error("duplicate LLM call summary `{call_id}` in RemoteTurnResult.llm_calls")]
+    DuplicateLlmCallSummary { call_id: String },
+    #[error("duplicate ModelCallRecorded activity for LLM call `{call_id}`")]
+    DuplicateLlmCallActivity { call_id: String },
+    #[error("LLM call summary `{call_id}` has no matching ModelCallRecorded activity")]
+    MissingLlmCallActivity { call_id: String },
+    #[error("ModelCallRecorded activity `{call_id}` has no matching LLM call summary")]
+    MissingLlmCallSummary { call_id: String },
+    #[error(
+        "LLM call `{call_id}` differs between the result summary and ModelCallRecorded activity"
+    )]
+    ConflictingLlmCallRecord { call_id: String },
     #[error("invalid attachment data `{id}`: {message}")]
     InvalidAttachmentData { id: String, message: String },
     #[error("invalid attachment reference `{id}`: {message}")]

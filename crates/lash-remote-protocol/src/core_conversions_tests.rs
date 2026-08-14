@@ -904,7 +904,13 @@ fn remote_turn_result_maps_core_semantics() {
         errors: Vec::new(),
     };
 
-    let remote = RemoteTurnResult::from_core("session", "turn", turn, []);
+    let result_activity = RemoteTurnActivity::from_core(
+        9,
+        lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {
+            record: call_record.clone(),
+        }),
+    );
+    let remote = RemoteTurnResult::from_core("session", "turn", turn, [result_activity]);
     remote.validate().expect("valid turn result");
     assert_eq!(remote.status, RemoteTurnStatus::Completed);
     assert_eq!(remote.usage.total.input_tokens, 4);

@@ -1197,6 +1197,7 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
   for (const scenario of executionEvidenceScenarios.providers) {
     const target = { textContent: "" };
     const snapshots = [];
+    const scheduledStateRetries = [];
     let resolveDelayedSnapshot;
     let handledModelCalls = 0;
     const element = () => ({
@@ -1222,7 +1223,7 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       markShellChannel() {},
       shellAvailability: {},
       renderShellStatus() {},
-      scheduleStateRetry() {},
+      scheduleStateRetry() { scheduledStateRetries.push("scheduled"); },
       renderError() {},
       snapshotFailureReason(error) { return String(error); },
       __LASH_WORKBENCH_TURN_EVENT_HOOK__(event) {
@@ -1259,16 +1260,34 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
        ${markedSource("WORKBENCH_REMOTE_STREAM_RECOVERY", "WORKBENCH_REMOTE_STREAM_RECOVERY")}`,
       scorecardContext,
     );
+    scorecardContext.applyProjectionSnapshot(
+      scorecardContext.projectionState,
+      scenario.first_snapshot,
+      true,
+    );
 
     const firstLine = JSON.stringify(scenario.first_observation_line);
     scorecardContext.handleObservationStreamLine(firstLine);
     scorecardContext.handleObservationStreamLine(firstLine);
     assert.equal(handledModelCalls, 1, "cursor dedupe must stop a second reducer dispatch");
-    assert.match(target.textContent, new RegExp(scenario.expected.first_call_id));
-    assert.match(target.textContent, new RegExp(`model ${scenario.expected.served_model}`));
-    assert.match(target.textContent, new RegExp(`response ${scenario.expected.response_id}`));
-    assert.match(target.textContent, new RegExp(`finish ${scenario.expected.finish}`));
-    assert.match(target.textContent, /reasoning 0/);
+    const firstRows = target.textContent
+      .split("\n")
+      .filter(row => row.includes(scenario.expected.first_call_id));
+    assert.equal(firstRows.length, 2, "the real retry call must render both attempt rows");
+    assert.match(firstRows[0], /#1 failed/);
+    assert.match(firstRows[0], /position no_response/);
+    assert.match(
+      firstRows[0],
+      new RegExp(`error ${scenario.expected.failed_attempt_error_class}`),
+    );
+    assert.match(firstRows[0], /retry scheduled/);
+    assert.doesNotMatch(firstRows[0], / · (?:model|response|finish|reasoning) /);
+    assert.match(firstRows[1], /#2 completed/);
+    assert.match(firstRows[1], /position terminal_observed/);
+    assert.match(firstRows[1], new RegExp(`model ${scenario.expected.served_model}`));
+    assert.match(firstRows[1], new RegExp(`response ${scenario.expected.response_id}`));
+    assert.match(firstRows[1], new RegExp(`finish ${scenario.expected.finish}`));
+    assert.match(firstRows[1], /reasoning 0/);
 
     snapshots.push(scenario.first_snapshot);
     scorecardContext.handleObservationStreamLine(
@@ -1280,8 +1299,26 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       new RegExp(scenario.expected.first_call_id),
       "the production snapshot renderer must retain the first runtime ledger",
     );
+    assert.equal(
+      target.textContent
+        .split("\n")
+        .filter(row => row.includes(scenario.expected.first_call_id)).length,
+      2,
+      "terminal replacement must retain both retry attempts",
+    );
 
+    const retriesBeforeGap = scheduledStateRetries.length;
     snapshots.push("delayed");
+    scorecardContext.executionScorecardState.delete(scenario.expected.first_call_id);
+    scorecardContext.renderExecutionScorecard(
+      scorecardContext.executionScorecardState,
+      target,
+    );
+    assert.doesNotMatch(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the replay gap must contain a scorecard row that only a snapshot can backfill",
+    );
     scorecardContext.handleObservationStreamLine(JSON.stringify({
       type: "replay_gap",
       gap: { latest_cursor: scenario.first_snapshot.observation.cursor },
@@ -1293,10 +1330,43 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
     assert.equal(handledModelCalls, 2);
     resolveDelayedSnapshot(scenario.first_snapshot);
     await new Promise(resolve => setImmediate(resolve));
+    assert.equal(
+      scheduledStateRetries.length,
+      retriesBeforeGap + 1,
+      "an overtaken replay-gap snapshot must schedule a fresh recovery",
+    );
     assert.match(
       target.textContent,
       new RegExp(scenario.expected.second_call_id),
       "an observation arriving during recovery must survive the older snapshot",
+    );
+    assert.doesNotMatch(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the overtaken snapshot itself must not erase the newer observation",
+    );
+
+    snapshots.push(scenario.final_snapshot);
+    await scorecardContext.recoverFromState(
+      "live updates paused; reload to restore the conversation",
+    );
+    assert.match(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the scheduled fresh snapshot must backfill the scorecard row lost in the replay gap",
+    );
+    assert.match(
+      target.textContent,
+      new RegExp(scenario.expected.second_call_id),
+      "fresh gap recovery must retain the observation that overtook the stale snapshot",
+    );
+    assert.deepEqual(
+      target.textContent
+        .split("\n")
+        .filter(row => row.includes(scenario.expected.first_call_id))
+        .map(row => row.match(/#\d+/)?.[0]),
+      ["#1", "#2"],
+      "gap recovery must restore retry attempt identity and order",
     );
 
     snapshots.push(scenario.final_snapshot);
@@ -1309,8 +1379,8 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
     }
     assert.equal(
       target.textContent.split("\n").length,
-      2,
-      "the real terminal replacement must converge to the authoritative product snapshot",
+      3,
+      "the real terminal replacement must converge to two retry rows plus the second call",
     );
   }
 });

@@ -384,7 +384,15 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
         tool_calls: Vec::new(),
         llm_calls: vec![valid_record.clone()],
         issues: Vec::new(),
-        activities: Vec::new(),
+        activities: vec![RemoteTurnActivity {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            sequence: 1,
+            id: "model-call".to_string(),
+            correlation_id: "llm-call".to_string(),
+            event: RemoteTurnEvent::ModelCallRecorded {
+                record: valid_record.clone(),
+            },
+        }],
         metadata: HashMap::new(),
     };
     result.validate().expect("valid model-call result");
@@ -402,6 +410,168 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
         retry_after_ms: None,
     });
     assert!(result.validate().is_err());
+}
+
+#[test]
+fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call() {
+    let summary = RemoteLlmCallRecord {
+        call_id: "same-call".to_string(),
+        label: Some("foreground".to_string()),
+        attempts: vec![RemoteAttemptRecord {
+            ordinal: 1,
+            started_at_ms: 7,
+            duration_ms: 9,
+            outcome: RemoteAttemptOutcome::Completed,
+            protocol_position: RemoteProtocolPosition::TerminalObserved,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: None,
+            evidence: Some(RemoteExecutionEvidence {
+                served_model: Some("served-model".to_string()),
+                provider_response_id: Some("provider-response".to_string()),
+                ..RemoteExecutionEvidence::default()
+            }),
+            generation_disposition: None,
+            usage: None,
+        }],
+    };
+    let activity_record = RemoteLlmCallRecord {
+        attempts: vec![RemoteAttemptRecord {
+            ordinal: 1,
+            started_at_ms: 7,
+            duration_ms: 9,
+            outcome: RemoteAttemptOutcome::Failed,
+            protocol_position: RemoteProtocolPosition::NoResponse,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: Some(RemoteNormalizedError {
+                class: "transport".to_string(),
+                provider_code: Some("connection_failed".to_string()),
+                http_status: None,
+                provider_request_id: None,
+                retry_after_ms: None,
+            }),
+            evidence: None,
+            generation_disposition: None,
+            usage: None,
+        }],
+        ..summary.clone()
+    };
+    let result = RemoteTurnResult {
+        protocol_version: REMOTE_PROTOCOL_VERSION,
+        session_id: "session".to_string(),
+        turn_id: "turn".to_string(),
+        status: RemoteTurnStatus::Completed,
+        outcome: RemoteTurnOutcome::Finished {
+            finish: RemoteTurnFinish::AssistantMessage {
+                text: "done".to_string(),
+            },
+        },
+        cancellation: None,
+        assistant_output: RemoteAssistantOutput::default(),
+        usage: RemoteTurnUsageSummary::default(),
+        execution: RemoteExecutionSummary::default(),
+        tool_calls: Vec::new(),
+        llm_calls: vec![summary],
+        issues: Vec::new(),
+        activities: vec![RemoteTurnActivity {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            sequence: 1,
+            id: "model-call".to_string(),
+            correlation_id: "same-call".to_string(),
+            event: RemoteTurnEvent::ModelCallRecorded {
+                record: activity_record,
+            },
+        }],
+        metadata: HashMap::new(),
+    };
+
+    assert!(matches!(
+        result.validate(),
+        Err(RemoteProtocolError::ConflictingLlmCallRecord { call_id })
+            if call_id == "same-call"
+    ));
+}
+
+#[test]
+fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
+    fn reconciled_result() -> RemoteTurnResult {
+        let record = RemoteLlmCallRecord {
+            call_id: "call-1".to_string(),
+            label: None,
+            attempts: vec![RemoteAttemptRecord {
+                ordinal: 1,
+                started_at_ms: 1,
+                duration_ms: 2,
+                outcome: RemoteAttemptOutcome::Completed,
+                protocol_position: RemoteProtocolPosition::TerminalObserved,
+                retry_budget_consumed: true,
+                retry_decision: None,
+                error: None,
+                evidence: None,
+                generation_disposition: None,
+                usage: None,
+            }],
+        };
+        RemoteTurnResult {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            session_id: "session".to_string(),
+            turn_id: "turn".to_string(),
+            status: RemoteTurnStatus::Completed,
+            outcome: RemoteTurnOutcome::Finished {
+                finish: RemoteTurnFinish::AssistantMessage {
+                    text: "done".to_string(),
+                },
+            },
+            cancellation: None,
+            assistant_output: RemoteAssistantOutput::default(),
+            usage: RemoteTurnUsageSummary::default(),
+            execution: RemoteExecutionSummary::default(),
+            tool_calls: Vec::new(),
+            llm_calls: vec![record.clone()],
+            issues: Vec::new(),
+            activities: vec![RemoteTurnActivity {
+                protocol_version: REMOTE_PROTOCOL_VERSION,
+                sequence: 1,
+                id: "event".to_string(),
+                correlation_id: "call-1".to_string(),
+                event: RemoteTurnEvent::ModelCallRecorded { record },
+            }],
+            metadata: HashMap::new(),
+        }
+    }
+
+    let mut missing_activity = reconciled_result();
+    missing_activity.activities.clear();
+    assert!(matches!(
+        missing_activity.validate(),
+        Err(RemoteProtocolError::MissingLlmCallActivity { call_id }) if call_id == "call-1"
+    ));
+
+    let mut missing_summary = reconciled_result();
+    missing_summary.llm_calls.clear();
+    assert!(matches!(
+        missing_summary.validate(),
+        Err(RemoteProtocolError::MissingLlmCallSummary { call_id }) if call_id == "call-1"
+    ));
+
+    let mut duplicate_summary = reconciled_result();
+    duplicate_summary
+        .llm_calls
+        .push(duplicate_summary.llm_calls[0].clone());
+    assert!(matches!(
+        duplicate_summary.validate(),
+        Err(RemoteProtocolError::DuplicateLlmCallSummary { call_id }) if call_id == "call-1"
+    ));
+
+    let mut duplicate_activity = reconciled_result();
+    duplicate_activity
+        .activities
+        .push(duplicate_activity.activities[0].clone());
+    assert!(matches!(
+        duplicate_activity.validate(),
+        Err(RemoteProtocolError::DuplicateLlmCallActivity { call_id }) if call_id == "call-1"
+    ));
 }
 
 #[test]
@@ -536,9 +706,15 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
             usage: RemoteTurnUsageSummary::default(),
             execution: RemoteExecutionSummary::default(),
             tool_calls: Vec::new(),
-            llm_calls: vec![record],
+            llm_calls: vec![record.clone()],
             issues: Vec::new(),
-            activities: Vec::new(),
+            activities: vec![RemoteTurnActivity {
+                protocol_version: REMOTE_PROTOCOL_VERSION,
+                sequence: 1,
+                id: "event".to_string(),
+                correlation_id: "correlation".to_string(),
+                event: RemoteTurnEvent::ModelCallRecorded { record },
+            }],
             metadata: HashMap::new(),
         }
         .validate()
