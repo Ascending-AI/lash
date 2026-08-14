@@ -150,73 +150,85 @@ fn hoisted_function_bodies_can_capture_later_const_bindings() {
 }
 
 #[test]
-fn hoisted_functions_support_cycles_and_nested_outer_captures() {
-    assert_eq!(
-        finished(
-            "function isEven(n: number): boolean { if (n === 0) { return true; } return isOdd(n - 1); } function isOdd(n: number): boolean { if (n === 0) { return false; } return isEven(n - 1); } finish(isEven(4));"
-        ),
-        Value::Bool(true)
-    );
+fn nested_function_declarations_read_enclosing_bindings() {
     assert_eq!(
         finished(
             "const top = 9; function outerFn(): number { function innerFn(): number { return top; } return innerFn(); } finish(outerFn());"
         ),
         Value::Number(9.0)
     );
-}
-
-#[test]
-fn mutually_recursive_declarations_keep_their_lexical_environment() {
-    // A three-member cycle, ordered so no member is declared before its peers.
+    // The enclosing binding is reachable regardless of source order, and
+    // through more than one level of nesting.
     assert_eq!(
         finished(
-            "function a(n: number): number { if (n === 0) { return 0; } return b(n - 1); } function b(n: number): number { return c(n); } function c(n: number): number { return 1 + a(n); } finish(a(3));"
+            "function outerFn(): number { function innerFn(): number { return later; } return innerFn(); } const later = 4; finish(outerFn());"
         ),
-        Value::Number(3.0)
+        Value::Number(4.0)
     );
-    // Cycle members still capture ordinary outer bindings, including one
-    // declared after the whole cycle.
     assert_eq!(
         finished(
-            "function ping(n: number): number { if (n === 0) { return base; } return pong(n - 1); } function pong(n: number): number { return ping(n - 1) + step; } const base = 100; const step = 10; finish(ping(4));"
+            "const seed = 2; function a(): number { function b(): number { function c(): number { return seed; } return c(); } return b(); } finish(a());"
+        ),
+        Value::Number(2.0)
+    );
+    // Self-recursion needs no peer and stays supported.
+    assert_eq!(
+        finished(
+            "function fact(n: number): number { if (n <= 1) { return 1; } return fact(n - 1) * n; } finish(fact(5));"
         ),
         Value::Number(120.0)
     );
-    // A peer read as a value rather than called, and a peer reached from a
-    // closure nested inside a cycle member.
+    // An acyclic chain of declarations is ordered, not rejected.
     assert_eq!(
         finished(
-            "function pick(n: number): number { const call = () => other(n); return call(); } function other(n: number): number { if (n === 0) { return 0; } return pick(n - 1) + 1; } finish(pick(3));"
-        ),
-        Value::Number(3.0)
-    );
-    assert_eq!(
-        finished(
-            "function left(n: number): number { const peer = right; return peer(n); } function right(n: number): number { if (n === 0) { return 7; } return left(n - 1); } finish(left(2));"
+            "function head(n: number): number { return tail(n) + 1; } function tail(n: number): number { return n * 2; } finish(head(3));"
         ),
         Value::Number(7.0)
     );
-    // A cycle nested inside a function body, and an acyclic function that
-    // depends on the cycle.
-    assert_eq!(
-        finished(
-            "function shell(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(shell(5));"
+}
+
+#[test]
+fn mutually_recursive_declarations_reject_with_their_cycle() {
+    // v1 captures by value, so a declaration cycle has no emission order; the
+    // frame-record alternative builds a heap cycle the durable encoding cannot
+    // hold. The shape rejects statically and names the cycle.
+    for (source, cycle) in [
+        (
+            "function isEven(n: number): boolean { if (n === 0) { return true; } return isOdd(n - 1); } function isOdd(n: number): boolean { if (n === 0) { return false; } return isEven(n - 1); } finish(isEven(4));",
+            "isEven -> isOdd -> isEven",
         ),
-        Value::Number(5.0)
-    );
-    assert_eq!(
-        finished(
-            "function head(n: number): number { return tail(n); } function tail(n: number): number { if (n === 0) { return 0; } return head(n - 1) + 2; } function caller(): number { return head(3); } finish(caller());"
+        (
+            "function a(n: number): number { if (n === 0) { return 0; } return b(n - 1); } function b(n: number): number { return c(n); } function c(n: number): number { return 1 + a(n); } finish(a(3));",
+            "a -> b -> c -> a",
         ),
-        Value::Number(6.0)
-    );
-    // Two independent cycles in one statement list get independent frames.
-    assert_eq!(
-        finished(
-            "function p(n: number): number { if (n === 0) { return 1; } return q(n - 1); } function q(n: number): number { return p(n); } function r(n: number): number { if (n === 0) { return 2; } return s(n - 1); } function s(n: number): number { return r(n); } finish(p(2) + r(2));"
+        (
+            "function ping(n: number): number { return pong(n); } function pong(n: number): number { return ping(n); } function caller(): number { return ping(1); } finish(caller());",
+            "ping -> pong -> ping",
         ),
-        Value::Number(3.0)
+    ] {
+        let error = lash_typescript::compile(source)
+            .expect_err("mutually recursive declarations must reject");
+        assert_eq!(
+            error.code,
+            lash_typescript::DiagnosticCode::MutualRecursionUnsupported,
+            "{source}"
+        );
+        assert!(
+            error.to_string().contains(cycle),
+            "expected cycle `{cycle}` in: {error}"
+        );
+    }
+    // A cycle nested inside a function body has the same lowering problem and
+    // takes the same rejection, with the names the author wrote.
+    let error = lash_typescript::compile(
+        "function shell(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(shell(5));",
+    )
+    .expect_err("a nested cycle must reject too");
+    assert_eq!(
+        error.code,
+        lash_typescript::DiagnosticCode::MutualRecursionUnsupported
     );
+    assert!(error.to_string().contains("up -> down -> up"), "{error}");
 }
 
 #[test]

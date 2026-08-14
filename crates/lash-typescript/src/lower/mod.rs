@@ -149,7 +149,18 @@ impl Lowerer {
             }
         }
         self.allow_uninitialized_declaration_capture = previous_capture_mode;
-        let mut pending = self.route_mutual_recursion_through_frames(pending);
+        reject_mutual_recursion(&pending, statements, self)?;
+        let mut pending = pending
+            .into_iter()
+            .map(|function| PendingBinding {
+                internal: function.internal.clone(),
+                captures: function.captures,
+                assignment: LashExpr::Assign {
+                    target: AssignTarget::variable(function.internal.into()),
+                    expr: Box::new(LashExpr::Function(Box::new(function.definition))),
+                },
+            })
+            .collect::<Vec<_>>();
 
         let flush_ready = |pending: &mut Vec<PendingBinding>,
                            available: &mut BTreeSet<String>,
@@ -194,76 +205,6 @@ impl Lowerer {
             self.scopes.pop();
         }
         Ok(output)
-    }
-
-    /// Hoisted function declarations may reference each other cyclically, which
-    /// no emission order can satisfy while closures capture by value. Each
-    /// cycle gets one generated frame record: every member captures the record
-    /// instead of its peers and rebinds those peers from it on entry, so the
-    /// peer values are read when the member runs rather than when it is built.
-    fn route_mutual_recursion_through_frames(
-        &mut self,
-        pending: Vec<PendingFunction>,
-    ) -> Vec<PendingBinding> {
-        let index_by_internal = pending
-            .iter()
-            .enumerate()
-            .map(|(index, function)| (function.internal.as_str(), index))
-            .collect::<BTreeMap<_, _>>();
-        let edges = pending
-            .iter()
-            .map(|function| {
-                function
-                    .captures
-                    .iter()
-                    .filter_map(|capture| index_by_internal.get(capture.as_str()).copied())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        let mut frame_of = vec![None; pending.len()];
-        let mut frames = Vec::new();
-        for component in strongly_connected_components(&edges) {
-            if component.len() < 2 {
-                continue;
-            }
-            let frame = format!("{GENERATED_BINDING_PREFIX}{}_frame", self.next_binding);
-            self.next_binding += 1;
-            let peers = component
-                .iter()
-                .map(|member| pending[*member].internal.clone())
-                .collect::<BTreeSet<_>>();
-            for member in &component {
-                frame_of[*member] = Some(frames.len());
-            }
-            frames.push((frame, peers));
-        }
-
-        let mut bindings = Vec::with_capacity(pending.len() + frames.len());
-        for (frame, _) in &frames {
-            bindings.push(PendingBinding {
-                internal: frame.clone(),
-                captures: BTreeSet::new(),
-                assignment: LashExpr::Assign {
-                    target: AssignTarget::variable(frame.as_str().into()),
-                    expr: Box::new(LashExpr::Record(Vec::new())),
-                },
-            });
-        }
-        for (index, function) in pending.into_iter().enumerate() {
-            let Some((frame, peers)) = frame_of[index].map(|frame| &frames[frame]) else {
-                bindings.push(PendingBinding {
-                    internal: function.internal.clone(),
-                    captures: function.captures,
-                    assignment: LashExpr::Assign {
-                        target: AssignTarget::variable(function.internal.into()),
-                        expr: Box::new(LashExpr::Function(Box::new(function.definition))),
-                    },
-                });
-                continue;
-            };
-            bindings.push(frame_bound_member(function, frame, peers));
-        }
-        bindings
     }
 
     fn predeclare(&mut self, statements: &[Stmt], root: bool) -> Result<(), Diagnostic> {
@@ -878,62 +819,95 @@ impl Lowerer {
     }
 }
 
-/// Rebuild one member of a mutually recursive group against its frame record.
-///
-/// The member captures the record in place of its peers and opens its body by
-/// reading each peer out of the record into the member's own frame slot, so the
-/// body — and every closure nested in it — keeps referring to the peers by the
-/// same name it already lowered.
-fn frame_bound_member(
-    function: PendingFunction,
-    frame: &str,
-    peers: &BTreeSet<String>,
-) -> PendingBinding {
-    let PendingFunction {
-        internal,
-        captures,
-        mut definition,
-    } = function;
-    let bound_peers = captures.intersection(peers).cloned().collect::<Vec<_>>();
-    let captures = captures
-        .difference(peers)
-        .cloned()
-        .chain(std::iter::once(frame.to_string()))
-        .collect::<BTreeSet<_>>();
-    definition.captures = captures.iter().map(|capture| capture.into()).collect();
-    let mut body = bound_peers
-        .into_iter()
-        .map(|peer| LashExpr::Assign {
-            target: AssignTarget::variable(peer.as_str().into()),
-            expr: Box::new(frame_field(frame, &peer)),
+/// v1 lowers a closure's captures by value, so a cycle of hoisted function
+/// declarations has no emission order: each member needs its peers' values
+/// before any of them exists. Routing the cycle through a shared mutable frame
+/// record would work in memory but builds a heap cycle reachable from a durable
+/// root, which the durable encoding rejects — the program would run and then
+/// fail to persist. The dialect therefore rejects the shape up front and names
+/// the cycle it found.
+fn reject_mutual_recursion(
+    pending: &[PendingFunction],
+    statements: &[Stmt],
+    lowerer: &Lowerer,
+) -> Result<(), Diagnostic> {
+    let index_by_internal = pending
+        .iter()
+        .enumerate()
+        .map(|(index, function)| (function.internal.as_str(), index))
+        .collect::<BTreeMap<_, _>>();
+    let edges = pending
+        .iter()
+        .map(|function| {
+            function
+                .captures
+                .iter()
+                .filter_map(|capture| index_by_internal.get(capture.as_str()).copied())
+                .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    body.push(*definition.body);
-    definition.body = Box::new(LashExpr::Block(body));
-    PendingBinding {
-        assignment: LashExpr::Block(vec![
-            LashExpr::Assign {
-                target: AssignTarget {
-                    root: frame.into(),
-                    steps: vec![AssignPathStep::Field(internal.as_str().into())],
-                },
-                expr: Box::new(LashExpr::Function(Box::new(definition))),
-            },
-            LashExpr::Assign {
-                target: AssignTarget::variable(internal.as_str().into()),
-                expr: Box::new(frame_field(frame, &internal)),
-            },
-        ]),
-        internal,
-        captures,
-    }
+    let Some(component) = strongly_connected_components(&edges)
+        .into_iter()
+        .find(|component| component.len() > 1)
+    else {
+        return Ok(());
+    };
+
+    // Report the cycle with the names the author wrote, not the mangled ones.
+    let source_names = statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Stmt::Function { name, .. } => lowerer
+                .binding(name)
+                .ok()
+                .map(|binding| (binding.internal.clone(), name.clone())),
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    let display = |member: usize| {
+        let internal = &pending[member].internal;
+        source_names.get(internal).unwrap_or(internal).clone()
+    };
+    let cycle = shortest_cycle_through(&edges, component[0])
+        .into_iter()
+        .map(display)
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    Err(Diagnostic::new(
+        DiagnosticCode::MutualRecursionUnsupported,
+        format!("mutually recursive function declarations are not supported in v1; cycle: {cycle}"),
+        None,
+    ))
 }
 
-fn frame_field(frame: &str, field: &str) -> LashExpr {
-    LashExpr::Field {
-        target: Box::new(LashExpr::Variable(frame.into())),
-        field: field.into(),
+/// The shortest cycle through `start`, as `start -> … -> start`.
+fn shortest_cycle_through(edges: &[Vec<usize>], start: usize) -> Vec<usize> {
+    let mut parent = vec![None; edges.len()];
+    let mut queue = std::collections::VecDeque::from([start]);
+    let mut seen = vec![false; edges.len()];
+    seen[start] = true;
+    while let Some(node) = queue.pop_front() {
+        for target in &edges[node] {
+            if *target == start {
+                let mut path = vec![start];
+                let mut step = Some(node);
+                while let Some(current) = step {
+                    path.push(current);
+                    step = parent[current];
+                }
+                path.reverse();
+                path.push(start);
+                path.dedup();
+                return path;
+            }
+            if !seen[*target] {
+                seen[*target] = true;
+                parent[*target] = Some(node);
+                queue.push_back(*target);
+            }
+        }
     }
+    vec![start]
 }
 
 /// Kosaraju's algorithm over the capture graph, iterative so that a deeply
