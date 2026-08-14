@@ -262,6 +262,34 @@ confidence-broad:
 confidence-full:
   bash "{{repo}}/scripts/confidence-gate.sh" full
 
+# Iteration-only workspace test run: the whole suite except six tests that
+# between them account for most of its wall clock. It exists to shorten the
+# edit-test loop, and it proves nothing on its own. The full battery stays
+# mandatory at review and stacking boundaries; `just push-gate`, the
+# `just confidence*` lanes, and CI all keep running the unfiltered workspace
+# suite, and this recipe changes none of them.
+#
+# Measured on a 32-core box: 3848 of the 3854 tests in 38s, against 204s for
+# the full run. The list is those six by measurement, not a category sweep —
+# the cheap tests beside them keep running. Each exclusion, and why deferring
+# it during iteration is safe:
+#   lash-sim `minimizer_preserves_named_contract_execution_fixture_reasons`
+#     (180s), `generated_sim_profile_writes_trace_replay_and_provider_artifacts`
+#     (169s), `minimizer_preserves_provider_worker_backend_fixture_reasons`
+#     (138s), and `minimizer_writes_replayable_regression_package` (95s) —
+#     counterexample minimization and the generated simulation harness,
+#     replayed across the committed fixture corpora. These four are the
+#     critical path of the full run; the other minimizer tests are cheap and
+#     stay in.
+#   lash-runtime `ui` binary — the trybuild compile-fail gates on the public
+#     API surface. Only 16s once trybuild's nested target directory is warm,
+#     but each case is a nested `cargo build`, so on a cold cache the pair
+#     costs minutes. The cost is compilation rather than product logic, and
+#     only an API-surface change can move the result.
+# Drop the leading `not` from the expression to run only the excluded set.
+battery-fast:
+  cargo nextest run --workspace --locked -E 'not ((package(lash-runtime) & binary(ui)) + (package(lash-sim) & test(/^(minimize::tests::minimizer_preserves_named_contract_execution_fixture_reasons|minimize::tests::minimizer_preserves_provider_worker_backend_fixture_reasons|minimize::tests::minimizer_writes_replayable_regression_package|runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)$/)))'
+
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':

@@ -183,3 +183,11 @@ swc_ecma_parser = { version = "=44.0.0", default-features = false, features = ["
 [profile.release]
 lto = "thin"
 strip = true
+
+# Third-party dependencies build optimized in debug builds; workspace crates
+# stay at opt-level 0 so local iteration keeps its fast rebuild and its
+# debuggability. Test suites that spend their time inside dependency code
+# (SQLite, serde, regex, the async runtime) pay dependency compilation once
+# and read back the difference on every subsequent test run.
+[profile.dev.package."*"]
+opt-level = 2
