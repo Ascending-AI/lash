@@ -8,7 +8,25 @@ mod diagnostics;
 mod lower;
 mod signatures;
 
-pub use adapter::MAX_SOURCE_NESTING_DEPTH;
+pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH};
+
+/// Parses with the source-nesting preflight disabled, leaving the parse-thread
+/// stack reservation as the only thing standing between a deep source and the
+/// native stack. Exists so a test can demonstrate that the no-abort guarantee
+/// does not depend on the preflight.
+#[cfg(feature = "testing")]
+pub fn parse_without_nesting_preflight(source: &str) -> Result<lashlang::Program, Diagnostic> {
+    let normalized = adapter::parse_without_nesting_preflight(source)?;
+    lower::lower(&normalized)
+}
+
+/// Parses on the caller's own stack with no guard at all, for measuring how
+/// much stack the parser needs per source byte.
+#[cfg(feature = "testing")]
+pub fn parse_unguarded_for_measurement(source: &str) -> Result<lashlang::Program, Diagnostic> {
+    let normalized = adapter::parse_unguarded(source)?;
+    lower::lower(&normalized)
+}
 /// The prefix on every binding the lowerer generates. Source identifiers that
 /// start with it are rejected, so a name carrying it is always generated — and
 /// never something a caller should render back to a user.

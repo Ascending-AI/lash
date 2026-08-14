@@ -2705,6 +2705,7 @@ name = "lash-typescript"
 version = "0.0.0-dev"
 dependencies = [
  "futures",
+ "lash-typescript",
  "lashlang",
  "serde_json",
  "swc_common",

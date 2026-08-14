@@ -13,6 +13,9 @@ description = "The ECMA-exact TypeScript dialect front-end for the Lash heap VM.
 keywords = ["lash", "typescript", "codeact", "agent"]
 categories = ["compilers", "parser-implementations"]
 
+[features]
+testing = []
+
 [lints]
 workspace = true
 
@@ -26,5 +29,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 futures = "0.3"
+lash-typescript = { path = ".", features = ["testing"] }
 swc_common = { workspace = true }
 swc_ecma_ast = { workspace = true }

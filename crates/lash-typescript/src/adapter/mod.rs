@@ -180,8 +180,105 @@ pub(crate) enum LogicalOp {
     Nullish,
 }
 
+/// The largest TypeScript cell this dialect will read. Sources above it reject
+/// with `TS_SOURCE_TOO_LARGE`; the bound is what makes the parse stack
+/// reservation below finite. 64 KiB is roughly 1 600 lines of TypeScript.
+pub const MAX_SOURCE_BYTES: usize = 64 * 1024;
+
+/// Stack reserved before any source-proportional allowance. It covers the
+/// parser's fixed frames and the conversion and lowering that follow, both of
+/// which are bounded by the adapter's own depth counter and the shared AST's
+/// nesting limit rather than by the source.
+const PARSE_STACK_BASE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Parser stack reserved per source byte.
+///
+/// A nesting level costs at least two source bytes — a delimiter needs an
+/// opener and a closer, a label needs a name byte and its `:` — so a source of
+/// `n` bytes cannot nest deeper than `n / 2` levels. The worst measured frame
+/// cost across the whole six-round abort corpus is 19 552 bytes per level, on
+/// parenthesis nesting in a debug build (release: 2 812; label chains, the
+/// densest in *source* terms, cost 10 845). Stack usage is linear in depth:
+/// measured at depths 1 000, 2 000, 4 000 and 8 000, the per-level cost varies
+/// by under half a percent.
+///
+/// So the requirement is at most `19 552 / 2 = 9 776` bytes per source byte,
+/// and reserving 40 000 leaves a 4.09x margin over the worst debug shape and
+/// 28x over the worst release shape. With [`MAX_SOURCE_BYTES`] at 64 KiB the
+/// largest reservation is 8 MiB + 2.44 GiB, which is address space rather than
+/// memory: pages commit only when touched, and an ordinary cell touches a few
+/// hundred kilobytes. Overflow is arithmetically out of reach rather than
+/// guarded against, which is the point — see `nesting.rs` for why that matters.
+const PARSE_STACK_BYTES_PER_SOURCE_BYTE: usize = 40_000;
+
+/// The stack a source of this size is parsed on.
+fn parse_stack_size(source_bytes: usize) -> usize {
+    PARSE_STACK_BASE_BYTES + PARSE_STACK_BYTES_PER_SOURCE_BYTE * source_bytes
+}
+
+fn guard_source_size(source: &str) -> Result<(), Diagnostic> {
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(Diagnostic::new(
+            DiagnosticCode::SourceTooLarge,
+            format!(
+                "TypeScript source is {} bytes, over the {MAX_SOURCE_BYTES}-byte limit; split the cell",
+                source.len()
+            ),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+/// The full front-end entry: bound the source, reject nesting with a
+/// source-level diagnostic, then parse on a stack sized for the source.
 pub(crate) fn parse(source: &str) -> Result<Program, Diagnostic> {
+    guard_source_size(source)?;
     guard_source_nesting(source)?;
+    parse_on_proportional_stack(source)
+}
+
+/// The same path with the nesting preflight removed, so a test can demonstrate
+/// that the no-abort guarantee rests on the stack reservation rather than on
+/// the preflight agreeing with SWC about the shape of the source.
+#[cfg(feature = "testing")]
+pub(crate) fn parse_without_nesting_preflight(source: &str) -> Result<Program, Diagnostic> {
+    guard_source_size(source)?;
+    parse_on_proportional_stack(source)
+}
+
+/// Parse on the caller's own stack with no guard at all. Only a stack
+/// measurement wants this; everything else goes through [`parse`].
+#[cfg(feature = "testing")]
+pub(crate) fn parse_unguarded(source: &str) -> Result<Program, Diagnostic> {
+    parse_source(source)
+}
+
+fn parse_on_proportional_stack(source: &str) -> Result<Program, Diagnostic> {
+    let stack_size = parse_stack_size(source.len());
+    std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .name("typescript-parse".to_string())
+            .stack_size(stack_size)
+            .spawn_scoped(scope, || parse_source(source))
+            .map_err(|error| {
+                Diagnostic::new(
+                    DiagnosticCode::InvalidAst,
+                    format!("the TypeScript parse thread could not be started: {error}"),
+                    None,
+                )
+            })?;
+        handle.join().unwrap_or_else(|_| {
+            Err(Diagnostic::new(
+                DiagnosticCode::SyntaxError,
+                "the TypeScript parser failed while reading this source",
+                None,
+            ))
+        })
+    })
+}
+
+fn parse_source(source: &str) -> Result<Program, Diagnostic> {
     let end = u32::try_from(source.len()).unwrap_or(u32::MAX);
     let lexer = Lexer::new(
         Syntax::Typescript(TsSyntax {
