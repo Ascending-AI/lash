@@ -10,7 +10,9 @@ Round-2 fix baseline: `13e31367e` (first decisive fresh-eyes verification, verdi
 
 Round-3 fix baseline: `4dc2bd5cc` (round-2 closure verification, verdict BLOCK)
 
-Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed, all ten findings from the first verification round are closed, and all five findings from the round-2 closure verification are closed. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
+Round-4 fix baseline: `712665428` (round-3 closure verification, verdict BLOCK)
+
+Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed, all ten findings from the first verification round are closed, all five findings from the round-2 closure verification are closed, and all five findings from the round-3 closure verification are closed. The no-abort guarantee is no longer verified shape-by-shape: it is now carried by a generative regression over the grammar's recursive-production families. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
 
 This layer is still a **pure calculator**. A TypeScript cell has no tool calls, no `await`, and no deferred tool resolution. Rendered tool signatures are synchronous descriptions for FIG-1305; they do not make tools executable here.
 
@@ -72,6 +74,20 @@ The closure verification confirmed both round-1 P0s closed and returned BLOCK on
 | R2-5 | A named function expression binds its own name inside its body, so the classic self-recursive function expression works; the generated namespace is reserved on that path too. | `250b549f0` | `0fac55e0e` |
 | R2-3 | The README states the budget in units with a measured per-form cost table instead of a bare 28. | — | `c6546721c` |
 
+### Round 4 — round-3 closure verification
+
+Round 3 closed every round-2 finding and re-opened the round-1 no-abort guarantee for two shape families nobody had enumerated. That is the third round in which the guarantee held for the shapes under test and failed for a shape outside them, so round 4 replaces the hand-written corpora with a generative guard.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| R3-1 | The ASI release treated every operand-opening keyword as able to end a statement, so `typeof\n`, `void\n`, `new\n` and `delete\n` chains released the budget on every line and aborted the process at ~1 500 lines. Only `return` among them can end a statement; a word's statement-ending and expression-ending bits are now tracked separately. | `b3c26f11f` | `160af2346` |
+| R3-2 | Postfix tails — call, subscript, tagged template — opened *and closed* a delimiter pair per link, so a chain of any length sat at depth one while the tree it produced was as deep as the chain. A single-line 20 000-link chain aborted. A postfix frame now charges a unit that survives the pair closing. Present since round 2. | `b3c26f11f` | `160af2346` |
+| R3-3 | A line comment consumed its own newline, so a trailing `//` suppressed the ASI release and 27 semicolon-free statements with trailing comments falsely rejected. The rule now runs on the transition out of the comment. | `b3c26f11f` | `160af2346` |
+| R3-4 | A root-level `catch` or block binding was mangled unconditionally and, at root, published a generated `__typescript_` name into the durable globals and the bound-variables prompt. Mangling now happens only where a name of the same spelling is actually visible; the residual shadowing case keeps a generated slot and the dialect filters the reserved prefix out of the prompt. | `b3c26f11f` | `3b1deab30` |
+| R3-5 | The per-form cost table carries the postfix cost, the ASI rules, and the re-measured ceilings. | — | `a66f822db` |
+
+Fixing R3-2 initially charged a statement head (`if (…)`) as a postfix call, which cost every `if`/`while` block a third unit and dropped its documented ceiling from 13 to 9; `7879c7f23` separates ending a statement from ending an expression and restores it.
+
 Closing R2-1 exposed one further abort shape of my own making — a newline-separated `if (1)` chain released the budget on every line and reached SWC unbounded — which the same fix closes by suppressing the release while a statement form is open; the 26-shape 2 MiB abort sweep covers it.
 
 The optional register line on `console.log` versus Node's inspector formatting landed with `b49499b7e`. Auxiliary round-3 repair: `0e47352a5` (strict-lint style). Auxiliary repairs are `a2bdf3b3d` (strict-lint style) and, from round 1, `074b24b3e` (synchronous signature docs assertion), `db4201eb7` and `ea8ca2aeb` (strict-lint style), and `67de889dd` (remove one redundant Lashlang test so its established package count remains 461). None changes the accepted language contract.
@@ -95,6 +111,8 @@ Free `console.log` accepts zero or more arguments. Each argument receives ECMA `
 ### Source nesting
 
 The effective v1 TypeScript source-nesting budget is **28 levels, cumulative and shared**. It is one budget, not several independent ones: every open delimiter (`(`, `[`, `{`, and a template hole) and every nested recursive operator or statement form draws on the same 28 units. Recursive forms are the prefix operators (`!`, `~`, unary `+`/`-`, `typeof`, `void`, `delete`, `new`, `await`, `yield`), the binary, ternary and member operators, and the statement keywords (`if`, `while`, `do`, `for`, `in`, `instanceof`, `with`). Operator counts from an enclosing delimiter frame stay active while the scanner visits an inner expression, so mixed nesting can no longer reach a multiple of the nominal cap the way three independent delimiter counters allowed. A statement boundary — `;`, `,`, the `}` that closes a statement block, or a newline in automatic-semicolon-insertion position — releases the operator run it terminates, so a flat sequence of statements is one level deep however long it runs, punctuated or not. The ASI release is suppressed while a statement form is still open (`if (1)` alone on a line is not a complete statement) and when the next token continues the expression (a leading `.`, `+`, `(` and so on); both suppressions are load-bearing, since without them a newline-separated chain reaches the parser unbounded. A brace-free chain such as `if (1) if (1) …` still accumulates and rejects.
+
+A postfix tail — `f(1)`, `a[0]`, a member step, a tagged template — charges a unit that outlives the pair it closes, because the tail leaves the tree one level deeper than it found it. Without that charge a chain of any length stayed at depth one, which is how `f(1)(1)…` reached SWC unbounded from round 2 until round 4. The charge applies only where the preceding token can end an expression, so a statement head like `if (…)` is not mistaken for a call.
 
 Template holes draw on the budget like binary-chain terms, because a template lowers to a left-nested concatenation chain whose depth outlives each hole. That is what keeps the source budget binding *before* the shared AST's own nesting limit: a sweep of eight shapes — templates, concatenation, arrays, calls, member chains, prefix operators, ternaries and objects — at every count up to 80 confirms no accepted-grammar source can reach `TS_INVALID_SHARED_AST`. The 28 is a budget in units, not visible levels; the README carries the measured per-form cost table. The adapter enforces the same 28 with one shared counter across statement and expression conversion.
 
@@ -140,7 +158,8 @@ These are the only intentional deviations for the accepted v1 surface. They are 
 6. Lone UTF-16 surrogates are not representable by the v1 UTF-8 value model. Literals reject statically as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; two further shapes produce one only at runtime and reject there as `TS_LONE_SURROGATE_UNSUPPORTED` — splitting a string containing an astral character into units, and indexing into one. Both are catchable TypeScript exceptions.
 7. Negative and other non-index array writes reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; non-negative out-of-range writes retain ECMAScript hole-extension behavior.
 8. Identifiers starting with `__typescript_` are reserved for the lowerer's generated bindings and reject as `TS_RESERVED_IDENTIFIER`.
-10. Mutually recursive function declarations reject as `TS_MUTUAL_RECURSION_UNSUPPORTED` with the cycle named. This is item 3's deferral seen from the front end: the only v1 lowering for the shape builds a durable-rooted heap cycle, so the shape fails closed at compile time instead of at the durability boundary.
+10. A block-scoped binding that shadows an outer name of the same spelling is lowered to a generated slot, which is the one place a `__typescript_` name can appear in persisted globals. It is dead by any turn boundary and the dialect filters the reserved prefix out of the bound-variables prompt, so it is never rendered.
+11. Mutually recursive function declarations reject as `TS_MUTUAL_RECURSION_UNSUPPORTED` with the cycle named. This is item 3's deferral seen from the front end: the only v1 lowering for the shape builds a durable-rooted heap cycle, so the shape fails closed at compile time instead of at the durability boundary.
 9. `console.log` is host-defined rather than ECMA-262 and prints ECMA `ToString` of each argument, so `console.log({a: 1})` prints `[object Object]` where Node's inspector prints `{ a: 1 }`.
 
 No reviewed semantic divergence was moved into this register.
@@ -171,18 +190,19 @@ Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR
 | `just perf-guard` | PASS | 297 Lashlang perf results and 1 profile result; runtime and stack budgets passed. |
 | `bash scripts/check-production-file-size.sh` | PASS | Production and test/support files remain within repository budgets. |
 | `git diff --check 93874e275..HEAD` | PASS | No whitespace errors across the whole branch before the final report commit. |
-| `cargo test -p lash-typescript --locked` | PASS | 115 tests across unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites (94 before round 2, 109 before round 3). |
+| `cargo test -p lash-typescript --locked` | PASS | 165 tests across unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites (94 before round 2, 109 before round 3, 115 before round 4). |
 | Committed Node differential table | PASS | All 310 rows match the checked Node v25.2.1 expectations or named rejection; regeneration under Node v25.2.1 reproduces the committed file byte for byte. |
 | `node crates/lash-typescript/tests/differential/generate.mjs` | PASS | Deliberate regeneration, Node version stamped and enforced by the generator. |
 | Base-vs-head Lashlang byte identity | PASS | Seven of seven raw artifact and normalized continuation records match; combined SHA-256 shown above. |
 | `cargo test -p lashlang --locked` | PASS | 461 unit tests passed, unchanged; all package integration/property/stack tests also passed. |
-| Verifier nesting sweep (2 MiB stack, 26 shapes) | PASS | Every delimiter, operator, statement, template and newline-separated shape returns `TS_SOURCE_NESTING_LIMIT`; zero aborts. |
+| Generative family sweep (48 units x 100 000 repeats, 2 MiB child processes) | PASS | Every recursive production of the accepted grammar, and mixed combinations, returns `TS_SOURCE_NESTING_LIMIT` with a clean exit. |
+| Legal ASI corpus (trailing/block comments, CRLF, multiline templates, newline arrow bodies, 120-statement sequences) | PASS | No false rejection. |
 | Shared-AST leak sweep (8 shapes x 80 counts) | PASS | No accepted-grammar source reaches `TS_INVALID_SHARED_AST`. |
 | Durability corpus (suspend + snapshot) | PASS | Every accepted binding shape suspends, encodes its continuation, and snapshots; no generated name reaches the global surface. |
 
 The first verification pass exposed a stale docs-snippet assertion that still expected `Promise` signatures and two strict-lint style findings. Commits `074b24b3e`, `db4201eb7`, and `ea8ca2aeb` corrected them; every affected gate and the full battery were rerun successfully on the corrected tree. In round 2 the workspace suite exited 0 on the first run; the `lash-sqlite-store` `sqlite_real_turn_crash_matrix` seeded flake recorded by the verifier (P3-9) did not reproduce, and it remains a pre-existing concurrency-load flake unrelated to this layer — no TypeScript or Lashlang code path is involved.
 
-Round 3 reran the whole battery on the final tree; the workspace suite again exited 0 on the first run and the `sqlite_real_turn_crash_matrix` seeded flake did not recur.
+Round 4 reran the whole battery again on the final tree, with the workspace suite green on the first run. Round 3 reran the whole battery on the final tree; the workspace suite again exited 0 on the first run and the `sqlite_real_turn_crash_matrix` seeded flake did not recur.
 
 The `ToNumber(String)` whitespace correction lives in `crates/lashlang/src/runtime/javascript.rs`, which is reached only through the `JavaScriptUnary`/`JavaScriptBinary` opcodes the TypeScript lowering emits. No Lashlang program semantics, and no semantic hash, change with it.
 
@@ -195,6 +215,8 @@ The `ToNumber(String)` whitespace correction lives in `crates/lashlang/src/runti
 No compatibility shim, fallback parser, dual execution path, migration adapter, silent semantic divergence, or `docs/adr/` change was added.
 
 ## Round-2 verification note
+
+The round-4 fixes changed the method, not only the code. The no-abort property had been verified against hand-written shape corpora three rounds running, and each round a family outside the corpus aborted the process. `src/adapter/nesting.rs` now carries the argument that the accepted grammar's recursive productions fall into exactly five families — prefix, infix, postfix, delimiter, statement form — with the reasoning for why nothing else recurses, and `tests/depth_guard.rs` turns that argument into the standing guard: 48 generated units, each repeated to 100 000 and parsed in its own process on the 2 MiB stack contract, covering every family and mixed combinations of them. The instance tests remain, but they are no longer what carries the guarantee. Writing the sweep found both round-3 P0s immediately.
 
 The round-3 fixes were likewise driven red-first: the durability regression suspends and snapshots the way an RLM session does between turns, so it reproduces R2-4 at the boundary the verifier used rather than through `lashlang::execute`, which is exactly what the round-2 scoping tests missed.
 
