@@ -420,7 +420,9 @@ const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
     ("mixed-postfix-after-keyword", "typeof a(1)", ";"),
     ("mixed-infix-postfix", "1+a[0]", ";"),
     ("mixed-alternating", "!(1)[0].a typeof ", "1;"),
-    ("mixed-newline-alternation", "!\na(1)\n.a\n", ";"),
+    // A prefix chain broken across lines: each newline sits mid-expression, so
+    // none of them ends a statement and the run must keep accumulating.
+    ("mixed-newline-alternation", "!\ntypeof\n-\n", "1;"),
     ("mixed-delimiter-statement", "if (1) { (", "1"),
 ];
 
