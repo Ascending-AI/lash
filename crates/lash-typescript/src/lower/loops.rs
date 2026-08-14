@@ -269,9 +269,7 @@ fn statement_mentions_binding(stmt: &Stmt, binding: &str) -> bool {
 /// When the iterable names no binding — a call result, a literal — nothing in
 /// the body can reach it and the body is unrestricted.
 pub(super) fn body_may_mutate_iterable(iterable: &Expr, body: &Stmt) -> Option<String> {
-    let Some(binding) = expression_root_binding(iterable) else {
-        return None;
-    };
+    let binding = expression_root_binding(iterable)?;
     for expr in statement_expressions(body) {
         if let Some(reason) = expression_may_mutate(expr, binding) {
             return Some(reason);

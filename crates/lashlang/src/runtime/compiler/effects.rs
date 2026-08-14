@@ -226,8 +226,8 @@ impl Compiler {
         // settlement order. `allSettled` reports every leaf as a record and
         // never unwraps one, so it must not validate — let alone die on —
         // metadata it does not read.
-        let selects_by_settlement_order = self.dialect == CompilationDialect::Typescript
-            && leaves.iter().any(|leaf| leaf.unwrap);
+        let selects_by_settlement_order =
+            self.dialect == CompilationDialect::Typescript && leaves.iter().any(|leaf| leaf.unwrap);
         let batch = self.push_resource_operation_batch(CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
             shape,

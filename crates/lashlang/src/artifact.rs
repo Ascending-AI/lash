@@ -143,11 +143,7 @@ pub struct ModuleArtifact {
     pub host_requirements_ref: HostRequirementsRef,
     pub host_requirements: HostRequirements,
     pub exports: ModuleExports,
-    /// Required: a stored artifact always names the dialect it was compiled
-    /// for. A default would let an artifact whose JSON predates the field decode
-    /// as Lashlang and verify, which is the one way a TypeScript artifact could
-    /// be compiled with Lashlang semantics. Nothing released carries the field,
-    /// so there is no compatibility to preserve.
+    /// Never defaulted: a defaulted dialect lets a TypeScript artifact verify as Lashlang.
     pub compilation_dialect: crate::CompilationDialect,
     #[serde(default)]
     pub trigger_key_manifest: TriggerKeyManifest,
