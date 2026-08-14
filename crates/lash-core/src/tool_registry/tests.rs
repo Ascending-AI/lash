@@ -113,6 +113,34 @@ mod tests {
         .build()
     }
 
+    #[tokio::test]
+    async fn internal_execution_route_refuses_non_internal_activation() {
+        let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+        let tool = test_tool_context();
+        let context = crate::InternalProcessContext::__for_testing(&tool);
+
+        let result = registry
+            .execute_internal_by_id(
+                &tool_id("mock_tool"),
+                &serde_json::json!({}),
+                &context,
+            )
+            .await;
+
+        assert!(
+            !result.as_output().is_success(),
+            "an Always-activated tool must not cross the internal route"
+        );
+        assert!(
+            result
+                .as_output()
+                .value_for_projection()["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("not activated for internal execution")),
+            "the class-boundary refusal must be explicit: {result:?}"
+        );
+    }
+
     #[async_trait::async_trait]
     impl ToolProvider for MockTool {
         fn tool_manifests(&self) -> Vec<ToolManifest> {

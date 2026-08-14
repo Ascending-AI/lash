@@ -88,15 +88,25 @@ The structural rule remains:
 
 > A recorded body must not emit commands into an ordinal-addressed journal.
 
-FIG-1294 enforces it by construction. `ToolContext` no longer exposes process
-administration, and the former command guard and refusal vocabulary are gone.
-Leaf providers receive only `AttemptContext`; its process/session projections
-are controller-free reads. Owner-bound internal process bodies receive the
-separate `InternalProcessContext`, and authored orchestration receives
-`OrchestrationContext`, so neither durable class is smuggled into a leaf body.
-The controller-decorating sentinel now asserts the post-cutover invariant
-directly: exactly zero controller crossings occur while a leaf attempt body is
-open. A deliberate test-only leak proves the sentinel still trips.
+FIG-1294 enforces the leaf boundary by construction only for providers that opt
+in through `supports_attempt_context`. Those providers receive only
+`AttemptContext`; its process/session projections are controller-free reads,
+and the trybuild fixture `attempt_context_has_no_journal_capability.rs` proves
+that the leaf type cannot obtain a controller-backed process scope. The law
+`sentinel_allows_no_undeclared_crossing_from_inside_an_attempt` proves exactly
+zero controller crossings while such a leaf attempt body is open, and
+`sentinel_test_only_leak_trips_inside_a_recorded_attempt` proves the detector
+still trips. `ToolContext` no longer exposes process administration, while
+owner-bound internal process bodies receive `InternalProcessContext` and
+authored orchestration receives `OrchestrationContext`.
+
+`supports_attempt_context` deliberately defaults to `false`. A provider that
+has not opted in therefore still receives the full legacy `ToolContext`; its
+surviving journal-capable routes remain guarded on ordinal-addressed tiers.
+`legacy_tool_context_guards_and_journal_free_routes_hold_inside_recorded_attempt`
+proves the three remaining guards (`sessions().start_turn()`,
+`dispatch().batch()`, and `triggers().emit()`) together with the surviving
+journal-free capability inventory inside a real recorded attempt.
 
 Layer 2 reclassified the shipped tool routes before that deletion:
 `shell.start`/detach declare `StartProcess`, `shell.write` declares
@@ -146,9 +156,30 @@ Outside a turn, a host binds `LashCore::tool_intents` to an actual session and
 submits one typed intent through `ToolIntentIngress::submit`. This is the sole
 host front door for durable leaf-style declarations. The identity-derived
 replay key is validated before admission and drives the process effect, so a
-duplicate returns the same typed outcome and a crash after journal admission
-redrives exactly one realization. Foreign session/scope keys and malformed
-transport keys return typed ingress refusals.
+controller-owned key-addressed journal returns the first typed outcome for an
+identical duplicate and marks it `replayed`; the laws
+`duplicate_host_submit_returns_the_same_outcome_and_realizes_once` and
+`host_ingress_duplicate_replays_the_same_outcome_once_on_postgres` prove the
+in-memory and real PostgreSQL front doors. A reused identity whose replayed
+outcome has a different intent kind returns
+`IdentityBoundToDifferentIntent`, as proved by
+`identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking` and
+`identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success`.
+Runtime-owned tiers have no effect journal; a process-store replay-key collision
+surfaces as the typed `DuplicateIdentity` ingress refusal, proved by
+`runtime_owned_duplicate_identity_is_a_typed_ingress_refusal`. On an
+ordinal-addressed tier every external submit is a new engine invocation rather
+than a key lookup, so a host must not treat a second invocation as an ingress
+idempotency retry; `checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes`
+pins replay only within the owning Restate invocation. The law
+`crash_after_admission_redrives_to_exactly_one_realization` durably records the
+mock admission before its injected crash, while
+`attempt_with_nested_command_redrives_identically_on_the_key_addressed_tier` and
+`recorded_intent_command_replays_after_live_terminal_mutation_on_postgres` pin
+the real journal-first window. Foreign session/scope keys and malformed
+transport keys return typed ingress refusals, as proved by
+`foreign_session_and_turn_keys_are_typed_refusals` and
+`malformed_key_is_a_typed_refusal_before_realization`.
 
 For a process parent, "reaches its end" means after its terminal outcome is
 durable. The terminal write atomically retains a compact

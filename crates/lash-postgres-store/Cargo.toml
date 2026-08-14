@@ -39,6 +39,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash = { workspace = true, features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }

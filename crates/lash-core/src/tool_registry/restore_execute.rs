@@ -378,7 +378,11 @@ impl ToolProvider for ToolRegistry {
             Ok(resolved) => resolved,
             Err(result) => return result,
         };
-        let _ = manifest;
+        if manifest.activation != crate::ToolActivation::Internal {
+            return ToolResult::err_fmt(format_args!(
+                "tool id `{tool_id}` is not activated for internal execution"
+            ));
+        }
         source
             .execute_internal_by_id(tool_id, args, context)
             .await

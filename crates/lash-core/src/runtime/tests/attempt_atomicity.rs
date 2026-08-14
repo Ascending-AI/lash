@@ -352,6 +352,182 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
     );
 }
 
+/// Providers that have not opted into `AttemptContext` still receive the
+/// legacy `ToolContext`. Exercise every surviving journal-capable route and its
+/// journal-free capability inventory inside a real recorded attempt so the
+/// ordinal guards remain end-to-end, not merely module-local.
+#[tokio::test]
+async fn legacy_tool_context_guards_and_journal_free_routes_hold_inside_recorded_attempt() {
+    let fixtures = fixtures().await;
+    let tier = ControllerOwnedTier::ordinal_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let scoped = crate::ScopedEffectController::borrowed(
+        &sentinel,
+        crate::ExecutionScope::turn(SESSION, TURN),
+    )
+    .expect("scoped legacy ToolContext sentinel controller");
+    let tool = tool_context(scoped, &fixtures);
+    let child_process_starts = Arc::clone(&fixtures.child_process_starts);
+
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        crate::RuntimeEffectEnvelope::new(
+            attempt_invocation(),
+            crate::RuntimeEffectCommand::ToolAttempt {
+                call: prepared_tool_call(),
+                execution_grant: None,
+                attempt: 1,
+                max_attempts: 1,
+            },
+        ),
+        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            let batch = tool
+                .dispatch()
+                .batch(vec![crate::ToolInvocation::new(
+                    "legacy-batch",
+                    crate::ToolId::new("noop"),
+                    serde_json::Value::Null,
+                )])
+                .await;
+            assert_eq!(batch.len(), 1);
+            assert!(
+                batch[0].output.value_for_projection()["message"]
+                    .as_str()
+                    .is_some_and(
+                        |message| message.contains("unavailable inside an atomic tool attempt")
+                    )
+            );
+
+            let nested_turn = tool
+                .sessions()
+                .start_turn(
+                    "legacy-child",
+                    "legacy-child-turn",
+                    crate::TurnInput::text("nested turn"),
+                )
+                .await
+                .expect_err("ordinal legacy nested turn is guarded");
+            assert!(
+                nested_turn
+                    .to_string()
+                    .contains("unavailable inside an atomic tool attempt")
+            );
+
+            let trigger = tool
+                .triggers()
+                .emit(crate::TriggerOccurrenceRequest::new(
+                    "attempt-atomicity.trigger",
+                    "attempt-atomicity-source",
+                    serde_json::json!({}),
+                    "legacy-attempt-occurrence",
+                ))
+                .await
+                .expect_err("ordinal legacy trigger emission is guarded");
+            assert!(
+                trigger
+                    .to_string()
+                    .contains("unavailable inside an atomic tool attempt")
+            );
+
+            let sessions = tool.sessions();
+            sessions
+                .snapshot_current()
+                .await
+                .expect("current snapshot read");
+            sessions
+                .snapshot(SESSION)
+                .await
+                .expect("named snapshot read");
+            sessions.model().await.expect("model read");
+            sessions.tool_catalog().await.expect("catalog read");
+            sessions
+                .shared_tool_catalog()
+                .await
+                .expect("shared catalog read");
+            assert!(
+                sessions
+                    .set_tool_membership(&["missing-tool".to_string()], true)
+                    .await
+                    .is_err(),
+                "membership reaches the journal-free registry and refuses the missing tool"
+            );
+
+            tool.attachments()
+                .put(
+                    vec![1, 2, 3, 4],
+                    crate::AttachmentCreateMeta::new(
+                        crate::MediaType::parse("image/png").expect("png media type"),
+                        Some(crate::AttachmentTypeMetadata::image(Some(1), Some(1))),
+                        Some("legacy-attempt.png".to_string()),
+                    ),
+                )
+                .await
+                .expect("attachment write stays inside the attempt body");
+            assert_eq!(
+                tool.direct_completions()
+                    .complete(
+                        crate::DirectRequest::text(
+                            "attempt-atomicity-model",
+                            "legacy direct completion",
+                        ),
+                        "attempt-atomicity",
+                    )
+                    .await
+                    .expect("direct completion stays local")
+                    .text,
+                "direct ok"
+            );
+
+            let events = tool.process_events();
+            events
+                .emit("attempt.atomicity.note", serde_json::json!({"n": 1}))
+                .await
+                .expect("registry-authorized event append");
+            events
+                .emit_request(crate::ProcessEventAppendRequest::new(
+                    "attempt.atomicity.awaited",
+                    serde_json::json!({"n": 2}),
+                ))
+                .await
+                .expect("registry-authorized request append");
+            events
+                .wait_event_after("attempt.atomicity.awaited", 0)
+                .await
+                .expect("registry-authorized event wait");
+
+            tool.emit_child_process_started(LIVE_PROCESS, Some("legacy child".to_string()));
+            assert_eq!(child_process_starts.load(Ordering::SeqCst), 1);
+            let _phase = tool.named_phase("legacy-tool-context-sentinel");
+            assert_eq!(tool.session_id(), SESSION);
+            assert_eq!(tool.tool_call_id(), Some(CALL_ID));
+            assert!(tool.cancellation_token().is_some());
+            assert_eq!(tool.prepared_payload(), &serde_json::Value::Null);
+
+            Ok(crate::RuntimeEffectOutcome::ToolAttempt {
+                launch: Box::new(crate::ToolAttemptLaunch::Done {
+                    record: Box::new(crate::ToolCallRecord {
+                        call_id: Some(CALL_ID.to_string()),
+                        tool: "attempt_atomicity".to_string(),
+                        args: serde_json::Value::Null,
+                        output: crate::ToolCallOutput::success(serde_json::json!("ok")),
+                        duration_ms: 0,
+                    }),
+                    intents: crate::ToolIntents::default(),
+                }),
+                triggers: Vec::new(),
+            })
+        }),
+    )
+    .await
+    .expect("legacy ToolContext inventory completes under its guards");
+    assert_eq!(
+        ledger.crossings_inside_attempt(),
+        Vec::<String>::new(),
+        "legacy guards refuse before the controller and journal-free routes stay local"
+    );
+}
+
 /// Red proof for the sentinel itself: a deliberately leaked test-only command
 /// must be caught while an attempt body is open.
 #[tokio::test]

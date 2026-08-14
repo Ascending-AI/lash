@@ -2156,6 +2156,7 @@ dependencies = [
  "lash-lashlang-runtime",
  "lash-plugin-process-controls",
  "lash-protocol-standard",
+ "lash-runtime",
  "lash-sansio",
  "lash-sqlite-store",
  "lash-subagents",

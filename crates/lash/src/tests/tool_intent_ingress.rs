@@ -114,8 +114,8 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
 #[derive(Default)]
 struct AdmissionCrashController {
     inner: lash_core::facade_support::InlineRuntimeEffectController,
-    first_admission: std::sync::atomic::AtomicBool,
     admitted: tokio::sync::Notify,
+    admission: std::sync::Mutex<Option<String>>,
     realizations: std::sync::atomic::AtomicUsize,
     recorded: std::sync::Mutex<Option<lash_core::RuntimeEffectOutcome>>,
 }
@@ -155,10 +155,24 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
         {
             return Ok(recorded);
         }
-        if !self
-            .first_admission
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
+        let replay_key = envelope
+            .invocation
+            .replay_key()
+            .expect("ingress envelope has a replay key")
+            .to_string();
+        let first_admission = {
+            let mut admission = self
+                .admission
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if admission.is_none() {
+                *admission = Some(replay_key);
+                true
+            } else {
+                false
+            }
+        };
+        if first_admission {
             self.admitted.notify_one();
             std::future::pending::<()>().await;
         }
@@ -187,6 +201,26 @@ fn emit_intent(session_id: &str) -> lash_core::ToolIntent {
     })
 }
 
+fn start_intent(session_id: &str) -> lash_core::ToolIntent {
+    lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
+        session_id: session_id.to_string(),
+        request: lash_core::ProcessStartRequest::external(
+            "ingress-start",
+            lash_core::ProcessOriginator::host(),
+            serde_json::Value::Null,
+        ),
+        on_parent_end: Default::default(),
+    }))
+}
+
+fn cancel_intent(session_id: &str) -> lash_core::ToolIntent {
+    lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
+        session_id: session_id.to_string(),
+        process_id: PROCESS.to_string(),
+        reason: Some("kind-swap probe".to_string()),
+    })
+}
+
 #[tokio::test]
 async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> Result<()> {
     let (core, registry) = ingress_core().await?;
@@ -201,12 +235,32 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
     intent.payload = serde_json::json!({"law": "same-key-different-payload"});
     let duplicate = ingress.submit(key, conflicting_duplicate).await;
 
-    assert_eq!(duplicate, first, "duplicate admission outcome is stable");
+    let crate::tools::ToolIntentIngressOutcome::Admitted {
+        outcome: first_outcome,
+        replayed: first_replayed,
+    } = first
+    else {
+        panic!("first submission must be admitted")
+    };
+    let crate::tools::ToolIntentIngressOutcome::Admitted {
+        outcome: duplicate_outcome,
+        replayed: duplicate_replayed,
+    } = duplicate
+    else {
+        panic!("duplicate submission must replay the admission")
+    };
+    assert_eq!(
+        duplicate_outcome, first_outcome,
+        "duplicate admission outcome is stable"
+    );
+    assert!(!first_replayed, "the first submission executes locally");
+    assert!(
+        duplicate_replayed,
+        "the duplicate returns a recorded outcome"
+    );
     assert!(matches!(
-        first,
-        crate::tools::ToolIntentIngressOutcome::Admitted {
-            outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. }
-        }
+        first_outcome,
+        lash_core::ToolIntentExecutionOutcome::Executed { .. }
     ));
     let events = registry.events_after(PROCESS, 0).await?;
     assert_eq!(
@@ -216,6 +270,140 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
             .count(),
         1,
         "one identity quadruple realizes exactly once"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking() -> Result<()> {
+    let (core, registry) = ingress_core().await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("kind-swap-start-emit", 0);
+
+    let first = ingress.submit(key.clone(), start_intent(SESSION)).await;
+    assert!(matches!(
+        first,
+        crate::tools::ToolIntentIngressOutcome::Admitted {
+            outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                kind: lash_core::ToolIntentKind::StartProcess,
+                ..
+            },
+            replayed: false,
+        }
+    ));
+
+    let second = ingress.submit(key, emit_intent(SESSION)).await;
+    assert!(matches!(
+        second,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                recorded_kind: lash_core::ToolIntentKind::StartProcess,
+                submitted_kind: lash_core::ToolIntentKind::EmitProcessEvent,
+            }
+        }
+    ));
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == EVENT)
+            .count(),
+        0,
+        "the rejected kind swap must not emit the submitted event"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -> Result<()> {
+    let (core, registry) = ingress_core().await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("kind-swap-emit-cancel", 0);
+
+    let first = ingress.submit(key.clone(), emit_intent(SESSION)).await;
+    assert!(matches!(
+        first,
+        crate::tools::ToolIntentIngressOutcome::Admitted {
+            outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                kind: lash_core::ToolIntentKind::EmitProcessEvent,
+                ..
+            },
+            replayed: false,
+        }
+    ));
+
+    let second = ingress.submit(key, cancel_intent(SESSION)).await;
+    assert!(matches!(
+        second,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                recorded_kind: lash_core::ToolIntentKind::EmitProcessEvent,
+                submitted_kind: lash_core::ToolIntentKind::CancelProcess,
+            }
+        }
+    ));
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == EVENT)
+            .count(),
+        1,
+        "the first intent realizes once and the kind swap realizes nothing"
+    );
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        0,
+        "the refused submission must not cancel the process"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result<()> {
+    let (core, registry) =
+        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+            .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("runtime-owned-duplicate", 0);
+
+    let first = ingress.submit(key.clone(), emit_intent(SESSION)).await;
+    assert!(matches!(
+        first,
+        crate::tools::ToolIntentIngressOutcome::Admitted {
+            replayed: false,
+            ..
+        }
+    ));
+    let mut conflicting = emit_intent(SESSION);
+    let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting else {
+        unreachable!("fixture is an emit intent")
+    };
+    intent.payload = serde_json::json!({"law": "conflicting-runtime-duplicate"});
+    let duplicate = ingress.submit(key, conflicting).await;
+    assert!(matches!(
+        duplicate,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                kind: lash_core::ToolIntentKind::EmitProcessEvent,
+            }
+        }
+    ));
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == EVENT)
+            .count(),
+        1
     );
     Ok(())
 }
@@ -310,16 +498,20 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
         outcome: lash_core::ToolIntentExecutionOutcome::ProtocolRefused {
             refusal: lash_core::ToolIntentRefusalReason::MissingToolCallId,
         },
+        replayed: false,
     };
-    let mut stripped = serde_json::to_value(admitted).expect("serialize admitted outcome");
-    stripped
-        .as_object_mut()
-        .expect("tagged ingress outcome")
-        .remove("outcome");
-    assert!(
-        serde_json::from_value::<crate::tools::ToolIntentIngressOutcome>(stripped).is_err(),
-        "ingress outcome field `outcome` must not acquire a serde default"
-    );
+    let admitted = serde_json::to_value(admitted).expect("serialize admitted outcome");
+    for field in ["outcome", "replayed"] {
+        let mut stripped = admitted.clone();
+        stripped
+            .as_object_mut()
+            .expect("tagged ingress outcome")
+            .remove(field);
+        assert!(
+            serde_json::from_value::<crate::tools::ToolIntentIngressOutcome>(stripped).is_err(),
+            "ingress outcome field `{field}` must not acquire a serde default"
+        );
+    }
 
     let refusal = crate::tools::ToolIntentIngressRefusal::ForeignSession {
         expected: SESSION.to_string(),
@@ -362,6 +554,19 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
             },
             &["expected", "recorded"][..],
         ),
+        (
+            crate::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                recorded_kind: lash_core::ToolIntentKind::StartProcess,
+                submitted_kind: lash_core::ToolIntentKind::EmitProcessEvent,
+            },
+            &["recorded_kind", "submitted_kind"][..],
+        ),
+        (
+            crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                kind: lash_core::ToolIntentKind::EmitProcessEvent,
+            },
+            &["kind"][..],
+        ),
     ];
     for (refusal, fields) in refusals {
         let refusal_value = serde_json::to_value(refusal).expect("serialize ingress refusal");
@@ -387,6 +592,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("crash-redrive-call", 0);
+    let expected_admission = key.identity().replay_key.clone();
 
     let crashed_ingress = ingress.clone();
     let crashed_key = key.clone();
@@ -396,6 +602,15 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
             .await
     });
     controller.admitted.notified().await;
+    assert_eq!(
+        controller
+            .admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_deref(),
+        Some(expected_admission.as_str()),
+        "the mock durably records journal admission before the crash window"
+    );
     crashed.abort();
     assert!(
         crashed
@@ -410,7 +625,8 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
         matches!(
             &redriven,
             crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. }
+                outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. },
+                replayed: false,
             }
         ),
         "redriven outcome: {redriven:?}"

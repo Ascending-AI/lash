@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash::process::ProcessRegistry as _;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolIntentExecutionOutcome,
+    ToolProvider, ToolResult,
 };
 
 const SESSION: &str = "docs-ingress-session";
@@ -76,15 +77,36 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
 
     let admitted = ingress.submit(key.clone(), event_intent(SESSION)).await;
     let duplicate = ingress.submit(key, event_intent(SESSION)).await;
-    let lash::tools::ToolIntentIngressOutcome::Admitted { outcome } = admitted else {
+    let lash::tools::ToolIntentIngressOutcome::Admitted { outcome, replayed } = admitted else {
         panic!("the valid host intent must be admitted")
     };
+    assert!(!replayed);
     assert!(matches!(
         outcome,
-        lash::tools::ToolIntentExecutionOutcome::Executed { .. }
+        ToolIntentExecutionOutcome::Executed { .. }
     ));
-    let expected_duplicate = lash::tools::ToolIntentIngressOutcome::Admitted { outcome };
-    assert_eq!(duplicate, expected_duplicate);
+    let lash::tools::ToolIntentIngressOutcome::Refused {
+        refusal: lash::tools::ToolIntentIngressRefusal::DuplicateIdentity { kind },
+    } = duplicate
+    else {
+        panic!("the runtime-owned tier must type its process-store duplicate")
+    };
+    assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);
+
+    let cross_kind = lash::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+        recorded_kind: lash::tools::ToolIntentKind::StartProcess,
+        submitted_kind: lash::tools::ToolIntentKind::EmitProcessEvent,
+    };
+    let lash::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+        recorded_kind,
+        submitted_kind,
+    } = cross_kind
+    else {
+        unreachable!("constructed the cross-kind refusal")
+    };
+    assert_eq!(recorded_kind, lash::tools::ToolIntentKind::StartProcess);
+    let expected_submitted = lash::tools::ToolIntentKind::EmitProcessEvent;
+    assert_eq!(submitted_kind, expected_submitted);
 
     let foreign_session = ingress
         .submit(
@@ -113,10 +135,8 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
     else {
         panic!("foreign scope must be refused")
     };
-    assert_eq!(
-        (expected.as_str(), recorded.as_str()),
-        (SCOPE, "foreign-scope")
-    );
+    assert_eq!(expected, SCOPE);
+    assert_eq!(recorded, "foreign-scope");
 
     let intent_session = ingress
         .submit(ingress.key("docs-call", 3), event_intent("foreign-intent"))
@@ -127,10 +147,8 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
     else {
         panic!("foreign intent session must be refused")
     };
-    assert_eq!(
-        (expected.as_str(), recorded.as_str()),
-        (SESSION, "foreign-intent")
-    );
+    assert_eq!(expected, SESSION);
+    assert_eq!(recorded, "foreign-intent");
 
     let mut forged = derived.identity().clone();
     forged.replay_key = "forged".to_string();
@@ -221,7 +239,8 @@ async fn internal_process_contract_is_separate_and_observable() {
         "exercise the internal process-engine context",
         ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object"}),
-    );
+    )
+    .with_activation(lash::tools::ToolActivation::Internal);
     let tool_id = definition.manifest.id.clone();
     let provider = StaticToolProvider::new(vec![definition], InternalProbe);
     let result = lash::tools::ToolProvider::execute_internal_by_id(
