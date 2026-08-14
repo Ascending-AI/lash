@@ -938,37 +938,59 @@ fn parse_javascript_json(source: &str) -> Result<Value, RuntimeError> {
             // turned host data containing a large number into a failed cell.
             // Underflow already agrees (`1e-400` parses as `0`), so only the
             // overflowing tokens are rewritten, and only outside strings.
-            let Some(rewritten) = rewrite_overflowing_json_numbers(source) else {
-                return Err(js_stdlib_error(format!("JSON.parse: {error}")));
+            let syntax_error = || js_stdlib_error(format!("JSON.parse: {error}"));
+            let Some(planted) = rewrite_overflowing_json_numbers(source) else {
+                return Err(syntax_error());
             };
-            let value = serde_json::from_str::<OrderedJsonValue>(&rewritten)
-                .map_err(|_| js_stdlib_error(format!("JSON.parse: {error}")))?;
+            let value = serde_json::from_str::<OrderedJsonValue>(&planted.source)
+                .map_err(|_| syntax_error())?;
             let mut value = ordered_json_to_value(value);
-            restore_clamped_json_infinities(&mut value);
+            let mut restored = 0;
+            restore_clamped_json_infinities(&mut value, &planted.marker, &mut restored);
+            // The marker is derived from the document, so guest data cannot
+            // carry it without containing its own digest. Counting the
+            // substitutions closes the class anyway: if the document somehow
+            // held one, the counts diverge and the parse fails rather than
+            // handing back reinterpreted guest data.
+            if restored != planted.count {
+                return Err(syntax_error());
+            }
             Ok(value)
         }
     }
 }
 
-/// The key of the sentinel object that stands in for an out-of-range number
-/// between the rewrite and the restore. `serde_json::Number` cannot hold an
-/// infinity, so the substitution has to happen in this runtime's own model.
-const JSON_OVERFLOW_SENTINEL: &str = "__lash_json_f64_overflow_sign__";
+/// A rewritten document, plus what it takes to undo the rewrite exactly.
+struct PlantedJsonOverflows {
+    source: String,
+    /// The object key standing in for an out-of-range number. Derived from the
+    /// document, so a guest object can only collide by containing a digest of
+    /// the very document it sits in.
+    marker: String,
+    /// How many markers were planted. The restore must consume exactly this
+    /// many.
+    count: usize,
+}
 
-/// Replace every out-of-range JSON number with a signed sentinel object.
+/// Replace every out-of-range JSON number with a signed marker object.
+///
 /// Returns `None` when the source has no such number, so an ordinary syntax
-/// error keeps its original diagnostic.
-fn rewrite_overflowing_json_numbers(source: &str) -> Option<String> {
+/// error keeps its original diagnostic. Copying is by string slice: an earlier
+/// version pushed raw bytes as `char`, which reinterpreted every UTF-8
+/// continuation byte as Latin-1 and mojibaked every non-ASCII character in any
+/// document that happened to contain one overflowing number.
+fn rewrite_overflowing_json_numbers(source: &str) -> Option<PlantedJsonOverflows> {
+    let marker = json_overflow_marker(source);
     let bytes = source.as_bytes();
     let mut out = String::with_capacity(source.len());
+    let mut copied = 0;
+    let mut count = 0;
     let mut index = 0;
-    let mut rewrote = false;
     let mut in_string = false;
     let mut escaped = false;
     while index < bytes.len() {
         let byte = bytes[index];
         if in_string {
-            out.push(byte as char);
             if escaped {
                 escaped = false;
             } else if byte == b'\\' {
@@ -981,14 +1003,12 @@ fn rewrite_overflowing_json_numbers(source: &str) -> Option<String> {
         }
         if byte == b'"' {
             in_string = true;
-            out.push('"');
             index += 1;
             continue;
         }
         let starts_number = byte.is_ascii_digit()
             || (byte == b'-' && bytes.get(index + 1).is_some_and(u8::is_ascii_digit));
         if !starts_number {
-            out.push(byte as char);
             index += 1;
             continue;
         }
@@ -1010,42 +1030,63 @@ fn rewrite_overflowing_json_numbers(source: &str) -> Option<String> {
             break;
         }
         let token = &source[start..index];
-        match token.parse::<f64>() {
-            Ok(number) if number.is_infinite() => {
-                let sign = if number.is_sign_negative() { -1 } else { 1 };
-                out.push_str(&format!("{{\"{JSON_OVERFLOW_SENTINEL}\":{sign}}}"));
-                rewrote = true;
-            }
-            _ => out.push_str(token),
+        if let Ok(number) = token.parse::<f64>()
+            && number.is_infinite()
+        {
+            // Copy everything since the last plant as text, never as bytes.
+            out.push_str(&source[copied..start]);
+            let sign = if number.is_sign_negative() { -1 } else { 1 };
+            out.push_str(&format!("{{\"{marker}\":{sign}}}"));
+            copied = index;
+            count += 1;
         }
     }
-    rewrote.then_some(out)
+    if count == 0 {
+        return None;
+    }
+    out.push_str(&source[copied..]);
+    Some(PlantedJsonOverflows {
+        source: out,
+        marker,
+        count,
+    })
 }
 
-/// Turn the sentinels back into the infinities ECMA produces.
-fn restore_clamped_json_infinities(value: &mut Value) {
+/// A marker keyed to this document. Guest data can only collide with it by
+/// containing a digest of itself, which no document can be written to do.
+fn json_overflow_marker(source: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    format!("__lash_json_overflow_{:016x}__", hasher.finish())
+}
+
+/// Turn the planted markers back into the infinities ECMA produces, counting
+/// each substitution so the caller can check none was missed or invented.
+fn restore_clamped_json_infinities(value: &mut Value, marker: &str, restored: &mut usize) {
     match value {
         Value::Record(entries) => {
             if entries.len() == 1
-                && let Some(Value::Number(sign)) = entries.get(JSON_OVERFLOW_SENTINEL)
+                && let Some(Value::Number(sign)) = entries.get(marker)
             {
                 *value = Value::Number(if *sign < 0.0 {
                     f64::NEG_INFINITY
                 } else {
                     f64::INFINITY
                 });
+                *restored += 1;
                 return;
             }
             let mut replaced = entries.as_ref().clone();
             for entry in replaced.entries.iter_mut() {
-                restore_clamped_json_infinities(&mut entry.value);
+                restore_clamped_json_infinities(&mut entry.value, marker, restored);
             }
             *entries = std::sync::Arc::new(replaced);
         }
         Value::List(items) => {
             let mut replaced = items.to_vec();
             for item in replaced.iter_mut() {
-                restore_clamped_json_infinities(item);
+                restore_clamped_json_infinities(item, marker, restored);
             }
             *items = replaced.into();
         }

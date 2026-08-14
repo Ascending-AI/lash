@@ -1131,3 +1131,70 @@ fn a_leaf_that_failed_before_the_batch_ran_settles_first() {
         "the leaf that settled before the batch ran is the reported rejection: {rendered}"
     );
 }
+
+fn run_typescript(source: &str) -> Value {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(source, &environment)
+        .unwrap_or_else(|error| panic!("link `{source}`: {error}"));
+    match futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &AggregateHost,
+    ))
+    .unwrap_or_else(|error| panic!("execute `{source}`: {error}"))
+    {
+        ExecutionOutcome::Finished(value) => value,
+        other => panic!("expected finish, got {other:?}"),
+    }
+}
+
+/// The overflow rewrite must not touch anything but the overflowing numbers.
+///
+/// It copied source bytes with `byte as char`, so every UTF-8 continuation byte
+/// was reinterpreted as Latin-1 and re-encoded: one out-of-range number
+/// mojibaked every non-ASCII character in the document. That replaced a typed
+/// failure with silently wrong data, on exactly the host-data path the clamping
+/// was justified by.
+#[test]
+fn json_overflow_rewriting_preserves_non_ascii_text() {
+    for (source, expected) in [
+        (
+            r#"finish(JSON.parse('{"a":"café","n":1e400}').a);"#,
+            "café",
+        ),
+        (
+            r#"finish(JSON.parse('{"a":"日本語","n":1e400}').a);"#,
+            "日本語",
+        ),
+        (
+            r#"finish(JSON.parse('{"a":"emoji 😀 tail","n":1e400}').a);"#,
+            "emoji 😀 tail",
+        ),
+        // Multi-byte characters immediately either side of the rewritten token.
+        (
+            r#"finish(JSON.parse('{"a":"é","n":1e400,"b":"ü"}').b);"#,
+            "ü",
+        ),
+        // No overflow at all: the untouched path must stay correct too.
+        (r#"finish(JSON.parse('{"a":"café"}').a);"#, "café"),
+    ] {
+        assert_eq!(
+            run_typescript(source),
+            Value::String(expected.into()),
+            "{source}"
+        );
+    }
+}
+
+/// Guest data shaped like the rewrite's own marker must never be reinterpreted.
+#[test]
+fn json_overflow_sentinel_does_not_collide_with_guest_data() {
+    let value = run_typescript(
+        r#"finish(JSON.stringify(JSON.parse('{"o":{"__lash_json_f64_overflow_sign__":1},"n":1e400}').o));"#,
+    );
+    assert_eq!(
+        value,
+        Value::String(r#"{"__lash_json_f64_overflow_sign__":1}"#.into()),
+        "a guest object that looks like the marker survives unchanged"
+    );
+}
