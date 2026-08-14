@@ -227,7 +227,9 @@ impl CellDetector {
         if self.cell_closed || !self.inside_cell {
             return Vec::new();
         }
-        let Some(span) = complete_lashlang_end_tag_span(&self.cell_body, true) else {
+        // Genuine response EOF, so a closing tag at the buffer end counts.
+        let Some(span) = complete_end_tag_span(&self.cell_body, true, self.dialect.cell_tags())
+        else {
             return Vec::new();
         };
         self.cell_body.truncate(span.body_end);

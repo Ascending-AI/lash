@@ -117,7 +117,7 @@ pub struct RlmCheckpointPerfFixture {
 #[cfg(feature = "testing")]
 impl RlmCheckpointPerfFixture {
     pub fn new(binding_count: usize, payload_bytes: usize) -> Result<Self, SessionError> {
-        let mut state = RlmExecutionState::new()?;
+        let mut state = RlmExecutionState::for_engine("lashlang")?;
         let mut snapshot = state.rlm.snapshot();
         for index in 0..binding_count {
             snapshot.globals.insert(
@@ -194,7 +194,7 @@ impl RlmCheckpointPerfFixture {
     }
 
     pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
-        let mut restored = RlmExecutionState::new()?;
+        let mut restored = RlmExecutionState::for_engine("lashlang")?;
         restored
             .restore_execution_state(state)
             .map_err(|error| SessionError::Protocol(error.to_string()))
