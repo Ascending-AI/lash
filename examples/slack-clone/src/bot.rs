@@ -7,6 +7,8 @@
 //! product" can and cannot do.
 
 pub mod channel;
+#[cfg(feature = "e2e")]
+mod e2e_provider;
 pub mod ledger;
 pub mod mcp_client;
 pub mod runtime;
@@ -100,7 +102,14 @@ pub async fn run(config: BotConfig) -> Result<()> {
     let mut runtime_config = RuntimeConfig::new(config.data_dir.join("lash"))
         .with_demo_mcp_server(&config.api_base_url, &config.bot_token)?;
     runtime_config.trace_path = config.trace_path.clone();
-    let (provider, model) = runtime::provider_from_env()?;
+    #[cfg(feature = "e2e")]
+    if std::env::var("SLACK_CLONE_E2E_PROVIDER").as_deref() == Ok("scripted-v1") {
+        runtime_config.lease_timings = Some(
+            lash::durability::LeaseTimings::from_ttl(Duration::from_secs(5))
+                .context("configure deterministic E2E lease timings")?,
+        );
+    }
+    let (provider, model) = configured_provider()?;
     let core = runtime::build_core(&runtime_config, provider, model, Arc::clone(&api)).await?;
 
     let bot = Arc::new(ChannelBot::new(
@@ -182,6 +191,28 @@ pub async fn run(config: BotConfig) -> Result<()> {
     let shutdown_result = shutdown_core(bot.core()).await;
     host_result?;
     shutdown_result
+}
+
+fn configured_provider() -> Result<(lash::provider::ProviderHandle, lash::ModelSpec)> {
+    match std::env::var("SLACK_CLONE_E2E_PROVIDER") {
+        Err(std::env::VarError::NotPresent) => runtime::provider_from_env(),
+        Err(error) => Err(error).context("read SLACK_CLONE_E2E_PROVIDER"),
+        Ok(selector) if selector == "scripted-v1" => {
+            #[cfg(feature = "e2e")]
+            {
+                e2e_provider::scripted_provider_from_env()
+            }
+            #[cfg(not(feature = "e2e"))]
+            {
+                bail!(
+                    "SLACK_CLONE_E2E_PROVIDER=scripted-v1 requires building slack-clone with --features e2e"
+                )
+            }
+        }
+        Ok(selector) => bail!(
+            "unsupported SLACK_CLONE_E2E_PROVIDER `{selector}`; omit it for OpenRouter or use scripted-v1 in the E2E harness"
+        ),
+    }
 }
 
 /// Complete the bot host's post-intake Lash shutdown sequence.

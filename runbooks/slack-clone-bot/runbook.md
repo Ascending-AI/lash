@@ -15,6 +15,11 @@ shape and its only standard-mode host, so what this runbook gates is whether a L
 behaves correctly *as a guest*: it hears everything, answers only when addressed, spends
 nothing while merely listening, answers exactly once, and survives both processes dying.
 
+The token-free, exact-answer subset is executable on every PR through
+[`../slack-clone-deterministic/runbook.md`](../slack-clone-deterministic/runbook.md).
+This document remains the real-token judged path; it is not replaced by the CI
+companion.
+
 **Why four layers.** The other runbooks reconcile three (DOM / durable state / logs) inside
 one process. Here there are **two independent processes with two independent durable stores**,
 and the interesting failures live precisely in the seam between them — a reply the platform

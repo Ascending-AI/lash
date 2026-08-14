@@ -58,10 +58,30 @@ source of truth for the CI split:
 - **Deterministic CI:** `Test docs + build cache` compiles all workspace targets, and
   `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack
   package tests.
-- **Full-host CI:** None. CI does not run `just slack-clone`, the two-process browser
-  journey, or the real-token MCP client-depth path.
+- **Full-host CI:** the `slack-clone-full-host` functional E2E leg runs
+  `just slack-clone-full-host-e2e` (token-free, deterministic). CI still does not
+  run `just slack-clone` interactively or the real-token MCP client-depth path.
 - **Manual judged:** [`slack-clone-bot`](../../runbooks/slack-clone-bot/runbook.md)
   and [`slack-clone-mcp-client-depth`](../../runbooks/slack-clone-mcp-client-depth/runbook.md).
+
+For the executable, token-free downstream acceptance used by CI, run:
+
+```bash
+just slack-clone-full-host-e2e
+```
+
+That companion boots the platform and bot as separate processes, lets the bot
+spawn the bundled MCP stdio child, drives two independent headless Chromium
+contexts, kills and restarts the bot during a claimed turn, reloads both humans,
+and emits a machine-readable DOM/platform/bot/trace scorecard. State and evidence
+live in a temporary directory outside the checkout by default; set
+`LASH_SLACK_CLONE_E2E_ARTIFACT_DIR` to retain them at a chosen location. See the
+[deterministic coverage boundary](../../runbooks/slack-clone-deterministic/runbook.md).
+
+The `e2e` Cargo feature and `SLACK_CLONE_E2E_PROVIDER=scripted-v1` selector are
+test-harness implementation details. Both are required together; ordinary
+launches always require `OPENROUTER_API_KEY` and keep using the manual OpenRouter
+path.
 
 ## What this demonstrates
 
@@ -125,8 +145,9 @@ sampling is billed by the host: its usage is visible in provider/host traces,
 not in the session usage ledger or `TurnResult` usage.
 
 [Run the judged MCP client-depth walkthrough](../../runbooks/slack-clone-mcp-client-depth/runbook.md)
-to reconcile the rendered flow, durable tool results, host completion log, and
-trace.
+for real-provider semantic judgement, or the
+[deterministic full-host companion](../../runbooks/slack-clone-deterministic/runbook.md)
+for the exact four-tool, four-layer CI contract.
 
 `lash-plugin-mcp` prefixes imported tools as `mcp__<server>__<tool>`. Ordinary
 native names therefore do not collide. If a host deliberately registers the exact

@@ -9,6 +9,11 @@ workspace roots while one outer MCP tool attempt remains open. The bundled
 server must ask the host for every result; neither the server nor Lash core may
 invent them.
 
+The same four client-depth tools run with exact scripted answers inside the
+token-free full-host CI companion documented at
+[`../slack-clone-deterministic/runbook.md`](../slack-clone-deterministic/runbook.md).
+This runbook remains the separate real-provider semantic judgement path.
+
 ## Scenario-specific golden rules
 
 1. **The host owns all policy.** Sampling uses the provider/model configured by

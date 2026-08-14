@@ -39,6 +39,8 @@ pub struct RuntimeConfig {
     pub incarnation: String,
     /// Whether to mirror trace records to stderr.
     pub trace_to_stderr: bool,
+    /// Optional deployment-specific lease timings.
+    pub lease_timings: Option<lash::durability::LeaseTimings>,
     /// MCP servers registered into the bot's standard tool catalog.
     pub mcp_servers: BTreeMap<String, McpServerConfig>,
 }
@@ -51,6 +53,7 @@ impl RuntimeConfig {
             trace_path: None,
             incarnation: fresh_incarnation(),
             trace_to_stderr: true,
+            lease_timings: None,
             mcp_servers: BTreeMap::new(),
         }
     }
@@ -179,6 +182,9 @@ pub async fn build_core(
         .trace_level(TraceLevel::Extended);
     if let Some(mcp) = mcp {
         builder = builder.plugin(mcp);
+    }
+    if let Some(lease_timings) = config.lease_timings {
+        builder = builder.lease_timings(lease_timings);
     }
     builder
         // Ambient channel traffic is admitted as queued turn input but must NOT

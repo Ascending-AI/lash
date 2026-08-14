@@ -51,6 +51,7 @@ offsets are stable:
 - `+40` distributed-worker MinIO;
 - `+41..+46` process-operations MinIO, Restate, and PostgreSQL;
 - `+47` version-bump recreation PostgreSQL.
+- `+48..+49` slack-clone full-host platform and bot.
 
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,
 `LASH_PUSH_GATE_POSTGRES_PORT`, `LASH_CONFIDENCE_OUT_DIR`, and each recipe's

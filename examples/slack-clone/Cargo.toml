@@ -14,6 +14,12 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Compiles the hermetic full-host E2E provider into the bot binary. The binary
+# still requires the explicit SLACK_CLONE_E2E_PROVIDER=scripted-v1 selector at
+# runtime, so an ordinary dev/manual launch always uses OpenRouter.
+e2e = ["lash/testing"]
+
 # Two binaries, one crate. The split is the point of the example: the platform
 # binary is a plain product with no Lash dependency, and the bot binary is the
 # Lash embedding that lives inside it.
