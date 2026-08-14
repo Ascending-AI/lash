@@ -178,144 +178,267 @@ pub(super) fn continue_under_finally(
     }
 }
 
-pub(super) fn contains_member_assignment(stmt: &Stmt) -> bool {
-    fn expression_contains_member_assignment(expr: &Expr) -> bool {
-        match expr {
-            Expr::Assign {
-                target: TsAssignTarget::Member { .. },
-                ..
-            } => true,
-            Expr::Array(items) => items.iter().any(expression_contains_member_assignment),
-            Expr::Object(entries) => entries
-                .iter()
-                .any(|(_, value)| expression_contains_member_assignment(value)),
-            Expr::Assign { value, .. }
-            | Expr::Unary { value, .. }
-            | Expr::Await(value)
-            | Expr::Member { object: value, .. } => expression_contains_member_assignment(value),
-            Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
-                expression_contains_member_assignment(left)
-                    || expression_contains_member_assignment(right)
-            }
-            Expr::Conditional {
-                test,
-                consequent,
-                alternate,
-            } => {
-                expression_contains_member_assignment(test)
-                    || expression_contains_member_assignment(consequent)
-                    || expression_contains_member_assignment(alternate)
-            }
-            Expr::Template { expressions, .. } => expressions
-                .iter()
-                .any(expression_contains_member_assignment),
-            Expr::Function(function) => match &function.body {
-                FunctionBody::Block(statements) => {
-                    statements.iter().any(contains_member_assignment)
+/// The root binding an expression reaches, if it names one.
+///
+/// `urls` and `urls[0]` and `obj.items` all root at a single identifier; a call
+/// result or a literal roots at nothing, and nothing in the body can name it.
+fn expression_root_binding(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(name) => Some(name.as_str()),
+        Expr::Member { object, .. } => expression_root_binding(object),
+        _ => None,
+    }
+}
+
+/// Whether an expression mentions `binding` anywhere.
+fn mentions_binding(expr: &Expr, binding: &str) -> bool {
+    fn any(exprs: &[Expr], binding: &str) -> bool {
+        exprs.iter().any(|expr| mentions_binding(expr, binding))
+    }
+    match expr {
+        Expr::Ident(name) => name.as_str() == binding,
+        Expr::Array(items) => any(items, binding),
+        Expr::Object(entries) => entries
+            .iter()
+            .any(|(_, value)| mentions_binding(value, binding)),
+        Expr::Assign { value, target } => {
+            mentions_binding(value, binding)
+                || match target {
+                    TsAssignTarget::Member { object, property } => {
+                        mentions_binding(object, binding)
+                            || match property {
+                                MemberProperty::Index(index) => mentions_binding(index, binding),
+                                MemberProperty::Field(_) => false,
+                            }
+                    }
+                    TsAssignTarget::Ident(name) => name.as_str() == binding,
                 }
-                FunctionBody::Expression(expr) => expression_contains_member_assignment(expr),
-            },
-            Expr::Call { callee, args } => {
-                call_may_mutate_iterable(callee)
-                    || args.iter().any(expression_contains_member_assignment)
-            }
-            Expr::Undefined
-            | Expr::Null
-            | Expr::Bool(_)
-            | Expr::Number(_)
-            | Expr::String(_)
-            | Expr::Ident(_)
-            | Expr::Update { .. } => false,
         }
-    }
-
-    fn call_may_mutate_iterable(callee: &Expr) -> bool {
-        match callee {
-            Expr::Ident(name) => !matches!(name.as_str(), "print" | "finish" | "wake"),
-            Expr::Member {
-                object,
-                property: MemberProperty::Field(method),
-            } => {
-                let known_global = module_path(object)
-                    .and_then(|path| path.first().cloned())
-                    .is_some_and(|owner| {
-                        matches!(
-                            owner.as_str(),
-                            "Object"
-                                | "Array"
-                                | "String"
-                                | "Number"
-                                | "JSON"
-                                | "Math"
-                                | "Date"
-                                | "console"
-                        )
-                    });
-                !(known_global || is_instance_stdlib_method(method))
-            }
-            _ => true,
+        Expr::Unary { value, .. } | Expr::Await(value) => mentions_binding(value, binding),
+        Expr::Member { object, property } => {
+            mentions_binding(object, binding)
+                || match property {
+                    MemberProperty::Index(index) => mentions_binding(index, binding),
+                    MemberProperty::Field(_) => false,
+                }
         }
-    }
-
-    match stmt {
-        Stmt::Expr(expr) | Stmt::Throw(expr) => expression_contains_member_assignment(expr),
-        Stmt::Block(statements) => statements.iter().any(contains_member_assignment),
-        Stmt::Var { declarations, .. } => declarations.iter().any(|declaration| {
-            declaration
-                .init
-                .as_ref()
-                .is_some_and(expression_contains_member_assignment)
-        }),
-        Stmt::Function { function, .. } => match &function.body {
-            FunctionBody::Block(statements) => statements.iter().any(contains_member_assignment),
-            FunctionBody::Expression(expr) => expression_contains_member_assignment(expr),
-        },
-        Stmt::Return(value) => value
-            .as_ref()
-            .is_some_and(expression_contains_member_assignment),
-        Stmt::If {
+        Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
+            mentions_binding(left, binding) || mentions_binding(right, binding)
+        }
+        Expr::Conditional {
             test,
             consequent,
             alternate,
         } => {
-            expression_contains_member_assignment(test)
-                || contains_member_assignment(consequent)
-                || alternate.as_deref().is_some_and(contains_member_assignment)
+            mentions_binding(test, binding)
+                || mentions_binding(consequent, binding)
+                || mentions_binding(alternate, binding)
         }
+        Expr::Template { expressions, .. } => any(expressions, binding),
+        Expr::Call { callee, args } => mentions_binding(callee, binding) || any(args, binding),
+        Expr::Function(function) => match &function.body {
+            FunctionBody::Block(statements) => statements
+                .iter()
+                .any(|stmt| statement_mentions_binding(stmt, binding)),
+            FunctionBody::Expression(expr) => mentions_binding(expr, binding),
+        },
+        Expr::Undefined
+        | Expr::Null
+        | Expr::Bool(_)
+        | Expr::Number(_)
+        | Expr::String(_)
+        | Expr::Update { .. } => false,
+    }
+}
+
+fn statement_mentions_binding(stmt: &Stmt, binding: &str) -> bool {
+    statement_expressions(stmt).any(|expr| mentions_binding(expr, binding))
+}
+
+/// Whether a `for…of` body can reach the iterable it is walking.
+///
+/// The v1 iterator snapshots the iterable, so mutating it mid-loop would change
+/// what the loop is walking. Only shapes that can actually reach it are
+/// rejected: an assignment whose target roots at the iterable, a method call on
+/// the iterable, or a call that passes the iterable to something that could
+/// mutate it. Effects, awaits, and assignments to anything else are ordinary
+/// body statements — `for (const url of urls) { const page = await
+/// web.fetch({ url }); out = out + page; }` is the loop this language exists to
+/// write, and suspending inside it resumes correctly.
+///
+/// When the iterable names no binding — a call result, a literal — nothing in
+/// the body can reach it and the body is unrestricted.
+pub(super) fn body_may_mutate_iterable(iterable: &Expr, body: &Stmt) -> Option<String> {
+    let Some(binding) = expression_root_binding(iterable) else {
+        return None;
+    };
+    for expr in statement_expressions(body) {
+        if let Some(reason) = expression_may_mutate(expr, binding) {
+            return Some(reason);
+        }
+    }
+    None
+}
+
+fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
+    let mut found = None;
+    visit_expressions(expr, &mut |expr| {
+        if found.is_some() {
+            return;
+        }
+        match expr {
+            Expr::Assign {
+                target: TsAssignTarget::Member { object, .. },
+                ..
+            } if expression_root_binding(object) == Some(binding) => {
+                found = Some(format!(
+                    "assigns through `{binding}`, the iterable this loop is walking"
+                ));
+            }
+            Expr::Call { callee, args } => {
+                if let Expr::Member {
+                    object,
+                    property: MemberProperty::Field(method),
+                } = callee.as_ref()
+                    && expression_root_binding(object) == Some(binding)
+                {
+                    found = Some(format!(
+                        "calls `{binding}.{method}()`, which may mutate the iterable this loop is walking"
+                    ));
+                } else if args.iter().any(|arg| mentions_binding(arg, binding)) {
+                    found = Some(format!(
+                        "passes `{binding}`, the iterable this loop is walking, to a call that may mutate it"
+                    ));
+                }
+            }
+            _ => {}
+        }
+    });
+    found
+}
+
+/// Every expression a statement contains, including nested bodies.
+fn statement_expressions(stmt: &Stmt) -> Box<dyn Iterator<Item = &Expr> + '_> {
+    match stmt {
+        Stmt::Expr(expr) | Stmt::Throw(expr) => Box::new(std::iter::once(expr)),
+        Stmt::Return(value) => Box::new(value.iter()),
+        Stmt::Block(statements) => Box::new(statements.iter().flat_map(statement_expressions)),
+        Stmt::Var { declarations, .. } => {
+            Box::new(declarations.iter().filter_map(|d| d.init.as_ref()))
+        }
+        Stmt::If {
+            test,
+            consequent,
+            alternate,
+        } => Box::new(
+            std::iter::once(test)
+                .chain(statement_expressions(consequent))
+                .chain(
+                    alternate
+                        .iter()
+                        .flat_map(|stmt| statement_expressions(stmt)),
+                ),
+        ),
         Stmt::While { test, body } => {
-            expression_contains_member_assignment(test) || contains_member_assignment(body)
+            Box::new(std::iter::once(test).chain(statement_expressions(body)))
         }
         Stmt::For {
             init,
             test,
             update,
             body,
-        } => {
-            init.as_deref().is_some_and(contains_member_assignment)
-                || test
-                    .as_ref()
-                    .is_some_and(expression_contains_member_assignment)
-                || update
-                    .as_ref()
-                    .is_some_and(expression_contains_member_assignment)
-                || contains_member_assignment(body)
-        }
+        } => Box::new(
+            init.iter()
+                .flat_map(|stmt| statement_expressions(stmt))
+                .chain(test.iter())
+                .chain(update.iter())
+                .chain(statement_expressions(body)),
+        ),
         Stmt::ForOf { iterable, body, .. } => {
-            expression_contains_member_assignment(iterable) || contains_member_assignment(body)
+            Box::new(std::iter::once(iterable).chain(statement_expressions(body)))
         }
         Stmt::Try {
             body,
             catch,
             finally,
-        } => {
-            body.iter().any(contains_member_assignment)
-                || catch
-                    .as_ref()
-                    .is_some_and(|catch| catch.body.iter().any(contains_member_assignment))
-                || finally
-                    .as_ref()
-                    .is_some_and(|body| body.iter().any(contains_member_assignment))
+        } => Box::new(
+            body.iter()
+                .flat_map(statement_expressions)
+                .chain(
+                    catch
+                        .iter()
+                        .flat_map(|catch| catch.body.iter().flat_map(statement_expressions)),
+                )
+                .chain(
+                    finally
+                        .iter()
+                        .flat_map(|stmts| stmts.iter().flat_map(statement_expressions)),
+                ),
+        ),
+        Stmt::Function { function, .. } => match &function.body {
+            FunctionBody::Block(statements) => {
+                Box::new(statements.iter().flat_map(statement_expressions))
+            }
+            FunctionBody::Expression(expr) => Box::new(std::iter::once(expr.as_ref())),
+        },
+        Stmt::Empty | Stmt::Break | Stmt::Continue => Box::new(std::iter::empty()),
+    }
+}
+
+/// Walk every sub-expression, outermost first.
+fn visit_expressions<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
+    visit(expr);
+    let mut walk = |expr: &'a Expr| visit_expressions(expr, visit);
+    match expr {
+        Expr::Array(items) => items.iter().for_each(walk),
+        Expr::Object(entries) => entries.iter().for_each(|(_, value)| walk(value)),
+        Expr::Assign { value, target } => {
+            walk(value);
+            if let TsAssignTarget::Member { object, property } = target {
+                walk(object);
+                if let MemberProperty::Index(index) = property {
+                    walk(index);
+                }
+            }
         }
-        Stmt::Empty | Stmt::Break | Stmt::Continue => false,
+        Expr::Unary { value, .. } | Expr::Await(value) => walk(value),
+        Expr::Member { object, property } => {
+            walk(object);
+            if let MemberProperty::Index(index) = property {
+                walk(index);
+            }
+        }
+        Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
+            walk(left);
+            walk(right);
+        }
+        Expr::Conditional {
+            test,
+            consequent,
+            alternate,
+        } => {
+            walk(test);
+            walk(consequent);
+            walk(alternate);
+        }
+        Expr::Template { expressions, .. } => expressions.iter().for_each(walk),
+        Expr::Call { callee, args } => {
+            walk(callee);
+            args.iter().for_each(walk);
+        }
+        Expr::Function(function) => match &function.body {
+            FunctionBody::Block(statements) => statements
+                .iter()
+                .flat_map(statement_expressions)
+                .for_each(walk),
+            FunctionBody::Expression(expr) => walk(expr),
+        },
+        Expr::Undefined
+        | Expr::Null
+        | Expr::Bool(_)
+        | Expr::Number(_)
+        | Expr::String(_)
+        | Expr::Ident(_)
+        | Expr::Update { .. } => {}
     }
 }

@@ -490,10 +490,12 @@ impl Lowerer {
                 iterable,
                 body,
             } => {
-                if contains_member_assignment(body) {
+                if let Some(reason) = body_may_mutate_iterable(iterable, body) {
                     return Err(Diagnostic::new(
                         DiagnosticCode::ForOfUnsupported,
-                        "for-of bodies that may mutate the iterable through property assignment or user calls are not supported in v1",
+                        format!(
+                            "this for-of body {reason}; the v1 iterator walks a snapshot, so mutating the iterable mid-loop is not supported"
+                        ),
                         None,
                     ));
                 }

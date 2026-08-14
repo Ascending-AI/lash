@@ -1,9 +1,5 @@
 use super::*;
 
-pub(super) fn is_lashlang_dialect(dialect: &crate::CompilationDialect) -> bool {
-    *dialect == crate::CompilationDialect::Lashlang
-}
-
 pub(super) fn module_ref(
     program: &Program,
     host_requirements_ref: &HostRequirementsRef,

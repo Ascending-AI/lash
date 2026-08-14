@@ -10,7 +10,7 @@ mod hash_writer;
 use hash_writer::HashWriter;
 #[path = "artifact_dialect.rs"]
 mod dialect;
-use dialect::{is_lashlang_dialect, module_ref};
+use dialect::module_ref;
 #[path = "artifact_write_helpers.rs"]
 mod write_helpers;
 use write_helpers::{
@@ -143,7 +143,11 @@ pub struct ModuleArtifact {
     pub host_requirements_ref: HostRequirementsRef,
     pub host_requirements: HostRequirements,
     pub exports: ModuleExports,
-    #[serde(default, skip_serializing_if = "is_lashlang_dialect")]
+    /// Required: a stored artifact always names the dialect it was compiled
+    /// for. A default would let an artifact whose JSON predates the field decode
+    /// as Lashlang and verify, which is the one way a TypeScript artifact could
+    /// be compiled with Lashlang semantics. Nothing released carries the field,
+    /// so there is no compatibility to preserve.
     pub compilation_dialect: crate::CompilationDialect,
     #[serde(default)]
     pub trigger_key_manifest: TriggerKeyManifest,

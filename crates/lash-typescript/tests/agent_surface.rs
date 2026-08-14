@@ -910,8 +910,8 @@ fn a_settlement_order_that_is_not_a_permutation_fails_closed() {
     .expect_err("a malformed settlement order is refused");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("settled positions"),
-        "the refusal names the settlement order: {rendered}"
+        rendered.contains("settled position 1 was reported twice"),
+        "the refusal names the offending position, not just a length: {rendered}"
     );
 }
 
@@ -990,4 +990,88 @@ fn settlement_order_does_not_reach_the_continuation_format() {
         "lashlang-vm-abi-v5",
         "the compiled-batch selection rule moved the VM ABI"
     );
+}
+
+/// A stored artifact that does not name its dialect must not decode at all.
+///
+/// The salvaged review probe: with a serde default, an artifact whose JSON
+/// predates the dialect field decoded as Lashlang and verified, which is the
+/// one route by which a TypeScript artifact could be compiled with Lashlang
+/// semantics — including input-order rejection selection.
+#[test]
+fn an_artifact_without_a_dialect_does_not_decode() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link("finish(1);", &environment).expect("links");
+    let artifact = linked.artifact.clone();
+    let mut json = serde_json::to_value(&artifact).expect("artifact encodes");
+    assert!(
+        json.get("compilation_dialect").is_some(),
+        "the dialect is always written"
+    );
+    json.as_object_mut()
+        .expect("artifact object")
+        .remove("compilation_dialect");
+    let decoded = serde_json::from_value::<lashlang::ModuleArtifact>(json);
+    let error = decoded.expect_err("a dialect-less artifact must not decode");
+    assert!(
+        error.to_string().contains("compilation_dialect"),
+        "the refusal names the missing dialect: {error}"
+    );
+}
+
+/// The canonical agent loop must compile.
+///
+/// The body filter used to reject every call and every member assignment, so
+/// the most common loop in the language was a link-time rejection. Suspension
+/// inside `for…of` is durable — the review proved it resumes across a
+/// continuation round-trip — so the restriction was a conservative static
+/// filter, not a durability requirement.
+#[test]
+fn for_of_bodies_accept_effects_and_unrelated_assignment() {
+    let environment = two_leaf_web_environment();
+    for source in [
+        // The canonical agent loop.
+        "const urls = ['a', 'b']; let out = ''; for (const url of urls) { const page = await web.fetch({ url }); out = out + page; } finish(out);",
+        // A bare await on a tool, with no assignment at all.
+        "const xs = ['a']; for (const x of xs) { await web.fetch({ url: x }); } finish('done');",
+        // Assignment to something that is demonstrably not the iterable.
+        "const xs = [1, 2]; const acc = { n: 0 }; for (const x of xs) { acc.n = acc.n + x; } finish(`${acc.n}`);",
+        // A second array, written while iterating the first.
+        "const xs = [1, 2]; const out = [0, 0]; for (const x of xs) { out[0] = x; } finish(`${out[0]}`);",
+        // An aggregate inside the body.
+        "const xs = ['a']; for (const x of xs) { await Promise.all([web.fetch({ url: x })]); } finish('done');",
+        // The iterable is a call result, so nothing in the body can name it.
+        "for (const c of 'ab'.concat('c')) { const page = await web.fetch({ url: c }); } finish('done');",
+    ] {
+        lash_typescript::link(source, &environment)
+            .unwrap_or_else(|error| panic!("must link: {error}\n  source: {source}"));
+    }
+}
+
+/// Genuine iterable mutation stays rejected, and says which shape reached it.
+#[test]
+fn for_of_bodies_still_reject_reaching_the_iterable() {
+    let environment = two_leaf_web_environment();
+    for (source, needle) in [
+        (
+            "const xs = [1, 2]; for (const x of xs) { xs[0] = 9; } finish('done');",
+            "assigns through `xs`",
+        ),
+        (
+            "const xs = [1, 2]; for (const x of xs) { xs.pop(); } finish('done');",
+            "calls `xs.pop()`",
+        ),
+        (
+            "const xs = [1, 2]; for (const x of xs) { await web.fetch({ url: xs }); } finish('done');",
+            "passes `xs`",
+        ),
+    ] {
+        let error = lash_typescript::link(source, &environment)
+            .expect_err("iterable mutation stays rejected");
+        assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{source}");
+        assert!(
+            error.to_string().contains(needle),
+            "the rejection names the shape that reached the iterable: {error}"
+        );
+    }
 }
