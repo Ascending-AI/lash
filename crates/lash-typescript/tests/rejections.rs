@@ -201,3 +201,27 @@ rejection_test!(
     "try {} catch {}",
     Code::EmptyCatchBindingUnsupported
 );
+
+rejection_test!(
+    rejects_compound_index_assignment,
+    "const a = [1]; a[0] += 5;",
+    Code::AssignmentOperatorUnsupported
+);
+rejection_test!(
+    rejects_reserved_generated_identifier,
+    "const __typescript_0_a = 1;",
+    Code::ReservedIdentifier
+);
+
+#[test]
+fn mapped_string_methods_accept_exactly_one_argument() {
+    for source in [
+        "finish(`${'abc'.startsWith('bc', 1)}`);",
+        "finish(`${'abc'.includes('b', 2)}`);",
+        "finish(`${'abc'.endsWith('b', 2)}`);",
+        "finish(`${'abc'.split('', 2)}`);",
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::UnsupportedExpression, "{source}");
+    }
+}
