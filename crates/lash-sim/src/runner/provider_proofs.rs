@@ -467,7 +467,12 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
         .complete(openai_compatible_request_with_events(Some(sender)))
         .await
         .expect_err("stream chunk timeout script should fail");
-    let committed_events = events.lock_recover().len();
+    let committed_events = events.lock_recover();
+    let evidence_events = committed_events
+        .iter()
+        .filter(|event| matches!(event, LlmStreamEvent::Evidence(_)))
+        .count();
+    let partial_response_events = committed_events.len() - evidence_events;
     require(
         err.kind == ProviderFailureKind::Timeout
             && err.code.as_deref() == Some("timeout")
@@ -476,8 +481,8 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
         "OpenAI-compatible stream chunk timeout did not match production timeout envelope",
     )?;
     require(
-        committed_events == 0,
-        "stream chunk timeout committed a partial provider success event",
+        evidence_events == 1 && partial_response_events == 0,
+        "stream chunk timeout did not retain exactly one request evidence event without partial provider output",
     )?;
     proof(
         "openai-compatible.chat-stream-chunk-timeout",
@@ -488,7 +493,9 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
         json!({
             "classification": failure_classification(&err),
             "timeout_phase": "stream_chunk",
-            "stream_events_committed": committed_events,
+            "stream_events_committed": committed_events.len(),
+            "evidence_events_committed": evidence_events,
+            "partial_response_events_committed": partial_response_events,
             "reported_successful_partial_response": false,
         }),
     )
