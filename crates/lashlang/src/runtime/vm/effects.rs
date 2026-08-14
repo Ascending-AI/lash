@@ -322,15 +322,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // that reports a malformed one fails closed rather than being silently
         // read as input order, which is the behaviour this replaces.
         let settlement_order = if batch.first_settled_rejection {
-            let Some(order) = result.settlement_sequence() else {
-                let error = RuntimeError::ResourceBatchSettlementOrder {
-                    leaves: batch.leaves.len(),
-                    reported: result.settlement_order.len(),
-                };
-                for active in active_nodes.iter().flatten() {
-                    self.fail_lashlang_execution(active, error.to_string());
+            let order = match result.settlement_sequence() {
+                Ok(order) => order,
+                Err(problem) => {
+                    let error = RuntimeError::ResourceBatchSettlementOrder { problem };
+                    for active in active_nodes.iter().flatten() {
+                        self.fail_lashlang_execution(active, error.to_string());
+                    }
+                    return Err(error);
                 }
-                return Err(error);
             };
             Some(order.to_vec())
         } else {

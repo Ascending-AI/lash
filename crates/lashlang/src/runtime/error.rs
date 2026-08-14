@@ -401,10 +401,8 @@ pub enum RuntimeError {
     ResourceBatchResultCount { actual: usize, expected: usize },
     /// A resource-operation batch reported a settlement order that is not an
     /// ordering of its own results.
-    #[error(
-        "resource operation batch reported {reported} settled positions for {leaves} operations"
-    )]
-    ResourceBatchSettlementOrder { leaves: usize, reported: usize },
+    #[error("resource operation batch settlement order is unusable: {problem}")]
+    ResourceBatchSettlementOrder { problem: String },
     /// Aggregate-await bytecode referenced a missing leaf.
     #[error("aggregate await leaf index out of range")]
     AggregateAwaitLeafOutOfRange,
@@ -972,8 +970,7 @@ mod tests {
                 expected: 3,
             },
             RuntimeError::ResourceBatchSettlementOrder {
-                leaves: 3,
-                reported: 2,
+                problem: "settled position 5 is out of range for 3 results".to_string(),
             },
             RuntimeError::AggregateAwaitLeafOutOfRange,
             RuntimeError::AggregateAwaitValueOutOfRange,
@@ -1267,7 +1264,7 @@ mod tests {
                     "resource operation batch returned 2 results for 3 operations"
                 }
                 RuntimeError::ResourceBatchSettlementOrder { .. } => {
-                    "resource operation batch reported 2 settled positions for 3 operations"
+                    "resource operation batch settlement order is unusable: settled position 5 is out of range for 3 results"
                 }
                 RuntimeError::AggregateAwaitLeafOutOfRange => {
                     "aggregate await leaf index out of range"

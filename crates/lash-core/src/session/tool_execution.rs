@@ -329,6 +329,35 @@ struct CoordinatedToolLaunch {
     triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
 
+/// Whether a reported settlement order is an ordering of the batch's own
+/// launches: one position per launch, each in range, none repeated.
+///
+/// A malformed order is refused rather than trimmed. Trimming produces a
+/// well-formed permutation that no later validator can tell from a real one.
+fn validate_batch_settlement_order(order: &[usize], launches: usize) -> Result<(), String> {
+    if order.len() != launches {
+        return Err(format!(
+            "tool batch reported {} settled positions for {launches} launches",
+            order.len()
+        ));
+    }
+    let mut seen = vec![false; launches];
+    for position in order {
+        let Some(slot) = seen.get_mut(*position) else {
+            return Err(format!(
+                "tool batch reported settled position {position} for {launches} launches"
+            ));
+        };
+        if *slot {
+            return Err(format!(
+                "tool batch reported settled position {position} more than once"
+            ));
+        }
+        *slot = true;
+    }
+    Ok(())
+}
+
 /// The replies to a tool batch, in input order, with the order they settled.
 #[derive(Debug, Default)]
 pub struct ToolBatchReplies {
@@ -1183,11 +1212,32 @@ impl RuntimeExecutionContext<'_> {
                 .iter()
                 .map(|(index, _, _, _)| *index)
                 .collect::<Vec<_>>();
+            // Validate before translating. Dropping an out-of-range position
+            // and back-filling the gap would turn any malformed order into a
+            // clean-looking input-order permutation, which is exactly the
+            // rejection selection this field exists to prevent — the defect
+            // would be repaired into invisibility instead of failing closed.
+            if let Err(reason) =
+                validate_batch_settlement_order(&outcome.settlement_order, batch_call_indices.len())
+            {
+                for (index, _, _, _) in prepared_entries {
+                    replies[index] = Some(ToolInvocationReply::error(serde_json::json!(format!(
+                        "tool batch failed: {reason}"
+                    ))));
+                }
+                return ToolBatchReplies {
+                    replies: replies
+                        .into_iter()
+                        .map(|reply| reply.expect("every batch reply slot should be filled"))
+                        .collect(),
+                    settlement_order: Vec::new(),
+                };
+            }
             settlement_order.extend(
                 outcome
                     .settlement_order
                     .iter()
-                    .filter_map(|position| batch_call_indices.get(*position).copied()),
+                    .map(|position| batch_call_indices[*position]),
             );
             if outcome.launches.len() != prepared_entries.len() {
                 let message = format!(
@@ -1257,13 +1307,6 @@ impl RuntimeExecutionContext<'_> {
             .into_iter()
             .map(|reply| reply.expect("every batch reply slot should be filled"))
             .collect::<Vec<_>>();
-        // Any call the batch never reported on settled during preparation or
-        // failed there; append it so the order stays a full ordering.
-        for index in 0..replies.len() {
-            if !settlement_order.contains(&index) {
-                settlement_order.push(index);
-            }
-        }
         ToolBatchReplies {
             replies,
             settlement_order,
@@ -1649,5 +1692,39 @@ impl RuntimeExecutionContext<'_> {
 
         self.complete_tool_call(index, call_id, replay, outcome, tool_correlation_id)
             .await
+    }
+}
+
+#[cfg(test)]
+mod settlement_order_boundary_tests {
+    use super::validate_batch_settlement_order as validate;
+
+    /// The reviewer's probe table. Every malformed order must be refused at the
+    /// boundary; repairing one into an input-order permutation is what silently
+    /// restored the original rejection-selection bug.
+    #[test]
+    fn a_malformed_settlement_order_is_refused_not_repaired() {
+        assert!(
+            validate(&[1, 0], 2).is_ok(),
+            "a genuine out-of-order settle"
+        );
+        assert!(
+            validate(&[0, 1], 2).is_ok(),
+            "input order is still an order"
+        );
+        let out_of_range =
+            validate(&[usize::MAX, 0], 2).expect_err("an out-of-range position must be refused");
+        assert!(
+            out_of_range.contains("settled position"),
+            "the refusal names the position: {out_of_range}"
+        );
+        let empty = validate(&[], 2).expect_err("an empty order must be refused");
+        assert!(empty.contains("0 settled positions"), "{empty}");
+        let duplicate = validate(&[0, 0], 2).expect_err("a duplicated position must be refused");
+        assert!(duplicate.contains("more than once"), "{duplicate}");
+        assert!(
+            validate(&[0, 1, 0], 2).is_err(),
+            "an over-long order must be refused"
+        );
     }
 }

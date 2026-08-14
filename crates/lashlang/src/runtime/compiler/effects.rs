@@ -222,12 +222,18 @@ impl Compiler {
         let mut leaves = Vec::with_capacity(leaf_count);
         let mut stack_value_count = 0;
         let shape = self.compile_aggregate_await_shape(handle, &mut leaves, &mut stack_value_count);
+        // Only a batch that can propagate a leaf's rejection selects by
+        // settlement order. `allSettled` reports every leaf as a record and
+        // never unwraps one, so it must not validate — let alone die on —
+        // metadata it does not read.
+        let selects_by_settlement_order = self.dialect == CompilationDialect::Typescript
+            && leaves.iter().any(|leaf| leaf.unwrap);
         let batch = self.push_resource_operation_batch(CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
             shape,
             stack_value_count,
             aggregate_unwrap,
-            first_settled_rejection: self.dialect == CompilationDialect::Typescript,
+            first_settled_rejection: selects_by_settlement_order,
         });
         let instruction = self.code.len();
         self.code.push(Instruction::ResourceOperationBatch(batch));

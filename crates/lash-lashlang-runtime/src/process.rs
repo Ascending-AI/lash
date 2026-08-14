@@ -710,6 +710,9 @@ impl LashlangProcessHost<'_> {
         let mut settlement_order = (0..results.len())
             .filter(|index| !positions.contains(index))
             .collect::<Vec<_>>();
+        // `call_tool_batch` refuses a malformed order at its boundary, so every
+        // reported position is a real invocation position here. Filtering again
+        // would only convert a future defect back into a silent repair.
         settlement_order.extend(
             batch
                 .settlement_order

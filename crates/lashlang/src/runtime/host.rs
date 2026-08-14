@@ -112,21 +112,32 @@ impl ResourceOperationBatchResult {
 
     /// The input indices in settlement order, validated against `results`.
     ///
-    /// The VM refuses a batch whose order is not a permutation of its results
-    /// rather than guessing, so a host that miscounts fails closed.
-    pub fn settlement_sequence(&self) -> Option<&[usize]> {
+    /// The VM refuses a batch whose order is not an ordering of its results
+    /// rather than guessing, so a host that miscounts fails closed. The error
+    /// names the offending position: a length-only complaint reads as
+    /// self-consistent and leaves nothing to debug.
+    pub fn settlement_sequence(&self) -> Result<&[usize], String> {
         if self.settlement_order.len() != self.results.len() {
-            return None;
+            return Err(format!(
+                "reported {} settled positions for {} results",
+                self.settlement_order.len(),
+                self.results.len()
+            ));
         }
         let mut seen = vec![false; self.results.len()];
         for index in &self.settlement_order {
-            let slot = seen.get_mut(*index)?;
+            let Some(slot) = seen.get_mut(*index) else {
+                return Err(format!(
+                    "settled position {index} is out of range for {} results",
+                    self.results.len()
+                ));
+            };
             if *slot {
-                return None;
+                return Err(format!("settled position {index} was reported twice"));
             }
             *slot = true;
         }
-        Some(&self.settlement_order)
+        Ok(&self.settlement_order)
     }
 }
 

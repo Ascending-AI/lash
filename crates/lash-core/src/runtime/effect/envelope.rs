@@ -1305,14 +1305,18 @@ mod settlement_order_journal_tests {
     /// as input order would silently reintroduce the bug the order fixes.
     #[test]
     fn a_tool_batch_outcome_without_settlement_order_fails_closed() {
+        // The tag key is `type`, not `kind`: a payload keyed `kind` fails on the
+        // *tag* and would pass this test while proving nothing about the field.
         let legacy = serde_json::json!({
-            "kind": "tool_batch",
+            "type": "tool_batch",
             "launches": [],
+            "triggers": [],
         });
         let decoded = serde_json::from_value::<RuntimeEffectOutcome>(legacy);
+        let error = decoded.expect_err("an outcome without settlement order must not decode");
         assert!(
-            decoded.is_err(),
-            "an outcome without settlement order must not decode: {decoded:?}"
+            error.to_string().contains("settlement_order"),
+            "the refusal must name the missing field, not the tag: {error}"
         );
     }
 
