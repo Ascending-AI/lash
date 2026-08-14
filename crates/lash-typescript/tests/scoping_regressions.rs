@@ -232,3 +232,33 @@ fn lexical_bindings_shadow_host_intrinsic_names() {
         Value::Number(7.0)
     );
 }
+
+#[test]
+fn generated_binding_namespace_is_reserved() {
+    // A source identifier spelled like a generated one would collide with the
+    // lowerer's own namespace and silently take a block-local value, including
+    // over a durable root global.
+    for source in [
+        "const __typescript_0_a = 'top'; { const a = 'inner'; } finish(__typescript_0_a);",
+        "const f = () => { const __typescript_0_b = 'fn'; { const b = 'blk'; } return __typescript_0_b; }; finish(f());",
+        "function __typescript_0_f(): number { return 1; } finish(__typescript_0_f());",
+        "const g = (__typescript_0_p: number): number => __typescript_0_p; finish(g(1));",
+        "try { throw 1; } catch (__typescript_0_e) { finish(1); }",
+        "let __typescript_0_frame = 1; finish(__typescript_0_frame);",
+    ] {
+        assert_eq!(
+            lash_typescript::compile(source)
+                .expect_err("generated-namespace identifiers must reject")
+                .code,
+            lash_typescript::DiagnosticCode::ReservedIdentifier,
+            "{source}"
+        );
+    }
+    // Neighbouring spellings stay ordinary identifiers.
+    assert_eq!(
+        finished(
+            "const __typescript = 3; const _typescript_0_a = 4; finish(__typescript + _typescript_0_a);"
+        ),
+        Value::Number(7.0)
+    );
+}
