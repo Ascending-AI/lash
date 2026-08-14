@@ -138,7 +138,8 @@ async fn aggregate_await_mixed_pure_values_batch_resource_leaves_and_reconstruct
                     self.batch_len
                         .store(batch.operations.len(), std::sync::atomic::Ordering::SeqCst);
                     Ok(AbilityResult::ResourceOperationBatch(
-                        ResourceOperationBatchResult::settled_in_input_order(batch
+                        ResourceOperationBatchResult::settled_in_input_order(
+                            batch
                                 .operations
                                 .into_iter()
                                 .map(|operation| {
@@ -152,7 +153,8 @@ async fn aggregate_await_mixed_pure_values_batch_resource_leaves_and_reconstruct
                                             .unwrap_or(Value::Null),
                                     )
                                 })
-                                .collect()),
+                                .collect(),
+                        ),
                     ))
                 }
                 AbilityOp::ResourceOperation(_) => Err(ExecutionHostError::new(
@@ -281,10 +283,12 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
                             .join(",")
                     ));
                     Ok(AbilityResult::ResourceOperationBatch(
-                        ResourceOperationBatchResult::settled_in_input_order(values
+                        ResourceOperationBatchResult::settled_in_input_order(
+                            values
                                 .into_iter()
                                 .map(ResourceOperationResult::Value)
-                                .collect()),
+                                .collect(),
+                        ),
                     ))
                 }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
@@ -330,7 +334,8 @@ async fn aggregate_await_leaf_unwrap_waits_for_all_siblings_then_reports_first_e
                     self.batch_len
                         .store(batch.operations.len(), std::sync::atomic::Ordering::SeqCst);
                     Ok(AbilityResult::ResourceOperationBatch(
-                        ResourceOperationBatchResult::settled_in_input_order(batch
+                        ResourceOperationBatchResult::settled_in_input_order(
+                            batch
                                 .operations
                                 .into_iter()
                                 .map(|operation| {
@@ -342,7 +347,8 @@ async fn aggregate_await_leaf_unwrap_waits_for_all_siblings_then_reports_first_e
                                         ResourceOperationResult::Value(Value::String("ok".into()))
                                     }
                                 })
-                                .collect()),
+                                .collect(),
+                        ),
                     ))
                 }
                 AbilityOp::Finish(value) | AbilityOp::Fail(value) => {

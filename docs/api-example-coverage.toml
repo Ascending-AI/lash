@@ -47181,6 +47181,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::ToolBatch::settlement_order"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::ToolBatch::settlement_order"]
+area = "triggers"
+disposition = "unused-remove"
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectOutcome::ToolBatch::settlement_order. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::ToolBatch::triggers"
 kind = "field"
 availability = "default+all-features"
@@ -69793,6 +69802,30 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeExecutionContext::call_tool_batch` hands `ToolInvocation` to hosts (runtime embedders). Consumer class: the RLM protocol crate -- this function is exercised in-repo at crates/lash-protocol-rlm/src/executor/host_bridge.rs:402, and no example reaches it, which is what keeps the row unused."
+
+[[api]]
+symbol = "lash_core::session::tool_execution::ToolBatchReplies"
+kind = "struct"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeExecutionContext::call_tool_batch` returns it to hosts (runtime embedders). Consumer class: the RLM protocol crate and the Lashlang process-engine implementer -- both read its settlement order to select the rejection `Promise.all` reports, at crates/lash-protocol-rlm/src/executor/host_bridge.rs and crates/lash-lashlang-runtime/src/process.rs, and no example reaches it, which is what keeps the row unused."
+
+[[api]]
+symbol = "lash_core::session::tool_execution::ToolBatchReplies::replies"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeExecutionContext::call_tool_batch` returns it to hosts (runtime embedders). Consumer class: the RLM protocol crate and the Lashlang process-engine implementer -- both read its settlement order to select the rejection `Promise.all` reports, at crates/lash-protocol-rlm/src/executor/host_bridge.rs and crates/lash-lashlang-runtime/src/process.rs, and no example reaches it, which is what keeps the row unused."
+
+[[api]]
+symbol = "lash_core::session::tool_execution::ToolBatchReplies::settlement_order"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeExecutionContext::call_tool_batch` returns it to hosts (runtime embedders). Consumer class: the RLM protocol crate and the Lashlang process-engine implementer -- both read its settlement order to select the rejection `Promise.all` reports, at crates/lash-protocol-rlm/src/executor/host_bridge.rs and crates/lash-lashlang-runtime/src/process.rs, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::session::tool_execution::ToolInvocationReply"
