@@ -166,6 +166,60 @@ fn hoisted_functions_support_cycles_and_nested_outer_captures() {
 }
 
 #[test]
+fn mutually_recursive_declarations_keep_their_lexical_environment() {
+    // A three-member cycle, ordered so no member is declared before its peers.
+    assert_eq!(
+        finished(
+            "function a(n: number): number { if (n === 0) { return 0; } return b(n - 1); } function b(n: number): number { return c(n); } function c(n: number): number { return 1 + a(n); } finish(a(3));"
+        ),
+        Value::Number(3.0)
+    );
+    // Cycle members still capture ordinary outer bindings, including one
+    // declared after the whole cycle.
+    assert_eq!(
+        finished(
+            "function ping(n: number): number { if (n === 0) { return base; } return pong(n - 1); } function pong(n: number): number { return ping(n - 1) + step; } const base = 100; const step = 10; finish(ping(4));"
+        ),
+        Value::Number(120.0)
+    );
+    // A peer read as a value rather than called, and a peer reached from a
+    // closure nested inside a cycle member.
+    assert_eq!(
+        finished(
+            "function pick(n: number): number { const call = () => other(n); return call(); } function other(n: number): number { if (n === 0) { return 0; } return pick(n - 1) + 1; } finish(pick(3));"
+        ),
+        Value::Number(3.0)
+    );
+    assert_eq!(
+        finished(
+            "function left(n: number): number { const peer = right; return peer(n); } function right(n: number): number { if (n === 0) { return 7; } return left(n - 1); } finish(left(2));"
+        ),
+        Value::Number(7.0)
+    );
+    // A cycle nested inside a function body, and an acyclic function that
+    // depends on the cycle.
+    assert_eq!(
+        finished(
+            "function shell(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(shell(5));"
+        ),
+        Value::Number(5.0)
+    );
+    assert_eq!(
+        finished(
+            "function head(n: number): number { return tail(n); } function tail(n: number): number { if (n === 0) { return 0; } return head(n - 1) + 2; } function caller(): number { return head(3); } finish(caller());"
+        ),
+        Value::Number(6.0)
+    );
+    // Two independent cycles in one statement list get independent frames.
+    assert_eq!(
+        finished(
+            "function p(n: number): number { if (n === 0) { return 1; } return q(n - 1); } function q(n: number): number { return p(n); } function r(n: number): number { if (n === 0) { return 2; } return s(n - 1); } function s(n: number): number { return r(n); } finish(p(2) + r(2));"
+        ),
+        Value::Number(3.0)
+    );
+}
+
+#[test]
 fn lexical_bindings_shadow_host_intrinsic_names() {
     assert_eq!(
         finished("const print = (value: number): number => value; finish(print(5));"),
