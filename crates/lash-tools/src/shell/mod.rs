@@ -93,6 +93,12 @@ impl StandardShell {
         self
     }
 
+    #[cfg(test)]
+    fn with_detached_launch_gate(mut self, gate: Arc<runtime::DetachedLaunchGate>) -> Self {
+        self.runtime = self.runtime.with_detached_launch_gate(gate);
+        self
+    }
+
     fn parse_common_command_params(
         &self,
         args: &serde_json::Value,
@@ -241,8 +247,10 @@ impl StandardShell {
     /// launch identity as a `Success` value. There are deliberately two durable
     /// rows: the unobserved OwnerBound launcher is the exactly-once execution
     /// receipt, while the `:detached` ExternallyOwned row is the model-facing
-    /// terminal audit record. Lash will not track, signal, or stop the process
-    /// afterward; the host/OS owns it.
+    /// audit record, registered before host launch and normally terminalized
+    /// immediately afterward. Lash will not track, signal, or stop the process
+    /// afterward; the host/OS owns it. Cancellation during the blocking spawn
+    /// can leave the pre-existing row pending, but cannot erase the audit fact.
     async fn detach_command_process(
         &self,
         params: &StartCommandParams,
@@ -261,8 +269,25 @@ impl StandardShell {
             );
         };
 
-        // Validate the complete durable launch context before starting host
-        // work. The audit row is registered only after a successful exec.
+        // Journal-first: durably register the audit identity before entering
+        // spawn_blocking. If the caller is cancelled while the blocking task
+        // continues, the launch can no longer escape without an audit row.
+        let requested = json!({
+            "command": params.cmd.clone(),
+            "launch_status": "requested",
+        });
+        let request = ProcessStartRequest::external(
+            detached_process_id,
+            lash_core::ProcessOriginator::host_scoped("shell-detached"),
+            requested,
+        )
+        .with_identity(
+            lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
+        );
+        if let Err(error) = context.processes().start(request).await {
+            return execution_failure("detached_process_registration_failed", error.to_string());
+        }
+
         let launch = match self
             .runtime
             .spawn_detached(
@@ -274,7 +299,25 @@ impl StandardShell {
             .await
         {
             Ok(launch) => launch,
-            Err(failure) => return ToolResult::failure(*failure),
+            Err(failure) => {
+                let _ = context
+                    .processes()
+                    .complete_external(
+                        detached_process_id,
+                        lash_core::ProcessAwaitOutput::Failure {
+                            class: failure.class.clone(),
+                            code: failure.code.clone(),
+                            message: failure.message.clone(),
+                            raw: failure
+                                .raw
+                                .as_ref()
+                                .and_then(|raw| serde_json::to_value(raw).ok()),
+                            control: None,
+                        },
+                    )
+                    .await;
+                return ToolResult::failure(*failure);
+            }
         };
         let started_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -286,18 +329,6 @@ impl StandardShell {
             "command": params.cmd.clone(),
             "started_at": started_at,
         });
-        let request = ProcessStartRequest::external(
-            detached_process_id,
-            lash_core::ProcessOriginator::host_scoped("shell-detached"),
-            launch_value.clone(),
-        )
-        .with_identity(
-            lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
-        );
-        if let Err(error) = context.processes().start(request).await {
-            self.runtime.stop_detached(launch);
-            return execution_failure("detached_process_registration_failed", error.to_string());
-        }
         if let Err(error) = context
             .processes()
             .complete_external(

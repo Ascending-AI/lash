@@ -29,6 +29,10 @@ ALIASED_FORBIDDEN = {
 }
 
 ENTRYPOINT = re.compile(r"\basync\s+fn\s+execute_orchestration(?:_by_id)?\s*\(")
+EXPECTED_ENTRYPOINTS = {
+    Path("crates/lash-protocol-standard/src/lib.rs"): 1,
+    Path("crates/lash-subagents/src/rlm.rs"): 1,
+}
 USE = re.compile(r"\buse\s+([^;]+);")
 ALIAS = re.compile(r"\b(SystemTime|Instant|Uuid|HashMap|HashSet|spawn|thread_rng)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -109,10 +113,13 @@ def orchestration_bodies(source: str):
 
 def main() -> int:
     failures = []
+    matched_entrypoints = {}
     for path in sorted((ROOT / "crates").glob("**/*.rs")):
         source = path.read_text(encoding="utf-8")
         aliases = import_aliases(code_only(source))
         for start, body in orchestration_bodies(source):
+            relative_path = path.relative_to(ROOT)
+            matched_entrypoints[relative_path] = matched_entrypoints.get(relative_path, 0) + 1
             line = source.count("\n", 0, start) + 1
             for token, reason in FORBIDDEN.items():
                 if token in body:
@@ -124,6 +131,11 @@ def main() -> int:
                         f"{path.relative_to(ROOT)}:{line}: {reason}: {token} "
                         f"(aliased import)"
                     )
+    if matched_entrypoints != EXPECTED_ENTRYPOINTS:
+        failures.append(
+            "entrypoint coverage changed: "
+            f"expected {EXPECTED_ENTRYPOINTS}, matched {matched_entrypoints}"
+        )
     if failures:
         print("orchestrating-tool determinism lint failed:", file=sys.stderr)
         print("\n".join(f"- {failure}" for failure in failures), file=sys.stderr)

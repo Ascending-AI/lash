@@ -114,8 +114,9 @@ pub(crate) struct StartCommandParams {
     pub(crate) login: bool,
     pub(crate) max_output_tokens: Option<usize>,
     /// Launch the command as a Detached Command (ADR 0019): its own session,
-    /// no PTY retained, host/OS-owned from birth. lash records only an
-    /// immediately-terminal audit fact and never tracks it as running.
+    /// no PTY retained, host/OS-owned from birth. lash records a durable audit
+    /// fact before launch and normally completes it immediately;
+    /// lash never tracks the detached OS process as running.
     pub(crate) detach: bool,
     /// Stable id of the ExternallyOwned audit row produced by the detached
     /// launcher body. Present exactly when `detach` is true.
@@ -170,6 +171,37 @@ pub(crate) struct ShellRuntime {
     cwd: PathBuf,
     table: Arc<ShellProcessTable>,
     next_session_id: Arc<AtomicI32>,
+    #[cfg(test)]
+    detached_launch_gate: Option<Arc<DetachedLaunchGate>>,
+}
+
+#[cfg(test)]
+pub(crate) struct DetachedLaunchGate {
+    entered: std::sync::Barrier,
+    release: std::sync::Barrier,
+}
+
+#[cfg(test)]
+impl DetachedLaunchGate {
+    pub(crate) fn new() -> Self {
+        Self {
+            entered: std::sync::Barrier::new(2),
+            release: std::sync::Barrier::new(2),
+        }
+    }
+
+    pub(crate) fn wait_until_entered(&self) {
+        self.entered.wait();
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.wait();
+    }
+
+    fn park_spawn(&self) {
+        self.entered.wait();
+        self.release.wait();
+    }
 }
 
 impl ShellRuntime {
@@ -181,11 +213,19 @@ impl ShellRuntime {
             cwd,
             table: Arc::new(ShellProcessTable::new()),
             next_session_id: Arc::new(AtomicI32::new(1)),
+            #[cfg(test)]
+            detached_launch_gate: None,
         }
     }
 
     pub(crate) fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.cwd = cwd.into();
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_detached_launch_gate(mut self, gate: Arc<DetachedLaunchGate>) -> Self {
+        self.detached_launch_gate = Some(gate);
         self
     }
 
@@ -382,6 +422,11 @@ impl ShellRuntime {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+
+        #[cfg(test)]
+        if let Some(gate) = &self.detached_launch_gate {
+            gate.park_spawn();
+        }
 
         #[cfg(unix)]
         let (read_fd, write_fd) = detached_identity_pipe().map_err(|error| {
@@ -917,7 +962,16 @@ impl ShellRuntime {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
+fn detached_identity_pipe() -> std::io::Result<(libc::c_int, libc::c_int)> {
+    let mut fds = [0_i32; 2];
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok((fds[0], fds[1]))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
 fn detached_identity_pipe() -> std::io::Result<(libc::c_int, libc::c_int)> {
     let mut fds = [0_i32; 2];
     if unsafe { libc::pipe(fds.as_mut_ptr()) } == -1 {

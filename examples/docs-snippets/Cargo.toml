@@ -16,8 +16,7 @@ workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
-lash = { workspace = true, features = ["rlm", "otel-trace", "testing"] }
-lash-core = { workspace = true, features = ["testing"] }
+lash = { workspace = true, features = ["rlm", "otel-trace"] }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-restate = { workspace = true }
 lash-plugin-mcp = { workspace = true, features = ["lashlang"] }
@@ -34,4 +33,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash = { workspace = true, features = ["testing"] }
+lash-core = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }

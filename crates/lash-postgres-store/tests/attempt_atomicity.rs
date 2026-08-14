@@ -2425,3 +2425,6 @@ async fn public_provider_parent_end_cancel_survives_crash_after_tool_batch_on_po
 
     reset(&storage).await;
 }
+
+#[path = "attempt_atomicity/rerunnable_signal.rs"]
+mod rerunnable_signal;

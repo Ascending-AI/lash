@@ -1304,6 +1304,71 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelled_detached_spawn_cannot_escape_without_a_durable_audit_row() {
+        let dir = tempfile::tempdir().expect("detached cancellation tempdir");
+        let marker = dir.path().join("launched-after-cancel");
+        let gate = Arc::new(runtime::DetachedLaunchGate::new());
+        let shell = shell_provider(
+            StandardShell::new()
+                .with_cwd(dir.path())
+                .with_detached_launch_gate(Arc::clone(&gate)),
+        );
+        let service = Arc::new(TestProcessService::default());
+        let registry = service.registry();
+        let ctx = context_with_processes(service, "detach-cancel-audit")
+            .with_async_process("detach-cancel-launcher", CancellationToken::new());
+        let args = json!({
+            "cmd": "touch launched-after-cancel",
+            "detach": true,
+            "detached_process_id": "detach-cancel-audit",
+        });
+        let task = tokio::spawn(async move {
+            run_with_context(&shell, "start_command", &args, &ctx).await
+        });
+
+        let audit = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Some(record) = registry
+                    .get_process("detach-cancel-audit")
+                    .await
+                    .expect("read cancellation audit row")
+                {
+                    break record;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("audit row must commit before the blocking spawn is released");
+        assert_eq!(
+            audit.disposition,
+            lash_core::RecoveryDisposition::ExternallyOwned
+        );
+        assert!(!audit.is_terminal(), "the launch is still gated");
+
+        gate.wait_until_entered();
+        task.abort();
+        gate.release();
+        let cancelled = task.await.expect_err("the caller is cancelled mid-spawn");
+        assert!(cancelled.is_cancelled());
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !marker.exists() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the detached blocking task must demonstrate post-cancel launch");
+        assert!(
+            registry
+                .get_process("detach-cancel-audit")
+                .await
+                .expect("read post-cancel audit row")
+                .is_some(),
+            "a post-cancel host launch must retain its pre-spawn durable audit row"
+        );
+    }
+
     #[tokio::test]
     async fn start_command_process_consumes_stdin_signals() {
         let shell = test_shell();
