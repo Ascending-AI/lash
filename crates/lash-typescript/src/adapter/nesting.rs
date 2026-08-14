@@ -46,6 +46,7 @@ enum PreviousToken {
     Word {
         opens_expression: bool,
         ends_statement: bool,
+        ends_expression: bool,
     },
 }
 
@@ -54,6 +55,7 @@ impl PreviousToken {
         Self::Word {
             opens_expression: is_expression_prefix_word(word),
             ends_statement: word_can_end_statement(word),
+            ends_expression: word_can_end_expression(word),
         }
     }
 
@@ -104,12 +106,19 @@ impl PreviousToken {
     fn can_end_expression(self) -> bool {
         match self {
             Self::Word {
-                opens_expression, ..
-            } => !opens_expression,
+                ends_expression, ..
+            } => ends_expression,
             Self::Byte(byte) => matches!(byte, b')' | b']' | b'}') || byte.is_ascii_alphanumeric(),
             Self::None => false,
         }
     }
+}
+
+/// Whether a word can end an expression, which is what makes a following `(`
+/// or `[` a call or subscript rather than a fresh grouping. `if (…)` is a
+/// statement head, not a call on `if`.
+fn word_can_end_expression(word: &str) -> bool {
+    word_can_end_statement(word) && !matches!(word, "return" | "break" | "continue")
 }
 
 /// Reserved words that cannot end a statement, so a newline after one is never
