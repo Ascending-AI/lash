@@ -1364,8 +1364,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::delete_session"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "The current example use of lash::LashCore::delete_session is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-service/src/fork_rewind_contract.rs:166#.delete_session(SOURCE_SESSION, scoped_effects)"
+assertion = "examples/agent-service/src/fork_rewind_contract.rs:169#assert_eq!(deleted.session_id, SOURCE_SESSION);"
+reason = "The agent-service fork/rewind contract test deletes the source through the host facade and asserts the typed deletion report before re-forking its retained anchor."
 
 [[api]]
 symbol = "lash::LashCore::drain_status"
@@ -1431,8 +1433,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::fork_at"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "The current example use of lash::LashCore::fork_at is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-service/src/fork_rewind_contract.rs:128#.fork_at(&retained_node_id, FIRST_BRANCH)"
+assertion = "examples/agent-service/src/fork_rewind_contract.rs:131#assert_eq!(first_branch.session_id, FIRST_BRANCH);"
+reason = "The agent-service fork/rewind contract test creates a zero-node branch through the host facade and asserts its typed identity and retained-anchor provenance."
 
 [[api]]
 symbol = "lash::LashCore::fork_at_with_observer_inheritance"
@@ -1440,8 +1444,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::fork_at_with_observer_inheritance"]
 area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::LashCore::fork_at_with_observer_inheritance to the agent-service recovery/operations flow example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-service/src/fork_rewind_contract.rs:146#.fork_at_with_observer_inheritance(&retained_node_id, EXPLICIT_BRANCH, Default::default())"
+assertion = "examples/agent-service/src/fork_rewind_contract.rs:155#assert_eq!(inherited[0].id, \"fork-contract-observed-process\");"
+reason = "The agent-service fork/rewind contract test supplies an explicit observer-inheritance policy through the host facade and asserts the inherited process observation on the new branch."
 
 [[api]]
 symbol = "lash::LashCore::fork_points"
@@ -1449,8 +1455,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::fork_points"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::LashCore::fork_points to the docs-snippets embedding/turns example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-service/src/fork_rewind_contract.rs:102#.fork_points()"
+assertion = "examples/agent-service/src/fork_rewind_contract.rs:105#assert_eq!(points, vec![pinned.clone()]);"
+reason = "The agent-service fork/rewind contract test enumerates retained host fork points and asserts pin state plus source provenance."
 
 [[api]]
 symbol = "lash::LashCore::pin"
@@ -1458,8 +1466,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::pin"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "The current example use of lash::LashCore::pin is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-service/src/fork_rewind_contract.rs:92#.pin(&retained_node_id)"
+assertion = "examples/agent-service/src/fork_rewind_contract.rs:95#assert_eq!(pinned.node_id, retained_node_id);"
+reason = "The agent-service fork/rewind contract test pins a live continuation through the host facade and asserts the returned retained point."
 
 [[api]]
 symbol = "lash::LashCore::process_registry"
