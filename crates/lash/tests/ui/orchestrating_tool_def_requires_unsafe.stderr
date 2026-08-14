@@ -1,0 +1,16 @@
+error: usage of an `unsafe` block
+  --> tests/ui/orchestrating_tool_def_requires_unsafe.rs:9:19
+   |
+ 9 |       let _forged = unsafe {
+   |  ___________________^
+10 | |         lash_core::facade_support::OrchestratingToolDef::from_first_party(
+11 | |             external_implementation(),
+12 | |         )
+13 | |     };
+   | |_____^
+   |
+note: the lint level is defined here
+  --> tests/ui/orchestrating_tool_def_requires_unsafe.rs:1:9
+   |
+ 1 | #![deny(unsafe_code)]
+   |         ^^^^^^^^^^^

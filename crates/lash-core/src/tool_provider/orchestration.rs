@@ -157,7 +157,10 @@ impl OrchestratingToolDef {
     ///
     /// The caller must be the crate that owns the registered tool contract.
     /// This is an unsafe capability boundary so ordinary downstream Rust code
-    /// cannot mint an orchestrating registration from a leaf provider.
+    /// cannot mint an orchestrating registration from a leaf provider. This is
+    /// a provenance convention, not a memory-safety invariant: violating it is
+    /// an unsupported capability escalation, but does not by itself cause
+    /// undefined behavior.
     #[doc(hidden)]
     pub unsafe fn from_first_party(
         implementation: Arc<dyn OrchestratingToolImplementation>,

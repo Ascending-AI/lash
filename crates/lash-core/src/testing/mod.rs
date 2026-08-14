@@ -1642,7 +1642,7 @@ mod test_protocol_fakes {
 
     pub fn test_standard_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
         vec![Arc::new(TestProtocolFactory {
-            id: "standard_protocol",
+            id: "test_protocol",
             include_batch: true,
             decode_code_create_options: false,
             session_override: None,
@@ -1656,7 +1656,7 @@ mod test_protocol_fakes {
         code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
     ) -> Arc<dyn PluginFactory> {
         Arc::new(TestProtocolFactory {
-            id: "standard_protocol",
+            id: "test_protocol",
             include_batch: true,
             decode_code_create_options: false,
             session_override: Some(session),

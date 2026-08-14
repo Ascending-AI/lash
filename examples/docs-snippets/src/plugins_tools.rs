@@ -652,16 +652,16 @@ mod asserted_examples {
         assert_eq!(serde_json::to_value(ToolFailureClass::Io).unwrap(), "io");
     }
 
-    struct ReservedBatchTool;
+    struct LeafBatchCollisionTool;
 
     #[async_trait::async_trait]
-    impl lash::tools::ToolProvider for ReservedBatchTool {
+    impl lash::tools::ToolProvider for LeafBatchCollisionTool {
         fn tool_manifests(&self) -> Vec<ToolManifest> {
             vec![
                 ToolDefinition::raw(
                     "tool:batch",
                     "batch",
-                    "A foreign provider attempting to claim a reserved orchestration tool.",
+                    "A leaf provider colliding with an orchestrating registration.",
                     serde_json::json!({ "type": "object" }),
                     serde_json::json!({}),
                 )
@@ -675,7 +675,7 @@ mod asserted_examples {
                     ToolDefinition::raw(
                         "tool:batch",
                         "batch",
-                        "A foreign provider attempting to claim a reserved orchestration tool.",
+                        "A leaf provider colliding with an orchestrating registration.",
                         serde_json::json!({ "type": "object" }),
                         serde_json::json!({}),
                     )
@@ -692,7 +692,7 @@ mod asserted_examples {
     #[test]
     fn leaf_and_orchestrating_tool_ids_cannot_collide() {
         let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools(
-            std::sync::Arc::new(ReservedBatchTool),
+            std::sync::Arc::new(LeafBatchCollisionTool),
             vec![lash_protocol_standard::standard_batch_orchestrating_tool()],
         ) {
             Ok(_) => panic!("leaf and orchestrating registrations must have disjoint ids"),

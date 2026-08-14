@@ -162,9 +162,11 @@ impl ToolRegistry {
     /// manifest, excluded from the catalog as a non-member, rebound when its
     /// source returns) instead of failing the whole restore. Tool id is the
     /// registry identity; the live manifest wins on rebind, with persisted Tool
-    /// Catalog membership preserved per id. Newly advertised ids are members by
-    /// default. Consequently an opt-out does not transfer when a provider
-    /// replaces a tool with a new id, even if it reuses the same name. Multiple
+    /// Catalog membership preserved per id. The live source also re-derives the
+    /// registration lane, so snapshots written before lane persistence remain
+    /// resumable. Newly advertised ids are members by default. Consequently an
+    /// opt-out does not transfer when a provider replaces a tool with a new id,
+    /// even if it reuses the same name. Multiple
     /// sources resolving the same id or advertised name still fail because
     /// execution authority and model-facing names must both be unambiguous.
     pub(crate) fn restore_state(

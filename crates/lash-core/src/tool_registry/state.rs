@@ -50,8 +50,9 @@ pub struct ToolStateEntry {
     /// the model. Hosts toggle this via `set_tool_membership`.
     #[serde(default = "is_member_default", skip_serializing_if = "is_default_member")]
     member: bool,
-    /// Registration lane is durable registry identity. Missing values from
-    /// pre-cutover snapshots decode as leaf registrations.
+    /// Persisted registration-lane hint. Missing values from pre-cutover
+    /// snapshots decode as leaf registrations; on rebind the live source is
+    /// authoritative and re-derives the effective lane.
     #[serde(default, skip_serializing_if = "is_leaf_registration")]
     registration_kind: ToolRegistrationKind,
 }

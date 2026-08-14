@@ -93,22 +93,6 @@ fn reconcile_tool_state_entries(
 
     for (id, stored) in entries {
         if let Some(live) = reconciled.get_mut(id) {
-            if live.registration_kind() != stored.registration_kind {
-                return Err(ReconfigureError::CrossLaneToolIdCollision {
-                    tool_id: id.clone(),
-                    leaf_source_id: if live.registration_kind() == ToolRegistrationKind::Leaf {
-                        live.binding
-                            .source_key()
-                            .and_then(|key| match key {
-                                ToolSourceKey::Leaf(source_id) => Some(source_id.clone()),
-                                ToolSourceKey::Orchestrating(_) => None,
-                            })
-                            .unwrap_or_else(|| "persisted_snapshot".to_string())
-                    } else {
-                        "persisted_snapshot".to_string()
-                    },
-                });
-            }
             live.member = stored.member && !hidden_tool_names.contains(&live.manifest.name);
             continue;
         }

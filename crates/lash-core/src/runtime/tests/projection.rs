@@ -14,7 +14,7 @@ struct AppendRollbackProtocolFactory {
 
 impl crate::PluginFactory for AppendRollbackProtocolFactory {
     fn id(&self) -> &'static str {
-        "standard_protocol"
+        "test_protocol"
     }
 
     fn build(
@@ -41,7 +41,7 @@ struct AppendRollbackProtocolPlugin {
 
 impl crate::SessionPlugin for AppendRollbackProtocolPlugin {
     fn id(&self) -> &'static str {
-        "standard_protocol"
+        "test_protocol"
     }
 
     fn register(&self, reg: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {

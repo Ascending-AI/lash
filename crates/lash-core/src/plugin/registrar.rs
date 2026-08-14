@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::*;
@@ -115,6 +115,7 @@ pub(crate) struct PluginContributions {
 pub struct PluginRegistrar {
     pub(crate) contributions: PluginContributions,
     pub(crate) registering_plugin_id: Option<String>,
+    tool_names: BTreeSet<String>,
 }
 
 pub struct ToolRegistrations<'a> {
@@ -481,6 +482,7 @@ impl PluginRegistrar {
         Self {
             contributions: PluginContributions::default(),
             registering_plugin_id: None,
+            tool_names: BTreeSet::new(),
         }
     }
 
@@ -537,6 +539,14 @@ impl PluginRegistrar {
     }
 
     fn add_tool_provider(&mut self, provider: Arc<dyn ToolProvider>) -> Result<(), PluginError> {
+        for manifest in provider.tool_manifests() {
+            if !self.tool_names.insert(manifest.name.clone()) {
+                return Err(PluginError::Registration(format!(
+                    "duplicate plugin tool name `{}`",
+                    manifest.name
+                )));
+            }
+        }
         push_registered_hook(
             &mut self.contributions.tool_providers,
             &self.registering_plugin_id,

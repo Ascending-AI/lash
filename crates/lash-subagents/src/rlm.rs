@@ -151,13 +151,18 @@ impl RlmSubagentToolsProvider {
 
 struct SpawnAgentOrchestratingTool {
     provider: Arc<RlmSubagentToolsProvider>,
+    definition: ToolDefinition,
 }
 
 pub(crate) fn spawn_agent_orchestrating_tool(
     provider: Arc<RlmSubagentToolsProvider>,
 ) -> lash_core::facade_support::OrchestratingToolDef {
+    let definition = spawn_agent_tool_definition(&provider.registry.names());
     let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
-        Arc::new(SpawnAgentOrchestratingTool { provider });
+        Arc::new(SpawnAgentOrchestratingTool {
+            provider,
+            definition,
+        });
     // SAFETY: this crate owns the spawn-agent tool contract and body.
     unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
 }
@@ -165,11 +170,11 @@ pub(crate) fn spawn_agent_orchestrating_tool(
 #[async_trait]
 impl lash_core::facade_support::OrchestratingToolImplementation for SpawnAgentOrchestratingTool {
     fn manifest(&self) -> lash_core::ToolManifest {
-        spawn_agent_tool_definition(&self.provider.registry.names()).manifest()
+        self.definition.manifest()
     }
 
     fn contract(&self) -> Arc<lash_core::ToolContract> {
-        Arc::new(spawn_agent_tool_definition(&self.provider.registry.names()).contract())
+        Arc::new(self.definition.contract())
     }
 
     async fn prepare_tool_call(
