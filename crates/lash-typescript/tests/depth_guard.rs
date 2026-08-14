@@ -141,6 +141,50 @@ fn sequential_statement_forms_do_not_accumulate_source_nesting() {
 }
 
 #[test]
+fn semicolon_free_statement_sequences_do_not_accumulate_source_nesting() {
+    // ASI terminates these statements; none of them ends in `;`, `,` or a
+    // statement-closing brace, and none of them is nested at all.
+    let declarations = (0..200)
+        .map(|index| format!("const v{index} = {index}\n"))
+        .collect::<String>();
+    lash_typescript::parse(&format!("{declarations}finish(`${{v199}}`)\n")).unwrap_or_else(
+        |error| panic!("semicolon-free declarations parse: {}", error.code.as_str()),
+    );
+    for source in [
+        (0..200)
+            .map(|index| format!("const a{index} = [{index}].length\n"))
+            .collect::<String>(),
+        (0..200)
+            .map(|index| format!("const b{index} = `x`.length + {index}\n"))
+            .collect::<String>(),
+        (0..200)
+            .map(|index| format!("if (1) {{ const c{index} = 1 }}\n"))
+            .collect::<String>(),
+        (0..200)
+            .map(|index| format!("const d{index} = {index}\n// a comment\n"))
+            .collect::<String>(),
+    ] {
+        lash_typescript::parse(&source).unwrap_or_else(|error| {
+            panic!(
+                "semicolon-free statement sequences parse: {}",
+                error.code.as_str()
+            )
+        });
+    }
+    // A newline that does not end a statement is not a release point: the
+    // continuation still counts against the same budget.
+    let error = lash_typescript::parse(&format!("const x = 1\n{}1\n", "+ 1\n".repeat(200)))
+        .expect_err("a continued expression must still accumulate");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+    let error = lash_typescript::parse(&format!(
+        "const y = {{ a: 1 }}\ny\n{}\n",
+        ".a\n".repeat(200)
+    ))
+    .expect_err("a newline-separated member chain must still accumulate");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+}
+
+#[test]
 fn documented_source_nesting_limit_fits_the_two_mebibyte_stack_budget() {
     std::thread::Builder::new()
         .name("typescript-source-nesting-budget".to_string())
@@ -164,4 +208,89 @@ fn documented_source_nesting_limit_fits_the_two_mebibyte_stack_budget() {
         .expect("stack-budget thread starts")
         .join()
         .expect("stack-budget thread does not abort or panic");
+}
+
+#[test]
+fn no_accepted_grammar_shape_leaks_the_shared_ast_diagnostic() {
+    // Every rejection carries a stable TS_* code of this dialect's own. The
+    // shared AST's generic limit must never be the thing that fires: the source
+    // budget has to bind first for every shape whose lowering is deeper than
+    // its source nesting.
+    let shapes: Vec<(&str, Box<dyn Fn(usize) -> String>)> = vec![
+        (
+            "template holes",
+            Box::new(|count| format!("const a = 1; finish(`{}`);", "${a}".repeat(count))),
+        ),
+        (
+            "string concatenation",
+            Box::new(|count| {
+                format!(
+                    "finish('p0'{});",
+                    (1..count).map(|i| format!(" + 'p{i}'")).collect::<String>()
+                )
+            }),
+        ),
+        (
+            "nested arrays",
+            Box::new(|count| {
+                format!(
+                    "finish(`${{{}1{}}}`);",
+                    "[".repeat(count),
+                    "]".repeat(count)
+                )
+            }),
+        ),
+        (
+            "nested calls",
+            Box::new(|count| {
+                format!(
+                    "const f = (n: number): number => n; finish(`${{{}1{}}}`);",
+                    "f(".repeat(count),
+                    ")".repeat(count)
+                )
+            }),
+        ),
+        (
+            "member chain",
+            Box::new(|count| {
+                format!(
+                    "const o = {{ a: 1 }}; finish(`${{o{}}}`);",
+                    ".a".repeat(count)
+                )
+            }),
+        ),
+        (
+            "prefix operators",
+            Box::new(|count| format!("finish(`${{{}1}}`);", "!".repeat(count))),
+        ),
+        (
+            "ternary chain",
+            Box::new(|count| format!("finish(`${{{}1}}`);", "1?1:".repeat(count))),
+        ),
+        (
+            "nested objects",
+            Box::new(|count| {
+                format!(
+                    "finish(`${{{}1{}}}`);",
+                    "{ a: ".repeat(count),
+                    " }".repeat(count)
+                )
+            }),
+        ),
+    ];
+    for (name, build) in shapes {
+        for count in 1..=80 {
+            let source = build(count);
+            match lash_typescript::compile(&source) {
+                Ok(_) => {}
+                Err(error) => {
+                    assert_ne!(
+                        error.code.as_str(),
+                        "TS_INVALID_SHARED_AST",
+                        "{name} at {count} leaked the shared AST limit: {error}"
+                    );
+                }
+            }
+        }
+    }
 }
