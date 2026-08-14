@@ -166,10 +166,10 @@ pub mod tools {
         ProcessParentEndPolicy, SignalProcessIntent, StartProcessIntent, TimeoutBehavior,
         ToolActivation, ToolArgumentProjectionPolicy, ToolAttemptResult, ToolCall, ToolCallOutput,
         ToolCallRecord, ToolContext, ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailure,
-        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentExecutionOutcome,
-        ToolIntentKind, ToolIntents, ToolManifest, ToolOutputContract, ToolPrepareCall,
-        ToolPrepareContext, ToolProvider, ToolResult, ToolResultDone, ToolRetryDisposition,
-        ToolValue, facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
+        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentExecutionOutcome, ToolIntents,
+        ToolManifest, ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+        ToolResult, ToolResultDone, ToolRetryDisposition, ToolValue,
+        facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
     };
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,

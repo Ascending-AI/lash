@@ -94,11 +94,11 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
     else {
         panic!("the runtime-owned tier must type its process-store duplicate")
     };
-    assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);
+    assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);
 
     let cross_kind = lash::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-        recorded_kind: lash::tools::ToolIntentKind::StartProcess,
-        submitted_kind: lash::tools::ToolIntentKind::EmitProcessEvent,
+        recorded_kind: lash_core::ToolIntentKind::StartProcess,
+        submitted_kind: lash_core::ToolIntentKind::EmitProcessEvent,
     };
     let lash::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
         recorded_kind,
@@ -107,8 +107,8 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
     else {
         unreachable!("constructed the cross-kind refusal")
     };
-    assert_eq!(recorded_kind, lash::tools::ToolIntentKind::StartProcess);
-    let expected_submitted = lash::tools::ToolIntentKind::EmitProcessEvent;
+    assert_eq!(recorded_kind, lash_core::ToolIntentKind::StartProcess);
+    let expected_submitted = lash_core::ToolIntentKind::EmitProcessEvent;
     assert_eq!(submitted_kind, expected_submitted);
 
     let foreign_session = ingress

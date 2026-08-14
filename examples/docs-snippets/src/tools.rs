@@ -68,8 +68,8 @@ async fn lookup_weather(args: WeatherArgs) -> WeatherReport {
 fn leaf_provider_copies_the_recorded_process_environment() {
     let tool = lash_core::testing::mock_tool_context();
     let attempt = lash::tools::AttemptContext::__for_testing(&tool, "docs-leaf-attempt");
-    let environment = attempt.process_execution_env_spec();
-    let stable_ref = environment
+    let stable_ref = attempt
+        .process_execution_env_spec()
         .stable_ref()
         .expect("recorded process environment is serializable");
 
