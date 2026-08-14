@@ -9,9 +9,9 @@
   "runtime": {
     "scenarios": {
       "checkpoint_state_hot_paths": {
-        "total_alloc_bytes_max": 165629000,
-        "steady_state_turn_alloc_bytes_max": 10452000,
-        "total_ms_max": 185.375,
+        "total_alloc_bytes_max": 297865000,
+        "steady_state_turn_alloc_bytes_max": 15294000,
+        "total_ms_max": 338.198,
         "phases": {
           "checkpoint_state.initial_capture": 5.96,
           "checkpoint_state.dirty_binding_update": 0.754,
@@ -19,7 +19,7 @@
           "checkpoint_state.measure_budget": 4.15,
           "checkpoint_state.component_commit": 52.844,
           "checkpoint_state.component_load": 16.326,
-          "checkpoint_state.execution_restore": 86.592
+          "checkpoint_state.execution_restore": 209.331
         }
       },
       "deep_turn_composition": {
@@ -214,8 +214,8 @@
         }
       },
       "rlm_globals": {
-        "total_alloc_bytes_max": 149652000,
-        "steady_state_turn_alloc_bytes_max": 11028000,
+        "total_alloc_bytes_max": 171063000,
+        "steady_state_turn_alloc_bytes_max": 12699000,
         "total_ms_max": 530.808,
         "phases": {
           "before_turn_hooks": 4.88,
@@ -226,8 +226,8 @@
           "post_commit_delivery": 11.43,
           "prepared_turn": 30.26,
           "prompt_build": 3.97,
-          "rlm_lashlang.compile_link": 3.078,
-          "rlm_lashlang.execute": 10.842,
+          "rlm_lashlang.compile_link": 7.137,
+          "rlm_lashlang.execute": 64.384,
           "rlm_lashlang.rehydrate_projected_globals": 4.3,
           "rlm_lashlang.resolve_projected_bindings": 9.41,
           "tool_intent.parent_end": 0.69,
