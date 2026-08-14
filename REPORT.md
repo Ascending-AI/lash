@@ -11,20 +11,18 @@ Implementation commits:
 
 ## Verdict
 
-**BLOCK / NOT READY TO STACK.**
+**READY TO STACK.**
 
 The TypeScript agent surface, durability paths, standard-library inventory,
-resource bounds, and repository gates are implemented and green. One ECMA-262
-release blocker remains: `Promise.all` observes aggregate results only after
-the entire shared resource-operation batch settles, then selects an error in
-input order. JavaScript requires rejection at the first-settled failure. This
-cannot be repaired truthfully in the TypeScript lowerer because the shared
-aggregate host contract does not expose completion order or early settlement.
-The required shared-runtime change is described under
-[Remaining release blocker](#remaining-release-blocker).
+resource bounds, and repository gates are implemented and green, and the ECMA
+`Promise.all` blocker is closed: the aggregate now rejects with the reason of
+the leaf that settled first.
 
-No semantic deviation is being accepted for that behavior. The dialect README
-also labels it as an open FIG-1305 release blocker.
+The repair was to the shared aggregate contract, not to the TypeScript lowerer,
+because the lowerer had nothing truthful to work with — the batch result carried
+only input-ordered results. It now carries the order the leaves settled in, and
+the VM selects the reported rejection from that order. See
+[Settlement order](#settlement-order).
 
 ## Delivered surface
 
@@ -92,11 +90,11 @@ also labels it as an open FIG-1305 release blocker.
 | Signal round-trip | `typescript_signal_round_trip_crosses_protocol_and_process_engine` stores and starts a TS artifact, sends a named signal through the protocol controller, resumes `waitSignal`, and observes terminal output | PASS |
 | Production artifact execution | `typescript_artifact_runs_through_process_engine_to_terminal` loads a stored TypeScript artifact through the Restate process engine and reaches terminal state | PASS |
 | Suspend/resume in `waitSignal`, `sleep`, and pending `finally` | `durable_processes_resume_across_await_signal_sleep_and_pending_finally` | PASS |
-| Suspend/resume during aggregate await | `durable_process_resumes_after_shared_promise_batch` | PASS, subject to the first-settled blocker below |
+| Suspend/resume during aggregate await | `durable_process_resumes_after_shared_promise_batch` | PASS |
 | Journaled time and randomness | Core journal/replay tests plus TypeScript effect lowering and execution tests | PASS |
 | First-party `typescript.tool` bindings and Promise signatures | Tool-catalog and signature-renderer tests | PASS |
 | Common first-shot programs avoid missing stdlib | Four executable fluency-smoke programs lower successfully | PASS |
-| ECMA-exact accepted `Promise.all` | First-settled rejection is not representable by the current batch result contract | **BLOCK** |
+| ECMA-exact accepted `Promise.all` | `promise_all_rejects_with_the_first_settled_rejection` drives the report's decisive case through the shared batch machine | PASS |
 
 ## Adversarial review closure
 
@@ -135,24 +133,51 @@ following findings were reproduced, repaired, and covered by focused tests.
 - The review's surviving finding is the shared aggregate settlement-order
   blocker below.
 
-## Remaining release blocker
+## Settlement order
 
-`crates/lashlang/src/runtime/vm/effects.rs` awaits one
-`AbilityOp::ResourceOperationBatch`. The host returns only when all leaves have
-settled, after which the VM scans the result vector in input order for an error.
+`Promise.all` is specified to reject with the first *settled* rejection.
+`crates/lashlang/src/runtime/vm/effects.rs` scanned its leaves in input order,
+so a batch whose second leaf rejected first still reported the first leaf's
+reason — the decisive case in the original review: leaf 0 rejects after five
+seconds with `A`, leaf 1 rejects after ten milliseconds with `B`, Node reports
+`B`, and the aggregate reported `A`.
 
-Decisive case:
+Three things had to change, and only one of them was in the VM.
 
-1. Promise leaf 0 rejects after 5 seconds with reason `A`.
-2. Promise leaf 1 rejects after 10 milliseconds with reason `B`.
-3. Node rejects after roughly 10 milliseconds with `B`.
-4. The current Lash aggregate waits for the batch and reports `A`.
+**The order existed in exactly one place and was being thrown away.**
+`schedule_tool_batch` drives a batch's leaves through `FuturesUnordered`,
+collects them in completion order, then sorts by input index. That sort was the
+only record of which leaf settled first. It now reports both halves: outcomes in
+input order, and the input indices in the order they completed.
 
-The fix must evolve the shared aggregate-await contract so the VM can observe
-settlement order and terminate `Promise.all` at the first rejection while still
-preserving replay-deterministic journal semantics. Changing only the TypeScript
-lowering would either duplicate the aggregate machine or fake semantics, both
-contrary to the FIG-1305 architecture ruling.
+**The order is journaled, and fails closed.** It crosses the effect boundary as a
+required field on `RuntimeEffectOutcome::ToolBatch`, which is what the replay
+journal stores. It deliberately has no serde default: an aggregate that selects
+by settlement order cannot distinguish a defaulted input order from a recorded
+one, so an entry written before this field existed is refused rather than
+replayed as input order. There is no migration decoder. Continuation and
+snapshot formats are untouched — a batch result is consumed inside a single
+`perform` and never persisted — and a test pins that.
+
+**The selection rule is recorded per batch at lowering.** The compiler already
+knows the dialect there, so a TypeScript aggregate marks its compiled batch and
+a Lashlang one leaves it clear. The alternative was to read the VM's
+`reference_semantics` flag at run time, which was rejected: that flag answers a
+heap-ownership question, and one predicate answering two questions is the exact
+defect shape that cost FIG-1304 three rounds. The cost is
+`LASHLANG_VM_ABI_VERSION` v4 to v5; the semantic hash and Lashlang's battery are
+unchanged.
+
+Both production hosts translate the order from invocation positions into leaf
+positions, with leaves that settled before the batch ran — journaled runtime
+values, and anything that failed during preparation — leading. A host that
+reports an order that is not an ordering of its own results fails closed with a
+typed `ResourceBatchSettlementOrder` rather than being guessed at.
+
+`Promise.allSettled` is unaffected by construction: it is specified to preserve
+input order however the leaves settled, its leaves never contribute a propagated
+rejection, and a test pins that the same out-of-order metadata leaves its result
+array alone.
 
 ## Accepted v1 restrictions and deviations
 
@@ -177,8 +202,10 @@ agent-surface-specific limits are:
 - Classes, modules, generators, destructuring, `for...in`, and the other
   inherited exclusions remain named rejections.
 
-The `Promise.all` first-settled problem is deliberately absent from this list:
-it is a blocker, not an accepted deviation.
+A rejected `Promise.all` still waits for every leaf to settle before reporting.
+ECMA specifies which reason surfaces, not when, so this is a runtime-system
+constraint rather than an alternate semantics, and it is registered as one: v1
+has no fail-fast cancellation of an in-flight batch leaf.
 
 ## Fluency smoke
 

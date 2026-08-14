@@ -40,10 +40,17 @@ fails it. Dynamic process definitions and targets reject with dedicated
 `Promise.all` and `Promise.allSettled` aggregate top-level tool promises and
 already-resolved values through the shared batch machine. Nested tool promises,
 non-array iterables, and process/timer promises are named rejections in v1.
-The shared batch host currently reports outcomes only after every leaf settles;
-therefore `Promise.all` does not yet reject at the first-settled failure and can
-select an earlier input's later failure. This is an open FIG-1305 release blocker,
-not an accepted semantic deviation.
+`Promise.all` rejects with the reason of the leaf that settled first, and
+`Promise.allSettled` keeps its results in input order, both as ECMA specifies.
+The host records the order its leaves settled in as part of the journaled batch
+result, so replay selects the same reason rather than re-deriving one.
+
+A rejected `Promise.all` still waits for every leaf to settle before it reports.
+ECMA specifies which reason surfaces, not when: it has no wall times, and a
+conforming program cannot observe the difference except through timing. v1 has
+no fail-fast cancellation of an in-flight batch leaf, so the aggregate settles
+at the pace of its slowest leaf while rejecting with its first-settled reason.
+This is a runtime-system constraint, not an alternate semantics.
 
 `Date.now()` and `Math.random()` are host effects, so their result is recorded
 at the same journal boundary as other effects and replay never samples the VM's
