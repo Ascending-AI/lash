@@ -388,12 +388,21 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
 #[derive(Default)]
 struct RecordingInlineEffectController {
     invocations: StdMutex<Vec<DurableEffectInvocation>>,
+    persisted_outcomes: StdMutex<Vec<String>>,
     inline: lash_core::facade_support::InlineRuntimeEffectController,
 }
 
 impl RecordingInlineEffectController {
     fn invocations(&self) -> Vec<DurableEffectInvocation> {
         self.invocations.lock_recover().clone()
+    }
+
+    fn persisted_outcomes(&self) -> Vec<lash_core::RuntimeEffectOutcome> {
+        self.persisted_outcomes
+            .lock_recover()
+            .iter()
+            .map(|outcome| serde_json::from_str(outcome).expect("deserialize effect outcome"))
+            .collect()
     }
 }
 
@@ -471,7 +480,13 @@ impl lash_core::RuntimeEffectController for RecordingInlineEffectController {
         ) {
             return Ok(lash_core::RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
         }
-        local_executor.execute(envelope).await
+        let outcome = local_executor.execute(envelope).await;
+        if let Ok(outcome) = &outcome {
+            self.persisted_outcomes
+                .lock_recover()
+                .push(serde_json::to_string(outcome).expect("serialize effect outcome"));
+        }
+        outcome
     }
 }
 
@@ -5221,6 +5236,25 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
             .requires_streaming(true)
             .complete(|request| async move {
                 let stream = request.stream_events.expect("stream events");
+                stream.send(LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
+                    request_body: Some("{\"model\":\"rlm-evidence\"}".to_string()),
+                    http_summary: Some(
+                        "HTTP POST https://provider.test/v1/responses (stream)".to_string(),
+                    ),
+                    execution_evidence: Some(lash_core::ExecutionEvidence {
+                        provider_request_id: Some("request-after-response-start".to_string()),
+                        ..Default::default()
+                    }),
+                    generation_disposition: Some(lash_core::GenerationDisposition {
+                        stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+                        ..Default::default()
+                    }),
+                    response_metadata: std::collections::BTreeMap::from([(
+                        "header:x-request-cost".to_string(),
+                        serde_json::json!("0.04"),
+                    )]),
+                    ..Default::default()
+                }));
                 stream.send(LlmStreamEvent::Delta(
                     "<lashlang>\nfinish \"late events survived\"\n</lashlang>\n".to_string(),
                 ));
@@ -5246,7 +5280,26 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
             })
             .build()
             .into_handle();
-        let core = rlm_abort_drain_core(provider)?;
+        let recorder = Arc::new(RecordingInlineEffectController::default());
+        let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            lash_core::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .generation(lash_core::GenerationOptions {
+            stop_sequences: vec!["caller-owned-stop".to_string()],
+            ..Default::default()
+        })
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
+            effect_controller,
+        )))
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-abort-late-events").open().await?;
 
         let result = session.turn(TurnInput::text("finish")).run().await?;
@@ -5270,6 +5323,84 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
                     })
                 })
         );
+
+        let attempt = result
+            .result
+            .llm_calls
+            .first()
+            .and_then(|record| record.attempts.first())
+            .expect("persisted aborted attempt");
+        assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Aborted);
+        assert_eq!(
+            attempt
+                .generation_disposition
+                .expect("attempt disposition")
+                .stop_sequences,
+            lash_core::GenerationOptionDisposition::SuppressedProtocolOwned
+        );
+        assert_eq!(
+            attempt
+                .evidence
+                .as_ref()
+                .and_then(|evidence| evidence.provider_request_id.as_deref()),
+            Some("request-after-response-start")
+        );
+        assert_eq!(
+            attempt
+                .evidence
+                .as_ref()
+                .and_then(|evidence| evidence.collection_interruption),
+            Some(lash_core::ExecutionEvidenceCollectionInterruption::ProtocolAbort)
+        );
+
+        let journaled = recorder
+            .persisted_outcomes()
+            .into_iter()
+            .find(|outcome| matches!(outcome, lash_core::RuntimeEffectOutcome::LlmCall { .. }))
+            .expect("persisted LLM effect outcome");
+        let lash_core::RuntimeEffectOutcome::LlmCall {
+            result: journaled_result,
+            call_record,
+            ..
+        } = journaled
+        else {
+            unreachable!("selected LLM outcome")
+        };
+        let response = journaled_result
+            .as_ref()
+            .as_ref()
+            .expect("protocol abort is an accepted response");
+        assert_eq!(
+            response.request_body.as_deref(),
+            Some("{\"model\":\"rlm-evidence\"}")
+        );
+        assert_eq!(
+            response.http_summary.as_deref(),
+            Some("HTTP POST https://provider.test/v1/responses (stream)")
+        );
+        assert_eq!(
+            response.response_metadata.get("header:x-request-cost"),
+            Some(&serde_json::json!("0.04"))
+        );
+        assert_eq!(
+            response
+                .generation_disposition
+                .expect("response disposition")
+                .stop_sequences,
+            lash_core::GenerationOptionDisposition::SuppressedProtocolOwned
+        );
+        assert_eq!(
+            response
+                .execution_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.collection_interruption),
+            Some(lash_core::ExecutionEvidenceCollectionInterruption::ProtocolAbort)
+        );
+        let journaled_attempt = call_record
+            .as_ref()
+            .and_then(|record| record.attempts.first())
+            .expect("journaled aborted attempt");
+        assert_eq!(journaled_attempt, attempt);
         Ok(())
     })
 }

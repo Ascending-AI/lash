@@ -119,11 +119,15 @@ mod tests {
                     ("set-cookie".to_string(), "secret".to_string()),
                 ],
             )));
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
         let response = provider
             .execute_request(
                 "access",
                 json!({ "model": "gemini-test" }),
-                Some(LlmEventSender::new(|_| {})),
+                Some(LlmEventSender::new(move |event| {
+                    event_sink.lock_recover().push(event);
+                })),
                 None,
                 StreamTermination::RequireTerminalEvidence,
                 None,
@@ -146,6 +150,15 @@ mod tests {
                 .values()
                 .any(|value| value == "hidden")
         );
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Evidence(evidence)
+                    if evidence.response_metadata.get("header:x-request-cost")
+                        == Some(&json!("0.03"))
+                        && !evidence.response_metadata.contains_key("header:set-cookie")
+            )
+        }));
     }
 
     #[tokio::test]

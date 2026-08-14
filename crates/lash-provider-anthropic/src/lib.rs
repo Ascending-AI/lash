@@ -158,9 +158,15 @@ mod tests {
                 ..ProviderOptions::default()
             })
             .with_transport(Arc::new(MetadataSseTransport(body)));
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        req.stream_events = Some(LlmEventSender::new(move |event| {
+            event_sink.lock_recover().push(event);
+        }));
 
         let response = provider
-            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .complete(req)
             .await
             .expect("metadata fixture completes");
 
@@ -183,6 +189,15 @@ mod tests {
                 .values()
                 .any(|value| value == "hidden")
         );
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Evidence(evidence)
+                    if evidence.response_metadata.get("header:x-request-cost")
+                        == Some(&json!("0.02"))
+                        && !evidence.response_metadata.contains_key("header:set-cookie")
+            )
+        }));
     }
 
     #[tokio::test]

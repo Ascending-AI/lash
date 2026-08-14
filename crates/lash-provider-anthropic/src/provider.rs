@@ -116,6 +116,8 @@ impl Provider for AnthropicProvider {
                 request_body.clone(),
             ));
         }
+        let mut response_metadata =
+            ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 request_body: request_body.clone(),
@@ -124,12 +126,10 @@ impl Provider for AnthropicProvider {
                     base_url.trim_end_matches('/')
                 )),
                 generation_disposition,
+                response_metadata: response_metadata.metadata(),
                 ..Default::default()
             }));
         }
-
-        let mut response_metadata =
-            ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         let mut state = StreamState::default();
         let expose_thinking = self.options.expose_thinking;
         let stream_result = drive_sse_response(

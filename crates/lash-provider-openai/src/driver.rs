@@ -171,6 +171,7 @@ pub(crate) async fn complete(
     }
 
     let provider_request_id = first_header_value(&resp.headers, "x-request-id").map(str::to_string);
+    let mut capture = ResponseMetadataCapture::from_response(&provider.options, &resp.headers);
     if let Some(tx) = &stream_events {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
             request_body: Some(request_body_for_error.clone()),
@@ -182,10 +183,10 @@ pub(crate) async fn complete(
                 }
             }),
             generation_disposition,
+            response_metadata: capture.metadata(),
             ..Default::default()
         }));
     }
-    let mut capture = ResponseMetadataCapture::from_response(&provider.options, &resp.headers);
     let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
 
     let response_context = ResponseContext {

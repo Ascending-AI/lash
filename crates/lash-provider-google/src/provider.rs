@@ -98,17 +98,17 @@ impl GoogleOAuthProvider {
                 request_body,
             ));
         }
+        let mut response_metadata =
+            ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {url} (stream)")),
                 generation_disposition,
+                response_metadata: response_metadata.metadata(),
                 ..Default::default()
             }));
         }
-
-        let mut response_metadata =
-            ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         if stream_events.is_none() {
             let text = read_http_body_text(
                 resp.body,

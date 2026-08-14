@@ -878,6 +878,9 @@ pub struct LlmStreamEvidence {
     pub http_summary: Option<String>,
     pub execution_evidence: Option<ExecutionEvidence>,
     pub generation_disposition: Option<GenerationDisposition>,
+    /// Allowlisted response metadata available when this evidence event was
+    /// emitted. Shipped HTTP adapters publish captured response headers once
+    /// response establishment succeeds.
     pub response_metadata: std::collections::BTreeMap<String, serde_json::Value>,
 }
 

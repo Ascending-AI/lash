@@ -272,14 +272,6 @@ impl CodexProvider {
             retry_after_dead_reused_connection: retry_state.after_dead_reused_connection,
         };
         self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
-        if let Some(tx) = &stream_events {
-            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-                request_body: Some(request_body.clone()),
-                http_summary: Some(self.websocket_http_summary(&diagnostics)),
-                generation_disposition: Some(Self::generation_disposition(req, full_body)),
-                ..Default::default()
-            }));
-        }
         let mut events_seen = false;
         if let Err(error) = attempt
             .lease_mut()
@@ -359,6 +351,14 @@ impl CodexProvider {
                 WsMessage::Close(_) => break,
                 WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Frame(_) => continue,
             };
+            if !events_seen && let Some(tx) = &stream_events {
+                tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                    request_body: Some(request_body.clone()),
+                    http_summary: Some(self.websocket_http_summary(&diagnostics)),
+                    generation_disposition: Some(Self::generation_disposition(req, full_body)),
+                    ..Default::default()
+                }));
+            }
             emit_provider_trace(provider_trace.as_ref(), "codex", &raw);
             events_seen = true;
             let prev_usage = state.usage.clone();
@@ -744,16 +744,17 @@ impl Provider for CodexProvider {
                 request_body.clone(),
             ));
         }
+        let mut response_metadata =
+            ResponseMetadataCapture::from_response(&self.options, &response_headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {} (stream)", self.responses_url)),
                 generation_disposition,
+                response_metadata: response_metadata.metadata(),
                 ..Default::default()
             }));
         }
-        let mut response_metadata =
-            ResponseMetadataCapture::from_response(&self.options, &response_headers);
 
         let parse_stream =
             Self::should_parse_stream(stream_events.is_some(), content_type.as_deref());

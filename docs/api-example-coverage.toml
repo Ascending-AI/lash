@@ -29411,7 +29411,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence::response_metadata"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Concrete host class: streaming provider implementers retain allowlisted response metadata observed before preemption."
+reason = "Shipped HTTP streaming adapters publish allowlisted response-header metadata after response establishment so protocol-owned preemption can retain it."
 
 [[api]]
 symbol = "lash::provider::LlmTimeouts"

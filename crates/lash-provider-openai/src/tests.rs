@@ -317,17 +317,29 @@ async fn response_metadata_captures_only_allowlisted_headers() {
             ..ProviderOptions::default()
         })
         .with_transport(transport);
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let event_sink = Arc::clone(&events);
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(move |event| {
+        event_sink.lock_recover().push(event);
+    }));
 
-    let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
-        .await
-        .expect("request succeeds");
+    let response = provider.complete(req).await.expect("request succeeds");
 
     assert_eq!(
         response.response_metadata["header:x-opper-cost"],
         json!("0.000008")
     );
     assert!(!response.response_metadata.contains_key("header:set-cookie"));
+    assert!(events.lock_recover().iter().any(|event| {
+        matches!(
+            event,
+            lash_core::llm::types::LlmStreamEvent::Evidence(evidence)
+                if evidence.response_metadata.get("header:x-opper-cost")
+                    == Some(&json!("0.000008"))
+                    && !evidence.response_metadata.contains_key("header:set-cookie")
+        )
+    }));
 }
 
 #[tokio::test]
