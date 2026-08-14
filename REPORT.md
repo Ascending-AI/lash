@@ -6,9 +6,11 @@ Implementation baseline: `e3b073423` (reviewed FIG-1303 head)
 
 Round-1 fix baseline: `bf704079b` — a pre-rebase SHA, retained for provenance only. The branch was rebased onto `93874e275`; the reachable branch history is `218a580d7..HEAD`, and every commit cited in the ledgers below is an ancestor of the head.
 
-Round-2 fix baseline: `13e31367e` (decisive fresh-eyes verification, verdict BLOCK)
+Round-2 fix baseline: `13e31367e` (first decisive fresh-eyes verification, verdict BLOCK)
 
-Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed, and all ten findings from the decisive verification round are closed. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
+Round-3 fix baseline: `4dc2bd5cc` (round-2 closure verification, verdict BLOCK)
+
+Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed, all ten findings from the first verification round are closed, and all five findings from the round-2 closure verification are closed. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
 
 This layer is still a **pure calculator**. A TypeScript cell has no tool calls, no `await`, and no deferred tool resolution. Rendered tool signatures are synchronous descriptions for FIG-1305; they do not make tools executable here.
 
@@ -58,7 +60,21 @@ The verification round returned BLOCK on two P0 defects and eight smaller findin
 | P3-8 | The exclusion list names compound assignment operators and the arity-1 restriction on mapped String methods, each backed by an executable rejection test. | — | `b49499b7e` |
 | P3-10 | The oracle's distinct-expression count is stated wherever its row count is cited. | — | `b49499b7e` |
 
-The optional register line on `console.log` versus Node's inspector formatting landed with `b49499b7e`. Auxiliary repairs are `a2bdf3b3d` (strict-lint style) and, from round 1, `074b24b3e` (synchronous signature docs assertion), `db4201eb7` and `ea8ca2aeb` (strict-lint style), and `67de889dd` (remove one redundant Lashlang test so its established package count remains 461). None changes the accepted language contract.
+### Round 3 — round-2 closure verification
+
+The closure verification confirmed both round-1 P0s closed and returned BLOCK on one regression the round-2 fixes introduced, plus four smaller findings.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| R2-4 | The per-cycle frame record made any session that defined mutually recursive top-level functions unpersistable: record and members formed a heap cycle reachable from a durable root, so `Vm::suspend()` and `State::snapshot()` failed after the program had already run, and `__typescript_0_frame` sat in `runtime_globals` where the bound-variables prompt would render it. The frame-record lowering is removed; declaration cycles reject statically as `TS_MUTUAL_RECURSION_UNSUPPORTED` naming the cycle. | `10f2ff326` | `883e083a3` |
+| R2-1 | A newline in automatic-semicolon-insertion position releases the operator run, so semicolon-free statement sequences no longer reject at 27 statements. The release is suppressed while a statement form is open and when the next token continues the expression. | `ca1baf00d` | `4c91df3d3` |
+| R2-2 | Template holes draw on the source budget, so a long template rejects as `TS_SOURCE_NESTING_LIMIT` instead of leaking the shared AST's generic `TS_INVALID_SHARED_AST`. A sweep of eight shapes at every count to 80 proves no accepted-grammar source can reach that limit. | `ca1baf00d` | `4c91df3d3` |
+| R2-5 | A named function expression binds its own name inside its body, so the classic self-recursive function expression works; the generated namespace is reserved on that path too. | `250b549f0` | `0fac55e0e` |
+| R2-3 | The README states the budget in units with a measured per-form cost table instead of a bare 28. | — | `c6546721c` |
+
+Closing R2-1 exposed one further abort shape of my own making — a newline-separated `if (1)` chain released the budget on every line and reached SWC unbounded — which the same fix closes by suppressing the release while a statement form is open; the 26-shape 2 MiB abort sweep covers it.
+
+The optional register line on `console.log` versus Node's inspector formatting landed with `b49499b7e`. Auxiliary round-3 repair: `0e47352a5` (strict-lint style). Auxiliary repairs are `a2bdf3b3d` (strict-lint style) and, from round 1, `074b24b3e` (synchronous signature docs assertion), `db4201eb7` and `ea8ca2aeb` (strict-lint style), and `67de889dd` (remove one redundant Lashlang test so its established package count remains 461). None changes the accepted language contract.
 
 ## Review conflict resolution
 
@@ -78,13 +94,19 @@ Free `console.log` accepts zero or more arguments. Each argument receives ECMA `
 
 ### Source nesting
 
-The effective v1 TypeScript source-nesting budget is **28 levels, cumulative and shared**. It is one budget, not several independent ones: every open delimiter (`(`, `[`, `{`, and a template hole) and every nested recursive operator or statement form draws on the same 28 units. Recursive forms are the prefix operators (`!`, `~`, unary `+`/`-`, `typeof`, `void`, `delete`, `new`, `await`, `yield`), the binary, ternary and member operators, and the statement keywords (`if`, `while`, `do`, `for`, `in`, `instanceof`, `with`). Operator counts from an enclosing delimiter frame stay active while the scanner visits an inner expression, so mixed nesting can no longer reach a multiple of the nominal cap the way three independent delimiter counters allowed. A statement boundary — `;`, `,`, or the `}` that closes a statement block — releases the operator run it terminates, so a flat sequence of statements is one level deep however long it runs; a brace-free chain such as `if (1) if (1) …` still accumulates and rejects. The adapter enforces the same 28 with one shared counter across statement and expression conversion.
+The effective v1 TypeScript source-nesting budget is **28 levels, cumulative and shared**. It is one budget, not several independent ones: every open delimiter (`(`, `[`, `{`, and a template hole) and every nested recursive operator or statement form draws on the same 28 units. Recursive forms are the prefix operators (`!`, `~`, unary `+`/`-`, `typeof`, `void`, `delete`, `new`, `await`, `yield`), the binary, ternary and member operators, and the statement keywords (`if`, `while`, `do`, `for`, `in`, `instanceof`, `with`). Operator counts from an enclosing delimiter frame stay active while the scanner visits an inner expression, so mixed nesting can no longer reach a multiple of the nominal cap the way three independent delimiter counters allowed. A statement boundary — `;`, `,`, the `}` that closes a statement block, or a newline in automatic-semicolon-insertion position — releases the operator run it terminates, so a flat sequence of statements is one level deep however long it runs, punctuated or not. The ASI release is suppressed while a statement form is still open (`if (1)` alone on a line is not a complete statement) and when the next token continues the expression (a leading `.`, `+`, `(` and so on); both suppressions are load-bearing, since without them a newline-separated chain reaches the parser unbounded. A brace-free chain such as `if (1) if (1) …` still accumulates and rejects.
+
+Template holes draw on the budget like binary-chain terms, because a template lowers to a left-nested concatenation chain whose depth outlives each hole. That is what keeps the source budget binding *before* the shared AST's own nesting limit: a sweep of eight shapes — templates, concatenation, arrays, calls, member chains, prefix operators, ternaries and objects — at every count up to 80 confirms no accepted-grammar source can reach `TS_INVALID_SHARED_AST`. The 28 is a budget in units, not visible levels; the README carries the measured per-form cost table. The adapter enforces the same 28 with one shared counter across statement and expression conversion.
 
 Level 28 compiles and executes on a 2 MiB child-thread stack; level 29 rejects as `TS_SOURCE_NESTING_LIMIT`. Child-process regressions across six shapes — 10,000 parentheses and 10,000 each of `!`, unary `-`, `typeof`, `?:`, and `+` chains — prove named-diagnostic-not-abort behavior; before the fix the last five aborted the process with a SIGABRT stack overflow at roughly 1.6 KB of source. Block lowering was flattened enough to make 28 the pinned source-level budget rather than exposing the shared AST's internal per-node cost.
 
 ### Mutual recursion
 
-Closures capture by value, so no emission order can satisfy a cycle of hoisted declarations that reference each other. Each strongly connected component of the declaration graph gets one generated frame record: the members capture the record instead of their peers and rebind those peers out of it on entry, so a peer value is read when the member runs rather than when it is built. The rebinding lands in the member's own frame slot under the name the body already lowered, so peers used as values, and peers reached from closures nested inside a member, work without rewriting the body. Acyclic declarations keep the original topological emission and are unchanged.
+**v1 does not support mutually recursive function declarations.** Closures capture by value, so a cycle of hoisted declarations has no emission order: every member needs its peers' values before any of them exists.
+
+Round 2 routed each strongly connected component through a generated frame record — members captured the record instead of their peers and rebound them on entry. It worked in memory and failed at the durability boundary: the record holds the member closures while every member closure captures the record, which is a heap cycle, and because both are root-level bindings the cycle is reachable from a durable root. Cyclic heap objects are rejected at durable capture (register item 3), so every `print`, cell boundary and between-turn snapshot in a session that defined such a group failed with an internal `UnserializableValue` — after the program had already run. Trading a compile-time diagnostic for a runtime persistence failure is strictly worse, and the frame record was also the layer's only generated **global**, so it reached `runtime_globals` and would have rendered into the model-facing bound-variables prompt.
+
+The lowering is removed. A declaration cycle now rejects statically as `TS_MUTUAL_RECURSION_UNSUPPORTED` and names the cycle it found (`cycle: isEven -> isOdd -> isEven`), which is the honest form of the same deferral that item 3 already carries. Everything adjacent stays supported: self-recursion, named self-recursive function expressions, nested declarations reading enclosing bindings in any source order, and acyclic declaration chains, which keep the topological emission. A durability regression suspends and snapshots every accepted binding shape and asserts that no generated name ever reaches the global surface.
 
 ### Tool signatures and structural diagnostics
 
@@ -118,6 +140,7 @@ These are the only intentional deviations for the accepted v1 surface. They are 
 6. Lone UTF-16 surrogates are not representable by the v1 UTF-8 value model. Literals reject statically as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; two further shapes produce one only at runtime and reject there as `TS_LONE_SURROGATE_UNSUPPORTED` — splitting a string containing an astral character into units, and indexing into one. Both are catchable TypeScript exceptions.
 7. Negative and other non-index array writes reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; non-negative out-of-range writes retain ECMAScript hole-extension behavior.
 8. Identifiers starting with `__typescript_` are reserved for the lowerer's generated bindings and reject as `TS_RESERVED_IDENTIFIER`.
+10. Mutually recursive function declarations reject as `TS_MUTUAL_RECURSION_UNSUPPORTED` with the cycle named. This is item 3's deferral seen from the front end: the only v1 lowering for the shape builds a durable-rooted heap cycle, so the shape fails closed at compile time instead of at the durability boundary.
 9. `console.log` is host-defined rather than ECMA-262 and prints ECMA `ToString` of each argument, so `console.log({a: 1})` prints `[object Object]` where Node's inspector prints `{ a: 1 }`.
 
 No reviewed semantic divergence was moved into this register.
@@ -148,14 +171,18 @@ Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR
 | `just perf-guard` | PASS | 297 Lashlang perf results and 1 profile result; runtime and stack budgets passed. |
 | `bash scripts/check-production-file-size.sh` | PASS | Production and test/support files remain within repository budgets. |
 | `git diff --check 93874e275..HEAD` | PASS | No whitespace errors across the whole branch before the final report commit. |
-| `cargo test -p lash-typescript --locked` | PASS | 109 tests across unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites (94 before round 2). |
+| `cargo test -p lash-typescript --locked` | PASS | 115 tests across unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites (94 before round 2, 109 before round 3). |
 | Committed Node differential table | PASS | All 310 rows match the checked Node v25.2.1 expectations or named rejection; regeneration under Node v25.2.1 reproduces the committed file byte for byte. |
 | `node crates/lash-typescript/tests/differential/generate.mjs` | PASS | Deliberate regeneration, Node version stamped and enforced by the generator. |
 | Base-vs-head Lashlang byte identity | PASS | Seven of seven raw artifact and normalized continuation records match; combined SHA-256 shown above. |
 | `cargo test -p lashlang --locked` | PASS | 461 unit tests passed, unchanged; all package integration/property/stack tests also passed. |
-| Verifier nesting sweep (2 MiB stack, 9 sources) | PASS | Every shape that previously aborted the process now returns `TS_SOURCE_NESTING_LIMIT`; no abort. |
+| Verifier nesting sweep (2 MiB stack, 26 shapes) | PASS | Every delimiter, operator, statement, template and newline-separated shape returns `TS_SOURCE_NESTING_LIMIT`; zero aborts. |
+| Shared-AST leak sweep (8 shapes x 80 counts) | PASS | No accepted-grammar source reaches `TS_INVALID_SHARED_AST`. |
+| Durability corpus (suspend + snapshot) | PASS | Every accepted binding shape suspends, encodes its continuation, and snapshots; no generated name reaches the global surface. |
 
 The first verification pass exposed a stale docs-snippet assertion that still expected `Promise` signatures and two strict-lint style findings. Commits `074b24b3e`, `db4201eb7`, and `ea8ca2aeb` corrected them; every affected gate and the full battery were rerun successfully on the corrected tree. In round 2 the workspace suite exited 0 on the first run; the `lash-sqlite-store` `sqlite_real_turn_crash_matrix` seeded flake recorded by the verifier (P3-9) did not reproduce, and it remains a pre-existing concurrency-load flake unrelated to this layer — no TypeScript or Lashlang code path is involved.
+
+Round 3 reran the whole battery on the final tree; the workspace suite again exited 0 on the first run and the `sqlite_real_turn_crash_matrix` seeded flake did not recur.
 
 The `ToNumber(String)` whitespace correction lives in `crates/lashlang/src/runtime/javascript.rs`, which is reached only through the `JavaScriptUnary`/`JavaScriptBinary` opcodes the TypeScript lowering emits. No Lashlang program semantics, and no semantic hash, change with it.
 
@@ -168,5 +195,7 @@ The `ToNumber(String)` whitespace correction lives in `crates/lashlang/src/runti
 No compatibility shim, fallback parser, dual execution path, migration adapter, silent semantic divergence, or `docs/adr/` change was added.
 
 ## Round-2 verification note
+
+The round-3 fixes were likewise driven red-first: the durability regression suspends and snapshots the way an RLM session does between turns, so it reproduces R2-4 at the boundary the verifier used rather than through `lashlang::execute`, which is exactly what the round-2 scoping tests missed.
 
 The round-2 fixes were driven red-first against the verifier's own repros: the nine-source nesting sweep on a 2 MiB stack, the three transitive-capture programs, the two mutual-recursion and nested-declaration programs, and both generated-namespace collisions were each reproduced before any fix and are now permanent regressions. Two of the verifier's findings led further than reported: the round-1 nesting preflight also accumulated statement keywords across sibling statements, so 28 flat `if` statements falsely rejected (closed as P0-1b), and the mutual-recursion fix additionally required nested declarations to see enclosing-function bindings independent of source order.
