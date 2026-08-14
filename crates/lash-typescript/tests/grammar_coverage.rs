@@ -318,6 +318,50 @@ const FUZZ_ALPHABET: &[&str] = &[
     "/* c */",
 ];
 
+/// The lexical-fidelity alphabet, split the way the axis actually works.
+///
+/// This surface is about whether the scanner and SWC agree on where one token
+/// ends and the next begins, so what matters is an *atom* immediately followed
+/// by a token that carries a charge. Drawing the two halves separately and
+/// pairing them is what gives the corpus power here: a uniform draw over one
+/// flat list pairs them only by luck, and the shape that defeats a charge — an
+/// identifier ending in a non-ASCII byte, immediately followed by `:` — is
+/// exactly a pairing.
+const FUZZ_LEXICAL_ATOMS: &[&str] = &[
+    // Non-ASCII identifiers, trailing and leading.
+    "a\u{e9}",
+    "a\u{4e2d}",
+    "a\u{f1}",
+    "\u{e9}a",
+    "\u{4e2d}",
+    "\u{e9}",
+    // Identifier escapes, which are those same identifiers written in ASCII.
+    "a\\u00e9",
+    "a\\u{e9}",
+    // Numeric literals with separators.
+    "1_0",
+    "1_000_000",
+    // ASCII controls, so the pairing is exercised both ways.
+    "a",
+    "a1",
+];
+
+/// Tokens that carry a charge, or end a line, immediately after an atom.
+const FUZZ_LEXICAL_COMBINERS: &[&str] = &[
+    ":",
+    "(1)",
+    ".a",
+    " as number",
+    "`x`",
+    "!",
+    "[0]",
+    "\u{2028}",
+    "\u{2029}",
+    "\n",
+    ";",
+    " ",
+];
+
 /// Draw a source from the alphabet.
 ///
 /// Uniform sequences are nearly useless here: with fifty-odd tokens in play,
@@ -329,19 +373,41 @@ const FUZZ_ALPHABET: &[&str] = &[
 /// still covered.
 fn fuzz_source(seed: u64, tokens: usize) -> String {
     let mut prng = Prng(seed);
-    let alphabet_size = match prng.below(8) {
-        0..=2 => 1,
-        3 | 4 => 2,
-        5 => 3,
-        6 => 5,
-        _ => FUZZ_ALPHABET.len(),
+    // Half the corpus targets the lexical axis by pairing an atom with the
+    // charge token that follows it; the other half is the grammar alphabet.
+    let chosen: Vec<String> = if prng.below(2) == 0 {
+        let atom = FUZZ_LEXICAL_ATOMS[prng.below(FUZZ_LEXICAL_ATOMS.len())];
+        let combiner = FUZZ_LEXICAL_COMBINERS[prng.below(FUZZ_LEXICAL_COMBINERS.len())];
+        // Usually emit the pairing as one indivisible token. Shuffling the two
+        // halves independently mostly produces `::` and `aéaé`, which SWC
+        // rejects as a syntax error long before it recurses, so the chain that
+        // actually reaches the parser never forms.
+        if prng.below(4) == 0 {
+            vec![atom.to_string(), combiner.to_string()]
+        } else {
+            let mut tokens = vec![format!("{atom}{combiner}")];
+            if prng.below(3) == 0 {
+                tokens.push(
+                    FUZZ_LEXICAL_COMBINERS[prng.below(FUZZ_LEXICAL_COMBINERS.len())].to_string(),
+                );
+            }
+            tokens
+        }
+    } else {
+        let alphabet_size = match prng.below(8) {
+            0..=2 => 1,
+            3 | 4 => 2,
+            5 => 3,
+            6 => 5,
+            _ => FUZZ_ALPHABET.len(),
+        };
+        (0..alphabet_size)
+            .map(|_| FUZZ_ALPHABET[prng.below(FUZZ_ALPHABET.len())].to_string())
+            .collect::<Vec<_>>()
     };
-    let chosen = (0..alphabet_size)
-        .map(|_| FUZZ_ALPHABET[prng.below(FUZZ_ALPHABET.len())])
-        .collect::<Vec<_>>();
     let mut source = String::new();
     for _ in 0..tokens {
-        source.push_str(chosen[prng.below(chosen.len())]);
+        source.push_str(&chosen[prng.below(chosen.len())]);
     }
     source
 }

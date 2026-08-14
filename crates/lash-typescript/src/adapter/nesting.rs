@@ -255,6 +255,26 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 //     is charged on the `:` when no conditional is waiting for it and the
 //     statement is at statement level.
 //
+// There is a second thing this scan has to get right, and it is not a grammar
+// question at all: **its lexer must agree with SWC's about where each token
+// ends.** Charging the right production is not enough if the token the charge
+// is gated on was cut in half. Labels are the sharp case — the `:` charge fires
+// only when the previous token was an identifier, and nothing else in a label
+// carries a charge — so an identifier the scanner ends early silently disarms
+// it. That is why identifier scanning treats every byte at or above `0x80` as
+// an identifier character, walks `\uXXXX` and `\u{…}` identifier escapes, and
+// stops at U+2028/U+2029.
+//
+// Agreement is the property; Unicode-class exactness is not. The
+// classification deliberately over-approximates `ID_Start` / `ID_Continue`,
+// which is the safe direction: including a byte SWC would have tokenised
+// separately can only merge two tokens, and no charged token — every operator
+// keyword and every punctuation operator is ASCII — can be swallowed by such a
+// merge, so no charged shape becomes uncharged. Excluding a byte SWC includes
+// is what fails, and it fails silently. `tests/depth_guard.rs` carries this as
+// its own axis, and the fuzzer in `tests/grammar_coverage.rs` pairs non-ASCII
+// atoms with charge-bearing tails for the same reason.
+//
 // Nothing else recurses: identifiers, literals, keywords, JSX text and regular
 // expression bodies are terminals; declarations, modules, classes and switch
 // bodies recurse only through families 4 and 5; and the sequence expression is
@@ -309,15 +329,10 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                 // whitespace and comments never change how a `{` is classified.
                 let mut scanned = Some(PreviousToken::Byte(byte));
                 if pending_statement_end && !byte.is_ascii_whitespace() {
-                    let word = if is_identifier_start(byte) {
-                        let mut end = index;
-                        while bytes
-                            .get(end + 1)
-                            .is_some_and(|byte| is_identifier_continue(*byte))
-                        {
-                            end += 1;
-                        }
-                        Some(&source[index..=end])
+                    let word = if is_identifier_start(byte)
+                        && unicode_line_terminator_length(bytes, index).is_none()
+                    {
+                        Some(&source[index..identifier_end(bytes, index)])
                     } else {
                         None
                     };
@@ -461,14 +476,26 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                             increment_source_operators(&frames, &mut current_operators, index)?;
                         }
                     }
+                    _ if unicode_line_terminator_length(bytes, index).is_some() => {
+                        // U+2028 / U+2029 end a line in ECMAScript, so SWC
+                        // inserts a semicolon after them and the budget has to
+                        // release in the same places.
+                        index += unicode_line_terminator_length(bytes, index)
+                            .expect("a line terminator was just matched")
+                            - 1;
+                        if previous.can_end_statement()
+                            && open_statement_forms == 0
+                            && frames.last().is_none_or(|frame: &SourceNestingFrame| {
+                                frame.delimiter == SourceDelimiter::StatementBrace
+                            })
+                        {
+                            pending_statement_end = true;
+                        }
+                        scanned = None;
+                    }
                     _ if is_identifier_start(byte) => {
                         let start = index;
-                        while bytes
-                            .get(index + 1)
-                            .is_some_and(|byte| is_identifier_continue(*byte))
-                        {
-                            index += 1;
-                        }
+                        index = identifier_end(bytes, index) - 1;
                         let word = &source[start..=index];
                         if is_recursive_operator_word(word) {
                             increment_source_operators(&frames, &mut current_operators, start)?;
@@ -554,7 +581,9 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                 }
             }
             ScanMode::LineComment => {
-                if matches!(byte, b'\n' | b'\r') {
+                let unicode_terminator = unicode_line_terminator_length(bytes, index);
+                if matches!(byte, b'\n' | b'\r') || unicode_terminator.is_some() {
+                    index += unicode_terminator.unwrap_or(1) - 1;
                     mode = ScanMode::Code;
                     // This newline never reaches the code scanner, so apply the
                     // automatic-semicolon-insertion rule here instead.
@@ -641,12 +670,90 @@ fn source_nesting_depth(frames: &[SourceNestingFrame], current_operators: usize)
             .sum::<usize>()
 }
 
+/// ECMAScript identifiers are Unicode, and the scanner only has to agree with
+/// SWC about **where a token ends**, not about which code points are legal.
+/// Every byte at or above `0x80` is therefore treated as part of an identifier:
+/// the classification is a deliberate over-approximation of `ID_Start` /
+/// `ID_Continue`.
+///
+/// Over-approximating is the safe direction. Folding a byte into a word that
+/// SWC would have made its own token can only *merge* tokens, which leaves a
+/// charge unfired at most where the merged token is charged anyway (an operator
+/// keyword cannot contain a non-ASCII byte, so no charged word is ever
+/// swallowed). Under-approximating is what fails: splitting an identifier in
+/// half turns `previous` into a bare continuation byte, and any charge gated on
+/// "the previous token was an identifier" — the label charge has no other
+/// token to fall back on — silently stops firing.
+///
+/// The two exceptions carved out below are the Unicode line terminators
+/// U+2028/U+2029, which SWC ends a line on, and which therefore must not be
+/// swallowed into a word.
 fn is_identifier_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$')
+    byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$') || byte >= 0x80
 }
 
 fn is_identifier_continue(byte: u8) -> bool {
     is_identifier_start(byte) || byte.is_ascii_digit()
+}
+
+/// `\u00e9` and `\u{e9}` inside an identifier are that identifier's
+/// characters, so the scanner has to walk past them the way SWC does.
+fn identifier_escape_length(bytes: &[u8], index: usize) -> Option<usize> {
+    if bytes.get(index) != Some(&b'\\') || bytes.get(index + 1) != Some(&b'u') {
+        return None;
+    }
+    if bytes.get(index + 2) == Some(&b'{') {
+        let mut end = index + 3;
+        while bytes.get(end).is_some_and(u8::is_ascii_hexdigit) {
+            end += 1;
+        }
+        if end > index + 3 && bytes.get(end) == Some(&b'}') {
+            return Some(end + 1 - index);
+        }
+        return None;
+    }
+    if (index + 6) <= bytes.len()
+        && bytes[index + 2..index + 6]
+            .iter()
+            .all(u8::is_ascii_hexdigit)
+    {
+        return Some(6);
+    }
+    None
+}
+
+/// One past the last byte of the identifier starting at `index`, walking
+/// identifier escapes and stopping at a Unicode line terminator.
+fn identifier_end(bytes: &[u8], index: usize) -> usize {
+    let mut end = index;
+    loop {
+        if let Some(length) = identifier_escape_length(bytes, end) {
+            end += length;
+            continue;
+        }
+        match bytes.get(end) {
+            Some(byte)
+                if is_identifier_continue(*byte)
+                    && unicode_line_terminator_length(bytes, end).is_none() =>
+            {
+                end += 1;
+            }
+            _ => return end.max(index + 1),
+        }
+    }
+}
+
+/// The UTF-8 encoding of U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR,
+/// both of which end a line in ECMAScript.
+fn unicode_line_terminator_length(bytes: &[u8], index: usize) -> Option<usize> {
+    if bytes.get(index) == Some(&0xE2)
+        && bytes.get(index + 1) == Some(&0x80)
+        && matches!(bytes.get(index + 2), Some(0xA8 | 0xA9))
+    {
+        Some(3)
+    } else {
+        None
+    }
 }
 
 fn is_recursive_operator_word(word: &str) -> bool {
