@@ -547,6 +547,7 @@ impl RuntimeQueueIngress {
                 )],
             ),
             Self::ProcessWake { text } => crate::process_wake_batch_draft(ProcessWakeDelivery {
+                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: format!("wake:{session_id}:{text}"),
                 target_session_id: session_id.to_string(),
                 process_id: format!("process:{text}"),

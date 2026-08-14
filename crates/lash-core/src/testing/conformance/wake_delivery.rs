@@ -1156,6 +1156,7 @@ async fn mixed_era_floor_and_ordering(
     let mut dense_batches = Vec::new();
     for sequence in 1..=3 {
         let wake = crate::ProcessWakeDelivery {
+            version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: format!("wake:mixed-era:{sequence}"),
             target_session_id: target_session_id.to_string(),
             process_id: process_id.to_string(),
@@ -1183,6 +1184,7 @@ async fn mixed_era_floor_and_ordering(
     let settled_redelivery = target
         .enqueue_queued_work(crate::process_wake_batch_draft(
             crate::ProcessWakeDelivery {
+                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: "wake:mixed-era:3".to_string(),
                 target_session_id: target_session_id.to_string(),
                 process_id: process_id.to_string(),
@@ -1216,6 +1218,7 @@ async fn mixed_era_floor_and_ordering(
     let live_redelivery = target
         .enqueue_queued_work(crate::process_wake_batch_draft(
             crate::ProcessWakeDelivery {
+                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: "wake:mixed-era:2".to_string(),
                 target_session_id: target_session_id.to_string(),
                 process_id: process_id.to_string(),
@@ -1310,6 +1313,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
 ) {
     let process_id = "wake-store-rewind-poison";
     let old = crate::ProcessWakeDelivery {
+        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:store-rewind:10".to_string(),
         target_session_id: target_session_id.to_string(),
         process_id: process_id.to_string(),

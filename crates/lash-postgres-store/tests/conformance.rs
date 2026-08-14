@@ -1060,6 +1060,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .await
         .expect("create source-lock target");
     let wake = lash_core::ProcessWakeDelivery {
+        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:source-lock".to_string(),
         target_session_id: session_id.to_string(),
         process_id: "wake-source-lock-process".to_string(),

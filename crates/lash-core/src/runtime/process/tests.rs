@@ -124,6 +124,7 @@ fn wake_delivery(
 ) -> ProcessWakeDelivery {
     let event_type = event_type.into();
     ProcessWakeDelivery {
+        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:abc".to_string(),
         target_session_id: "target".to_string(),
         process_id: "process-1".to_string(),

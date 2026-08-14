@@ -635,15 +635,17 @@ fn cancellation_replay_key(process_id: &str, reason: Option<&str>) -> String {
     )
 }
 
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 1;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessWakeDelivery {
+    #[serde(default = "default_process_wake_delivery_format_version")]
+    pub version: u32,
     pub wake_id: String,
     pub target_session_id: String,
     pub process_id: ProcessId,
     pub sequence: u64,
-    #[serde(default = "default_process_wake_event_type")]
     pub event_type: String,
-    #[serde(default = "default_process_wake_event_invocation")]
     pub event_invocation: crate::RuntimeInvocation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_caused_by: Option<crate::CausalRef>,
@@ -655,25 +657,12 @@ pub struct ProcessWakeDelivery {
     pub created_at_ms: u64,
 }
 
+fn default_process_wake_delivery_format_version() -> u32 {
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+}
+
 fn process_wake_authority_is_empty(authority: &crate::QueuedWorkAuthority) -> bool {
     authority.principal.is_none() && authority.elevation.is_none()
-}
-
-fn default_process_wake_event_type() -> String {
-    "process.wake".to_string()
-}
-
-fn default_process_wake_event_invocation() -> crate::RuntimeInvocation {
-    crate::RuntimeInvocation {
-        scope: crate::RuntimeScope::new(""),
-        subject: crate::RuntimeSubject::ProcessEvent {
-            process_id: String::new(),
-            sequence: 0,
-            event_type: default_process_wake_event_type(),
-        },
-        caused_by: None,
-        replay: None,
-    }
 }
 
 pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {

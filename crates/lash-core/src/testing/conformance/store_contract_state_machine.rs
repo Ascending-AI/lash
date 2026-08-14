@@ -2245,6 +2245,7 @@ fn runtime_wake(process_id: &str, sequence: u64) -> ProcessWakeDelivery {
 }
 fn runtime_wake_for(session_id: &str, process_id: &str, sequence: u64) -> ProcessWakeDelivery {
     ProcessWakeDelivery {
+        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: session_id.to_string(),
         process_id: process_id.to_string(),

@@ -5765,6 +5765,7 @@
           "process_id": "sim-process-session-004-001",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:46bbf0287b6783a014a55cb7e4944da2a8a9326ae6036890f2ea7e21f2b801a9"
         },
         "runtime_queued_work": {
@@ -5905,6 +5906,7 @@
           "process_id": "sim-process-session-004-001",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:46bbf0287b6783a014a55cb7e4944da2a8a9326ae6036890f2ea7e21f2b801a9"
         },
         "runtime_queued_work": {

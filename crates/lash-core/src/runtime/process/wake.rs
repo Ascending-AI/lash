@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use crate::plugin::PluginError;
 
-use super::events::{ProcessWake, ProcessWakeDelivery};
+use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWake, ProcessWakeDelivery};
 use super::model::{ProcessId, SessionId};
 use super::time::epoch_ms_from_system_time;
 
@@ -113,6 +113,7 @@ pub fn process_wake_delivery(
     } = request;
     let wake_id = process_wake_id(target_session_id.as_str(), process_id.as_str(), sequence);
     Ok(ProcessWakeDelivery {
+        version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id,
         target_session_id,
         process_id,

@@ -2390,6 +2390,7 @@ pub fn queued_process_wake_draft(
     delivery_policy: DeliveryPolicy,
 ) -> QueuedWorkBatchDraft {
     let wake = ProcessWakeDelivery {
+        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{session_id}:{text}"),
         target_session_id: session_id.to_string(),
         process_id: format!("process:{text}"),
@@ -6596,6 +6597,7 @@ async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) {
 
 fn policy_test_wake(session_id: &str, process_id: &str, sequence: u64) -> ProcessWakeDelivery {
     ProcessWakeDelivery {
+        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: session_id.to_string(),
         process_id: process_id.to_string(),
@@ -8242,6 +8244,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let wake = ProcessWakeDelivery {
+        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake-1".to_string(),
         target_session_id: "root".to_string(),
         process_id: "process-1".to_string(),

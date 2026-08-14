@@ -420,6 +420,7 @@ fn queued_work_stress_wake(
 ) -> lash_core::ProcessWakeDelivery {
     let process_id = format!("runtime-perf-process-{sequence}");
     lash_core::ProcessWakeDelivery {
+        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{session_id}:{sequence}"),
         target_session_id: session_id.to_string(),
         process_id: process_id.clone(),

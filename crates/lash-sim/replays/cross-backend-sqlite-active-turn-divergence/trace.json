@@ -7593,6 +7593,7 @@
           "process_id": "sim-process-session-002-001",
           "sequence": 1,
           "target_session_id": "session-002",
+          "version": 1,
           "wake_id": "wake:v1:sha256:983ed4b6aff999ef12feacf6797ad926e294bbd2b4bf6e17861657eb4f6cd1bc"
         },
         "runtime_queued_work": {
@@ -7677,6 +7678,7 @@
           "process_id": "sim-process-session-002-001",
           "sequence": 1,
           "target_session_id": "session-002",
+          "version": 1,
           "wake_id": "wake:v1:sha256:983ed4b6aff999ef12feacf6797ad926e294bbd2b4bf6e17861657eb4f6cd1bc"
         },
         "runtime_queued_work": {
@@ -7947,6 +7949,7 @@
           "process_id": "sim-process-session-002-003",
           "sequence": 1,
           "target_session_id": "session-002",
+          "version": 1,
           "wake_id": "wake:v1:sha256:12099d15b5affe8176109aa09463b1092839c58162b281d3557d1d6e82ed74e6"
         },
         "runtime_queued_work": {
@@ -9114,6 +9117,7 @@
           "process_id": "sim-process-session-004-001",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:46bbf0287b6783a014a55cb7e4944da2a8a9326ae6036890f2ea7e21f2b801a9"
         },
         "runtime_queued_work": {
@@ -10285,6 +10289,7 @@
           "process_id": "sim-process-session-004-002",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:8fa7893b42aaf38bdb4a7eeefb62ec9c318f29d701b08046f36a40c80550b60c"
         },
         "runtime_queued_work": {
@@ -11644,6 +11649,7 @@
           "process_id": "sim-process-session-004-003",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:a24cacdb5fc9bbdfac02c659544e84c031b4f53159592acb4091b69cb668faa5"
         },
         "runtime_queued_work": {
@@ -12208,6 +12214,7 @@
           "process_id": "sim-process-session-004-004",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:1db3212a101f4ebb7a1905d9338ea8d123f71734e04404291d891c5b6fe376c6"
         },
         "runtime_queued_work": {
@@ -12975,6 +12982,7 @@
           "process_id": "sim-process-session-002-004",
           "sequence": 1,
           "target_session_id": "session-002",
+          "version": 1,
           "wake_id": "wake:v1:sha256:a23ccddcc0f7970ccf509b2c4126845c1ac9bc8a91af941478a207f94fcb06a0"
         },
         "runtime_queued_work": {
@@ -14856,6 +14864,7 @@
           "process_id": "sim-process-session-004-005",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:5e28db4cf105796ddee9b7976d7526f826cb8758d2816991e34d4f5cd2f992a8"
         },
         "runtime_queued_work": {
@@ -15607,6 +15616,7 @@
           "process_id": "sim-process-session-004-006",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:30acc70d5813a4a9382b9f544c624a74978ab3a9c68ba34d271591296979a416"
         },
         "runtime_queued_work": {
@@ -16284,6 +16294,7 @@
           "process_id": "sim-process-session-004-007",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:2ce1171249948cde8133b43c3652f7c1871db1875cd34eb6be700bbb4789c6d2"
         },
         "runtime_queued_work": {
@@ -18838,6 +18849,7 @@
           "process_id": "sim-process-session-003-001",
           "sequence": 1,
           "target_session_id": "session-003",
+          "version": 1,
           "wake_id": "wake:v1:sha256:e4745a9fbf0c27418b18ac5962e09e794da4d0491729901e7b7397336268054a"
         },
         "runtime_queued_work": {
@@ -19890,6 +19902,7 @@
           "process_id": "sim-process-session-001-001",
           "sequence": 1,
           "target_session_id": "session-001",
+          "version": 1,
           "wake_id": "wake:v1:sha256:b995aeea137db2626462f975af9b5949202d1883cca9b76b5688200ec62a57ec"
         },
         "runtime_queued_work": {
@@ -19974,6 +19987,7 @@
           "process_id": "sim-process-session-003-002",
           "sequence": 1,
           "target_session_id": "session-003",
+          "version": 1,
           "wake_id": "wake:v1:sha256:1b8b6eedb48bdc88f00c7ff743225f4c02cd569dece6bc95d6a0ad6970e005db"
         },
         "runtime_queued_work": {
@@ -20394,6 +20408,7 @@
           "process_id": "sim-process-session-004-008",
           "sequence": 1,
           "target_session_id": "session-004",
+          "version": 1,
           "wake_id": "wake:v1:sha256:b6207750c44252a66562a409b5f71a36f5100584ac9559c12655abdc34b23438"
         },
         "runtime_queued_work": {
@@ -24035,6 +24050,7 @@
           "process_id": "sim-process-session-001-002",
           "sequence": 1,
           "target_session_id": "session-001",
+          "version": 1,
           "wake_id": "wake:v1:sha256:7703fde1a94f33b6981e49b4bda5283fda21f1c694c494a53092f9471a30175f"
         },
         "runtime_queued_work": {
@@ -24245,6 +24261,7 @@
           "process_id": "sim-process-session-003-003",
           "sequence": 1,
           "target_session_id": "session-003",
+          "version": 1,
           "wake_id": "wake:v1:sha256:2aac0020ac37786f439a6ae36bb3ed9482e8aaf7ac033f03c47952b471a0a3be"
         },
         "runtime_queued_work": {
@@ -24570,6 +24587,7 @@
           "process_id": "sim-process-session-002-005",
           "sequence": 1,
           "target_session_id": "session-002",
+          "version": 1,
           "wake_id": "wake:v1:sha256:a05c81563a438a5468c46da68482a87ec4250e7e23fef36e19de99cb090aa3fe"
         },
         "runtime_queued_work": {
@@ -28678,6 +28696,7 @@
           "process_id": "sim-process-session-002-006",
           "sequence": 1,
           "target_session_id": "session-002",
+          "version": 1,
           "wake_id": "wake:v1:sha256:afa3bedd61437cd21da5df1362481dd2b06cc72f92478bfdcae836d5b01311df"
         },
         "runtime_queued_work": {
