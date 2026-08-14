@@ -11,7 +11,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 17],
+  ['findings', 'findings-expressions.txt', 23],
 ];
 
 const rejected = new Map([
@@ -36,6 +36,8 @@ const runtimeRejected = new Map([
     '(() => { const a = [1,2]; a[-1] = 9; return a[-1]; })()',
     'TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED',
   ],
+  ["'\\uD83D\\uDE00'.split('')", 'TS_LONE_SURROGATE_UNSUPPORTED'],
+  ["'\\uD83D\\uDE00'[0]", 'TS_LONE_SURROGATE_UNSUPPORTED'],
 ]);
 
 function expressions(file, expectedCount) {

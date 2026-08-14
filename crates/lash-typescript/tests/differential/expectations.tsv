@@ -303,3 +303,9 @@ findings	14	accept	"[1][9]"	"undefined"	-
 findings	15	accept	"(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()"	"4|undefined|undefined|9"	-
 findings	16	runtime-reject	"(() => { const a = [1,2]; a[-1] = 9; return a[-1]; })()"	"9"	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
 findings	17	reject	"'\\uD800'"	"\ud800"	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
+findings	18	accept	"+'\\uFEFF5'"	"5"	-
+findings	19	accept	"+'\\u00855'"	"NaN"	-
+findings	20	accept	"+'\\uFEFF 5\\u00A0'"	"5"	-
+findings	21	accept	"+'\\u2028\\u20295'"	"5"	-
+findings	22	runtime-reject	"'\\uD83D\\uDE00'.split('')"	"\ud83d,\ude00"	TS_LONE_SURROGATE_UNSUPPORTED
+findings	23	runtime-reject	"'\\uD83D\\uDE00'[0]"	"\ud83d"	TS_LONE_SURROGATE_UNSUPPORTED
