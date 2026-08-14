@@ -417,7 +417,7 @@ fn promise_all_settled_preserves_javascript_result_shape() {
             { "status": "rejected", "reason": {
                 "name": "EffectError",
                 "message": "boom",
-                "code": "UnwrappedModuleOperationFailed",
+                "code": "ResourceOperationFailed",
                 "details": { "kind": "effect", "operation": "resource_batch" }
             } }
         ])))
@@ -1074,4 +1074,60 @@ fn for_of_bodies_still_reject_reaching_the_iterable() {
             "the rejection names the shape that reached the iterable: {error}"
         );
     }
+}
+
+/// A leaf that fails before the batch runs settles first.
+///
+/// This is the only reachable "leading" case in the host translation from
+/// invocation positions to leaf positions — a journaled runtime value cannot be
+/// a batch leaf, because an aggregate containing one is rejected before it ever
+/// reaches a host. Without this the translation is unexercised.
+struct PreparationFailureHost;
+
+impl ExecutionHost for PreparationFailureHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperationBatch(batch) => {
+                assert_eq!(batch.operations.len(), 2);
+                // Leaf 1 never entered the batch: it failed while being
+                // prepared, so it had already settled when the batch started.
+                Ok(AbilityResult::ResourceOperationBatch(
+                    ResourceOperationBatchResult::settled_in_order(
+                        vec![
+                            ResourceOperationResult::Error(ExecutionHostError::new(
+                                "ran-and-failed",
+                            )),
+                            ResourceOperationResult::Error(ExecutionHostError::new(
+                                "never-prepared",
+                            )),
+                        ],
+                        vec![1, 0],
+                    ),
+                ))
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unexpected preparation ability")),
+        }
+    }
+}
+
+#[test]
+fn a_leaf_that_failed_before_the_batch_ran_settles_first() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(
+        "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
+        &environment,
+    )
+    .expect("Promise.all should link");
+    let error = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &PreparationFailureHost,
+    ))
+    .expect_err("a rejected aggregate fails the program");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("never-prepared"),
+        "the leaf that settled before the batch ran is the reported rejection: {rendered}"
+    );
 }

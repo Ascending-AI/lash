@@ -2,12 +2,22 @@
 
 Branch: `samuel-fig-1305`
 
-Base: `c03deb8d56a9c552c3250a153ab0e0ea0de195b7` (the reviewed FIG-1304 head)
+Base: `1532794d93606940121c3dcff88ac9ad088ddd3e` (the FIG-1304 head this layer stacks on, after the stack was rebased onto main)
 
 Implementation commits:
 
-- `3862c50f8ed7e7ce21d2cf6f3713f20bbb16ebb2` — `feat(typescript): add the durable agent surface`
-- `82471eb2852f536982e07066df9bee37d830541d` — `fix(typescript): close durable agent review gaps`
+- `cff0b745cc5ad9924625d9d5fc65e83f155818c5` — `feat(typescript): add the durable agent surface`
+- `f0bd18d9f0acb41260550c9b5851a892af8c2bb9` — `fix(typescript): close durable agent review gaps`
+- `6b7dc23c2062aa23729a9c4fd3dfb8e45255a686` — `fix(rlm): pass the lease owner the process worker config now requires`
+- `061321389405ebd050a0a01558493c72bd747c77` — `feat(lashlang): carry per-leaf settlement order on the batch result`
+- `48b6a05b11ec19282443db8422cd0281fcc8057c` / `bb797239253135c63dd0bf2357c1f17d99a0cc17` — the first-settled rejection, red then green
+- `c3a8b3a7e8d318ccc44722ac596f6c88ebaa677f` — determinism, fail-closed journal and format pins
+- `1cd32308a3f3019232bcde5874a1dd139c19073f` — refuse a malformed settlement order instead of repairing it
+- `0d56d88f6b1064a21d490b35856f3b66ccf3c332` — for-of bodies do work; artifacts must name their dialect
+- `b75f390459e14d1d9040826720e99b41c7707ba6` — restore the instance methods; classify misses by name
+
+Every SHA above is an ancestor of the head. An earlier revision of this ledger
+named pre-rebase commits that no longer describe this history.
 
 ## Verdict
 
@@ -174,10 +184,18 @@ values, and anything that failed during preparation — leading. A host that
 reports an order that is not an ordering of its own results fails closed with a
 typed `ResourceBatchSettlementOrder` rather than being guessed at.
 
-`Promise.allSettled` is unaffected by construction: it is specified to preserve
-input order however the leaves settled, its leaves never contribute a propagated
-rejection, and a test pins that the same out-of-order metadata leaves its result
-array alone.
+`Promise.allSettled` keeps its results in input order however the leaves
+settled, and a test pins that. It is not merely unaffected by construction: a
+batch only selects by settlement order when it can propagate a leaf's rejection,
+so an allSettled batch does not validate — and cannot die on — order metadata it
+never reads.
+
+The order translates from invocation positions to leaf positions at both hosts,
+with anything that settled before the batch ran leading. Today the only
+reachable case is a leaf that failed during preparation; a journaled runtime
+value cannot be a batch leaf, because an aggregate containing one is rejected
+before it reaches the host. An earlier revision of this section claimed
+otherwise.
 
 ## Accepted v1 restrictions and deviations
 
@@ -250,8 +268,8 @@ where Cargo was involved.
 | `python3 scripts/check_api_example_coverage.py` | PASS; 8,074 entries |
 | `just perf-guard` | PASS; 297 Lashlang performance results and 1 profile result |
 | `bash scripts/check-production-file-size.sh` | PASS; main executor reduced to 1,588 lines |
-| `git diff --check c03deb8d56a9c552c3250a153ab0e0ea0de195b7..HEAD` | PASS |
-| `cargo test -p lashlang --locked` | PASS; 462 unit tests and all package integrations |
+| `git diff --check 1532794d93606940121c3dcff88ac9ad088ddd3e..HEAD` | PASS |
+| `cargo test -p lashlang --locked` | PASS; 464 unit tests and all package integrations |
 | `cargo test -p lash-typescript --locked` | PASS; all 15 agent-surface tests plus dialect, differential, ECMA, fluency, rejection, safety, and conformance suites |
 | Focused protocol named-signal integration | PASS |
 | Focused Restate TypeScript artifact-to-terminal integration | PASS |

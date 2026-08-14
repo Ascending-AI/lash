@@ -22,8 +22,17 @@ pub fn render_tool_signature(
             render_type(&input),
             render_type(&output)
         );
-        for module in modules.iter().rev() {
-            declaration = format!("declare namespace {module} {{ {declaration} }}");
+        // Only the outermost wrapper may carry `declare`: a nested one is
+        // already inside an ambient context, and `declare namespace a { declare
+        // namespace b { … } }` is not valid TypeScript. This is prompt text the
+        // model reads as ground truth.
+        for (depth, module) in modules.iter().rev().enumerate() {
+            let ambient = if depth + 1 == modules.len() {
+                "declare "
+            } else {
+                ""
+            };
+            declaration = format!("{ambient}namespace {module} {{ {declaration} }}");
         }
         declaration
     } else {

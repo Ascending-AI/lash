@@ -203,9 +203,16 @@ pub(super) fn all_settled_results(items: LashExpr) -> LashExpr {
                         LashExpr::Record(vec![
                             ("name".into(), LashExpr::String("EffectError".into())),
                             ("message".into(), field("error")),
+                            // An allSettled leaf is never unwrapped, so it
+                            // cannot have failed the way an unwrap does. The
+                            // message carries the host's own text, which is the
+                            // only identity the effect-host contract exposes
+                            // today; a finer code needs a code channel on
+                            // ExecutionHostError, which every host would have
+                            // to populate.
                             (
                                 "code".into(),
-                                LashExpr::String("UnwrappedModuleOperationFailed".into()),
+                                LashExpr::String("ResourceOperationFailed".into()),
                             ),
                             (
                                 "details".into(),
