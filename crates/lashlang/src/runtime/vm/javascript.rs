@@ -532,14 +532,12 @@ fn javascript_string_method(
             &javascript_to_string(replacement),
         )
         .map(|value| Value::String(value.into())),
-        ("replaceAll", [needle, replacement]) => Ok(Value::String(
-            value
-                .replace(
-                    &javascript_to_string(needle),
-                    &javascript_to_string(replacement),
-                )
-                .into(),
-        )),
+        ("replaceAll", [needle, replacement]) => replace_all_string(
+            value,
+            &javascript_to_string(needle),
+            &javascript_to_string(replacement),
+        )
+        .map(|value| Value::String(value.into())),
         ("slice", bounds) => slice_utf16(&units, bounds, true),
         ("substring", bounds) => substring_utf16(&units, bounds),
         ("split", []) => Ok(Value::List(vec![Value::String(value.into())].into())),
@@ -633,10 +631,15 @@ fn javascript_array_method(
             javascript_join(&Value::List(items.to_vec().into()), separator)?.into(),
         )),
         ("slice", bounds) => {
-            let start = bounds.first().map_or(0.0, javascript_to_number);
-            let end = bounds
-                .get(1)
-                .map_or(items.len() as f64, javascript_to_number);
+            let start = match bounds.first() {
+                None | Some(Value::Undefined) => 0.0,
+                Some(value) => javascript_to_number(value),
+            };
+            // Absent and explicitly `undefined` are the same thing here.
+            let end = match bounds.get(1) {
+                None | Some(Value::Undefined) => items.len() as f64,
+                Some(value) => javascript_to_number(value),
+            };
             let start = clamp_relative_index(start, items.len());
             let end = clamp_relative_index(end, items.len()).max(start);
             Ok(Value::List(items[start..end].to_vec().into()))
@@ -733,6 +736,82 @@ fn array_index_property(key: &str) -> Option<u32> {
     }
     let index = key.parse::<u32>().ok()?;
     (index != u32::MAX && index.to_string() == key).then_some(index)
+}
+
+/// `replaceAll`: every occurrence, with the same `$`-token expansion `replace`
+/// applies to the one occurrence it touches. Each match expands against its own
+/// prefix and suffix, so `` $` `` and `$'` mean what they mean at that match.
+fn replace_all_string(
+    value: &str,
+    needle: &str,
+    replacement: &str,
+) -> Result<String, RuntimeError> {
+    if needle.is_empty() {
+        // An empty search matches before every position; ECMA's behaviour here
+        // is the single-match path applied once, which `replace_string`
+        // already implements.
+        return replace_string(value, needle, replacement);
+    }
+    let mut output = String::new();
+    let mut searched = 0;
+    while let Some(offset) = value[searched..].find(needle) {
+        let start = searched + offset;
+        let end = start + needle.len();
+        ensure_javascript_string_size(output.len() + (start - searched))?;
+        output.push_str(&value[searched..start]);
+        // `$\`` and `$'` mean the text either side of *this* match in the whole
+        // string, not in the slice being scanned.
+        expand_replacement_tokens(
+            &mut output,
+            replacement,
+            needle,
+            &value[..start],
+            &value[end..],
+        )?;
+        searched = end;
+    }
+    ensure_javascript_string_size(output.len() + (value.len() - searched))?;
+    output.push_str(&value[searched..]);
+    Ok(output)
+}
+
+/// Append `replacement` to `output`, expanding the `$`-tokens ECMA defines for
+/// a match of `needle` sitting between `prefix` and `suffix`.
+fn expand_replacement_tokens(
+    output: &mut String,
+    replacement: &str,
+    needle: &str,
+    prefix: &str,
+    suffix: &str,
+) -> Result<(), RuntimeError> {
+    let mut chars = replacement.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '$' {
+            output.push(character);
+        } else {
+            match chars.peek().copied() {
+                Some('$') => {
+                    chars.next();
+                    output.push('$');
+                }
+                Some('&') => {
+                    chars.next();
+                    output.push_str(needle);
+                }
+                Some('`') => {
+                    chars.next();
+                    output.push_str(prefix);
+                }
+                Some('\'') => {
+                    chars.next();
+                    output.push_str(suffix);
+                }
+                _ => output.push('$'),
+            }
+        }
+        ensure_javascript_string_size(output.len())?;
+    }
+    Ok(())
 }
 
 fn replace_string(value: &str, needle: &str, replacement: &str) -> Result<String, RuntimeError> {
@@ -1350,8 +1429,15 @@ fn code_point_at(units: &[u16], index: usize) -> Result<Value, RuntimeError> {
 
 fn slice_utf16(units: &[u16], bounds: &[Value], relative: bool) -> Result<Value, RuntimeError> {
     let to_number = crate::runtime::javascript::javascript_to_number;
-    let start_value = bounds.first().map_or(0.0, to_number);
-    let end_value = bounds.get(1).map_or(units.len() as f64, to_number);
+    let start_value = match bounds.first() {
+        None | Some(Value::Undefined) => 0.0,
+        Some(value) => to_number(value),
+    };
+    // Absent and explicitly `undefined` are the same thing here: end of input.
+    let end_value = match bounds.get(1) {
+        None | Some(Value::Undefined) => units.len() as f64,
+        Some(value) => to_number(value),
+    };
     let start = if relative {
         clamp_relative_index(start_value, units.len())
     } else {
@@ -1367,8 +1453,19 @@ fn slice_utf16(units: &[u16], bounds: &[Value], relative: bool) -> Result<Value,
 
 fn substring_utf16(units: &[u16], bounds: &[Value]) -> Result<Value, RuntimeError> {
     let to_number = crate::runtime::javascript::javascript_to_number;
-    let mut start = bounds.first().map_or(0.0, to_number).max(0.0) as usize;
-    let mut end = bounds.get(1).map_or(units.len() as f64, to_number).max(0.0) as usize;
+    // Absent and explicitly `undefined` both mean end-of-input; coercing the
+    // padded `Undefined` gives NaN, which clamps to zero and silently swaps the
+    // bounds below.
+    let mut start = match bounds.first() {
+        None | Some(Value::Undefined) => 0.0,
+        Some(value) => to_number(value),
+    }
+    .max(0.0) as usize;
+    let mut end = match bounds.get(1) {
+        None | Some(Value::Undefined) => units.len() as f64,
+        Some(value) => to_number(value),
+    }
+    .max(0.0) as usize;
     start = start.min(units.len());
     end = end.min(units.len());
     if start > end {

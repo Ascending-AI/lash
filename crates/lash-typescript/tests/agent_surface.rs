@@ -1158,10 +1158,7 @@ fn run_typescript(source: &str) -> Value {
 #[test]
 fn json_overflow_rewriting_preserves_non_ascii_text() {
     for (source, expected) in [
-        (
-            r#"finish(JSON.parse('{"a":"café","n":1e400}').a);"#,
-            "café",
-        ),
+        (r#"finish(JSON.parse('{"a":"café","n":1e400}').a);"#, "café"),
         (
             r#"finish(JSON.parse('{"a":"日本語","n":1e400}').a);"#,
             "日本語",
