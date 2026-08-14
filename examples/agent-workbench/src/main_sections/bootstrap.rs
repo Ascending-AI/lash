@@ -206,13 +206,21 @@ async fn async_main() -> AnyhowResult<()> {
     )
     .with_deferred_tool_resolver(deferred_tools.resolver())
     .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
-    let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    let builder = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(model_spec)
         .store_factory(Arc::clone(&core_store_factory))
         .trigger_store(Arc::clone(&trigger_store))
         .trace_sink(Arc::clone(&trace_sink))
-        .trace_level(TraceLevel::Extended)
+        .trace_level(TraceLevel::Extended);
+    let builder = if let Some(tool_provider) =
+        dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider)
+    {
+        builder.tools(tool_provider)
+    } else {
+        builder
+    };
+    let core = builder
         .configure_plugins(|plugins| {
             configure_workbench_plugins(
                 plugins,

@@ -211,6 +211,20 @@ enum TranscriptRow {
         output: String,
         error: Option<String>,
         success: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        tools: Vec<TranscriptTool>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum TranscriptTool {
+    DurableSummary {
+        operation: String,
+        status: &'static str,
+    },
+    Omitted {
+        count: usize,
     },
 }
 

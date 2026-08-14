@@ -56,12 +56,49 @@ id shape (FIG-972). Both regimes now carry unit coverage; this runbook is the ju
 browser-surface layer over it, and it exists because the unit tests assert within one surface
 while both defects were only visible **between** surfaces.
 
-**Real tokens.** Turns and the wake go through OpenRouter, so prose and termination style
-are nondeterministic. No exact model wording is an answer key. The answer key is **counts per
-role**: rendered rows, committed conversation messages, projected messages, and completed turn
-executions. Because termination style is model-dependent, and termination decides which
-namespace mints the committed id, a gate that requires a specific id is nondeterministic by
-construction. Record ids as evidence; gate on counts.
+**Two lanes.** The rendered-surface answer key is driven only with the named development
+provider scenarios below. They make no provider network calls and have exact event and text
+markers. The existing one-send/one-wake count lane still uses OpenRouter: its prose and
+termination style are nondeterministic, so that lane gates on role counts and records ids
+rather than requiring a particular id shape.
+
+## Judged rendered-surface answer key
+
+This table is binding. Browser dispatch names come from the in-page
+`__LASH_WORKBENCH_TURN_EVENT_HOOK__`; trace `runtime_stream_event` names such as `delta`,
+`reasoning_delta`, and `usage` are a different vocabulary and must not be used to infer which
+`handleTurnEvent` branch ran.
+
+| Event or committed source | Rendered answer | Settled/reload answer |
+|---|---|---|
+| committed user message | one `message user` row, role `you` | durable in `/api/state.messages`; identical after reload |
+| `assistant_prose_delta` then committed assistant | provisional `message assistant`, replaced by one committed `message assistant` | durable; no provisional duplicate |
+| `reasoning_delta` | one `reasoning` disclosure | `/api/state.transcript.type == "reasoning"`; survives reload |
+| `code_block_started` | one `code-block` disclosure in running state | same element settles; never a second code row |
+| successful `code_block_completed` | the same `code-block`, summary `lashlang completed` | `/api/state.transcript.type == "code_block"`; survives reload |
+| failing `code_block_completed` | the same `code-block fail`, with the exact code error | durable code block; survives reload |
+| `tool_call_started` | one `tool pending` child **inside its code block** | completion updates it in place by `call_id`, or by the deterministic turn/name/arguments/graph/parent fallback when no id exists |
+| successful/failed `tool_call_completed` | the same nested child becomes `tool` / `tool fail` with `completed` / `failed` badge | reload has an honest source-operation/outcome summary for each retained call, not the live call identity or details |
+| `final_value` | terminal text/value is appended inside the current `message assistant`; no terminal-value row | committed assistant contains the same rendering; survives reload |
+| `tool_value` | intentionally the same rendering as `final_value`; `tool_name` does not create a DOM distinction | committed assistant contains the same value; survives reload |
+| committed failure message | one `message event`, role `event`, exact text `turn could not be completed`, no retry button | durable in `/api/state.messages`; same in sender, observer, and reload |
+| ordinary provider/turn `error` activity | no `.message.error` row and no retry control in either sender or observer | the later committed failure message is the only rendered failure row |
+| `postCommand` HTTP/fetch failure | transient `message error`, role `error`, with `retry turn` because the command recorded `lastRequest` | page-local and absent from backfill; do not confuse it with provider activity or the durable failure row |
+| `model_attempt_reset` | removes only prose/reasoning chunks whose correlation ids are named | empty id arrays remove nothing; settled transcript contains no superseded text |
+| `retry_status` | transient, turn-owned `message event retry-status` with attempt/max/reason/wait | removed only by the same turn's next request or settlement; delayed completion of another turn cannot clear it |
+| committed message attachments | `message-attachments` inside the owning `message user` body | sourced from `message.attachments`, not a stream event; survives reload |
+| `usage` | left-rail totals add that turn's `cumulative` counters to the last settled session baseline, keyed by turn id | totals remain monotonic on later turns and equal `/api/state.usage` after settlement |
+
+`/api/state.transcript` has exactly three producible row types:
+`["code_block", "message", "reasoning"]`. Tool summaries reload as children encoded on their
+code block. The durable executed-call ledger retains only source operation and outcome for its
+bounded tail (currently 128 calls); `calls_omitted` renders as an explicit nested omission row.
+It does **not** retain call id, live tool name, arguments, result, or duration, so reload must not
+claim those fields or exact live tool identity. Terminal values and failures reload through
+committed messages; attachments reload from the owning message. Every settled producible
+top-level row must return with an identical class histogram. Retry status and client-request
+errors are explicitly transient and are judged before settlement, never included in the reload
+histogram.
 
 ## Scenario-specific golden rules
 
@@ -86,15 +123,131 @@ construction. Record ids as evidence; gate on counts.
    until the row and message counts are unchanged across several consecutive samples before
    counting. A duplicate that lands a second late must still be caught; a fixed sleep either
    misses it or passes by luck.
-6. **Reload must be an identity, not a re-derivation.** The post-reload row multiset must
-   equal the pre-reload multiset exactly. Backfill is a second, independent projection of
-   the same conversation: a duplicate that appears **only** after reload, or **only** before
-   it, localizes the defect to one of the two paths and is as much a failure as a duplicate
-   in both.
+6. **Reload must preserve every durable identity.** The post-reload message/reasoning/code
+   multiset must equal the settled pre-reload multiset exactly. Tool details use the narrower
+   durable contract above: retained source operation/outcome summaries plus an explicit omitted
+   count. Backfill is a second, independent projection of committed state; never manufacture
+   unavailable live fields to make the two paths look identical.
 7. **Scope everything to one session id.** Drive `/?session_id=<S>` and scope every read —
    `/api/state?session_id=<S>`, the `graph_nodes.session_id` filter, the product-event map
    key, and the trace's `context.session_id` — to that id. An unscoped read mixes other
    tabs' conversations into the counts and voids the run.
+8. **Use the browser dispatch hook for event identity.** Before navigation, install
+   `window.__LASH_WORKBENCH_TURN_EVENT_HOOK__ = (event, turnId) => ...` and record a deep copy
+   of every call. Correlate DOM checkpoints to that buffer. Trace vocabulary is corroboration,
+   not the event-side answer key.
+9. **Count nested tool rows where they live.** For each code block record
+   `code.querySelectorAll(":scope > .tool")`, each badge, and each available call id from the
+   hook. A timeline-child count cannot see tools. One live call must produce one child before
+   and after completion even when `call_id` is absent. Reload must reproduce each retained source
+   operation/outcome summary and one explicit `calls_omitted` row when the ledger overflowed;
+   arguments, results, duration, and stable call identity must remain unavailable.
+10. **Separate live from settled classes.** Capture transient retry/client-error/running rows at
+    their named checkpoint. For the reload identity gate compare only the settled histogram,
+    after `Done`, idle, empty `active_turns`, and count stability. Retry rows are turn-owned: a
+    delayed `Done` for turn A must not clear turn B's retry row.
+
+## Deterministic rendered-surface lane
+
+For every phase use a fresh data directory, session id, port, and artifact subdirectory. Boot
+with `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=<scenario> AGENT_WORKBENCH_DATA_DIR=<fresh>
+AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`, require the startup warning to name the
+exact scenario and the page to render model `dev/failure-paths`, then install the dispatch hook
+before navigation. Teardown with `just agent-workbench-down <port>` before the next phase.
+
+At every named checkpoint save four machine-readable extracts beside the screenshot:
+
+- `*-dom.json`: top-level class histogram, code-block histogram, nested tool count/status, row
+  text, and attachment ids;
+- `*-state.json`: scoped `/api/state`, including `messages`, `transcript`, `usage`, and
+  `active_turns`;
+- `*-store.json`: scoped non-tombstoned conversation/transcript graph nodes from
+  `<data-dir>/lash-sessions/durable-core.db`;
+- `*-events-trace.json`: the in-page hook buffer plus the scoped `turn_completed`, LLM-call,
+  code/tool, usage, and retry records from `trace.jsonl`.
+
+Any DOM/API/store/trace disagreement is an Abort/RCA under the shared rules.
+
+### Surface A — reasoning, successful code, and final value
+
+Boot `rendered-surface`; submit any text. Poll the hook for `reasoning_delta`, capture the visible
+`reasoning` disclosure as `10-reasoning-live.png`, then poll through
+`code_block_started`, `code_block_completed`, and `final_value` to settled/idle. Require exactly
+one `reasoning`, one successful `code-block` whose body contains `lashlang completed`, and one
+assistant row containing the structured marker `FIG-1350 deterministic final value`. There is
+no separate value row. Save `11-code-ok-final-settled.png` and the four `11-*` extracts.
+
+Reload. Require transcript types exactly `["code_block", "message", "reasoning"]` after unique
+sorting and require the complete settled class histogram, row bodies, and counts to equal the
+pre-reload extract. Capture `12-code-ok-final-reload.png`.
+
+### Surface B — nested tool start/complete and live `tool_value`
+
+Boot `tool-value`; submit any text. Poll the hook for `tool_call_started`, then require exactly
+one `.tool.pending` child under the one running `.code-block`, zero top-level `.tool` siblings,
+and capture `20-tool-start-live.png`. The deterministic terminal tool remains pending long enough
+for this objective poll; never replace the poll with a sleep.
+
+Poll for `tool_call_completed`, `code_block_completed`, and `tool_value`, then settled/idle.
+Require the same nested element count to remain one, its badge to be `completed`, the code summary
+to report one tool, and the assistant row to contain `FIG-1350 deterministic tool value`. Record
+that `tool_value` and `final_value` are DOM-indistinguishable by the answer key: both render their
+value into the assistant row. Capture `21-tool-complete-value-settled.png` and the four `21-*`
+extracts. Reload and require one nested completed durable-summary child with the same source
+operation and outcome. Require its payload to omit call id, arguments, result, and duration;
+capture `22-tool-complete-value-reload.png`.
+
+### Surface C — failing code and durable error
+
+Boot `code-failure`; submit any text and poll to settled/idle. Require one `code-block fail` whose
+error contains `FIG-1350 deterministic code failure`, one durable `message event` with exact text
+`turn could not be completed`, and no settled `.message.error` or retry button. Capture
+`30-code-fail-error-settled.png` and the four `30-*` extracts. Reload and require the same failed
+code row and durable event row with the same histogram; capture `31-code-fail-error-reload.png`.
+An ordinary provider `error` activity before that message must add no row on either the sending
+page (even though it has `lastRequest`) or a never-sent observer.
+
+Separately prove the client row without calling a provider: after a successful page hydration,
+abort or refuse a composer `POST /api/turn` in browser routing so `postCommand` has a
+`lastRequest`. Require one transient `message error` with a `retry turn` button, capture
+`32-client-error-retry-live.png`, then remove the route fault and reload. Require that transient
+row to be absent and the durable transcript unchanged. This is the reachable client/network
+error path; it is not the provider-failure answer.
+
+### Surface D — correlated retry/reset with partial text
+
+Boot `retry-reset-partial`; submit any text. Poll the hook for the exact superseded prose marker,
+then for `model_attempt_reset` naming its prose correlation id and `retry_status`. While the retry
+row is present require the superseded marker to be absent, the `message event retry-status` body
+to name attempt/max/reason/wait, and capture `40-retry-reset-live.png`. Poll to settled/idle and
+require exactly one assistant copy containing `FIG-1350 retry replacement`, no superseded marker,
+no retry-status row, and one completed turn. Capture `41-retry-replacement-settled.png` and the
+four `41-*` extracts. Reload and require the same settled histogram and no superseded marker;
+capture `42-retry-replacement-reload.png`.
+
+### Surface E — attachment row and complete live-to-settled identity
+
+Boot `rendered-surface`. Upload a valid PNG through the UI, require its attachment id in the
+committed user message's `attachments`, and submit. Capture the live user-row gallery as
+`50-attachment-live.png`; after settled/idle capture `51-attachment-settled.png`. Require the
+attachment to be inside the `message user` body and require no attachment stream event in the
+hook buffer. Reload, require the same attachment id/link/image and complete settled histogram,
+and capture `52-attachment-reload.png`.
+
+### Deterministic scorecard
+
+| Item | Objective gate | Verdict | Evidence |
+|---|---|---|---|
+| Dispatch vocabulary | every event class named by the in-page hook, never inferred from trace names | | hook extracts |
+| Reasoning | one durable `reasoning`, same after reload | | `10-*`, `12-*` |
+| Code success/failure | one in-place code row per turn with exact success/fail class | | `11-*`, `30-*`, reloads |
+| Tool start/complete | one nested child updates pending → completed with or without call id; reload exposes only retained source operation/outcome and explicit omission | | `20-*` through `22-*` |
+| Final/tool value | both exact values render inline in assistant; no separate row; intended indistinguishability recorded | | `11-*`, `21-*` |
+| Durable/client errors | durable event survives reload without retry; client error is transient and retryable when `lastRequest` exists | | `30-*` through `32-*` |
+| Retry/reset | named partial correlation retracted; retry status visible then removed; replacement single-copy | | `40-*` through `42-*` |
+| Attachment | row sourced from committed message and identical after reload | | `50-*` through `52-*` |
+| Usage | later-turn cumulative counters add to the settled session baseline monotonically; settled rail equals `/api/state.usage` | | every state/hook extract |
+| Cross-check | DOM, API, durable graph, and trace agree at every settled checkpoint | | all four extracts per checkpoint |
 
 ## Working material
 
