@@ -240,13 +240,7 @@ impl Lowerer {
         preserve_name: bool,
     ) -> Result<(), Diagnostic> {
         if name.starts_with(GENERATED_BINDING_PREFIX) {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ReservedIdentifier,
-                format!(
-                    "`{name}` is reserved: identifiers starting with `{GENERATED_BINDING_PREFIX}` name the lowerer's generated bindings"
-                ),
-                None,
-            ));
+            return Err(reserved_identifier(name));
         }
         let owner_function = self.current_function();
         let scope = self.scopes.last_mut().expect("a scope is always active");
@@ -504,6 +498,25 @@ impl Lowerer {
             ..FunctionContext::default()
         });
         self.scopes.push(Scope::default());
+        // ECMA binds a function's own name inside its body. A declaration
+        // already owns an outer binding to reuse; a named function expression
+        // needs a fresh one, visible only here, which the VM's self-slot fills.
+        let internal_name = match (&function.name, internal_name) {
+            (Some(source_name), None) => {
+                if source_name.starts_with(GENERATED_BINDING_PREFIX) {
+                    self.scopes.pop();
+                    self.functions.pop();
+                    self.loop_depth = outer_loop_depth;
+                    return Err(reserved_identifier(source_name));
+                }
+                let generated = self.next_binding;
+                self.next_binding += 1;
+                Some(format!(
+                    "{GENERATED_BINDING_PREFIX}{generated}_{source_name}"
+                ))
+            }
+            (_, internal_name) => internal_name,
+        };
         if let (Some(source_name), Some(internal)) = (&function.name, &internal_name) {
             self.scopes.last_mut().unwrap().bindings.insert(
                 source_name.clone(),
@@ -964,6 +977,16 @@ fn strongly_connected_components(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
         components.push(component);
     }
     components
+}
+
+fn reserved_identifier(name: &str) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::ReservedIdentifier,
+        format!(
+            "`{name}` is reserved: identifiers starting with `{GENERATED_BINDING_PREFIX}` name the lowerer's generated bindings"
+        ),
+        None,
+    )
 }
 
 fn js_unary(op: JavaScriptUnaryOp, expr: LashExpr) -> LashExpr {
