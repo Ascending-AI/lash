@@ -1195,3 +1195,74 @@ fn json_overflow_sentinel_does_not_collide_with_guest_data() {
         "a guest object that looks like the marker survives unchanged"
     );
 }
+
+/// `map` must actually run: it was advertised, accepted, and then failed at
+/// run time with a host-boundary error because the stdlib builtin exports
+/// every argument across the boundary and a closure cannot cross it.
+#[test]
+fn array_map_runs_its_callback_in_the_vm() {
+    assert_eq!(
+        run_typescript("finish([1,2,3].map((x) => x * 2).join('-'));"),
+        Value::String("2-4-6".into())
+    );
+    assert_eq!(
+        run_typescript("finish(['a','b'].map((x, i) => x + i).join('-'));"),
+        Value::String("a0-b1".into())
+    );
+    assert_eq!(
+        run_typescript("const a = [1,2,3]; finish(a.map((x) => x + 1).join('-'));"),
+        Value::String("2-3-4".into())
+    );
+    // The callback closes over its environment.
+    assert_eq!(
+        run_typescript("const k = 10; finish([1,2].map((x) => x + k).join('-'));"),
+        Value::String("11-12".into())
+    );
+    assert_eq!(
+        run_typescript("finish([].map((x) => x).join('-'));"),
+        Value::String("".into())
+    );
+}
+
+/// Shapes whose callback arity is not statically known reject by name rather
+/// than lowering something the VM's exact-arity check cannot run.
+#[test]
+fn array_map_rejects_shapes_it_cannot_run() {
+    let environment = two_leaf_web_environment();
+    for source in [
+        "function d(x: number): number { return x * 2; } finish([1,2].map(d).join('-'));",
+        "finish([1,2].map((x, i, all) => x).join('-'));",
+        "finish([1,2].map().join('-'));",
+    ] {
+        let error = lash_typescript::link(source, &environment)
+            .expect_err("an unrunnable map shape must reject at link time");
+        assert_eq!(error.code.as_str(), "TS_METHOD_UNSUPPORTED", "{source}");
+    }
+}
+
+/// Giving the iterable a second name inside the body defeats root tracking:
+/// the alias is written through, the snapshot iterator hides it, and the loop
+/// diverges from ECMA. Both escapes the verification found reject by name.
+#[test]
+fn for_of_bodies_reject_aliasing_the_iterable() {
+    let environment = two_leaf_web_environment();
+    for source in [
+        "const urls = ['a','b','c']; let out = ''; for (const u of urls) { const alias = urls; alias[1] = 'MUT'; out = out + u; } finish(out);",
+        "const urls = ['a','b']; for (const u of urls) { const box = { inner: urls }; box.inner[0] = 'MUT'; } finish('done');",
+        "const urls = ['a','b']; for (const u of urls) { const boxed = [urls]; boxed[0][0] = 'MUT'; } finish('done');",
+    ] {
+        let error = lash_typescript::link(source, &environment)
+            .expect_err("aliasing the iterable must reject");
+        assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{source}");
+        assert!(
+            error.to_string().contains("urls"),
+            "the rejection names the iterable: {error}"
+        );
+    }
+    // Binding something else entirely stays fine.
+    lash_typescript::link(
+        "const urls = ['a']; const other = ['b']; for (const u of urls) { const alias = other; alias[0] = 'ok'; } finish('done');",
+        &environment,
+    )
+    .expect("aliasing a different array is not the iterable");
+}

@@ -273,3 +273,56 @@ rejection_test!(
     "let x = 1; const old = x++;",
     Code::UpdateUnsupported
 );
+
+/// The register must name exactly what the lowerer accepts.
+///
+/// The documented inventory was hand-maintained and fell nine methods behind
+/// the allowlist, so the register told a guest that `slice` rejects when it
+/// does not. This derives the expected sentence from the lowerer and compares,
+/// which is the only way a prose inventory stays true.
+#[test]
+fn instance_method_inventory_matches_the_lowerer() {
+    let register = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
+        .expect("the register is readable");
+    let documented = register
+        .split("The shipped instance methods are ")
+        .nth(1)
+        .expect("the register names its instance methods")
+        .split('.')
+        .next()
+        .expect("the sentence ends");
+    let documented = documented
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect::<std::collections::BTreeSet<_>>();
+
+    // Every documented name must be accepted, and the count must match the
+    // register's own claim, so neither list can grow without the other.
+    for method in &documented {
+        assert!(
+            lash_typescript::accepts_instance_method(method),
+            "the register documents `{method}`, which the lowerer does not accept"
+        );
+    }
+    let claimed = register
+        .split("37 static methods and\n")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|count| count.parse::<usize>().ok())
+        .expect("the register states an instance-method count");
+    assert_eq!(
+        claimed,
+        documented.len(),
+        "the stated instance-method count must match the documented list"
+    );
+    for candidate in [
+        "sort", "pop", "push", "shift", "unshift", "reduce", "filter", "flat", "substr",
+    ] {
+        assert!(
+            !lash_typescript::accepts_instance_method(candidate),
+            "`{candidate}` is not documented, so it must not be accepted"
+        );
+    }
+}

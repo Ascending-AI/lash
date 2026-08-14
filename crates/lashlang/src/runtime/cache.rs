@@ -39,6 +39,12 @@ pub struct CompiledProcessCacheKey {
     pub vm_abi_version: &'static str,
 }
 
+/// Owned cache keys built so far. A hit compares borrowed fields, so this must
+/// only ever advance on a miss.
+#[cfg(test)]
+pub(crate) static COMPILED_PROCESS_KEYS_BUILT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 impl CompiledProcessCacheKey {
     pub fn new(
         module_ref: crate::ModuleRef,
@@ -46,6 +52,8 @@ impl CompiledProcessCacheKey {
         host_requirements_ref: HostRequirementsRef,
         compilation_dialect: CompilationDialect,
     ) -> Self {
+        #[cfg(test)]
+        COMPILED_PROCESS_KEYS_BUILT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
             module_ref,
             process_ref,
@@ -54,6 +62,25 @@ impl CompiledProcessCacheKey {
             compiler_version: LASHLANG_COMPILER_VERSION,
             vm_abi_version: LASHLANG_VM_ABI_VERSION,
         }
+    }
+
+    /// Whether this key names the same compiled process as the borrowed parts.
+    ///
+    /// A cache lookup only ever compares its key, so building an owned one to
+    /// do it charges every hit for three string clones it immediately drops.
+    fn matches(
+        &self,
+        module_ref: &crate::ModuleRef,
+        process_ref: &ProcessRef,
+        host_requirements_ref: &HostRequirementsRef,
+        compilation_dialect: CompilationDialect,
+    ) -> bool {
+        self.compilation_dialect == compilation_dialect
+            && self.compiler_version == LASHLANG_COMPILER_VERSION
+            && self.vm_abi_version == LASHLANG_VM_ABI_VERSION
+            && &self.module_ref == module_ref
+            && &self.process_ref == process_ref
+            && &self.host_requirements_ref == host_requirements_ref
     }
 }
 
@@ -92,19 +119,22 @@ impl CompiledProcessCache {
         process_ref: &ProcessRef,
         host_requirements_ref: &HostRequirementsRef,
     ) -> Result<Arc<CompiledProgram>, crate::RuntimeError> {
-        let key = CompiledProcessCacheKey::new(
-            artifact.module_ref.clone(),
-            process_ref.clone(),
-            host_requirements_ref.clone(),
-            artifact.compilation_dialect,
-        );
+        // Compare borrowed: a hit must not allocate a key it only reads.
+        let matches = |entry: &CachedCompiledProcess| {
+            entry.key.matches(
+                &artifact.module_ref,
+                process_ref,
+                host_requirements_ref,
+                artifact.compilation_dialect,
+            )
+        };
         if let Some(entry) = self.entries.back()
-            && entry.key == key
+            && matches(entry)
         {
             self.hits += 1;
             return Ok(entry.compiled.clone());
         }
-        if let Some(index) = self.entries.iter().position(|entry| entry.key == key) {
+        if let Some(index) = self.entries.iter().position(matches) {
             self.hits += 1;
             let entry = self
                 .entries
@@ -124,8 +154,14 @@ impl CompiledProcessCache {
             self.entries.pop_front();
             self.evictions += 1;
         }
+        // Only a miss stores an entry, so only a miss pays for the owned key.
         self.entries.push_back(CachedCompiledProcess {
-            key,
+            key: CompiledProcessCacheKey::new(
+                artifact.module_ref.clone(),
+                process_ref.clone(),
+                host_requirements_ref.clone(),
+                artifact.compilation_dialect,
+            ),
             compiled: compiled.clone(),
         });
         Ok(compiled)

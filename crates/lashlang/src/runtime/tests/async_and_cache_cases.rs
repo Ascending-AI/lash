@@ -1394,3 +1394,53 @@ async fn host_can_transform_fail_value_while_keeping_failure_path() {
         "transformed value should still arrive on the failure path"
     );
 }
+
+/// A compiled-process cache hit must not build the key it only compares.
+///
+/// The key owns three cloned strings, so constructing it before the lookup
+/// charged every hit an allocation and 83 bytes for a value it dropped
+/// immediately — the same shape as the parse-on-hit defect, on the hot path.
+#[test]
+fn a_compiled_process_cache_hit_builds_no_key() {
+    use std::sync::atomic::Ordering;
+
+    let linked = crate::LinkedModule::link(
+        crate::parse("process scan() { finish 1 }").expect("parse module"),
+        runtime_test_environment(),
+    )
+    .expect("link module");
+    let process_ref = linked
+        .artifact
+        .process_ref("scan")
+        .expect("scan process ref")
+        .clone();
+    let mut cache = CompiledProcessCache::with_capacity(2);
+
+    let before = crate::runtime::cache::COMPILED_PROCESS_KEYS_BUILT.load(Ordering::Relaxed);
+    cache
+        .get_or_compile(
+            &linked.artifact,
+            &process_ref,
+            &linked.host_requirements_ref,
+        )
+        .expect("first compile misses");
+    let after_miss = crate::runtime::cache::COMPILED_PROCESS_KEYS_BUILT.load(Ordering::Relaxed);
+    assert_eq!(after_miss - before, 1, "a miss stores one owned key");
+
+    for _ in 0..8 {
+        cache
+            .get_or_compile(
+                &linked.artifact,
+                &process_ref,
+                &linked.host_requirements_ref,
+            )
+            .expect("subsequent lookups hit");
+    }
+    let after_hits = crate::runtime::cache::COMPILED_PROCESS_KEYS_BUILT.load(Ordering::Relaxed);
+    assert_eq!(
+        after_hits, after_miss,
+        "eight cache hits must build no keys at all"
+    );
+    assert_eq!(cache.stats().hits, 8);
+    assert_eq!(cache.stats().misses, 1);
+}

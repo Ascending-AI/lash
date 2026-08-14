@@ -1195,12 +1195,16 @@ impl RuntimeExecutionContext<'_> {
                         )));
                         let _ = prepared;
                     }
-                    return ToolBatchReplies::settled_in_input_order(
-                        replies
+                    // The batch never ran, so no order was observed. Claiming
+                    // input order here is the shape this layer exists to
+                    // remove; an empty order says what is true.
+                    return ToolBatchReplies {
+                        replies: replies
                             .into_iter()
                             .map(|reply| reply.expect("every batch reply slot should be filled"))
                             .collect(),
-                    );
+                        settlement_order: Vec::new(),
+                    };
                 }
             };
             self.dispatch

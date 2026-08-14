@@ -32,6 +32,14 @@ pub fn parse_unguarded_for_measurement(source: &str) -> Result<lashlang::Program
 /// never something a caller should render back to a user.
 pub const GENERATED_BINDING_PREFIX: &str = lower::GENERATED_BINDING_PREFIX;
 
+/// Whether the lowerer accepts `method` as an instance standard-library method.
+///
+/// Exposed so the register's documented inventory can be pinned against the
+/// allowlist instead of being maintained by hand.
+pub fn accepts_instance_method(method: &str) -> bool {
+    lower::accepts_instance_method(method)
+}
+
 pub use diagnostics::{Diagnostic, DiagnosticCode, SourceSpan};
 pub use signatures::render_tool_signature;
 

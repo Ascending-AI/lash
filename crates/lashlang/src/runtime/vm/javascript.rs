@@ -647,6 +647,19 @@ fn javascript_array_method(
         ("toString", []) => Ok(Value::String(
             javascript_join(&Value::List(items.to_vec().into()), &Value::Undefined)?.into(),
         )),
+        // Pair each item with its index so a two-parameter `map` callback can
+        // be driven by the VM's one-argument map. Not a guest-visible method:
+        // the lowerer emits it and nothing parses it.
+        ("__enumerate", []) => Ok(Value::List(
+            items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    Value::List(vec![item.clone(), Value::Number(index as f64)].into())
+                })
+                .collect::<Vec<_>>()
+                .into(),
+        )),
         _ => Err(js_stdlib_error(format!(
             "TS_METHOD_UNSUPPORTED: Array.{method}"
         ))),

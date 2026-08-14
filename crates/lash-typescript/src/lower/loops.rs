@@ -270,12 +270,87 @@ fn statement_mentions_binding(stmt: &Stmt, binding: &str) -> bool {
 /// the body can reach it and the body is unrestricted.
 pub(super) fn body_may_mutate_iterable(iterable: &Expr, body: &Stmt) -> Option<String> {
     let binding = expression_root_binding(iterable)?;
+    // A body that gives the iterable a second name defeats root tracking: the
+    // alias can be written through, the snapshot iterator hides it, and the
+    // loop silently diverges from ECMA. Reject binding it rather than trying to
+    // follow every alias.
+    if let Some(reason) = body_binds_iterable_elsewhere(body, binding) {
+        return Some(reason);
+    }
     for expr in statement_expressions(body) {
         if let Some(reason) = expression_may_mutate(expr, binding) {
             return Some(reason);
         }
     }
     None
+}
+
+/// Whether the body stores the iterable under another name — a `const alias =
+/// urls`, or boxing it in a structure the loop can reach later.
+fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
+    fn names_iterable_directly(expr: &Expr, binding: &str) -> bool {
+        match expr {
+            Expr::Ident(name) => name.as_str() == binding,
+            // Boxing it in a literal keeps a live reference to it.
+            Expr::Array(items) => items
+                .iter()
+                .any(|item| names_iterable_directly(item, binding)),
+            Expr::Object(entries) => entries
+                .iter()
+                .any(|(_, value)| names_iterable_directly(value, binding)),
+            _ => false,
+        }
+    }
+    fn walk(stmt: &Stmt, binding: &str) -> Option<String> {
+        match stmt {
+            Stmt::Var { declarations, .. } => declarations.iter().find_map(|declaration| {
+                declaration
+                    .init
+                    .as_ref()
+                    .filter(|init| names_iterable_directly(init, binding))
+                    .map(|_| {
+                        format!(
+                            "binds `{binding}`, the iterable this loop is walking, to `{}`",
+                            declaration.name
+                        )
+                    })
+            }),
+            Stmt::Expr(Expr::Assign { value, .. }) if names_iterable_directly(value, binding) => {
+                Some(format!(
+                    "assigns `{binding}`, the iterable this loop is walking, to another binding"
+                ))
+            }
+            Stmt::Block(statements) => statements.iter().find_map(|stmt| walk(stmt, binding)),
+            Stmt::If {
+                consequent,
+                alternate,
+                ..
+            } => walk(consequent, binding)
+                .or_else(|| alternate.as_deref().and_then(|stmt| walk(stmt, binding))),
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::ForOf { body, .. } => {
+                walk(body, binding)
+            }
+            Stmt::Try {
+                body,
+                catch,
+                finally,
+            } => body
+                .iter()
+                .find_map(|stmt| walk(stmt, binding))
+                .or_else(|| {
+                    catch
+                        .iter()
+                        .find_map(|catch| catch.body.iter().find_map(|stmt| walk(stmt, binding)))
+                })
+                .or_else(|| {
+                    finally
+                        .iter()
+                        .find_map(|stmts| stmts.iter().find_map(|stmt| walk(stmt, binding)))
+                }),
+            _ => None,
+        }
+    }
+    walk(stmt, binding)
 }
 
 fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {

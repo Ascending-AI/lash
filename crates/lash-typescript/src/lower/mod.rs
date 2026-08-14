@@ -22,6 +22,10 @@ use graph::{shortest_cycle_through, strongly_connected_components};
 
 /// Every binding the lowerer generates carries this prefix, which the dialect
 /// reserves so a source identifier can never collide with one.
+pub(crate) fn accepts_instance_method(method: &str) -> bool {
+    stdlib::is_instance_stdlib_method(method)
+}
+
 pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
 
 pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnostic> {
@@ -226,6 +230,80 @@ impl Lowerer {
             self.scopes.pop();
         }
         Ok(output)
+    }
+
+    /// `xs.map(callback)` as an in-VM map over the VM's own callback driver.
+    ///
+    /// ECMA calls the callback with `(value, index, array)`. The VM checks
+    /// callback arity exactly, so the shape of the callback decides the
+    /// lowering: a one-parameter callback maps directly, and a two-parameter
+    /// one maps over `(value, index)` pairs through a generated wrapper. The
+    /// third `array` argument and callbacks whose arity is not statically
+    /// known reject by name rather than lowering something that cannot run.
+    fn lower_array_map(&mut self, object: &Expr, args: &[Expr]) -> Result<LashExpr, Diagnostic> {
+        let [callback] = args else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::MethodUnsupported,
+                "map takes exactly one callback argument in v1",
+                None,
+            ));
+        };
+        let Expr::Function(function) = callback else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::MethodUnsupported,
+                "map requires a function literal in v1 so its parameter count is known before it runs",
+                None,
+            ));
+        };
+        let items = self.lower_expr(object)?;
+        match function.params.len() {
+            1 => Ok(LashExpr::Map {
+                items: Box::new(items),
+                function: Box::new(self.lower_expr(callback)?),
+            }),
+            2 => {
+                // Pair each item with its index, then unpack in a generated
+                // one-parameter wrapper so the driver's arity still matches.
+                let pairs = LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![LashExpr::String("__enumerate".into()), items],
+                };
+                let pair = format!("{GENERATED_BINDING_PREFIX}{}_pair", self.next_binding);
+                self.next_binding += 1;
+                let lowered_callback = self.lower_expr(callback)?;
+                let wrapper = format!("{GENERATED_BINDING_PREFIX}{}_map", self.next_binding);
+                self.next_binding += 1;
+                let index_of = |index: usize| LashExpr::Index {
+                    target: Box::new(LashExpr::Variable(pair.as_str().into())),
+                    index: Box::new(LashExpr::Number(index as f64)),
+                };
+                Ok(LashExpr::Block(vec![
+                    LashExpr::Assign {
+                        target: AssignTarget::variable(wrapper.as_str().into()),
+                        expr: Box::new(lowered_callback),
+                    },
+                    LashExpr::Map {
+                        items: Box::new(pairs),
+                        function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
+                            name: None,
+                            params: vec![pair.as_str().into()],
+                            captures: vec![wrapper.as_str().into()],
+                            body: Box::new(LashExpr::Return(Box::new(LashExpr::Call {
+                                function: Box::new(LashExpr::Variable(wrapper.as_str().into())),
+                                args: vec![index_of(0), index_of(1)],
+                            }))),
+                        }))),
+                    },
+                ]))
+            }
+            other => Err(Diagnostic::new(
+                DiagnosticCode::MethodUnsupported,
+                format!(
+                    "map callbacks take the value and optionally its index in v1; this one takes {other} parameters"
+                ),
+                None,
+            )),
+        }
     }
 
     fn predeclare(&mut self, statements: &[Stmt], root: bool) -> Result<(), Diagnostic> {
@@ -1275,6 +1353,13 @@ impl Lowerer {
                     name: "__typescript_stdlib".into(),
                     args: builtin_args,
                 });
+            }
+            // `map` drives a guest callback, so it cannot go through the
+            // stdlib builtin: that exports every argument across the host
+            // boundary, which refuses a function value. The VM already owns
+            // functions, frames and an in-VM map driver, so lower to that.
+            if method == "map" {
+                return self.lower_array_map(object, args);
             }
             if is_instance_stdlib_method(method) {
                 if has_literal_stdlib_receiver(object)

@@ -163,9 +163,13 @@ surface below.
 
 ## Standard-library inventory
 
-The v1 inventory contains 55 method names: 37 static methods and 18 instance
-method names (with `toString`, `concat`, `includes`, `indexOf`, and
-`lastIndexOf` shared by more than one receiver kind).
+The v1 inventory contains 64 method names: 37 static methods and
+27 instance method names (with `toString`, `concat`, `includes`,
+`indexOf`, and `lastIndexOf` shared by more than one receiver kind).
+
+`instance_method_inventory_matches_the_lowerer` pins the list below against
+`is_instance_stdlib_method`, so the register cannot drift from what the lowerer
+actually accepts.
 
 The shipped static methods are `Object.keys`, `values`, `entries`,
 `fromEntries`, `hasOwn`, and `is`; `Array.isArray` and `of`;
@@ -175,10 +179,7 @@ The shipped static methods are `Object.keys`, `values`, `entries`,
 `floor`, `log`, `log10`, `log2`, `round`, `sin`, `tan`, `trunc`, `max`, `min`,
 `pow`, `sqrt`, and `sign`.
 
-The shipped instance methods are `charCodeAt`, `codePointAt`, `concat`,
-`endsWith`, `includes`, `indexOf`, `lastIndexOf`, `repeat`, `replace`,
-`startsWith`, `toLowerCase`, `toUpperCase`, `trim`, `trimStart`, `trimEnd`,
-`toString`, `valueOf`, and `join`. Missing methods reject with
+The shipped instance methods are `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, and `valueOf`. Missing methods reject with
 `TS_METHOD_UNSUPPORTED` when the receiver is statically known and with the same
 named typed runtime failure when only its runtime type is known. Mutating array
 methods are deliberately absent; index assignment remains the supported
