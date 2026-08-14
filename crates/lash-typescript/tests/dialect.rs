@@ -456,16 +456,11 @@ mod durability {
                 .suspend()
                 .unwrap_or_else(|error| panic!("suspend `{source}`: {error}"));
             serde_json::to_vec(&continuation).expect("encode continuation");
-            loop {
-                match vm
-                    .run_process_until_effect()
-                    .await
-                    .unwrap_or_else(|error| panic!("finish `{source}`: {error}"))
-                {
-                    VmRunOutcome::EffectCompleted => {}
-                    VmRunOutcome::Complete(_) => break,
-                }
-            }
+            while let VmRunOutcome::EffectCompleted = vm
+                .run_process_until_effect()
+                .await
+                .unwrap_or_else(|error| panic!("finish `{source}`: {error}"))
+            {}
             drop(vm);
             // The between-turn snapshot must encode too.
             let snapshot = state.snapshot();

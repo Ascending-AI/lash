@@ -216,7 +216,8 @@ fn no_accepted_grammar_shape_leaks_the_shared_ast_diagnostic() {
     // shared AST's generic limit must never be the thing that fires: the source
     // budget has to bind first for every shape whose lowering is deeper than
     // its source nesting.
-    let shapes: Vec<(&str, Box<dyn Fn(usize) -> String>)> = vec![
+    type Shape = (&'static str, Box<dyn Fn(usize) -> String>);
+    let shapes: Vec<Shape> = vec![
         (
             "template holes",
             Box::new(|count| format!("const a = 1; finish(`{}`);", "${a}".repeat(count))),
