@@ -112,6 +112,26 @@ fn mixed_delimiters_share_one_source_nesting_budget() {
 }
 
 #[test]
+fn sequential_statement_forms_do_not_accumulate_source_nesting() {
+    // Statement keywords open a recursive form that closes with the statement.
+    // A flat sequence of them is one level deep however long the sequence is.
+    for source in [
+        "if (1) { const a = 1; } ".repeat(200),
+        "while (0) { const a = 1; } ".repeat(200),
+        "if (1) { const a = 1; } else { const b = 2; } ".repeat(200),
+        "do { const a = 1; } while (0); ".repeat(200),
+        "if (1) { if (0) { const a = 1; } } ".repeat(200),
+    ] {
+        lash_typescript::parse(&source).unwrap_or_else(|error| {
+            panic!("flat statement sequences parse: {}", error.code.as_str())
+        });
+    }
+    let error = lash_typescript::parse(&format!("{}finish(1);", "if (1) ".repeat(200)))
+        .expect_err("brace-free statement nesting must still reject");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+}
+
+#[test]
 fn documented_source_nesting_limit_fits_the_two_mebibyte_stack_budget() {
     std::thread::Builder::new()
         .name("typescript-source-nesting-budget".to_string())
