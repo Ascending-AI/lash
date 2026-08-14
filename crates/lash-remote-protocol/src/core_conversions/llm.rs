@@ -455,6 +455,7 @@ impl From<core_llm::ExecutionEvidence> for RemoteExecutionEvidence {
             provider_request_id,
             reasoning_output_tokens,
             provider_finish_reason,
+            collection_interruption,
         } = value;
         Self {
             served_model,
@@ -462,6 +463,7 @@ impl From<core_llm::ExecutionEvidence> for RemoteExecutionEvidence {
             provider_request_id,
             reasoning_output_tokens,
             provider_finish_reason,
+            collection_interruption: collection_interruption.map(Into::into),
         }
     }
 }
@@ -474,6 +476,7 @@ impl From<RemoteExecutionEvidence> for core_llm::ExecutionEvidence {
             provider_request_id,
             reasoning_output_tokens,
             provider_finish_reason,
+            collection_interruption,
         } = value;
         Self {
             served_model,
@@ -481,6 +484,29 @@ impl From<RemoteExecutionEvidence> for core_llm::ExecutionEvidence {
             provider_request_id,
             reasoning_output_tokens,
             provider_finish_reason,
+            collection_interruption: collection_interruption.map(Into::into),
+        }
+    }
+}
+
+impl From<core_llm::ExecutionEvidenceCollectionInterruption>
+    for RemoteExecutionEvidenceCollectionInterruption
+{
+    fn from(value: core_llm::ExecutionEvidenceCollectionInterruption) -> Self {
+        match value {
+            core_llm::ExecutionEvidenceCollectionInterruption::ProtocolAbort => {
+                Self::ProtocolAbort
+            }
+        }
+    }
+}
+
+impl From<RemoteExecutionEvidenceCollectionInterruption>
+    for core_llm::ExecutionEvidenceCollectionInterruption
+{
+    fn from(value: RemoteExecutionEvidenceCollectionInterruption) -> Self {
+        match value {
+            RemoteExecutionEvidenceCollectionInterruption::ProtocolAbort => Self::ProtocolAbort,
         }
     }
 }

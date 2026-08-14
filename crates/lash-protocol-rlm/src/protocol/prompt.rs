@@ -179,7 +179,7 @@ Do not finish with final results that depend on operations, files, generated pat
 
 ### Response shape
 
-Executable code must be inside paired `<lashlang>` and `</lashlang>` tags. The start and close tag lines must be standalone after trimming. When action is needed, place the Lashlang block after any visible prose or omit prose. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.
+Executable code must be inside paired `<lashlang>` and `</lashlang>` tags. The start and close tag lines must be standalone after trimming. A standalone `</lashlang>` line terminates the cell even inside a multiline string, so construct such string content without that standalone delimiter line. When action is needed, place the Lashlang block after any visible prose or omit prose. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.
 "#,
     );
     section

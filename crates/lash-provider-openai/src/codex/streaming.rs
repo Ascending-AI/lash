@@ -17,7 +17,9 @@ use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
-use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, LlmTerminalReason, LlmUsage};
+use lash_core::llm::types::{
+    LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmUsage,
+};
 use lash_core::provider::{Provider, ProviderOptions, StreamTermination};
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
 use lash_llm_transport::timeouts::response_start_timeout;
@@ -270,6 +272,14 @@ impl CodexProvider {
             retry_after_dead_reused_connection: retry_state.after_dead_reused_connection,
         };
         self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                request_body: Some(request_body.clone()),
+                http_summary: Some(self.websocket_http_summary(&diagnostics)),
+                generation_disposition: Some(Self::generation_disposition(req, full_body)),
+                ..Default::default()
+            }));
+        }
         let mut events_seen = false;
         if let Err(error) = attempt
             .lease_mut()
@@ -374,6 +384,14 @@ impl CodexProvider {
                 &state.usage,
                 &prev_usage,
             );
+            if let Some(tx) = &stream_events
+                && state.provider_usage.is_some()
+            {
+                tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                    provider_usage: state.provider_usage.clone(),
+                    ..Default::default()
+                }));
+            }
             if let Some(tx) = &stream_events {
                 for piece in state.take_reasoning_deltas() {
                     if expose_thinking {
@@ -647,6 +665,14 @@ impl Provider for CodexProvider {
             LlmTransportError::new(format!("Failed to serialize Codex request: {e}"))
         })?;
         emit_provider_request_trace(provider_trace.as_ref(), "codex", "responses", &body_bytes);
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                request_body: request_body.clone(),
+                http_summary: Some(format!("HTTP POST {} (stream)", self.responses_url)),
+                generation_disposition,
+                ..Default::default()
+            }));
+        }
 
         let access_token = credential.access_token.clone();
         let account_id = credential.account_id.clone();
@@ -754,6 +780,11 @@ impl Provider for CodexProvider {
                 response.generation_disposition = generation_disposition;
                 response.response_metadata = response_metadata.into_metadata();
                 if let Some(tx) = &stream_events {
+                    tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                        provider_usage: response.provider_usage.clone(),
+                        execution_evidence: response.execution_evidence.clone(),
+                        ..Default::default()
+                    }));
                     if response.usage != LlmUsage::default() {
                         tx.send(LlmStreamEvent::Usage(response.usage.clone()));
                     }
@@ -795,6 +826,10 @@ impl Provider for CodexProvider {
                 });
             }
             if let Some(tx) = &stream_events {
+                tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                    provider_usage: provider_usage.clone(),
+                    ..Default::default()
+                }));
                 if usage != LlmUsage::default() {
                     tx.send(LlmStreamEvent::Usage(usage.clone()));
                 }
@@ -841,6 +876,14 @@ impl Provider for CodexProvider {
                 let prev_usage = state.usage.clone();
                 let mut emitted_parts = Vec::new();
                 shared::process_sse_event(PROVIDER, raw, &mut state, Some(&mut emitted_parts))?;
+                if let Some(tx) = &stream_events
+                    && state.provider_usage.is_some()
+                {
+                    tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                        provider_usage: state.provider_usage.clone(),
+                        ..Default::default()
+                    }));
+                }
                 emit_stream_progress(
                     stream_events.as_ref(),
                     state.take_text_deltas(),

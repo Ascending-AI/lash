@@ -359,7 +359,8 @@ pub mod remote {
     pub mod llm {
         pub use lash_remote_protocol::llm::{
             RemoteAttachmentRef, RemoteAttachmentSource, RemoteAttachmentTypeMetadata,
-            RemoteDiagnostic, RemoteExecutionEvidence, RemoteGenerationDisposition,
+            RemoteDiagnostic, RemoteExecutionEvidence,
+            RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationDisposition,
             RemoteGenerationOptionDisposition, RemoteGenerationOptions, RemoteLlmContentBlock,
             RemoteLlmMessage, RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmRequest,
             RemoteLlmRequestScope, RemoteLlmResponse, RemoteLlmRole, RemoteLlmTerminalReason,
@@ -641,7 +642,7 @@ pub mod provider {
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
     pub use lash_core::{
-        ExecutionEvidence, LlmRequest, LlmRequestScope, LlmResponse,
-        facade_support::LlmTransportError,
+        ExecutionEvidence, ExecutionEvidenceCollectionInterruption, LlmRequest, LlmRequestScope,
+        LlmResponse, LlmStreamEvidence, facade_support::LlmTransportError,
     };
 }

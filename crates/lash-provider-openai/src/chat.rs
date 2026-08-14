@@ -771,6 +771,7 @@ impl ChatStreamState {
             provider_request_id: None,
             reasoning_output_tokens: self.reasoning_output_tokens,
             provider_finish_reason: self.provider_finish_reason.clone(),
+            collection_interruption: None,
         };
         (evidence != ExecutionEvidence::default()).then_some(evidence)
     }

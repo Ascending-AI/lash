@@ -126,9 +126,8 @@ pub(crate) fn complete_lashlang_start_tag_span(text: &str) -> Option<LashlangSta
     None
 }
 
-/// Locate a closing tag line inside a streamed cell body. With `allow_eof`,
-/// a closing tag at the end of the currently buffered chunk is complete
-/// enough to abort the provider stream.
+/// Locate a closing tag line inside a cell body. `allow_eof` is reserved for
+/// genuine response EOF; an ordinary provider chunk boundary is not EOF.
 pub(crate) fn complete_lashlang_end_tag_span(
     text: &str,
     allow_eof: bool,

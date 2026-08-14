@@ -859,12 +859,47 @@ pub enum LlmStreamEvent {
     /// state and replay metadata; they are not live-visible text deltas.
     Part(LlmOutputPart),
     Usage(LlmUsage),
+    /// Adapter-owned request and provider evidence observed while the stream
+    /// is live. The runtime retains the latest fields so a protocol abort can
+    /// journal what was known before preemption.
+    Evidence(LlmStreamEvidence),
     RetryStatus {
         wait_seconds: u64,
         attempt: usize,
         max_attempts: usize,
         reason: String,
     },
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LlmStreamEvidence {
+    pub provider_usage: Option<serde_json::Value>,
+    pub request_body: Option<String>,
+    pub http_summary: Option<String>,
+    pub execution_evidence: Option<ExecutionEvidence>,
+    pub generation_disposition: Option<GenerationDisposition>,
+    pub response_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl LlmStreamEvidence {
+    pub fn merge(&mut self, next: Self) {
+        if next.provider_usage.is_some() {
+            self.provider_usage = next.provider_usage;
+        }
+        if next.request_body.is_some() {
+            self.request_body = next.request_body;
+        }
+        if next.http_summary.is_some() {
+            self.http_summary = next.http_summary;
+        }
+        if next.execution_evidence.is_some() {
+            self.execution_evidence = next.execution_evidence;
+        }
+        if next.generation_disposition.is_some() {
+            self.generation_disposition = next.generation_disposition;
+        }
+        self.response_metadata.extend(next.response_metadata);
+    }
 }
 
 #[derive(Clone)]
@@ -962,6 +997,16 @@ pub struct ExecutionEvidence {
     /// OpenAI-compatible `finish_reason` when both are present.
     #[serde(default)]
     pub provider_finish_reason: Option<String>,
+    /// Why provider evidence is partial even though the Lash response is
+    /// accepted. Present only when Lash deliberately preempted collection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_interruption: Option<ExecutionEvidenceCollectionInterruption>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionEvidenceCollectionInterruption {
+    ProtocolAbort,
 }
 
 /// Lash-owned identity for one logical LLM call, spanning all transport

@@ -205,6 +205,13 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
         );
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Evidence(evidence)
+                    if evidence.provider_usage == partial.provider_usage
+            )
+        }));
     }
 
     #[tokio::test]
@@ -535,14 +542,22 @@ mod tests {
             .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
             .collect::<Vec<_>>();
         assert_eq!(reasoning.len(), 2);
-        assert!(matches!(
-            events.as_slice(),
+        let visible = events
+            .iter()
+            .filter_map(|event| match event {
+                LlmStreamEvent::ReasoningDelta(text) => Some(("reasoning", text.as_str())),
+                LlmStreamEvent::Delta(text) => Some(("text", text.as_str())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visible,
             [
-                LlmStreamEvent::ReasoningDelta(first),
-                LlmStreamEvent::ReasoningDelta(second),
-                LlmStreamEvent::Delta(answer),
-            ] if first == "first" && second == "second" && answer == "answer"
-        ));
+                ("reasoning", "first"),
+                ("reasoning", "second"),
+                ("text", "answer")
+            ]
+        );
     }
 
     #[tokio::test]

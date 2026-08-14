@@ -30,8 +30,7 @@ use crate::rlm_support::decode_rlm_termination_options;
 
 use super::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
 use super::cell::{
-    CellExtraction, CellExtractionError, extract_lashlang_cell, normalize_cell_boundary,
-    project_visible_assistant_prose,
+    CellExtraction, CellExtractionError, extract_lashlang_cell, project_visible_assistant_prose,
 };
 use super::finish::{
     finish_required_reminder_message, finish_schema_mismatch_message,
@@ -96,7 +95,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 return actions;
             }
         };
-        let assistant_text = normalize_cell_boundary(&projected.assistant_text);
+        let assistant_text = projected.assistant_text;
         let reasoning = projected.reasoning;
         let visible_prose = project_visible_assistant_prose(&assistant_text);
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
@@ -139,9 +138,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     ),
                     (CellExtractionError::UnclosedCell, _) => {
                         ("retry_unclosed_cell", err.message().to_string())
-                    }
-                    (CellExtractionError::MultipleCells, _) => {
-                        ("invalid_lashlang_cell", err.message().to_string())
                     }
                 };
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(

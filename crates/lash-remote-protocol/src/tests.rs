@@ -136,6 +136,7 @@ fn remote_llm_response_json_round_trips() {
             provider_request_id: Some("request-1".to_string()),
             reasoning_output_tokens: Some(0),
             provider_finish_reason: Some("stop".to_string()),
+            collection_interruption: None,
         }),
         generation_disposition: Some(RemoteGenerationDisposition {
             output_token_cap: RemoteGenerationOptionDisposition::Applied,
@@ -545,7 +546,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 33, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 34, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -949,12 +950,12 @@ fn wrong_protocol_versions_are_rejected() {
 }
 
 #[test]
-fn pre_frame_key_remote_protocol_is_rejected_with_literal_versions() {
+fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
     assert!(matches!(
-        ensure_protocol_version(31),
+        ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 31,
-            expected: 33,
+            actual: 33,
+            expected: 34,
         })
     ));
 }

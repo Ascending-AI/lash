@@ -5191,7 +5191,7 @@ fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
             .complete(|request| async move {
                 let stream = request.stream_events.expect("stream events");
                 stream.send(LlmStreamEvent::Delta(
-                    "<lashlang>\nfinish \"cell survived reset\"\n</lashlang>".to_string(),
+                    "<lashlang>\nfinish \"cell survived reset\"\n</lashlang>\n".to_string(),
                 ));
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 stream.send(LlmStreamEvent::AttemptReset);
@@ -5222,7 +5222,7 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
             .complete(|request| async move {
                 let stream = request.stream_events.expect("stream events");
                 stream.send(LlmStreamEvent::Delta(
-                    "<lashlang>\nfinish \"late events survived\"\n</lashlang>".to_string(),
+                    "<lashlang>\nfinish \"late events survived\"\n</lashlang>\n".to_string(),
                 ));
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 stream.send(LlmStreamEvent::Delta("provider suffix".to_string()));
@@ -5286,7 +5286,7 @@ fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<()> {
                     .stream_events
                     .expect("stream events")
                     .send(LlmStreamEvent::Delta(
-                        "<lashlang>\nfinish \"deadline survived\"\n</lashlang>".to_string(),
+                        "<lashlang>\nfinish \"deadline survived\"\n</lashlang>\n".to_string(),
                     ));
                 std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
             })

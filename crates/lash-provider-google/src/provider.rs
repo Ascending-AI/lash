@@ -61,6 +61,14 @@ impl GoogleOAuthProvider {
         if stream_events.is_some() {
             url.push_str("?alt=sse");
         }
+        if let Some(tx) = &stream_events {
+            tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                request_body: request_body.clone(),
+                http_summary: Some(format!("HTTP POST {url} (stream)")),
+                generation_disposition,
+                ..Default::default()
+            }));
+        }
         let http_request = LlmHttpRequest::post(url.clone(), request_body_bytes)
             .with_header("Authorization", format!("Bearer {access_token}"))
             .with_header("Content-Type", "application/json")
@@ -191,6 +199,12 @@ impl GoogleOAuthProvider {
                 if let Some(tx) = stream_events.as_ref() {
                     if usage != prev_usage && usage != LlmUsage::default() {
                         tx.send(LlmStreamEvent::Usage(usage.clone()));
+                    }
+                    if provider_usage.is_some() {
+                        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                            provider_usage: provider_usage.clone(),
+                            ..Default::default()
+                        }));
                     }
                     for delta in text_deltas {
                         tx.send(LlmStreamEvent::Delta(delta));

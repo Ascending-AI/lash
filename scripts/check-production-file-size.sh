@@ -106,6 +106,8 @@ done < <(
       -path '*/.claude/*' -o \
       -path '*/target' -o \
       -path '*/target/*' -o \
+      -path '*/.tgt' -o \
+      -path '*/.tgt/*' -o \
       -path '*/vendor' -o \
       -path '*/vendor/*' -o \
       -path '*/vendored' -o \

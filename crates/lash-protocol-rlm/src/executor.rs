@@ -303,7 +303,7 @@ async fn execute_code_inner(
                 executed_calls: Vec::new(),
                 images: Vec::new(),
                 printed_images: Vec::new(),
-                error: Some(lashlang::format_parse_diagnostic(code, &err)),
+                error: Some(format_rlm_parse_diagnostic(code, &err)),
                 duration_ms: start.elapsed().as_millis() as u64,
                 terminal_finish: None,
             };
@@ -536,6 +536,13 @@ async fn execute_code_inner(
     }
 }
 
+fn format_rlm_parse_diagnostic(code: &str, error: &lashlang::ParseError) -> String {
+    format!(
+        "{}\n\nA standalone `</lashlang>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line.",
+        lashlang::format_parse_diagnostic(code, error)
+    )
+}
+
 fn select_deferred_resolution_link(
     state: &mut RlmExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
@@ -719,6 +726,16 @@ fn is_reserved_global_name(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
+        let code = "payload = \"\"\"";
+        let error = lashlang::parse(code).expect_err("unterminated multiline string");
+        let diagnostic = format_rlm_parse_diagnostic(code, &error);
+
+        assert!(diagnostic.contains("standalone `</lashlang>` line"));
+        assert!(diagnostic.contains("inside multiline source text"));
+    }
     use crate::projection::{
         ProjectionRef, ProjectionRegistry, flow_record_to_json_value, flow_record_to_tool_args,
         flow_to_json_value, projected_index,

@@ -1968,6 +1968,7 @@ fn openrouter_buffered_wire_preserves_concrete_model_and_explicit_zero_reasoning
             provider_request_id: None,
             reasoning_output_tokens: Some(0),
             provider_finish_reason: Some("stop".to_string()),
+            collection_interruption: None,
         })
     );
     assert_ne!(state.served_model.as_deref(), Some("openrouter/auto"));
@@ -2073,6 +2074,7 @@ fn openrouter_stream_wire_retains_partial_identity_when_stream_ends_early() {
             provider_request_id: None,
             reasoning_output_tokens: None,
             provider_finish_reason: None,
+            collection_interruption: None,
         })
     );
 }

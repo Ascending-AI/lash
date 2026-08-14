@@ -332,6 +332,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             provider_request_id: Some("request-1".to_string()),
             reasoning_output_tokens: Some(0),
             provider_finish_reason: Some("stop".to_string()),
+            collection_interruption: None,
         }),
         generation_disposition: None,
         response_metadata: response_metadata.clone(),

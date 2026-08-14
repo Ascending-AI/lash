@@ -8419,7 +8419,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GenerationOptionDisposition::SuppressedProtocolOwned"]
 area = "protocol"
 disposition = "unused-justify"
-reason = "Concrete host class: protocol-driver implementers that replace caller stop sequences; shipped RLM tests assert the replacement and its reported disposition."
+reason = "Concrete host class: protocol-driver implementers that suppress caller stop sequences; shipped RLM tests assert suppression and its reported disposition."
 
 [[api]]
 symbol = "lash::direct::GenerationOptionDisposition::applied"
@@ -8509,7 +8509,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GenerationOptions::projection_provenance"]
 area = "protocol"
 disposition = "unused-justify"
-reason = "Concrete host class: protocol-driver implementers; the opaque provenance value is set through the replacement helper and consumed by the runtime disposition ledger."
+reason = "Concrete host class: protocol-driver implementers; the opaque provenance value is set through the suppression helper and consumed by the runtime disposition ledger."
 
 [[api]]
 symbol = "lash::direct::GenerationOptions::suppress_stop_sequences_for_protocol"
@@ -8518,7 +8518,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GenerationOptions::suppress_stop_sequences_for_protocol"]
 area = "protocol"
 disposition = "unused-justify"
-reason = "Concrete host class: protocol-driver implementers that own a grammar boundary; shipped RLM tests assert caller-stop replacement and equal-value ownership."
+reason = "Concrete host class: protocol-driver implementers that own a grammar boundary; shipped RLM tests assert caller-stop suppression for every non-empty caller list."
 
 [[api]]
 symbol = "lash::direct::GenerationOptions::seed"
@@ -8725,6 +8725,22 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::direct::LlmStreamEvent::Delta::0 to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::direct::LlmStreamEvent::Evidence"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party provider implementers emit request and provider evidence while a stream is live so protocol aborts can retain the facts observed before preemption."
+
+[[api]]
+symbol = "lash::direct::LlmStreamEvent::Evidence::0"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: third-party provider implementers carry live request, usage, disposition, and execution evidence through this provider-runtime seam."
 
 [[api]]
 symbol = "lash::direct::LlmStreamEvent::Part"
@@ -28886,6 +28902,15 @@ disposition = "unused-justify"
 reason = "Internal integrator seam: `lash_core::ExecutionEvidence` is consumed inside the workspace at crates/lash-protocol-rlm/src/stream_mask.rs:514. The `lash` facade is built on lash-protocol-rlm, so that caller cannot migrate to the `lash` facade -- the core path is the seam itself, not a pending migration. Host-facing projection: `lash::provider::ExecutionEvidence`."
 
 [[api]]
+symbol = "lash::provider::ExecutionEvidence::collection_interruption"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ExecutionEvidence::collection_interruption"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: provider and protocol implementers distinguish deliberately preempted evidence collection from silently absent provider facts."
+
+[[api]]
 symbol = "lash::provider::ExecutionEvidence::provider_finish_reason"
 kind = "field"
 availability = "default+all-features"
@@ -28929,6 +28954,24 @@ aliases = ["lash_core::ExecutionEvidence::served_model"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
+symbol = "lash::provider::ExecutionEvidenceCollectionInterruption"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::ExecutionEvidenceCollectionInterruption"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: provider and protocol implementers record why an accepted response has intentionally partial execution evidence."
+
+[[api]]
+symbol = "lash::provider::ExecutionEvidenceCollectionInterruption::ProtocolAbort"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ExecutionEvidenceCollectionInterruption::ProtocolAbort"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: a protocol-owned stream abort uses this typed state when evidence collection ends before the provider's natural terminal response."
 
 [[api]]
 symbol = "lash::provider::LlmOutputSpec"
@@ -29297,6 +29340,78 @@ aliases = ["lash_core::LlmResponse::usage"]
 area = "plugins"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::LlmResponse::usage. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash::provider::LlmStreamEvidence"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::LlmStreamEvidence"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: streaming provider implementers publish request and provider facts before completion so protocol-owned preemption can retain honest evidence."
+
+[[api]]
+symbol = "lash::provider::LlmStreamEvidence::execution_evidence"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::LlmStreamEvidence::execution_evidence"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: streaming provider implementers publish request ids, served models, and terminal evidence as those facts arrive."
+
+[[api]]
+symbol = "lash::provider::LlmStreamEvidence::generation_disposition"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::LlmStreamEvidence::generation_disposition"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: streaming provider implementers report which generation options reached the wire before any protocol-owned abort."
+
+[[api]]
+symbol = "lash::provider::LlmStreamEvidence::http_summary"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::LlmStreamEvidence::http_summary"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: streaming provider implementers retain the non-secret transport summary available at request dispatch."
+
+[[api]]
+symbol = "lash::provider::LlmStreamEvidence::merge"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::LlmStreamEvidence::merge"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Internal integrator seam: the runtime merges incremental provider evidence without requiring adapters to synthesize a premature terminal response."
+
+[[api]]
+symbol = "lash::provider::LlmStreamEvidence::provider_usage"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::LlmStreamEvidence::provider_usage"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: streaming provider implementers retain raw provider usage sidecars delivered before or during abort draining."
+
+[[api]]
+symbol = "lash::provider::LlmStreamEvidence::request_body"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::LlmStreamEvidence::request_body"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: streaming provider implementers retain the serialized request context that was actually dispatched."
+
+[[api]]
+symbol = "lash::provider::LlmStreamEvidence::response_metadata"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::LlmStreamEvidence::response_metadata"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete host class: streaming provider implementers retain allowlisted response metadata observed before preemption."
 
 [[api]]
 symbol = "lash::provider::LlmTimeouts"
@@ -31602,6 +31717,14 @@ disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteExecutionEvidence to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::remote::llm::RemoteExecutionEvidence::collection_interruption"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add typed protocol-abort evidence to the docs-snippets remote LLM response round trip and assert that interrupted collection survives serialization."
+
+[[api]]
 symbol = "lash::remote::llm::RemoteExecutionEvidence::provider_finish_reason"
 kind = "field"
 availability = "default+all-features"
@@ -31640,6 +31763,22 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteExecutionEvidence::served_model to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteExecutionEvidenceCollectionInterruption"
+kind = "enum"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add the typed remote evidence-interruption vocabulary to the docs-snippets remote LLM response round trip."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteExecutionEvidenceCollectionInterruption::ProtocolAbort"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Assert in the docs-snippets remote LLM response round trip that protocol_abort survives serialization without a compatibility alias."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteGenerationDisposition"
@@ -31743,7 +31882,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
-reason = "Add the protocol-owned stop-sequence replacement disposition to the docs-snippets remote/direct protocol flow example and assert its round-trip result."
+reason = "Add the protocol-owned stop-sequence suppression disposition to the docs-snippets remote/direct protocol flow example and assert its round-trip result."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteGenerationOptions"

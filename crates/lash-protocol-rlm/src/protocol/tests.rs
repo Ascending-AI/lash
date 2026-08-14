@@ -243,6 +243,7 @@ fn execution_section_makes_paired_lashlang_tag_contract_explicit() {
             .contains("Executable code must be inside paired `<lashlang>` and `</lashlang>` tags")
     );
     assert!(section.contains("tag lines must be standalone after trimming"));
+    assert!(section.contains("terminates the cell even inside a multiline string"));
     assert!(
         section.contains("When action is needed, place the Lashlang block after any visible prose")
     );
@@ -695,10 +696,10 @@ fn standalone_close_tag_line_inside_multiline_source_is_the_cell_boundary() {
 }
 
 #[test]
-fn cell_extraction_rejects_multiple_cells() {
+fn cell_extraction_accepts_only_the_first_of_multiple_cells() {
     let text = "<lashlang>\nprint 1\n</lashlang>\n<lashlang>\nfinish 2\n</lashlang>";
-    assert!(matches!(
-        extract_lashlang_cell(text),
-        Err(super::cell::CellExtractionError::MultipleCells)
-    ));
+    let extraction = extract_lashlang_cell(text)
+        .expect("suffix is discarded")
+        .expect("first cell extracts");
+    assert_eq!(extraction.code, "print 1");
 }

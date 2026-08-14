@@ -117,6 +117,14 @@ pub(crate) async fn complete(
         provider.base_url.trim_end_matches('/'),
         endpoint.path()
     );
+    if let Some(tx) = &stream_events {
+        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+            request_body: Some(request_body_for_error.clone()),
+            http_summary: Some(endpoint.http_summary(&url, stream)),
+            generation_disposition,
+            ..Default::default()
+        }));
+    }
     let mut headers = vec![
         (
             "Authorization".to_string(),
@@ -171,6 +179,17 @@ pub(crate) async fn complete(
     }
 
     let provider_request_id = first_header_value(&resp.headers, "x-request-id").map(str::to_string);
+    if let Some(tx) = &stream_events
+        && let Some(provider_request_id) = provider_request_id.clone()
+    {
+        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+            execution_evidence: Some(ExecutionEvidence {
+                provider_request_id: Some(provider_request_id),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+    }
     let mut capture = ResponseMetadataCapture::from_response(&provider.options, &resp.headers);
     let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
 
@@ -345,6 +364,10 @@ fn complete_buffered_responses(
         return Err(empty_response_error(text));
     }
     if let Some(tx) = &stream_events {
+        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+            provider_usage: state.provider_usage.clone(),
+            ..Default::default()
+        }));
         if state.usage != LlmUsage::default() {
             tx.send(LlmStreamEvent::Usage(state.usage.clone()));
         }
@@ -422,6 +445,11 @@ fn complete_buffered_chat(
         return Err(empty_response_error(text));
     }
     if let Some(tx) = &stream_events {
+        tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+            provider_usage: state.provider_usage.clone(),
+            execution_evidence: state.execution_evidence(),
+            ..Default::default()
+        }));
         if state.usage != LlmUsage::default() {
             tx.send(LlmStreamEvent::Usage(state.usage.clone()));
         }
@@ -527,6 +555,14 @@ async fn drive_streaming_responses(
             emit_provider_trace(provider_trace.as_ref(), "openai_compatible", raw);
             let prev_usage = state.usage.clone();
             OpenAiCompatibleProvider::process_sse_event(raw, &mut state, Some(&mut emitted_parts))?;
+            if let Some(tx) = &stream_events
+                && state.provider_usage.is_some()
+            {
+                tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                    provider_usage: state.provider_usage.clone(),
+                    ..Default::default()
+                }));
+            }
             emit_stream_progress(
                 stream_events.as_ref(),
                 state.take_text_deltas(),
@@ -649,6 +685,15 @@ async fn drive_streaming_chat(
             emit_provider_trace(provider_trace.as_ref(), "openai_compatible", raw);
             let prev_usage = state.usage.clone();
             OpenAiCompatibleProvider::process_chat_sse_event(raw, &mut state)?;
+            if let Some(tx) = &stream_events
+                && (state.provider_usage.is_some() || state.execution_evidence().is_some())
+            {
+                tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                    provider_usage: state.provider_usage.clone(),
+                    execution_evidence: state.execution_evidence(),
+                    ..Default::default()
+                }));
+            }
             emit_stream_progress(
                 stream_events.as_ref(),
                 state.take_text_deltas(),
