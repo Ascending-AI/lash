@@ -52,6 +52,21 @@ struct FunctionContext {
     captures: BTreeSet<String>,
 }
 
+/// A hoisted function declaration awaiting a place in the emission order.
+struct PendingFunction {
+    internal: String,
+    captures: BTreeSet<String>,
+    definition: FunctionExpr,
+}
+
+/// A binding whose assignment is emitted once every name it captures holds a
+/// value.
+struct PendingBinding {
+    internal: String,
+    captures: BTreeSet<String>,
+    assignment: LashExpr,
+}
+
 #[derive(Default)]
 struct Lowerer {
     scopes: Vec<Scope>,
@@ -84,12 +99,6 @@ impl Lowerer {
         }
         self.predeclare(statements, root)?;
 
-        struct PendingFunction {
-            internal: String,
-            captures: Vec<String>,
-            assignment: LashExpr,
-        }
-
         let local_function_internals = statements
             .iter()
             .filter_map(|statement| match statement {
@@ -99,12 +108,18 @@ impl Lowerer {
                 _ => None,
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
+        let current_function = self.current_function();
         let mut available = self
             .scopes
             .iter()
             .flat_map(|scope| scope.bindings.values())
             .filter(|binding| {
-                binding.initialized && !local_function_internals.contains(&binding.internal)
+                // A binding owned by an enclosing function reaches this frame as
+                // a capture or a parameter, so it already holds a value whenever
+                // these statements run. Only bindings this frame declares itself
+                // have to be ordered against the declarations that fill them.
+                (binding.initialized || binding.owner_function != current_function)
+                    && !local_function_internals.contains(&binding.internal)
             })
             .map(|binding| binding.internal.clone())
             .collect::<BTreeSet<_>>();
@@ -115,38 +130,35 @@ impl Lowerer {
             if let Stmt::Function { name, function } = statement {
                 let binding = self.binding(name)?.clone();
                 let function = self.lower_function(function, Some(binding.internal.clone()))?;
-                let LashExpr::Function(definition) = &function else {
+                let LashExpr::Function(definition) = function else {
                     unreachable!("function lowering returns a function expression")
                 };
-                let captures = definition
-                    .captures
-                    .iter()
-                    .map(|capture| capture.as_str().to_string())
-                    .collect();
                 pending.push(PendingFunction {
                     internal: binding.internal.clone(),
-                    captures,
-                    assignment: LashExpr::Assign {
-                        target: AssignTarget::variable(binding.internal.into()),
-                        expr: Box::new(function),
-                    },
+                    captures: definition
+                        .captures
+                        .iter()
+                        .map(|capture| capture.as_str().to_string())
+                        .collect(),
+                    definition: *definition,
                 });
             }
         }
         self.allow_uninitialized_declaration_capture = previous_capture_mode;
+        let mut pending = self.route_mutual_recursion_through_frames(pending);
 
-        let flush_ready = |pending: &mut Vec<PendingFunction>,
+        let flush_ready = |pending: &mut Vec<PendingBinding>,
                            available: &mut BTreeSet<String>,
                            output: &mut Vec<LashExpr>| {
-            while let Some(index) = pending.iter().position(|function| {
-                function
+            while let Some(index) = pending.iter().position(|binding| {
+                binding
                     .captures
                     .iter()
                     .all(|capture| available.contains(capture))
             }) {
-                let function = pending.remove(index);
-                available.insert(function.internal);
-                output.push(function.assignment);
+                let binding = pending.remove(index);
+                available.insert(binding.internal);
+                output.push(binding.assignment);
             }
         };
         let mut output = Vec::new();
@@ -178,6 +190,76 @@ impl Lowerer {
             self.scopes.pop();
         }
         Ok(output)
+    }
+
+    /// Hoisted function declarations may reference each other cyclically, which
+    /// no emission order can satisfy while closures capture by value. Each
+    /// cycle gets one generated frame record: every member captures the record
+    /// instead of its peers and rebinds those peers from it on entry, so the
+    /// peer values are read when the member runs rather than when it is built.
+    fn route_mutual_recursion_through_frames(
+        &mut self,
+        pending: Vec<PendingFunction>,
+    ) -> Vec<PendingBinding> {
+        let index_by_internal = pending
+            .iter()
+            .enumerate()
+            .map(|(index, function)| (function.internal.as_str(), index))
+            .collect::<BTreeMap<_, _>>();
+        let edges = pending
+            .iter()
+            .map(|function| {
+                function
+                    .captures
+                    .iter()
+                    .filter_map(|capture| index_by_internal.get(capture.as_str()).copied())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let mut frame_of = vec![None; pending.len()];
+        let mut frames = Vec::new();
+        for component in strongly_connected_components(&edges) {
+            if component.len() < 2 {
+                continue;
+            }
+            let frame = format!("__typescript_{}_frame", self.next_binding);
+            self.next_binding += 1;
+            let peers = component
+                .iter()
+                .map(|member| pending[*member].internal.clone())
+                .collect::<BTreeSet<_>>();
+            for member in &component {
+                frame_of[*member] = Some(frames.len());
+            }
+            frames.push((frame, peers));
+        }
+
+        let mut bindings = Vec::with_capacity(pending.len() + frames.len());
+        for (frame, _) in &frames {
+            bindings.push(PendingBinding {
+                internal: frame.clone(),
+                captures: BTreeSet::new(),
+                assignment: LashExpr::Assign {
+                    target: AssignTarget::variable(frame.as_str().into()),
+                    expr: Box::new(LashExpr::Record(Vec::new())),
+                },
+            });
+        }
+        for (index, function) in pending.into_iter().enumerate() {
+            let Some((frame, peers)) = frame_of[index].map(|frame| &frames[frame]) else {
+                bindings.push(PendingBinding {
+                    internal: function.internal.clone(),
+                    captures: function.captures,
+                    assignment: LashExpr::Assign {
+                        target: AssignTarget::variable(function.internal.into()),
+                        expr: Box::new(LashExpr::Function(Box::new(function.definition))),
+                    },
+                });
+                continue;
+            };
+            bindings.push(frame_bound_member(function, frame, peers));
+        }
+        bindings
     }
 
     fn predeclare(&mut self, statements: &[Stmt], root: bool) -> Result<(), Diagnostic> {
@@ -781,6 +863,120 @@ impl Lowerer {
                 .collect::<Result<_, _>>()?,
         })
     }
+}
+
+/// Rebuild one member of a mutually recursive group against its frame record.
+///
+/// The member captures the record in place of its peers and opens its body by
+/// reading each peer out of the record into the member's own frame slot, so the
+/// body — and every closure nested in it — keeps referring to the peers by the
+/// same name it already lowered.
+fn frame_bound_member(
+    function: PendingFunction,
+    frame: &str,
+    peers: &BTreeSet<String>,
+) -> PendingBinding {
+    let PendingFunction {
+        internal,
+        captures,
+        mut definition,
+    } = function;
+    let bound_peers = captures.intersection(peers).cloned().collect::<Vec<_>>();
+    let captures = captures
+        .difference(peers)
+        .cloned()
+        .chain(std::iter::once(frame.to_string()))
+        .collect::<BTreeSet<_>>();
+    definition.captures = captures.iter().map(|capture| capture.into()).collect();
+    let mut body = bound_peers
+        .into_iter()
+        .map(|peer| LashExpr::Assign {
+            target: AssignTarget::variable(peer.as_str().into()),
+            expr: Box::new(frame_field(frame, &peer)),
+        })
+        .collect::<Vec<_>>();
+    body.push(*definition.body);
+    definition.body = Box::new(LashExpr::Block(body));
+    PendingBinding {
+        assignment: LashExpr::Block(vec![
+            LashExpr::Assign {
+                target: AssignTarget {
+                    root: frame.into(),
+                    steps: vec![AssignPathStep::Field(internal.as_str().into())],
+                },
+                expr: Box::new(LashExpr::Function(Box::new(definition))),
+            },
+            LashExpr::Assign {
+                target: AssignTarget::variable(internal.as_str().into()),
+                expr: Box::new(frame_field(frame, &internal)),
+            },
+        ]),
+        internal,
+        captures,
+    }
+}
+
+fn frame_field(frame: &str, field: &str) -> LashExpr {
+    LashExpr::Field {
+        target: Box::new(LashExpr::Variable(frame.into())),
+        field: field.into(),
+    }
+}
+
+/// Kosaraju's algorithm over the capture graph, iterative so that a deeply
+/// chained set of declarations cannot exhaust the native stack.
+fn strongly_connected_components(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let mut reversed = vec![Vec::new(); edges.len()];
+    for (from, targets) in edges.iter().enumerate() {
+        for to in targets {
+            reversed[*to].push(from);
+        }
+    }
+
+    let mut order = Vec::with_capacity(edges.len());
+    let mut visited = vec![false; edges.len()];
+    for start in 0..edges.len() {
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        let mut stack = vec![(start, 0usize)];
+        while let Some((node, next)) = stack.pop() {
+            match edges[node].get(next) {
+                Some(target) => {
+                    stack.push((node, next + 1));
+                    if !visited[*target] {
+                        visited[*target] = true;
+                        stack.push((*target, 0));
+                    }
+                }
+                None => order.push(node),
+            }
+        }
+    }
+
+    let mut components = Vec::new();
+    let mut assigned = vec![false; edges.len()];
+    for start in order.into_iter().rev() {
+        if assigned[start] {
+            continue;
+        }
+        assigned[start] = true;
+        let mut component = vec![start];
+        let mut stack = vec![start];
+        while let Some(node) = stack.pop() {
+            for target in &reversed[node] {
+                if !assigned[*target] {
+                    assigned[*target] = true;
+                    component.push(*target);
+                    stack.push(*target);
+                }
+            }
+        }
+        component.sort_unstable();
+        components.push(component);
+    }
+    components
 }
 
 fn js_unary(op: JavaScriptUnaryOp, expr: LashExpr) -> LashExpr {
