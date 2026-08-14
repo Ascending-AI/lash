@@ -197,6 +197,51 @@ value cannot be a batch leaf, because an aggregate containing one is rejected
 before it reaches the host. An earlier revision of this section claimed
 otherwise.
 
+## Dual-review fix round
+
+Two independent adversarial reviews returned APPROVE-WITH-FIXES with disjoint
+findings. Every one is closed below.
+
+| Finding | What it was | Red | Fix |
+| --- | --- | --- | --- |
+| sol F1 (High) | `call_tool_batch` dropped out-of-range settlement positions and back-filled the gaps, so any malformed order became a clean input-order permutation that no validator could tell from a real one — the original rejection selection, restored silently | `1cd32308a` | `1cd32308a` |
+| opus F1 | The fail-closed journal pin keyed the tag `kind` instead of `type`, so it failed on the tag and proved nothing about the field it guards | `1cd32308a` | `1cd32308a` |
+| opus F6 | An `allSettled` batch validated — and could die on — settlement metadata it never reads | — | `1cd32308a` |
+| opus F10a | The settlement diagnostic reported lengths only, so a duplicate rendered as self-consistent and undiagnosable | — | `1cd32308a` |
+| sol F4 | `ModuleArtifact.compilation_dialect` carried a serde default, so a dialect-less TypeScript artifact decoded as Lashlang and verified | `0d56d88f6` | `0d56d88f6` |
+| opus F2 | `for…of` bodies rejected every call and member assignment, so the canonical agent loop was a link-time rejection — justified by a durability claim the reviewer refuted | `0d56d88f6` | `0d56d88f6` |
+| opus F5 | Nine instance methods were withdrawn behind a representability argument that covers only astral-splitting shapes, which the existing runtime rejection already handles | `b75f39045` | `b75f39045` |
+| opus F3 + sol F3 | An unadvertised method on a non-module receiver fell through to the tool-call branch and, under `await`, failed at the host untyped | `b75f39045` | `b75f39045` |
+| opus F8 | `pad_string` allocated without a size preflight | — | `b75f39045` |
+| opus F7 + sol F2 | `JSON.parse` rejected out-of-range numbers where ECMA clamps to an infinity | `b75f39045` | `b75f39045` |
+| sol F5 | An `allSettled` rejection carried the unwrap error's code, which cannot describe a leaf that is never unwrapped | — | `14e5feb74` |
+| opus F9 | A multi-segment call path rendered `declare namespace a { declare namespace b`, which is not valid TypeScript | — | `14e5feb74` |
+| opus F4 + sol F6 | The ledger named pre-rebase commits, the lashlang count was stale, and the settlement narrative described an unreachable path | — | `14e5feb74` |
+
+Three of these deserve a note beyond the table.
+
+**The repair-instead-of-refuse defect was the important one.** The contract, the
+journal decoder and the VM validator were all correct; between them a
+normalisation step quietly made every malformed order well-formed. The guarantee
+read as delivered in three places while being false in one. The fix validates at
+the boundary and deletes the back-fill, because a repair that produces a valid
+permutation is indistinguishable from a real one downstream — by construction, no
+later check could have caught it.
+
+**The `for…of` restriction was justified by a false claim.** The register said the
+filter waited on a resumable iterator protocol; the reviewer suspended a process
+inside a `for…of` and resumed it through a continuation round-trip. The filter
+was conservatism, not durability, and it cost the most common loop in the
+language. It now rejects only shapes that can reach the iterable, and says which
+shape did.
+
+**`sol F5` is closed only as far as the contract allows.** `ExecutionHostError`
+carries a message and nothing else, so the finest identity available to an
+`allSettled` record is the host's own text. The record no longer claims the
+unwrap error's code, which was simply wrong for a leaf that is never unwrapped.
+Giving rejections a discriminable code needs a code channel on the effect-host
+contract that every host would have to populate — named here rather than faked.
+
 ## Accepted v1 restrictions and deviations
 
 The full executable register is in `crates/lash-typescript/README.md`. The
@@ -259,6 +304,8 @@ where Cargo was involved.
 | --- | --- |
 | `cargo check --workspace --all-targets --locked` | PASS |
 | `cargo test --workspace --locked` | PASS; full unit, integration, property, UI, trybuild, simulation, conformance, and doctest suite |
+| `cargo nextest run` (lashlang, typescript, core, protocol-rlm, lashlang-runtime) | PASS; 2 241 tests |
+| `just perf-guard` | Pre-existing failures only. The lashlang leg fails 162 budgets at the recipe's 500 iterations and 45 at 2 500; both sets are **identical before and after this work**, so nothing here regressed a budget. The overages shrink from wild (1 459 vs 336) to marginal (3.6 vs 3.0) as iterations rise, which says the recipe's 500-iteration numbers are dominated by warmup rather than by steady-state cost. Recalibration is owned separately. |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS |
 | `cargo fmt --all --check` | PASS |
 | `python3 scripts/check_included_file_formatting.py` | PASS; 37 included Rust files |
