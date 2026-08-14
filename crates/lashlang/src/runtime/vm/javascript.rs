@@ -928,10 +928,129 @@ impl<'de> serde::Deserialize<'de> for OrderedJsonValue {
     }
 }
 
-fn parse_javascript_json(value: &str) -> Result<Value, RuntimeError> {
-    let value = serde_json::from_str::<OrderedJsonValue>(value)
-        .map_err(|error| js_stdlib_error(format!("JSON.parse: {error}")))?;
-    Ok(ordered_json_to_value(value))
+fn parse_javascript_json(source: &str) -> Result<Value, RuntimeError> {
+    match serde_json::from_str::<OrderedJsonValue>(source) {
+        Ok(value) => Ok(ordered_json_to_value(value)),
+        Err(error) => {
+            // ECMA parses a JSON number as an IEEE double, so a magnitude past
+            // the double range becomes an infinity — `JSON.parse` never fails
+            // on range. serde_json's tokenizer rejects those instead, which
+            // turned host data containing a large number into a failed cell.
+            // Underflow already agrees (`1e-400` parses as `0`), so only the
+            // overflowing tokens are rewritten, and only outside strings.
+            let Some(rewritten) = rewrite_overflowing_json_numbers(source) else {
+                return Err(js_stdlib_error(format!("JSON.parse: {error}")));
+            };
+            let value = serde_json::from_str::<OrderedJsonValue>(&rewritten)
+                .map_err(|_| js_stdlib_error(format!("JSON.parse: {error}")))?;
+            let mut value = ordered_json_to_value(value);
+            restore_clamped_json_infinities(&mut value);
+            Ok(value)
+        }
+    }
+}
+
+/// The key of the sentinel object that stands in for an out-of-range number
+/// between the rewrite and the restore. `serde_json::Number` cannot hold an
+/// infinity, so the substitution has to happen in this runtime's own model.
+const JSON_OVERFLOW_SENTINEL: &str = "__lash_json_f64_overflow_sign__";
+
+/// Replace every out-of-range JSON number with a signed sentinel object.
+/// Returns `None` when the source has no such number, so an ordinary syntax
+/// error keeps its original diagnostic.
+fn rewrite_overflowing_json_numbers(source: &str) -> Option<String> {
+    let bytes = source.as_bytes();
+    let mut out = String::with_capacity(source.len());
+    let mut index = 0;
+    let mut rewrote = false;
+    let mut in_string = false;
+    let mut escaped = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            out.push(byte as char);
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            in_string = true;
+            out.push('"');
+            index += 1;
+            continue;
+        }
+        let starts_number = byte.is_ascii_digit()
+            || (byte == b'-' && bytes.get(index + 1).is_some_and(u8::is_ascii_digit));
+        if !starts_number {
+            out.push(byte as char);
+            index += 1;
+            continue;
+        }
+        let start = index;
+        if bytes[index] == b'-' {
+            index += 1;
+        }
+        while index < bytes.len() {
+            let current = bytes[index];
+            if current.is_ascii_digit() || matches!(current, b'.' | b'e' | b'E') {
+                index += 1;
+                continue;
+            }
+            // A sign continues a number only straight after an exponent marker.
+            if matches!(current, b'+' | b'-') && matches!(bytes[index - 1], b'e' | b'E') {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        let token = &source[start..index];
+        match token.parse::<f64>() {
+            Ok(number) if number.is_infinite() => {
+                let sign = if number.is_sign_negative() { -1 } else { 1 };
+                out.push_str(&format!("{{\"{JSON_OVERFLOW_SENTINEL}\":{sign}}}"));
+                rewrote = true;
+            }
+            _ => out.push_str(token),
+        }
+    }
+    rewrote.then_some(out)
+}
+
+/// Turn the sentinels back into the infinities ECMA produces.
+fn restore_clamped_json_infinities(value: &mut Value) {
+    match value {
+        Value::Record(entries) => {
+            if entries.len() == 1
+                && let Some(Value::Number(sign)) = entries.get(JSON_OVERFLOW_SENTINEL)
+            {
+                *value = Value::Number(if *sign < 0.0 {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                });
+                return;
+            }
+            let mut replaced = entries.as_ref().clone();
+            for entry in replaced.entries.iter_mut() {
+                restore_clamped_json_infinities(&mut entry.value);
+            }
+            *entries = std::sync::Arc::new(replaced);
+        }
+        Value::List(items) => {
+            let mut replaced = items.to_vec();
+            for item in replaced.iter_mut() {
+                restore_clamped_json_infinities(item);
+            }
+            *items = replaced.into();
+        }
+        _ => {}
+    }
 }
 
 fn ordered_json_to_value(value: OrderedJsonValue) -> Value {
@@ -1227,8 +1346,17 @@ fn pad_string(value: &str, length: f64, fill: &str, start: bool) -> Result<Value
     if length <= current || fill.is_empty() {
         return Ok(Value::String(value.into()));
     }
+    // Size before allocating, as `repeat` and `concat` do. `'a'.padStart(1e15)`
+    // is a memory-limit rejection, never a host allocation abort.
+    let added = length - current;
+    ensure_javascript_string_size(
+        added
+            .checked_mul(std::mem::size_of::<u16>())
+            .and_then(|bytes| bytes.checked_add(value.len()))
+            .ok_or_else(|| javascript_string_size_error(usize::MAX))?,
+    )?;
     let fill_units = fill.encode_utf16().collect::<Vec<_>>();
-    let padding = (0..length - current)
+    let padding = (0..added)
         .map(|index| fill_units[index % fill_units.len()])
         .collect::<Vec<_>>();
     let padding = match utf16_value(padding)? {

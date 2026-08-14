@@ -11,7 +11,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 23],
+  ['findings', 'findings-expressions.txt', 27],
 ];
 
 const rejected = new Map([
@@ -29,14 +29,13 @@ const rejected = new Map([
   ['delete ({a:1}).a', 'TS_DELETE_UNSUPPORTED'],
   ['null ?? 1 || 2', 'TS_SYNTAX_ERROR'],
   ["'\\uD800'", 'TS_LONE_SURROGATE_LITERAL_UNSUPPORTED'],
-  ["'abc'.split('')", 'TS_METHOD_UNSUPPORTED'],
-  ["'a,b'.split(',')", 'TS_METHOD_UNSUPPORTED'],
-  ["''.split(',')", 'TS_METHOD_UNSUPPORTED'],
-  ["'abc'.split('b')", 'TS_METHOD_UNSUPPORTED'],
-  ["'\\uD83D\\uDE00'.split('')", 'TS_METHOD_UNSUPPORTED'],
 ]);
 
 const runtimeRejected = new Map([
+  // Splitting an astral character into units would manufacture a lone
+  // surrogate, which the UTF-8 value model cannot represent. This is the
+  // existing shape-dependent runtime rejection, not a withdrawn method.
+  ["'\\uD83D\\uDE00'.split('')", 'TS_LONE_SURROGATE_UNSUPPORTED'],
   [
     '(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()',
     'TS_SPARSE_ARRAY_UNSUPPORTED',

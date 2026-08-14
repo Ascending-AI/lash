@@ -73,41 +73,35 @@ pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
     }
 }
 
-pub(super) fn is_removed_instance_stdlib_method(method: &str) -> bool {
-    matches!(
-        method,
-        "at" | "charAt"
-            | "padStart"
-            | "padEnd"
-            | "replaceAll"
-            | "slice"
-            | "split"
-            | "substring"
-            | "map"
-    )
-}
-
 pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
     matches!(
         method,
-        "charCodeAt"
+        "at" | "charAt"
+            | "charCodeAt"
             | "codePointAt"
             | "concat"
             | "endsWith"
             | "includes"
             | "indexOf"
+            | "join"
             | "lastIndexOf"
+            | "map"
+            | "padEnd"
+            | "padStart"
             | "repeat"
             | "replace"
+            | "replaceAll"
+            | "slice"
+            | "split"
             | "startsWith"
+            | "substring"
             | "toLowerCase"
             | "toUpperCase"
-            | "trim"
-            | "trimStart"
-            | "trimEnd"
             | "toString"
+            | "trim"
+            | "trimEnd"
+            | "trimStart"
             | "valueOf"
-            | "join"
     )
 }
 
@@ -115,16 +109,23 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
     match expr {
         Expr::String(_) => matches!(
             method,
-            "charCodeAt"
+            "at" | "charAt"
+                | "charCodeAt"
                 | "codePointAt"
                 | "concat"
                 | "endsWith"
                 | "includes"
                 | "indexOf"
                 | "lastIndexOf"
+                | "padEnd"
+                | "padStart"
                 | "repeat"
                 | "replace"
+                | "replaceAll"
+                | "slice"
+                | "split"
                 | "startsWith"
+                | "substring"
                 | "toLowerCase"
                 | "toUpperCase"
                 | "trim"
@@ -135,7 +136,14 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
         ),
         Expr::Array(_) => matches!(
             method,
-            "concat" | "includes" | "indexOf" | "lastIndexOf" | "join" | "toString"
+            "at" | "concat"
+                | "includes"
+                | "indexOf"
+                | "join"
+                | "lastIndexOf"
+                | "map"
+                | "slice"
+                | "toString"
         ),
         Expr::Number(_) | Expr::Bool(_) | Expr::Null | Expr::Undefined | Expr::Object(_) => {
             matches!(method, "toString" | "valueOf")

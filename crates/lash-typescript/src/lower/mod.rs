@@ -1322,9 +1322,18 @@ impl Lowerer {
                 });
             }
 
+            // Classify by method name before the tool-call branch. A receiver
+            // that is not a module authority — a chained call, a local binding,
+            // a computed member, a literal — can never dispatch a tool, so an
+            // unadvertised method there is a missing method and must say so.
+            // Falling through reported it as a tool call needing `await`, and
+            // under `await` it lowered and failed at the host untyped.
+            let receiver_is_module_authority = module_path(object)
+                .and_then(|path| path.first().cloned())
+                .is_some_and(|root| !self.has_binding(&root));
             if matches!(object.as_ref(), Expr::Ident(owner) if is_known_runtime_global(owner) && !self.has_binding(owner))
                 || has_literal_stdlib_receiver(object)
-                || matches!(object.as_ref(), Expr::Ident(owner) if self.has_binding(owner) && is_removed_instance_stdlib_method(method))
+                || (!receiver_is_module_authority && !is_instance_stdlib_method(method))
             {
                 return Err(Diagnostic::new(
                     DiagnosticCode::MethodUnsupported,

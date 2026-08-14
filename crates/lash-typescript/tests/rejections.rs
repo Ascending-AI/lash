@@ -123,8 +123,23 @@ rejection_test!(
     Code::MethodUnsupported
 );
 rejection_test!(
-    rejects_removed_method_on_bound_receiver,
-    "const s = 'a,b'; s.split(',');",
+    rejects_unknown_method_on_bound_receiver,
+    "const s = 'a,b'; s.notAMethod(',');",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_method_on_chained_receiver,
+    "'abc'.repeat(2).notAMethod(10, 'x');",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_method_on_computed_receiver,
+    "const xs = [['a']]; xs[0].notAMethod();",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_method_under_await,
+    "const s = 'a'; await s.notAMethod();",
     Code::MethodUnsupported
 );
 rejection_test!(

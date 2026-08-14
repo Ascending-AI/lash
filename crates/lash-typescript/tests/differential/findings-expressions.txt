@@ -21,3 +21,7 @@ Infinity
 +'\u2028\u20295'
 '\uD83D\uDE00'.split('')
 '\uD83D\uDE00'[0]
+JSON.parse('1e400')
+JSON.parse('-1e400')
+JSON.parse('1e-400')
+JSON.parse('[1e400,2]')[0]
