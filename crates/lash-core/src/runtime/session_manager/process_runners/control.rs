@@ -98,6 +98,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             .run(crate::ProcessCommand::Cancel {
                 process_id: process_id.to_string(),
                 reason,
+                replay: None,
             })
             .await?
         {

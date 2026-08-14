@@ -294,3 +294,158 @@ async fn internal_process_contract_is_separate_and_observable() {
         "internal_probe"
     );
 }
+
+async fn ingress_core_with_effect_host(
+    effect_host: Arc<dyn lash::durability::EffectHost>,
+) -> anyhow::Result<(lash::LashCore, Arc<lash::testing::TestLocalProcessRegistry>)> {
+    let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default());
+    registry
+        .register_process_with_observers(
+            lash::process::ProcessRegistration::new(
+                PROCESS,
+                lash::process::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash::process::RecoveryDisposition::ExternallyOwned,
+                lash::process::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash::process::ProcessEventType {
+                name: EVENT.to_string(),
+                payload_schema: lash::triggers::LashSchema::any(),
+                semantics: lash::process::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[SESSION.to_string()],
+        )
+        .await?;
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .provider(lash::provider::ProviderHandle::unconfigured())
+        .model(
+            lash::ModelSpec::builder("pg-tool-intent-ingress-model")
+                .context_window_tokens(4_096)
+                .build()?,
+        )
+        .effect_host(effect_host)
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash::process::ProcessRegistry>)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "docs-fig1294-evidence-worker",
+            "docs-fig1294-evidence-boot",
+        ))?;
+    let _session = core.session(SESSION).open().await?;
+    Ok((core, registry))
+}
+
+#[tokio::test]
+async fn runtime_owned_cancel_uses_ingress_identity() -> anyhow::Result<()> {
+    let (core, registry) =
+        ingress_core_with_effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .await?;
+    let ingress =
+        core.tool_intents(SESSION, lash::runtime::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("docs-cancel-call", 0);
+    let cancel_intent = |reason: &str| {
+        lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
+            session_id: SESSION.to_string(),
+            process_id: PROCESS.to_string(),
+            reason: Some(reason.to_string()),
+        })
+    };
+
+    let first = ingress
+        .submit(key.clone(), cancel_intent("first reason"))
+        .await;
+    assert!(matches!(
+        first,
+        lash::tools::ToolIntentIngressOutcome::Admitted {
+            outcome: ToolIntentExecutionOutcome::Executed {
+                kind: lash_core::ToolIntentKind::CancelProcess,
+                ..
+            },
+            replayed: false,
+        }
+    ));
+    let duplicate = ingress.submit(key, cancel_intent("changed reason")).await;
+    assert!(matches!(
+        duplicate,
+        lash::tools::ToolIntentIngressOutcome::Refused {
+            refusal: lash::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                kind: lash_core::ToolIntentKind::CancelProcess,
+            }
+        }
+    ));
+    let cancel_events = registry
+        .events_after(PROCESS, 0)
+        .await?
+        .into_iter()
+        .filter(|event| event.event_type == "process.cancel_requested")
+        .collect::<Vec<_>>();
+    assert_eq!(cancel_events.len(), 1);
+    assert_eq!(cancel_events[0].payload["reason"], "first reason");
+    Ok(())
+}
+
+struct SeededOutsideProtocolOutcome;
+
+#[async_trait]
+impl lash_core::AwaitEventResolver for SeededOutsideProtocolOutcome {
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
+    }
+
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::KeyAddressed
+    }
+}
+
+impl lash_core::EffectHost for SeededOutsideProtocolOutcome {
+    fn scoped<'run>(
+        &'run self,
+        scope: lash_core::ExecutionScope,
+    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        lash_core::ScopedEffectController::borrowed(self, scope)
+    }
+}
+
+#[async_trait]
+impl lash_core::RuntimeEffectController for SeededOutsideProtocolOutcome {
+    async fn execute_effect(
+        &self,
+        _envelope: lash_core::RuntimeEffectEnvelope,
+        _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        Ok(lash_core::RuntimeEffectOutcome::Process {
+            result: lash_core::ProcessEffectOutcome::List {
+                entries: Vec::new(),
+            },
+        })
+    }
+}
+
+#[tokio::test]
+async fn host_ingress_types_a_seeded_outside_protocol_outcome() -> anyhow::Result<()> {
+    let (core, _registry) =
+        ingress_core_with_effect_host(Arc::new(SeededOutsideProtocolOutcome)).await?;
+    let ingress =
+        core.tool_intents(SESSION, lash::runtime::ExecutionScope::turn(SESSION, SCOPE))?;
+
+    let outcome = ingress
+        .submit(ingress.key("docs-seeded-outcome", 0), event_intent(SESSION))
+        .await;
+    let lash::tools::ToolIntentIngressOutcome::Refused {
+        refusal:
+            lash::tools::ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol { recorded },
+    } = outcome
+    else {
+        panic!("the seeded List outcome must be a typed ingress refusal")
+    };
+    assert_eq!(recorded, "list");
+    Ok(())
+}

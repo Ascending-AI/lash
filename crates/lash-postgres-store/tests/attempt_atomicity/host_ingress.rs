@@ -115,4 +115,70 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         1,
         "the real PostgreSQL front door realizes the identity once"
     );
+
+    let cancel_key = ingress.key("pg-host-ingress-cancel", 1);
+    let cancel_intent = |reason: &str| {
+        lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
+            session_id: session_id.clone(),
+            process_id: process_id.clone(),
+            reason: Some(reason.to_string()),
+        })
+    };
+    let first_cancel = ingress
+        .submit(cancel_key.clone(), cancel_intent("first reason"))
+        .await;
+    let duplicate_cancel = ingress
+        .submit(cancel_key.clone(), cancel_intent("first reason"))
+        .await;
+    let conflicting_cancel = ingress
+        .submit(cancel_key, cancel_intent("conflicting reason"))
+        .await;
+    let lash::tools::ToolIntentIngressOutcome::Admitted {
+        outcome: first_cancel_outcome,
+        replayed: false,
+    } = first_cancel
+    else {
+        panic!("the first PostgreSQL cancel ingress submission must execute")
+    };
+    let lash::tools::ToolIntentIngressOutcome::Admitted {
+        outcome: duplicate_cancel_outcome,
+        replayed: true,
+    } = duplicate_cancel
+    else {
+        panic!("the duplicate PostgreSQL cancel ingress submission must replay")
+    };
+    assert_eq!(
+        duplicate_cancel_outcome, first_cancel_outcome,
+        "the real key-addressed journal returns the first cancel outcome"
+    );
+    let lash::tools::ToolIntentIngressOutcome::Admitted {
+        outcome:
+            lash::tools::ToolIntentExecutionOutcome::Refused {
+                kind: lash_core::ToolIntentKind::CancelProcess,
+                refusal: lash_core::ToolIntentRefusalReason::CommandFailed { message, .. },
+                ..
+            },
+        replayed: false,
+    } = conflicting_cancel
+    else {
+        panic!("the conflicting PostgreSQL cancel ingress submission must be refused")
+    };
+    assert!(
+        message.contains("postgres_effect_replay_hash_conflict")
+            && message.contains("command.command.reason"),
+        "the refusal must identify the canonical command conflict: {message}"
+    );
+    let cancel_events = registry
+        .events_after(&process_id, 0)
+        .await
+        .expect("read PostgreSQL cancel ingress events")
+        .into_iter()
+        .filter(|event| event.event_type == "process.cancel_requested")
+        .collect::<Vec<_>>();
+    assert_eq!(cancel_events.len(), 1);
+    assert_eq!(
+        cancel_events[0].payload["reason"],
+        serde_json::json!("first reason"),
+        "the first admitted cancel payload remains authoritative"
+    );
 }

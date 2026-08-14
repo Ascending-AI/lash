@@ -1864,7 +1864,11 @@ impl From<RemoteProcessCancelRequest> for lash_core::ProcessCommand {
             process_id,
             reason,
         } = value;
-        Self::Cancel { process_id, reason }
+        Self::Cancel {
+            process_id,
+            reason,
+            replay: None,
+        }
     }
 }
 

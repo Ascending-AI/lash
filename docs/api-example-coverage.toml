@@ -44961,6 +44961,17 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
+symbol = "lash::runtime::ProcessCommand::Cancel::replay"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessCommand::Cancel::replay"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:390#assert_eq!(cancel_events.len(), 1);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:390#assert_eq!(cancel_events.len(), 1);"
+reason = "The executable FIG-1294 ingress law submits a cancellation with ingress replay identity and asserts that a conflicting duplicate creates only one durable cancel event."
+
+[[api]]
 symbol = "lash::runtime::ProcessCommand::DeleteSession"
 kind = "variant"
 availability = "default+all-features"
@@ -74583,6 +74594,26 @@ disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1294_ingress.rs:175#assert_eq!(recorded_replay_key, \"forged\");"
 assertion = "examples/docs-snippets/src/fig1294_ingress.rs:175#assert_eq!(recorded_replay_key, \"forged\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:449#assert_eq!(recorded, \"list\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:449#assert_eq!(recorded, \"list\");"
+reason = "The executable FIG-1294 seeded-journal law observes this typed refusal from a real host-ingress submission and asserts the recorded process-outcome discriminator."
+
+[[api]]
+symbol = "lash::tools::ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol::recorded"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:449#assert_eq!(recorded, \"list\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:449#assert_eq!(recorded, \"list\");"
+reason = "The executable FIG-1294 seeded-journal law destructures the discriminator field from the observed refusal and asserts the exhaustive List spelling."
 
 [[api]]
 symbol = "lash::tools::ToolProvider::execute_internal"

@@ -1096,20 +1096,21 @@ where
                 output: Box::new(output),
             })
         }
-        ProcessCommand::Cancel { process_id, reason } => {
+        ProcessCommand::Cancel {
+            process_id,
+            reason,
+            replay,
+        } => {
             let record = registry
                 .get_process(&process_id)
                 .await?
                 .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-            registry
-                .append_event(
-                    &process_id,
-                    lash_core::ProcessEventAppendRequest::cancel_requested(
-                        &process_id,
-                        reason.clone(),
-                    ),
-                )
-                .await?;
+            let mut request =
+                lash_core::ProcessEventAppendRequest::cancel_requested(&process_id, reason.clone());
+            if let Some(replay) = replay {
+                request = request.with_optional_replay(Some(replay));
+            }
+            registry.append_event(&process_id, request).await?;
             context
                 .request_process_workflow_cancel(RestateProcessCancelRequest { process_id, reason })
                 .await

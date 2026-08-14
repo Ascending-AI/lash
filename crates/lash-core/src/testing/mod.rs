@@ -1022,6 +1022,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         let command = crate::ProcessCommand::Cancel {
             process_id: process_id.to_string(),
             reason: Some("requested by tool".to_string()),
+            replay: None,
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
@@ -1039,6 +1040,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         let command = crate::ProcessCommand::Cancel {
             process_id: process_id.to_string(),
             reason,
+            replay: None,
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
@@ -1508,6 +1510,7 @@ impl crate::ProcessService for MockSessionManager {
             self.process_registry.clone(),
             process_id,
             Some("requested by test".to_string()),
+            None,
         )
         .await
     }
@@ -1523,6 +1526,7 @@ impl crate::ProcessService for MockSessionManager {
             self.process_registry.clone(),
             process_id,
             reason,
+            None,
         )
         .await
     }

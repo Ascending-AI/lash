@@ -8748,6 +8748,7 @@ async fn restate_controller_cancel_requests_call_workflow_cancel() {
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_id: "task-cancel".to_string(),
                     reason: Some("user requested".to_string()),
+                    replay: None,
                 }),
             ),
             RuntimeEffectLocalExecutor::processes(registry, None),
@@ -9897,6 +9898,7 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_id: "task-smoke".to_string(),
                     reason: Some("stop-smoke".to_string()),
+                    replay: None,
                 }),
             ),
             RuntimeEffectLocalExecutor::processes(registry, None),
@@ -10835,6 +10837,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_id: "recover-tool".to_string(),
                     reason: Some("post-rebuild cancel probe".to_string()),
+                    replay: None,
                 }),
             ),
             RuntimeEffectLocalExecutor::processes(Arc::clone(&registry_b), None),

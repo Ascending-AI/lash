@@ -217,6 +217,18 @@ fn tool_context<'run>(
     scoped: crate::ScopedEffectController<'run>,
     fixtures: &Fixtures,
 ) -> crate::ToolContext<'run> {
+    tool_context_with_provider(
+        scoped,
+        fixtures,
+        Arc::new(crate::testing::EmptyToolProvider),
+    )
+}
+
+fn tool_context_with_provider<'run>(
+    scoped: crate::ScopedEffectController<'run>,
+    fixtures: &Fixtures,
+    tools: Arc<dyn crate::ToolProvider>,
+) -> crate::ToolContext<'run> {
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(4);
     let plugins = crate::plugin::PluginHost::new(Vec::new())
         .build_session(SESSION, None)
@@ -225,7 +237,7 @@ fn tool_context<'run>(
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
-        tools: Arc::new(crate::testing::EmptyToolProvider),
+        tools,
         tool_registry: None,
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
         sessions: fixtures.host.clone(),
@@ -291,6 +303,103 @@ fn tool_context<'run>(
             Arc::new(crate::SystemClock),
         )
         .build()
+}
+
+struct LegacyRoutingProbeProvider {
+    execute_by_id_calls: AtomicUsize,
+}
+
+impl LegacyRoutingProbeProvider {
+    fn new() -> Self {
+        Self {
+            execute_by_id_calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn definition() -> crate::ToolDefinition {
+        crate::ToolDefinition::raw(
+            "tool:attempt_atomicity",
+            "attempt_atomicity",
+            "",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({"type": "string"}),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for LegacyRoutingProbeProvider {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "attempt_atomicity").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+        panic!("provider-routing law must enter the execute_by_id override")
+    }
+
+    async fn execute_by_id(
+        &self,
+        tool_id: &crate::ToolId,
+        _args: &serde_json::Value,
+        context: &crate::ToolContext<'_>,
+    ) -> crate::ToolResult {
+        assert_eq!(tool_id, &crate::ToolId::new("tool:attempt_atomicity"));
+        self.execute_by_id_calls.fetch_add(1, Ordering::SeqCst);
+
+        let batch = context
+            .dispatch()
+            .batch(vec![crate::ToolInvocation::new(
+                "legacy-routing-batch",
+                crate::ToolId::new("noop"),
+                serde_json::Value::Null,
+            )])
+            .await;
+        assert_eq!(batch.len(), 1);
+        assert!(
+            batch[0].output.value_for_projection()["message"]
+                .as_str()
+                .is_some_and(
+                    |message| message.contains("unavailable inside an atomic tool attempt")
+                )
+        );
+
+        let nested_turn = context
+            .sessions()
+            .start_turn(
+                "legacy-routing-child",
+                "legacy-routing-child-turn",
+                crate::TurnInput::text("nested turn"),
+            )
+            .await
+            .expect_err("provider-routed nested turn is guarded");
+        assert!(
+            nested_turn
+                .to_string()
+                .contains("unavailable inside an atomic tool attempt")
+        );
+
+        let trigger = context
+            .triggers()
+            .emit(crate::TriggerOccurrenceRequest::new(
+                "attempt-atomicity.trigger",
+                "attempt-atomicity-source",
+                serde_json::json!({}),
+                "legacy-routing-occurrence",
+            ))
+            .await
+            .expect_err("provider-routed trigger emission is guarded");
+        assert!(
+            trigger
+                .to_string()
+                .contains("unavailable inside an atomic tool attempt")
+        );
+
+        crate::ToolResult::ok(serde_json::json!("legacy execute_by_id ran"))
+    }
 }
 
 /// The post-cutover catch-all. A leaf body receives only `AttemptContext`; all
@@ -528,6 +637,71 @@ async fn legacy_tool_context_guards_and_journal_free_routes_hold_inside_recorded
     );
 }
 
+#[tokio::test]
+async fn default_false_provider_routes_through_execute_once_without_controller_crossing() {
+    let fixtures = fixtures().await;
+    let tier = ControllerOwnedTier::ordinal_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let scoped = crate::ScopedEffectController::borrowed(
+        &sentinel,
+        crate::ExecutionScope::turn(SESSION, TURN),
+    )
+    .expect("scoped provider-routing sentinel controller");
+    let provider = Arc::new(LegacyRoutingProbeProvider::new());
+    let tool = tool_context_with_provider(
+        scoped,
+        &fixtures,
+        Arc::clone(&provider) as Arc<dyn crate::ToolProvider>,
+    );
+
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        crate::RuntimeEffectEnvelope::new(
+            attempt_invocation(),
+            crate::RuntimeEffectCommand::ToolAttempt {
+                call: prepared_tool_call(),
+                execution_grant: None,
+                attempt: 1,
+                max_attempts: 1,
+            },
+        ),
+        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            let dispatch = Arc::clone(
+                tool.runtime_dispatch
+                    .as_ref()
+                    .expect("tool context carries runtime dispatch"),
+            );
+            let result =
+                crate::tool_dispatch::execute_once(dispatch.as_ref(), &prepared_tool_call(), tool)
+                    .await;
+            assert!(matches!(result, crate::ToolAttemptResult::Done { .. }));
+            Ok(crate::RuntimeEffectOutcome::ToolAttempt {
+                launch: Box::new(crate::ToolAttemptLaunch::Done {
+                    record: Box::new(crate::ToolCallRecord {
+                        call_id: Some(CALL_ID.to_string()),
+                        tool: "attempt_atomicity".to_string(),
+                        args: serde_json::Value::Null,
+                        output: crate::ToolCallOutput::success(serde_json::json!("ok")),
+                        duration_ms: 0,
+                    }),
+                    intents: crate::ToolIntents::default(),
+                }),
+                triggers: Vec::new(),
+            })
+        }),
+    )
+    .await
+    .expect("default-false provider completes through execute_once");
+
+    assert_eq!(provider.execute_by_id_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        ledger.crossings_inside_attempt(),
+        Vec::<String>::new(),
+        "all three legacy routes refuse before crossing the controller"
+    );
+}
+
 /// Red proof for the sentinel itself: a deliberately leaked test-only command
 /// must be caught while an attempt body is open.
 #[tokio::test]
@@ -539,6 +713,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     let command = crate::ProcessCommand::Cancel {
         process_id: LIVE_PROCESS.to_string(),
         reason: Some("outside any attempt".to_string()),
+        replay: None,
     };
     let effect_id = command.effect_id();
     crate::RuntimeEffectController::execute_effect(
@@ -583,6 +758,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
             let command = crate::ProcessCommand::Cancel {
                 process_id: LIVE_PROCESS.to_string(),
                 reason: Some("test-only sentinel leak".to_string()),
+                replay: None,
             };
             let effect_id = command.effect_id();
             crate::RuntimeEffectController::execute_effect(

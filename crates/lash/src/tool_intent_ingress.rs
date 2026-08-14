@@ -88,6 +88,9 @@ pub enum ToolIntentIngressRefusal {
     DuplicateIdentity {
         kind: lash_core::ToolIntentKind,
     },
+    RecordedOutcomeOutsideIntentProtocol {
+        recorded: String,
+    },
 }
 
 /// Admission result for one host-submitted intent.
@@ -119,6 +122,34 @@ pub struct ToolIntentIngress {
     core: crate::LashCore,
     session_id: String,
     scope: lash_core::ExecutionScope,
+    runtime_submission_gates: std::sync::Arc<RuntimeSubmissionGates>,
+}
+
+#[derive(Default)]
+struct RuntimeSubmissionGates {
+    by_replay_key: std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>,
+    >,
+}
+
+impl RuntimeSubmissionGates {
+    async fn lock(&self, replay_key: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let gate = {
+            let mut gates = self
+                .by_replay_key
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            gates.retain(|_, gate| gate.strong_count() > 0);
+            if let Some(gate) = gates.get(replay_key).and_then(std::sync::Weak::upgrade) {
+                gate
+            } else {
+                let gate = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+                gates.insert(replay_key.to_string(), std::sync::Arc::downgrade(&gate));
+                gate
+            }
+        };
+        gate.lock_owned().await
+    }
 }
 
 enum RealizationFailure {
@@ -182,6 +213,7 @@ impl ToolIntentIngress {
             core,
             session_id,
             scope,
+            runtime_submission_gates: std::sync::Arc::new(RuntimeSubmissionGates::default()),
         }
     }
 
@@ -320,6 +352,17 @@ impl ToolIntentIngress {
         RealizationFailure,
     > {
         let kind = intent.kind();
+        let _runtime_submission_guard = if self.core.env.core.control.effect_host.replay_ownership()
+            == lash_core::EffectReplayOwnership::Runtime
+        {
+            Some(
+                self.runtime_submission_gates
+                    .lock(&identity.replay_key)
+                    .await,
+            )
+        } else {
+            None
+        };
         let duplicate_probe = self.runtime_duplicate_probe(identity, &intent);
         if let Some(probe) = duplicate_probe.as_ref()
             && self
@@ -351,26 +394,32 @@ impl ToolIntentIngress {
         };
         let recorded_kind = match &result {
             lash_core::ProcessEffectOutcome::Start { .. } => {
-                Some(lash_core::ToolIntentKind::StartProcess)
+                lash_core::ToolIntentKind::StartProcess
             }
             lash_core::ProcessEffectOutcome::Signal { .. } => {
-                Some(lash_core::ToolIntentKind::SignalProcess)
+                lash_core::ToolIntentKind::SignalProcess
             }
             lash_core::ProcessEffectOutcome::Cancel { .. } => {
-                Some(lash_core::ToolIntentKind::CancelProcess)
+                lash_core::ToolIntentKind::CancelProcess
             }
             lash_core::ProcessEffectOutcome::EmitEvent { .. } => {
-                Some(lash_core::ToolIntentKind::EmitProcessEvent)
+                lash_core::ToolIntentKind::EmitProcessEvent
             }
-            _ => None,
-        };
-        let Some(recorded_kind) = recorded_kind else {
-            return Err(RealizationFailure::Command(
-                kind,
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                    "tool-intent ingress received the wrong process outcome".to_string(),
-                )),
-            ));
+            lash_core::ProcessEffectOutcome::List { .. } => {
+                return Err(Self::outside_protocol_outcome("list"));
+            }
+            lash_core::ProcessEffectOutcome::Transfer => {
+                return Err(Self::outside_protocol_outcome("transfer"));
+            }
+            lash_core::ProcessEffectOutcome::DeleteSession { .. } => {
+                return Err(Self::outside_protocol_outcome("delete_session"));
+            }
+            lash_core::ProcessEffectOutcome::Await { .. } => {
+                return Err(Self::outside_protocol_outcome("await"));
+            }
+            lash_core::ProcessEffectOutcome::ParentEnd { .. } => {
+                return Err(Self::outside_protocol_outcome("parent_end"));
+            }
         };
         if recorded_kind != kind {
             return Err(RealizationFailure::Refused(
@@ -396,13 +445,13 @@ impl ToolIntentIngress {
                     process_id: summary.id.clone(),
                     policy,
                 };
-                (
+                let (value, parent_end) = (
                     serde_json::to_value(summary).unwrap_or(serde_json::Value::Null),
                     Some(parent_end),
-                )
+                );
+                (value, parent_end)
             }
-            lash_core::ProcessEffectOutcome::Signal { event }
-            | lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => (
+            lash_core::ProcessEffectOutcome::Signal { event } => (
                 serde_json::to_value(*event).unwrap_or(serde_json::Value::Null),
                 None,
             ),
@@ -411,16 +460,35 @@ impl ToolIntentIngress {
                     .unwrap_or(serde_json::Value::Null),
                 None,
             ),
-            _ => {
-                return Err(RealizationFailure::Command(
-                    kind,
-                    crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                        "tool-intent ingress received the wrong process outcome".to_string(),
-                    )),
-                ));
+            lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => (
+                serde_json::to_value(*event).unwrap_or(serde_json::Value::Null),
+                None,
+            ),
+            lash_core::ProcessEffectOutcome::List { .. } => {
+                return Err(Self::outside_protocol_outcome("list"));
+            }
+            lash_core::ProcessEffectOutcome::Transfer => {
+                return Err(Self::outside_protocol_outcome("transfer"));
+            }
+            lash_core::ProcessEffectOutcome::DeleteSession { .. } => {
+                return Err(Self::outside_protocol_outcome("delete_session"));
+            }
+            lash_core::ProcessEffectOutcome::Await { .. } => {
+                return Err(Self::outside_protocol_outcome("await"));
+            }
+            lash_core::ProcessEffectOutcome::ParentEnd { .. } => {
+                return Err(Self::outside_protocol_outcome("parent_end"));
             }
         };
         Ok(((kind, value), parent_end, replayed))
+    }
+
+    fn outside_protocol_outcome(recorded: &str) -> RealizationFailure {
+        RealizationFailure::Refused(
+            ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol {
+                recorded: recorded.to_string(),
+            },
+        )
     }
 
     async fn realize_inner(
@@ -474,6 +542,12 @@ impl ToolIntentIngress {
             lash_core::ToolIntent::CancelProcess(intent) => lash_core::ProcessCommand::Cancel {
                 process_id: intent.process_id,
                 reason: intent.reason,
+                replay: Some(lash_core::RuntimeReplay {
+                    key: identity.replay_key.clone(),
+                    attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+                        identity.clone(),
+                    )),
+                }),
             },
             lash_core::ToolIntent::EmitProcessEvent(intent) => {
                 let request =
@@ -514,7 +588,10 @@ impl ToolIntentIngress {
                 process_id: intent.process_id.clone(),
                 replay_key: identity.replay_key.clone(),
             }),
-            lash_core::ToolIntent::CancelProcess(_) => None,
+            lash_core::ToolIntent::CancelProcess(intent) => Some(RuntimeDuplicateProbe::Event {
+                process_id: intent.process_id.clone(),
+                replay_key: identity.replay_key.clone(),
+            }),
         }
     }
 

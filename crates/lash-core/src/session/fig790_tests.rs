@@ -285,6 +285,7 @@ impl crate::ProcessService for EffectBackedProcessService {
                 crate::ProcessCommand::Cancel {
                     process_id: process_id.to_string(),
                     reason: Some("turn cancelled while awaiting process".to_string()),
+                    replay: None,
                 },
             )
             .await?

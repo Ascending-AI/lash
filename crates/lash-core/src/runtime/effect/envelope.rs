@@ -519,6 +519,8 @@ pub enum ProcessCommand {
     Cancel {
         process_id: String,
         reason: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replay: Option<crate::RuntimeReplay>,
     },
     ParentEnd {
         identity: crate::ToolIntentIdentity,

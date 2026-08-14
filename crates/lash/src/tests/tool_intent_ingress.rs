@@ -115,9 +115,15 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
 struct AdmissionCrashController {
     inner: lash_core::facade_support::InlineRuntimeEffectController,
     admitted: tokio::sync::Notify,
-    admission: std::sync::Mutex<Option<String>>,
+    admission: std::sync::Mutex<Option<MockEffectAdmission>>,
     realizations: std::sync::atomic::AtomicUsize,
     recorded: std::sync::Mutex<Option<lash_core::RuntimeEffectOutcome>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MockEffectAdmission {
+    replay_key: String,
+    envelope_hash: String,
 }
 
 impl lash_core::AwaitEventResolver for AdmissionCrashController {
@@ -147,6 +153,40 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
+        let replay_key = envelope
+            .invocation
+            .replay_key()
+            .expect("ingress envelope has a replay key")
+            .to_string();
+        let envelope_hash = envelope.stable_hash()?;
+        let submitted_admission = MockEffectAdmission {
+            replay_key,
+            envelope_hash,
+        };
+        let first_admission = {
+            let mut admission = self
+                .admission
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match admission.as_ref() {
+                None => {
+                    *admission = Some(submitted_admission.clone());
+                    true
+                }
+                Some(recorded) if recorded == &submitted_admission => false,
+                Some(recorded) => {
+                    return Err(lash_core::RuntimeEffectControllerError::foreign(
+                        "test_admission_envelope_hash_conflict",
+                        format!(
+                            "replay key `{}` was admitted with envelope hash `{}` but redriven with `{}`",
+                            recorded.replay_key,
+                            recorded.envelope_hash,
+                            submitted_admission.envelope_hash,
+                        ),
+                    ));
+                }
+            }
+        };
         if let Some(recorded) = self
             .recorded
             .lock()
@@ -155,23 +195,6 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
         {
             return Ok(recorded);
         }
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .expect("ingress envelope has a replay key")
-            .to_string();
-        let first_admission = {
-            let mut admission = self
-                .admission
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if admission.is_none() {
-                *admission = Some(replay_key);
-                true
-            } else {
-                false
-            }
-        };
         if first_admission {
             self.admitted.notify_one();
             std::future::pending::<()>().await;
@@ -214,10 +237,14 @@ fn start_intent(session_id: &str) -> lash_core::ToolIntent {
 }
 
 fn cancel_intent(session_id: &str) -> lash_core::ToolIntent {
+    cancel_intent_with_reason(session_id, "kind-swap probe")
+}
+
+fn cancel_intent_with_reason(session_id: &str, reason: &str) -> lash_core::ToolIntent {
     lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
         session_id: session_id.to_string(),
         process_id: PROCESS.to_string(),
-        reason: Some("kind-swap probe".to_string()),
+        reason: Some(reason.to_string()),
     })
 }
 
@@ -367,6 +394,50 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
 }
 
 #[tokio::test]
+async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -> Result<()> {
+    let controller = Arc::new(KeyJournalController::default());
+    let (core, registry) =
+        ingress_core_with_effect_host(Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>)
+            .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("seeded-outside-protocol", 0);
+    controller
+        .recorded
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(
+            key.identity().replay_key.clone(),
+            lash_core::RuntimeEffectOutcome::Process {
+                result: lash_core::ProcessEffectOutcome::List {
+                    entries: Vec::new(),
+                },
+            },
+        );
+
+    let outcome = ingress.submit(key, emit_intent(SESSION)).await;
+    assert!(matches!(
+        outcome,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal:
+                crate::tools::ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol {
+                    recorded,
+                }
+        } if recorded == "list"
+    ));
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == EVENT)
+            .count(),
+        0,
+        "a seeded non-protocol outcome cannot fabricate an intent realization"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result<()> {
     let (core, registry) =
         ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
@@ -404,6 +475,105 @@ async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result
             .filter(|event| event.event_type == EVENT)
             .count(),
         1
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() -> Result<()> {
+    let (core, registry) =
+        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+            .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+
+    for (call_id, first_reason, duplicate_reason) in [
+        ("cancel-same-reason", "same", "same"),
+        ("cancel-changed-reason", "first", "changed"),
+    ] {
+        let key = ingress.key(call_id, 0);
+        let first = ingress
+            .submit(
+                key.clone(),
+                cancel_intent_with_reason(SESSION, first_reason),
+            )
+            .await;
+        assert!(matches!(
+            first,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                    kind: lash_core::ToolIntentKind::CancelProcess,
+                    ..
+                },
+                replayed: false,
+            }
+        ));
+        let duplicate = ingress
+            .submit(key, cancel_intent_with_reason(SESSION, duplicate_reason))
+            .await;
+        assert!(matches!(
+            duplicate,
+            crate::tools::ToolIntentIngressOutcome::Refused {
+                refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                    kind: lash_core::ToolIntentKind::CancelProcess,
+                }
+            }
+        ));
+    }
+
+    let concurrent_key = ingress.key("cancel-concurrent", 0);
+    let (left, right) = tokio::join!(
+        ingress.submit(
+            concurrent_key.clone(),
+            cancel_intent_with_reason(SESSION, "concurrent"),
+        ),
+        ingress.submit(
+            concurrent_key,
+            cancel_intent_with_reason(SESSION, "concurrent"),
+        ),
+    );
+    let concurrent_outcomes = [left, right];
+    assert_eq!(
+        concurrent_outcomes
+            .iter()
+            .filter(|outcome| matches!(
+                outcome,
+                crate::tools::ToolIntentIngressOutcome::Admitted {
+                    outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                        kind: lash_core::ToolIntentKind::CancelProcess,
+                        ..
+                    },
+                    replayed: false,
+                }
+            ))
+            .count(),
+        1,
+        "one concurrent submit realizes the cancellation"
+    );
+    assert_eq!(
+        concurrent_outcomes
+            .iter()
+            .filter(|outcome| matches!(
+                outcome,
+                crate::tools::ToolIntentIngressOutcome::Refused {
+                    refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                        kind: lash_core::ToolIntentKind::CancelProcess,
+                    }
+                }
+            ))
+            .count(),
+        1,
+        "the racing duplicate is a typed refusal"
+    );
+
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        3,
+        "each ingress identity realizes one cancellation"
     );
     Ok(())
 }
@@ -567,6 +737,12 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
             },
             &["kind"][..],
         ),
+        (
+            crate::tools::ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol {
+                recorded: "list".to_string(),
+            },
+            &["recorded"][..],
+        ),
     ];
     for (refusal, fields) in refusals {
         let refusal_value = serde_json::to_value(refusal).expect("serialize ingress refusal");
@@ -607,7 +783,8 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
             .admission
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_deref(),
+            .as_ref()
+            .map(|admission| admission.replay_key.as_str()),
         Some(expected_admission.as_str()),
         "the mock durably records journal admission before the crash window"
     );
@@ -620,16 +797,51 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     );
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
 
-    let redriven = ingress.submit(key, emit_intent(SESSION)).await;
+    let mut conflicting_redrive = emit_intent(SESSION);
+    let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting_redrive else {
+        unreachable!("fixture is an event intent")
+    };
+    intent.payload = serde_json::json!({"law": "conflicting-redrive-payload"});
+    let redriven = ingress.submit(key.clone(), conflicting_redrive).await;
     assert!(
         matches!(
             &redriven,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Refused {
+                    kind: lash_core::ToolIntentKind::EmitProcessEvent,
+                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed {
+                        code,
+                        ..
+                    },
+                    ..
+                },
+                replayed: false,
+            } if code == "tool_intent_ingress_realization_failed"
+        ),
+        "a conflicting redrive must be rejected as a typed command failure: {redriven:?}"
+    );
+    assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == EVENT)
+            .count(),
+        0,
+        "the redrive cannot replace the admitted command"
+    );
+
+    let matching_redrive = ingress.submit(key, emit_intent(SESSION)).await;
+    assert!(
+        matches!(
+            &matching_redrive,
             crate::tools::ToolIntentIngressOutcome::Admitted {
                 outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. },
                 replayed: false,
             }
         ),
-        "redriven outcome: {redriven:?}"
+        "the admitted command remains redrivable: {matching_redrive:?}"
     );
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -639,7 +851,8 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
             .iter()
             .filter(|event| event.event_type == EVENT)
             .count(),
-        1
+        1,
+        "the originally admitted command realizes exactly once"
     );
     Ok(())
 }

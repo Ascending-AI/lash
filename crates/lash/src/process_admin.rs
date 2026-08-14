@@ -367,6 +367,7 @@ impl Processes {
         let command = lash_core::ProcessCommand::Cancel {
             process_id: process_id.to_string(),
             reason: Some("requested by host".to_string()),
+            replay: None,
         };
         let outcome = self
             .run_command(command, scoped_effect_controller.clone())

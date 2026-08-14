@@ -82,6 +82,7 @@ impl ProcessLocalExecution {
                                 Arc::clone(&registry),
                                 &process_id,
                                 Some("turn cancelled while awaiting process".to_string()),
+                                None,
                             )
                             .await?;
                             await_terminal().await?
@@ -94,11 +95,16 @@ impl ProcessLocalExecution {
                     output: Box::new(output),
                 })
             }
-            ProcessCommand::Cancel { process_id, reason } => {
+            ProcessCommand::Cancel {
+                process_id,
+                reason,
+                replay,
+            } => {
                 let record = InlineRuntimeEffectController::request_process_cancel(
                     registry,
                     &process_id,
                     reason,
+                    replay,
                 )
                 .await?;
                 Ok(ProcessEffectOutcome::Cancel {
@@ -123,6 +129,7 @@ impl ProcessLocalExecution {
                             registry,
                             &process_id,
                             Some(reason),
+                            None,
                         )
                         .await
                         {

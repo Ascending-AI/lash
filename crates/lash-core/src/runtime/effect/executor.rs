@@ -1404,16 +1404,17 @@ impl InlineRuntimeEffectController {
         registry: Arc<dyn crate::ProcessRegistry>,
         process_id: &str,
         reason: Option<String>,
+        replay: Option<crate::RuntimeReplay>,
     ) -> Result<ProcessRecord, PluginError> {
         // Cancellation is a durable signal: the cancel event is what the
         // runner-run process observes, so the inline controller appends it and
         // no longer tracks an in-process cancellation token.
-        registry
-            .append_event(
-                process_id,
-                crate::ProcessEventAppendRequest::cancel_requested(process_id, reason.clone()),
-            )
-            .await?;
+        let mut request =
+            crate::ProcessEventAppendRequest::cancel_requested(process_id, reason.clone());
+        if let Some(replay) = replay {
+            request = request.with_optional_replay(Some(replay));
+        }
+        registry.append_event(process_id, request).await?;
         registry
             .get_process(process_id)
             .await?

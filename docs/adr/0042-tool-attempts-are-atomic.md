@@ -106,7 +106,11 @@ surviving journal-capable routes remain guarded on ordinal-addressed tiers.
 `legacy_tool_context_guards_and_journal_free_routes_hold_inside_recorded_attempt`
 proves the three remaining guards (`sessions().start_turn()`,
 `dispatch().batch()`, and `triggers().emit()`) together with the surviving
-journal-free capability inventory inside a real recorded attempt.
+journal-free capability inventory inside a real recorded attempt. The law
+`default_false_provider_routes_through_execute_once_without_controller_crossing`
+also enters through `execute_once` with the provider default unchanged, proves
+that `execute_by_id` ran, exercises all three guards, and observes zero
+controller crossings.
 
 Layer 2 reclassified the shipped tool routes before that deletion:
 `shell.start`/detach declare `StartProcess`, `shell.write` declares
@@ -167,13 +171,16 @@ outcome has a different intent kind returns
 `identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success`.
 Runtime-owned tiers have no effect journal; a process-store replay-key collision
 surfaces as the typed `DuplicateIdentity` ingress refusal, proved by
-`runtime_owned_duplicate_identity_is_a_typed_ingress_refusal`. On an
+`runtime_owned_duplicate_identity_is_a_typed_ingress_refusal` and, for identical,
+changed-reason, and concurrent cancellation duplicates,
+`runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once`. On an
 ordinal-addressed tier every external submit is a new engine invocation rather
 than a key lookup, so a host must not treat a second invocation as an ingress
 idempotency retry; `checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes`
 pins replay only within the owning Restate invocation. The law
 `crash_after_admission_redrives_to_exactly_one_realization` durably records the
-mock admission before its injected crash, while
+mock admission's canonical envelope hash before its injected crash, rejects a
+changed-payload redrive, and realizes the originally admitted command once, while
 `attempt_with_nested_command_redrives_identically_on_the_key_addressed_tier` and
 `recorded_intent_command_replays_after_live_terminal_mutation_on_postgres` pin
 the real journal-first window. Foreign session/scope keys and malformed

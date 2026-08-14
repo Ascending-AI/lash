@@ -1856,6 +1856,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
             Arc::clone(&registry),
             process_id,
             Some("cancel after prune".to_string()),
+            None,
         )
         .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })

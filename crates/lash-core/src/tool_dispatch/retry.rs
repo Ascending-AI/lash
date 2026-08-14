@@ -42,7 +42,7 @@ pub(super) async fn execute_granted_leaf_tool_attempt<'run>(
     .await
 }
 
-async fn execute_once<'run>(
+pub(crate) async fn execute_once<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
