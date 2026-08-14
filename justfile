@@ -58,6 +58,9 @@ slack-clone-platform-foreground port='3040':
 slack-clone-full-host-e2e:
   bash "{{repo}}/scripts/slack-clone-full-host-e2e.sh"
 
+slack-clone-live-model-e2e *args:
+  bash "{{repo}}/scripts/slack-clone-live-model-e2e.sh" {{args}}
+
 workflow-graph-roundtrip port='3031':
   #!/usr/bin/env bash
   set -euo pipefail

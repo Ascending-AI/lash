@@ -22,6 +22,8 @@
 
 pub mod bot;
 pub mod ids;
+#[cfg(feature = "live-e2e")]
+pub mod live_e2e;
 pub mod mcp_server;
 pub mod platform;
 pub mod secrets;
