@@ -154,7 +154,13 @@ async fn scheduler_runs_every_item_concurrently_and_preserves_order() {
         assert_eq!(completed_rx.recv().await, Some("slow"));
     };
 
-    let (outputs, ()) = tokio::join!(scheduled, observe_concurrency);
+    let (scheduled, ()) = tokio::join!(scheduled, observe_concurrency);
+    let outputs = scheduled.outcomes;
+    assert_eq!(
+        scheduled.settlement_order,
+        vec![2, 1, 0],
+        "the recorded settlement order is completion order, fastest first"
+    );
     assert_eq!(
         outputs,
         ["slow", "formerly_serial", "fast"],

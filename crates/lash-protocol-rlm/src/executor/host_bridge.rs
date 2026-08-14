@@ -515,13 +515,15 @@ impl HostBridge<'_> {
             invocations.push(invocation);
         }
 
+        let batch = self.ctx.call_tool_batch(invocations).await;
         for ((((source_index, host_operation), source_operation), execution_index), reply) in
             positions
-                .into_iter()
+                .iter()
+                .copied()
                 .zip(host_operations)
                 .zip(source_operations)
                 .zip(execution_indices)
-                .zip(self.ctx.call_tool_batch(invocations).await)
+                .zip(batch.replies)
         {
             // Batch replies are terminal for the same reason as scalar replies.
             let outcome = match &reply.output.outcome {
@@ -536,11 +538,26 @@ impl HostBridge<'_> {
             results[source_index] = Some(lashlang::ResourceOperationResult::from_result(result));
         }
 
-        lashlang::ResourceOperationBatchResult::settled_in_input_order(
+        // The batch reports settlement in its own invocation positions; the VM
+        // reads leaf positions. Leaves resolved before the batch ran — the
+        // journaled TypeScript runtime values above, and anything that failed
+        // during preparation — had already settled, so they lead the order.
+        let mut settlement_order = (0..results.len())
+            .filter(|index| !positions.contains(index))
+            .collect::<Vec<_>>();
+        settlement_order.extend(
+            batch
+                .settlement_order
+                .iter()
+                .filter_map(|position| positions.get(*position).copied()),
+        );
+
+        lashlang::ResourceOperationBatchResult::settled_in_order(
             results
                 .into_iter()
                 .map(|result| result.expect("every batch result slot should be filled"))
                 .collect(),
+            settlement_order,
         )
     }
 

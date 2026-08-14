@@ -329,6 +329,26 @@ struct CoordinatedToolLaunch {
     triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
 
+/// The replies to a tool batch, in input order, with the order they settled.
+#[derive(Debug, Default)]
+pub struct ToolBatchReplies {
+    /// One reply per invocation, in input order.
+    pub replies: Vec<ToolInvocationReply>,
+    /// Input indices in the order the invocations settled.
+    pub settlement_order: Vec<usize>,
+}
+
+impl ToolBatchReplies {
+    /// Replies whose invocations settled in the order they were issued.
+    pub fn settled_in_input_order(replies: Vec<ToolInvocationReply>) -> Self {
+        let settlement_order = (0..replies.len()).collect();
+        Self {
+            replies,
+            settlement_order,
+        }
+    }
+}
+
 impl RuntimeExecutionContext<'_> {
     fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeInvocation {
         let suffix = format!("tool-batch:{batch_id}");
@@ -395,7 +415,14 @@ impl RuntimeExecutionContext<'_> {
                 triggers.extend(outcome.triggers);
                 context = context.with_cancellation_token(tool_cancel.clone());
             }
-            return Ok(crate::ToolBatchEffectOutcome { launches, triggers });
+            // This path runs the leaves one at a time, so they settle in the
+            // order they were issued.
+            let settlement_order = (0..launches.len()).collect();
+            return Ok(crate::ToolBatchEffectOutcome {
+                launches,
+                triggers,
+                settlement_order,
+            });
         }
         let intent_drain_gate =
             std::sync::Arc::new(crate::tool_dispatch::BatchIntentDrainGate::default());
@@ -487,13 +514,17 @@ impl RuntimeExecutionContext<'_> {
         // the cancelled background-session-turn path does before it resumes.
         crate::runtime::ensure_process_execution_permit().await;
 
-        let mut launches = Vec::with_capacity(child_outcomes.len());
+        let mut launches = Vec::with_capacity(child_outcomes.outcomes.len());
         let mut triggers = Vec::new();
-        for outcome in child_outcomes {
+        for outcome in child_outcomes.outcomes {
             launches.push(outcome.launch);
             triggers.extend(outcome.triggers);
         }
-        Ok(crate::ToolBatchEffectOutcome { launches, triggers })
+        Ok(crate::ToolBatchEffectOutcome {
+            launches,
+            triggers,
+            settlement_order: child_outcomes.settlement_order,
+        })
     }
 
     async fn execute_prepared_tool_batch_child(
@@ -985,14 +1016,17 @@ impl RuntimeExecutionContext<'_> {
 
     /// Executes a source-ordered tool batch for code-executor implementors and returns replies in
     /// the same order even though individual calls may run concurrently.
-    pub async fn call_tool_batch(&self, calls: Vec<ToolInvocation>) -> Vec<ToolInvocationReply> {
+    pub async fn call_tool_batch(&self, calls: Vec<ToolInvocation>) -> ToolBatchReplies {
         if calls.is_empty() {
-            return Vec::new();
+            return ToolBatchReplies::default();
         }
 
         let batch_id = deterministic_tool_invocation_batch_id(&calls);
         let mut replies = vec![None; calls.len()];
         let mut prepared_entries = Vec::new();
+        // A call that finishes while being prepared has already settled by the
+        // time the concurrent batch starts, so it leads the settlement order.
+        let mut settled_during_preparation = Vec::new();
 
         for (index, call) in calls.into_iter().enumerate() {
             let preparation = if let Some(grant) = call.execution_grant.as_deref().cloned() {
@@ -1049,6 +1083,7 @@ impl RuntimeExecutionContext<'_> {
                         ToolInvocationReply::from_output(completed.completed.output)
                             .with_record(completed.record),
                     );
+                    settled_during_preparation.push(index);
                     continue;
                 };
 
@@ -1084,9 +1119,11 @@ impl RuntimeExecutionContext<'_> {
                         ToolInvocationReply::from_output(completed.completed.output)
                             .with_record(completed.record),
                     );
+                    settled_during_preparation.push(index);
                 }
             }
         }
+        let mut settlement_order = settled_during_preparation;
 
         if !prepared_entries.is_empty() {
             let invocation = self.tool_batch_invocation(&batch_id);
@@ -1118,25 +1155,40 @@ impl RuntimeExecutionContext<'_> {
                 .controller()
                 .execute_effect(envelope, local_executor)
                 .await;
-            let outcome =
-                match raw_outcome.and_then(crate::RuntimeEffectOutcome::into_tool_batch_effect) {
-                    Ok(outcome) => outcome,
-                    Err(err) => {
-                        for (index, prepared, _, _) in prepared_entries {
-                            replies[index] = Some(ToolInvocationReply::error(serde_json::json!(
-                                format!("tool batch failed: {err}")
-                            )));
-                            let _ = prepared;
-                        }
-                        return replies
+            let outcome = match raw_outcome
+                .and_then(crate::RuntimeEffectOutcome::into_tool_batch_effect)
+            {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    for (index, prepared, _, _) in prepared_entries {
+                        replies[index] = Some(ToolInvocationReply::error(serde_json::json!(
+                            format!("tool batch failed: {err}")
+                        )));
+                        let _ = prepared;
+                    }
+                    return ToolBatchReplies::settled_in_input_order(
+                        replies
                             .into_iter()
                             .map(|reply| reply.expect("every batch reply slot should be filled"))
-                            .collect();
-                    }
-                };
+                            .collect(),
+                    );
+                }
+            };
             self.dispatch
                 .recorded_intent_outcomes
                 .record_launches(&outcome.launches);
+            // The batch reports settlement in prepared-entry positions; the
+            // caller counts in original call positions.
+            let batch_call_indices = prepared_entries
+                .iter()
+                .map(|(index, _, _, _)| *index)
+                .collect::<Vec<_>>();
+            settlement_order.extend(
+                outcome
+                    .settlement_order
+                    .iter()
+                    .filter_map(|position| batch_call_indices.get(*position).copied()),
+            );
             if outcome.launches.len() != prepared_entries.len() {
                 let message = format!(
                     "tool batch returned {} launches for {} prepared calls",
@@ -1201,10 +1253,21 @@ impl RuntimeExecutionContext<'_> {
             }
         }
 
-        replies
+        let replies = replies
             .into_iter()
             .map(|reply| reply.expect("every batch reply slot should be filled"))
-            .collect()
+            .collect::<Vec<_>>();
+        // Any call the batch never reported on settled during preparation or
+        // failed there; append it so the order stays a full ordering.
+        for index in 0..replies.len() {
+            if !settlement_order.contains(&index) {
+                settlement_order.push(index);
+            }
+        }
+        ToolBatchReplies {
+            replies,
+            settlement_order,
+        }
     }
 
     /// Executes one catalog-authorized tool by stable ID for code-executor implementors.

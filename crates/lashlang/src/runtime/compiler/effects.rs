@@ -227,6 +227,7 @@ impl Compiler {
             shape,
             stack_value_count,
             aggregate_unwrap,
+            first_settled_rejection: self.dialect == CompilationDialect::Typescript,
         });
         let instruction = self.code.len();
         self.code.push(Instruction::ResourceOperationBatch(batch));

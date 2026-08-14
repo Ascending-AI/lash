@@ -399,6 +399,12 @@ pub enum RuntimeError {
     /// A resource-operation batch returned the wrong number of results.
     #[error("resource operation batch returned {actual} results for {expected} operations")]
     ResourceBatchResultCount { actual: usize, expected: usize },
+    /// A resource-operation batch reported a settlement order that is not an
+    /// ordering of its own results.
+    #[error(
+        "resource operation batch reported {reported} settled positions for {leaves} operations"
+    )]
+    ResourceBatchSettlementOrder { leaves: usize, reported: usize },
     /// Aggregate-await bytecode referenced a missing leaf.
     #[error("aggregate await leaf index out of range")]
     AggregateAwaitLeafOutOfRange,
@@ -542,6 +548,7 @@ impl RuntimeError {
             Self::InvalidResourceBatchResult => ErrorTaxonomy::Catchable,
             Self::ResourceBatchFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::ResourceBatchResultCount { .. } => ErrorTaxonomy::Catchable,
+            Self::ResourceBatchSettlementOrder { .. } => ErrorTaxonomy::Catchable,
             Self::AggregateAwaitLeafOutOfRange => ErrorTaxonomy::Catchable,
             Self::AggregateAwaitValueOutOfRange => ErrorTaxonomy::Catchable,
             Self::InvalidAggregateAwaitRecordShape => ErrorTaxonomy::Catchable,
@@ -666,6 +673,7 @@ impl RuntimeError {
             Self::InvalidResourceBatchResult => "InvalidResourceBatchResult",
             Self::ResourceBatchFailed { .. } => "ResourceBatchFailed",
             Self::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
+            Self::ResourceBatchSettlementOrder { .. } => "ResourceBatchSettlementOrder",
             Self::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
             Self::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
             Self::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
@@ -963,6 +971,10 @@ mod tests {
                 actual: 2,
                 expected: 3,
             },
+            RuntimeError::ResourceBatchSettlementOrder {
+                leaves: 3,
+                reported: 2,
+            },
             RuntimeError::AggregateAwaitLeafOutOfRange,
             RuntimeError::AggregateAwaitValueOutOfRange,
             RuntimeError::InvalidAggregateAwaitRecordShape,
@@ -1254,6 +1266,9 @@ mod tests {
                 RuntimeError::ResourceBatchResultCount { .. } => {
                     "resource operation batch returned 2 results for 3 operations"
                 }
+                RuntimeError::ResourceBatchSettlementOrder { .. } => {
+                    "resource operation batch reported 2 settled positions for 3 operations"
+                }
                 RuntimeError::AggregateAwaitLeafOutOfRange => {
                     "aggregate await leaf index out of range"
                 }
@@ -1281,7 +1296,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 111] = [
+    const RUNTIME_ERROR_CODES: [&str; 112] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1385,6 +1400,7 @@ mod tests {
         "InvalidResourceBatchResult",
         "ResourceBatchFailed",
         "ResourceBatchResultCount",
+        "ResourceBatchSettlementOrder",
         "AggregateAwaitLeafOutOfRange",
         "AggregateAwaitValueOutOfRange",
         "InvalidAggregateAwaitRecordShape",
@@ -1512,6 +1528,7 @@ mod tests {
             RuntimeError::InvalidResourceBatchResult => "InvalidResourceBatchResult",
             RuntimeError::ResourceBatchFailed { .. } => "ResourceBatchFailed",
             RuntimeError::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
+            RuntimeError::ResourceBatchSettlementOrder { .. } => "ResourceBatchSettlementOrder",
             RuntimeError::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
             RuntimeError::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
             RuntimeError::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",

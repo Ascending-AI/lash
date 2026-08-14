@@ -134,6 +134,15 @@ pub(crate) struct CompiledResourceOperationBatch {
     pub(crate) shape: CompiledAggregateAwaitShape,
     pub(crate) stack_value_count: usize,
     pub(crate) aggregate_unwrap: bool,
+    /// Select the rejection this batch reports by the order its leaves
+    /// *settled* rather than the order they were written.
+    ///
+    /// `Promise.all` is specified to reject with the first settled rejection,
+    /// so the TypeScript lowering sets this. Lashlang's own aggregates select
+    /// in input order and leave it clear, which is why the choice is recorded
+    /// per batch at lowering instead of being inferred at run time from a
+    /// dialect flag that answers some other question.
+    pub(crate) first_settled_rejection: bool,
 }
 
 #[derive(Clone)]

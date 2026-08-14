@@ -680,6 +680,13 @@ pub struct ToolBatchEffectOutcome {
     pub launches: Vec<ToolCallLaunch>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<ToolTriggerEffectOutcome>,
+    /// Input indices in the order the batch's leaves settled.
+    ///
+    /// Required, and deliberately without a serde default: an aggregate that
+    /// must reject with its first *settled* rejection cannot tell a defaulted
+    /// input order from a real one, so a journal entry written before this
+    /// field existed is refused rather than silently replayed as input order.
+    pub settlement_order: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -754,6 +761,9 @@ pub enum RuntimeEffectOutcome {
         launches: Vec<ToolCallLaunch>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         triggers: Vec<ToolTriggerEffectOutcome>,
+        /// Input indices in the order the leaves settled. Required and never
+        /// defaulted: see [`ToolBatchEffectOutcome::settlement_order`].
+        settlement_order: Vec<usize>,
     },
     Trigger {
         result: Box<crate::TriggerEffectResult>,
@@ -955,9 +965,15 @@ impl RuntimeEffectOutcome {
         self,
     ) -> Result<ToolBatchEffectOutcome, RuntimeEffectControllerError> {
         match self {
-            Self::ToolBatch { launches, triggers } => {
-                Ok(ToolBatchEffectOutcome { launches, triggers })
-            }
+            Self::ToolBatch {
+                launches,
+                triggers,
+                settlement_order,
+            } => Ok(ToolBatchEffectOutcome {
+                launches,
+                triggers,
+                settlement_order,
+            }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::ToolBatch,
                 other.kind(),

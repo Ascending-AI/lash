@@ -697,20 +697,32 @@ impl LashlangProcessHost<'_> {
             }
         }
 
-        for (index, reply) in positions
-            .into_iter()
-            .zip(self.ctx.call_tool_batch(invocations).await)
-        {
+        let batch = self.ctx.call_tool_batch(invocations).await;
+        for (index, reply) in positions.iter().copied().zip(batch.replies) {
             results[index] = Some(lashlang::ResourceOperationResult::from_result(
                 protocol_tool_reply_to_lashlang_value(reply),
             ));
         }
 
-        lashlang::ResourceOperationBatchResult::settled_in_input_order(
+        // The batch counts settlement in its own invocation positions; the VM
+        // counts in the aggregate's leaf positions. Leaves that failed before
+        // the batch ran had already settled, so they lead.
+        let mut settlement_order = (0..results.len())
+            .filter(|index| !positions.contains(index))
+            .collect::<Vec<_>>();
+        settlement_order.extend(
+            batch
+                .settlement_order
+                .iter()
+                .filter_map(|position| positions.get(*position).copied()),
+        );
+
+        lashlang::ResourceOperationBatchResult::settled_in_order(
             results
                 .into_iter()
                 .map(|result| result.expect("every batch result slot should be filled"))
                 .collect(),
+            settlement_order,
         )
     }
 

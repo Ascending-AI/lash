@@ -937,6 +937,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                 Ok(RuntimeEffectOutcome::ToolBatch {
                     launches: outcome.launches,
                     triggers: outcome.triggers,
+                    settlement_order: outcome.settlement_order,
                 })
             }
             RuntimeEffectCommand::ToolAttempt {
@@ -1062,6 +1063,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
             .map(|outcome| RuntimeEffectOutcome::ToolBatch {
                 launches: outcome.launches,
                 triggers: outcome.triggers,
+                settlement_order: outcome.settlement_order,
             }),
             RuntimeEffectCommand::ExecCode { language, code } => {
                 let result = runner
