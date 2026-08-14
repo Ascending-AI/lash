@@ -86,7 +86,7 @@ impl RuntimeSessionServices {
             .await;
             return Ok((outcome.record.output, Vec::new()));
         }
-        if dispatch.is_first_party_orchestration_tool(&call.tool_id) {
+        if dispatch.is_orchestrating_tool(&call.tool_id) {
             let outcome = crate::tool_dispatch::execute_orchestrating_tool(
                 dispatch.as_ref(),
                 call,

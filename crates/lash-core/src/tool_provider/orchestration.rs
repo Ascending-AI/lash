@@ -1,6 +1,7 @@
-use super::ToolContext;
-use crate::ToolManifest;
+use super::{ToolContext, ToolPrepareCall, ToolResult};
 use crate::plugin::PluginError;
+use crate::{PreparedToolCall, ToolContract, ToolManifest};
+use std::sync::Arc;
 
 /// Sealed process-replay environment for the rare tool body that must await
 /// durable work before it can return.
@@ -9,9 +10,9 @@ use crate::plugin::PluginError;
 /// randomness, drive commands from unordered iteration, perform unjournaled
 /// I/O, or leave a journaled action un-awaited.
 ///
-/// This is a doc-hidden first-party facade-support seam; runtime internals
-/// construct it and first-party provider bodies can recover it only from a
-/// runtime-marked invocation of one of the two reserved orchestration ids.
+/// This is a doc-hidden first-party facade-support seam. Runtime dispatch
+/// constructs it only for a typed orchestrating registration and passes it
+/// directly to that registration's implementation.
 #[derive(Clone)]
 #[doc(hidden)]
 pub struct OrchestrationContext<'run> {
@@ -19,10 +20,8 @@ pub struct OrchestrationContext<'run> {
 }
 
 impl<'run> OrchestrationContext<'run> {
-    pub(crate) fn from_tool_context(context: &ToolContext<'run>) -> Option<Self> {
-        context.first_party_orchestration.then(|| Self {
-            context: context.clone(),
-        })
+    pub(crate) fn new(context: ToolContext<'run>) -> Self {
+        Self { context }
     }
 
     pub fn session_id(&self) -> &str {
@@ -115,10 +114,82 @@ impl<'run> OrchestrationContext<'run> {
     }
 }
 
-pub(crate) fn first_party_orchestration_source_id(tool_id: &crate::ToolId) -> Option<&'static str> {
-    match tool_id.as_str() {
-        "tool:batch" => Some("standard_protocol"),
-        "tool:spawn_agent" => Some("subagents"),
-        _ => None,
+/// Implementation contract carried by an [`OrchestratingToolDef`].
+///
+/// First-party crates keep their concrete implementation types private and
+/// expose only the completed definition. Hosts can enable such a definition,
+/// but leaf providers cannot be upgraded into this lane.
+#[async_trait::async_trait]
+#[doc(hidden)]
+pub trait OrchestratingToolImplementation: Send + Sync + 'static {
+    fn manifest(&self) -> ToolManifest;
+
+    fn contract(&self) -> Arc<ToolContract>;
+
+    async fn prepare_tool_call(
+        &self,
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolResult> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    async fn execute(
+        &self,
+        args: &serde_json::Value,
+        context: &OrchestrationContext<'_>,
+    ) -> ToolResult;
+}
+
+/// Opaque definition for a first-party orchestrating registration.
+///
+/// The registry accepts this completed definition as a distinct registration
+/// kind. It never recognizes or upgrades a leaf provider by id or source name.
+#[derive(Clone)]
+#[doc(hidden)]
+pub struct OrchestratingToolDef {
+    implementation: Arc<dyn OrchestratingToolImplementation>,
+}
+
+impl OrchestratingToolDef {
+    /// Package an implementation supplied by an owning first-party crate.
+    ///
+    /// # Safety
+    ///
+    /// The caller must be the crate that owns the registered tool contract.
+    /// This is an unsafe capability boundary so ordinary downstream Rust code
+    /// cannot mint an orchestrating registration from a leaf provider.
+    #[doc(hidden)]
+    pub unsafe fn from_first_party(
+        implementation: Arc<dyn OrchestratingToolImplementation>,
+    ) -> Self {
+        Self { implementation }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(implementation: Arc<dyn OrchestratingToolImplementation>) -> Self {
+        Self { implementation }
+    }
+
+    pub(crate) fn manifest(&self) -> ToolManifest {
+        self.implementation.manifest()
+    }
+
+    pub(crate) fn contract(&self) -> Arc<ToolContract> {
+        self.implementation.contract()
+    }
+
+    pub(crate) async fn prepare_tool_call(
+        &self,
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolResult> {
+        self.implementation.prepare_tool_call(call).await
+    }
+
+    pub(crate) async fn execute(
+        &self,
+        args: &serde_json::Value,
+        context: &OrchestrationContext<'_>,
+    ) -> ToolResult {
+        self.implementation.execute(args, context).await
     }
 }

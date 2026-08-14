@@ -181,10 +181,10 @@ pub struct ToolDispatchContext<'run> {
 }
 
 impl ToolDispatchContext<'_> {
-    pub(crate) fn is_first_party_orchestration_tool(&self, tool_id: &crate::ToolId) -> bool {
+    pub(crate) fn is_orchestrating_tool(&self, tool_id: &crate::ToolId) -> bool {
         self.tool_registry
             .as_deref()
-            .is_some_and(|registry| registry.is_first_party_orchestration_tool(tool_id))
+            .is_some_and(|registry| registry.is_orchestrating_tool(tool_id))
     }
 }
 

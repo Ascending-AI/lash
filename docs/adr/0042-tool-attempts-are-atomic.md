@@ -26,13 +26,23 @@ The implementation law has two provider shapes:
 > process shape. If you only need to cause it, return an intent.
 
 Leaf providers receive `AttemptContext` and execute as one opaque recorded
-attempt. Core reserves `tool:batch` to the `standard_protocol` source and
-`tool:spawn_agent` to the `subagents` source. Registry reconciliation rejects a
-different source's manifest with `ReservedOrchestrationToolId`, and dispatch
-independently requires both the reserved id and its resolved owner before it
-marks the private orchestration context. No external provider can opt in. The
-first-party bodies never enter `coordinate_tool_invocation` and have no
-enclosing `ToolAttempt`. The body is authored process-replay code,
+attempt. Orchestrating tools are registered through a distinct typed lane as
+completed `OrchestratingToolDef` values whose concrete constructors and
+implementation types are owned by `lash-protocol-standard` and
+`lash-subagents`; the core wrapper has private fields and no public safe
+constructor. Its doc-hidden unsafe capability constructor requires the caller
+to own the tool contract, so safe out-of-tree code cannot mint one. The
+registry never recognizes a tool id or plugin id and upgrades its provider: a
+leaf registration remains a leaf for every identifier.
+If the two lanes contain the same tool id, reconciliation fails with
+`CrossLaneToolIdCollision`. Dispatch matches the stored registration kind and
+resolves through a typed source key whose leaf and orchestrating variants are
+disjoint, so even a leaf plugin id that renders like an internal source cannot
+select or replace the orchestrating route. Dispatch then
+hands `OrchestrationContext` directly to the orchestrating implementation; no
+marker is smuggled through `ToolContext`, and no external leaf provider can opt
+in by naming itself or its tool specially. The first-party bodies never enter
+`coordinate_tool_invocation` and have no enclosing `ToolAttempt`. The body is authored process-replay code,
 so every journal command it issues is a direct child of the enclosing process
 invocation. `ExecCode`, runtime-owned `batch`, and `spawn_agent` use that replay
 shape; leaf tools cannot recursively dispatch a batch.

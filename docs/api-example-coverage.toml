@@ -70543,39 +70543,30 @@ disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/tool_registry/registry_impl.rs:67, crates/lash-core/src/tool_registry/registry_impl.rs:89, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::tool_registry::ReconfigureError::ReservedOrchestrationToolId"
+symbol = "lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision"
 kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:700#let lash_core::tool_registry::ReconfigureError::ReservedOrchestrationToolId {"
+usage = "examples/docs-snippets/src/plugins_tools.rs:701#let lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision {"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:708#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 
 [[api]]
-symbol = "lash_core::tool_registry::ReconfigureError::ReservedOrchestrationToolId::required_source_id"
+symbol = "lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:703#required_source_id,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:710#assert_eq!(required_source_id, \"standard_protocol\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:703#leaf_source_id,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:709#assert_eq!(leaf_source_id, \"plugins\");"
 
 [[api]]
-symbol = "lash_core::tool_registry::ReconfigureError::ReservedOrchestrationToolId::source_id"
+symbol = "lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::tool_id"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:702#source_id,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:709#assert_eq!(source_id, \"plugins\");"
-
-[[api]]
-symbol = "lash_core::tool_registry::ReconfigureError::ReservedOrchestrationToolId::tool_id"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:701#tool_id,"
+usage = "examples/docs-snippets/src/plugins_tools.rs:702#tool_id,"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:708#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 
 [[api]]

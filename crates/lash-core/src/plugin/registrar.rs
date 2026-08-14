@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::*;
@@ -85,6 +85,7 @@ fn register_singleton_hook<H>(
 #[derive(Clone, Default)]
 pub(crate) struct PluginContributions {
     pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
+    pub(crate) orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     pub(crate) triggers: Vec<crate::TriggerEvent>,
     pub(crate) prompt_contributors: Vec<RegisteredHook<PromptContributor>>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
@@ -112,7 +113,6 @@ pub(crate) struct PluginContributions {
 }
 
 pub struct PluginRegistrar {
-    pub(crate) tool_names: BTreeSet<String>,
     pub(crate) contributions: PluginContributions,
     pub(crate) registering_plugin_id: Option<String>,
 }
@@ -124,6 +124,14 @@ pub struct ToolRegistrations<'a> {
 impl ToolRegistrations<'_> {
     pub fn provider(self, provider: Arc<dyn ToolProvider>) -> Result<(), PluginError> {
         self.reg.add_tool_provider(provider)
+    }
+
+    #[doc(hidden)]
+    pub fn orchestrating(
+        self,
+        definition: crate::tool_provider::orchestration::OrchestratingToolDef,
+    ) -> Result<(), PluginError> {
+        self.reg.add_orchestrating_tool(definition)
     }
 }
 
@@ -471,7 +479,6 @@ impl ExecutionRegistrations<'_> {
 impl PluginRegistrar {
     pub(crate) fn new() -> Self {
         Self {
-            tool_names: BTreeSet::new(),
             contributions: PluginContributions::default(),
             registering_plugin_id: None,
         }
@@ -530,19 +537,19 @@ impl PluginRegistrar {
     }
 
     fn add_tool_provider(&mut self, provider: Arc<dyn ToolProvider>) -> Result<(), PluginError> {
-        for manifest in provider.tool_manifests() {
-            if !self.tool_names.insert(manifest.name.clone()) {
-                return Err(PluginError::Registration(format!(
-                    "duplicate plugin tool name `{}`",
-                    manifest.name
-                )));
-            }
-        }
         push_registered_hook(
             &mut self.contributions.tool_providers,
             &self.registering_plugin_id,
             provider,
         );
+        Ok(())
+    }
+
+    fn add_orchestrating_tool(
+        &mut self,
+        definition: crate::tool_provider::orchestration::OrchestratingToolDef,
+    ) -> Result<(), PluginError> {
+        self.contributions.orchestrating_tools.push(definition);
         Ok(())
     }
 

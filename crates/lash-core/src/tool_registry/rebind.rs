@@ -71,21 +71,21 @@ struct ReconciledTools {
 
 /// Reconcile live sources with persisted per-id state at the one registry seam.
 ///
-/// `preferred_source_id` is used only by the context-catalog adapter, whose
+/// `preferred_source_key` is used only by the context-catalog adapter, whose
 /// documented semantics replace base tools that collide by id or model-facing
 /// name. All ordinary live-source collisions are rejected.
 fn reconcile_tool_state_entries(
     entries: &BTreeMap<ToolId, ToolStateEntry>,
-    sources: &BTreeMap<String, Arc<dyn ToolSourceExecutor>>,
+    sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
     mode: ReconcileMode,
-    preferred_source_id: Option<&str>,
+    preferred_source_key: Option<&ToolSourceKey>,
     hidden_tool_names: &BTreeSet<String>,
 ) -> Result<ReconciledTools, ReconfigureError> {
     validate_snapshot_entries(entries)?;
 
     let mut reconciled = match mode {
         ReconcileMode::LiveSurface => {
-            advertised_tool_entries(sources, preferred_source_id, hidden_tool_names)?
+            advertised_tool_entries(sources, preferred_source_key, hidden_tool_names)?
         }
         ReconcileMode::SnapshotSurface => BTreeMap::new(),
     };
@@ -93,14 +93,30 @@ fn reconcile_tool_state_entries(
 
     for (id, stored) in entries {
         if let Some(live) = reconciled.get_mut(id) {
+            if live.registration_kind() != stored.registration_kind {
+                return Err(ReconfigureError::CrossLaneToolIdCollision {
+                    tool_id: id.clone(),
+                    leaf_source_id: if live.registration_kind() == ToolRegistrationKind::Leaf {
+                        live.binding
+                            .source_key()
+                            .and_then(|key| match key {
+                                ToolSourceKey::Leaf(source_id) => Some(source_id.clone()),
+                                ToolSourceKey::Orchestrating(_) => None,
+                            })
+                            .unwrap_or_else(|| "persisted_snapshot".to_string())
+                    } else {
+                        "persisted_snapshot".to_string()
+                    },
+                });
+            }
             live.member = stored.member && !hidden_tool_names.contains(&live.manifest.name);
             continue;
         }
 
-        let resolved = resolve_snapshot_id(id, sources, preferred_source_id)?;
+        let resolved = resolve_snapshot_id(id, sources, preferred_source_key)?;
         match resolved {
-            Some((source_id, manifest)) => {
-                let mut entry = bound_tool_entry(manifest, source_id, hidden_tool_names);
+            Some((source_key, manifest, kind)) => {
+                let mut entry = bound_tool_entry(manifest, source_key, kind, hidden_tool_names);
                 entry.member &= stored.member;
                 insert_result_entry(&mut reconciled, id.clone(), entry)?;
             }
@@ -121,7 +137,10 @@ fn reconcile_tool_state_entries(
                     continue;
                 }
                 orphaned.push(id.clone());
-                let mut orphan = ToolRegistryEntry::orphaned(stored.manifest.clone());
+                let mut orphan = ToolRegistryEntry::orphaned(
+                    stored.manifest.clone(),
+                    stored.registration_kind,
+                );
                 orphan.member =
                     stored.member && !hidden_tool_names.contains(&orphan.manifest.name);
                 insert_result_entry(&mut reconciled, id.clone(), orphan)?;
@@ -138,25 +157,25 @@ fn reconcile_tool_state_entries(
 }
 
 fn advertised_tool_entries(
-    sources: &BTreeMap<String, Arc<dyn ToolSourceExecutor>>,
-    preferred_source_id: Option<&str>,
+    sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
+    preferred_source_key: Option<&ToolSourceKey>,
     hidden_tool_names: &BTreeSet<String>,
 ) -> Result<BTreeMap<ToolId, ToolRegistryEntry>, ReconfigureError> {
     let mut advertised = BTreeMap::new();
-    for (source_id, source) in sources {
+    for (source_key, source) in sources {
         let manifests = source
             .advertised_tools()
             .into_iter()
             .map(|manifest| manifest_with_compact_contract(source.as_ref(), manifest))
             .collect::<Vec<_>>();
         validate_unique_manifests(&manifests)?;
-        validate_reserved_orchestration_manifests(source_id, &manifests)?;
         for manifest in manifests {
             insert_advertised_entry(
                 &mut advertised,
-                source_id,
+                source_key,
+                source.registration_kind(),
                 manifest,
-                preferred_source_id,
+                preferred_source_key,
                 hidden_tool_names,
             )?;
         }
@@ -164,32 +183,12 @@ fn advertised_tool_entries(
     Ok(advertised)
 }
 
-fn validate_reserved_orchestration_manifests(
-    source_id: &str,
-    manifests: &[ToolManifest],
-) -> Result<(), ReconfigureError> {
-    for manifest in manifests {
-        let Some(required_source_id) =
-            crate::tool_provider::first_party_orchestration_source_id(&manifest.id)
-        else {
-            continue;
-        };
-        if source_id != required_source_id {
-            return Err(ReconfigureError::ReservedOrchestrationToolId {
-                tool_id: manifest.id.clone(),
-                source_id: source_id.to_string(),
-                required_source_id,
-            });
-        }
-    }
-    Ok(())
-}
-
 fn insert_advertised_entry(
     advertised: &mut BTreeMap<ToolId, ToolRegistryEntry>,
-    source_id: &str,
+    source_key: &ToolSourceKey,
+    kind: ToolRegistrationKind,
     manifest: ToolManifest,
-    preferred_source_id: Option<&str>,
+    preferred_source_key: Option<&ToolSourceKey>,
     hidden_tool_names: &BTreeSet<String>,
 ) -> Result<(), ReconfigureError> {
     let id_conflict = advertised.get(&manifest.id).map(|entry| {
@@ -197,9 +196,10 @@ fn insert_advertised_entry(
             manifest.id.clone(),
             entry
                 .binding
-                .source_id()
+                .source_key()
                 .expect("advertised entries are bound")
-                .to_string(),
+                .clone(),
+            entry.registration_kind(),
         )
     });
     let name_conflict = advertised.iter().find_map(|(id, entry)| {
@@ -208,85 +208,120 @@ fn insert_advertised_entry(
                 id.clone(),
                 entry
                     .binding
-                    .source_id()
+                    .source_key()
                     .expect("advertised entries are bound")
-                    .to_string(),
+                    .clone(),
             )
         })
     });
 
-    let conflicts = [id_conflict.as_ref(), name_conflict.as_ref()]
+    if let Some((tool_id, owner, existing_kind)) = id_conflict.as_ref()
+        && *existing_kind != kind
+    {
+        let leaf_source_id = if kind == ToolRegistrationKind::Leaf {
+            source_key.to_string()
+        } else {
+            owner.to_string()
+        };
+        return Err(ReconfigureError::CrossLaneToolIdCollision {
+            tool_id: tool_id.clone(),
+            leaf_source_id,
+        });
+    }
+
+    let conflicts = [
+        id_conflict.as_ref().map(|(id, owner, _)| (id, owner)),
+        name_conflict.as_ref().map(|(id, owner)| (id, owner)),
+    ]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
     if !conflicts.is_empty() {
-        if preferred_source_id == Some(source_id) {
+        if preferred_source_key == Some(source_key) {
             for (id, _) in conflicts {
                 advertised.remove(id);
             }
         } else if conflicts
             .iter()
-            .any(|(_, owner)| preferred_source_id == Some(owner.as_str()))
+            .any(|(_, owner)| preferred_source_key == Some(*owner))
         {
             return Ok(());
-        } else if let Some((_, owner)) = id_conflict {
+        } else if let Some((_, owner, _)) = id_conflict {
             return Err(ReconfigureError::Validation(format!(
-                "duplicate tool id `{}` from source `{source_id}` conflicts with source `{owner}`",
+                "duplicate tool id `{}` from source `{source_key}` conflicts with source `{owner}`",
                 manifest.id
             )));
         } else if let Some((id, owner)) = name_conflict {
             return Err(ReconfigureError::Validation(format!(
-                "duplicate tool name `{}` from source `{source_id}` conflicts with tool id `{id}` from source `{owner}`",
+                "duplicate tool name `{}` from source `{source_key}` conflicts with tool id `{id}` from source `{owner}`",
                 manifest.name
             )));
         }
     }
 
-    let entry = bound_tool_entry(manifest, source_id, hidden_tool_names);
+    let entry = bound_tool_entry(manifest, source_key.clone(), kind, hidden_tool_names);
     advertised.insert(entry.manifest.id.clone(), entry);
     Ok(())
 }
 
 fn bound_tool_entry(
     manifest: ToolManifest,
-    source_id: impl Into<String>,
+    source_key: ToolSourceKey,
+    kind: ToolRegistrationKind,
     hidden_tool_names: &BTreeSet<String>,
 ) -> ToolRegistryEntry {
-    let mut entry = ToolRegistryEntry::new(manifest, source_id);
+    let mut entry = ToolRegistryEntry::new(manifest, source_key, kind);
     entry.member = !hidden_tool_names.contains(&entry.manifest.name);
     entry
 }
 
 fn resolve_snapshot_id(
     id: &ToolId,
-    sources: &BTreeMap<String, Arc<dyn ToolSourceExecutor>>,
-    preferred_source_id: Option<&str>,
-) -> Result<Option<(String, ToolManifest)>, ReconfigureError> {
+    sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
+    preferred_source_key: Option<&ToolSourceKey>,
+) -> Result<Option<(ToolSourceKey, ToolManifest, ToolRegistrationKind)>, ReconfigureError> {
     let mut matches = Vec::new();
-    for (source_id, source) in sources {
+    for (source_key, source) in sources {
         let Some(manifest) = source.resolve_manifest_by_id(id) else {
             continue;
         };
-        validate_reserved_orchestration_manifests(source_id, std::slice::from_ref(&manifest))?;
         if manifest.id != *id {
             return Err(ReconfigureError::Validation(format!(
-                "source `{source_id}` resolved tool id `{id}` with mismatched manifest id `{}`",
+                "source `{source_key}` resolved tool id `{id}` with mismatched manifest id `{}`",
                 manifest.id
             )));
         }
         matches.push((
-            source_id.clone(),
+            source_key.clone(),
             manifest_with_compact_contract(source.as_ref(), manifest),
+            source.registration_kind(),
         ));
     }
 
+    if matches
+        .iter()
+        .any(|(_, _, kind)| *kind == ToolRegistrationKind::Leaf)
+        && matches
+            .iter()
+            .any(|(_, _, kind)| *kind == ToolRegistrationKind::Orchestrating)
+    {
+        let leaf_source_id = matches
+            .iter()
+            .find(|(_, _, kind)| *kind == ToolRegistrationKind::Leaf)
+            .map(|(source_key, _, _)| source_key.to_string())
+            .expect("mixed registration kinds include a leaf source");
+        return Err(ReconfigureError::CrossLaneToolIdCollision {
+            tool_id: id.clone(),
+            leaf_source_id,
+        });
+    }
     if matches.len() <= 1 {
         return Ok(matches.pop());
     }
-    if let Some(preferred_source_id) = preferred_source_id
+    if let Some(preferred_source_key) = preferred_source_key
         && let Some(preferred) = matches
             .into_iter()
-            .find(|(source_id, _)| source_id == preferred_source_id)
+            .find(|(source_key, _, _)| source_key == preferred_source_key)
     {
         return Ok(Some(preferred));
     }

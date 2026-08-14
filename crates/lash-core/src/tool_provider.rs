@@ -22,7 +22,6 @@ mod triggers;
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
-pub(crate) use orchestration::first_party_orchestration_source_id;
 pub use process::ToolSessionProcessAdmin;
 pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;
@@ -334,7 +333,6 @@ pub struct ToolContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    pub(crate) first_party_orchestration: bool,
 }
 
 #[derive(Clone)]
@@ -547,7 +545,6 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
-            first_party_orchestration: false,
         }
     }
 }
@@ -596,7 +593,6 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
-            first_party_orchestration: self.first_party_orchestration,
         })
     }
 
@@ -648,11 +644,6 @@ impl<'run> ToolContext<'run> {
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     ) -> ToolContextBuilder<'run> {
         ToolContextBuilder::from_dispatch(dispatch)
-    }
-
-    pub(crate) fn with_first_party_orchestration(mut self) -> Self {
-        self.first_party_orchestration = true;
-        self
     }
 
     /// Exposes session id to protocol and process-engine implementors while preparing or executing

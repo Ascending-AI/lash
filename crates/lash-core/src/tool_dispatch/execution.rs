@@ -23,14 +23,17 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
     let started = context.clock.now();
     let tool_name = prepared.tool_name.clone();
     let args = prepared.args.clone();
-    let tool_context = tool_context
-        .with_prepared_payload(prepared.prepared_payload.clone())
-        .with_first_party_orchestration();
-    let result = std::panic::AssertUnwindSafe(context.tools.execute_by_id(
-        &prepared.tool_id,
-        &prepared.args,
-        &tool_context,
-    ))
+    let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
+    let orchestration_context =
+        crate::tool_provider::orchestration::OrchestrationContext::new(tool_context);
+    let result = std::panic::AssertUnwindSafe(async {
+        let Some(registry) = context.tool_registry.as_deref() else {
+            return ToolResult::err_fmt("orchestrating registration is missing its tool registry");
+        };
+        registry
+            .execute_orchestrating_by_id(&prepared.tool_id, &prepared.args, &orchestration_context)
+            .await
+    })
     .catch_unwind()
     .await
     .unwrap_or_else(|payload| {

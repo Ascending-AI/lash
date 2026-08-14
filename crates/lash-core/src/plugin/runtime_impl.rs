@@ -348,8 +348,9 @@ fn build_tool_registry(
             .or_default()
             .push(Arc::clone(&registered.hook));
     }
-    let registry = crate::ToolRegistry::from_tool_provider_sources_with_hidden_tools(
+    let registry = crate::ToolRegistry::from_tool_registrations_with_hidden_tools(
         providers_by_source.into_iter().collect(),
+        contributions.orchestrating_tools.clone(),
         tool_access.hidden_tools.clone(),
     )
     .map_err(|err| PluginError::Registration(format!("failed to build tool registry: {err}")))?;

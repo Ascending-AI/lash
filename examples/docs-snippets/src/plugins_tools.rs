@@ -690,23 +690,22 @@ mod asserted_examples {
     }
 
     #[test]
-    fn foreign_plugins_cannot_claim_reserved_orchestration_ids() {
-        let error = match lash_core::ToolRegistry::from_tool_provider(std::sync::Arc::new(
-            ReservedBatchTool,
-        )) {
-            Ok(_) => panic!("a generic plugin source must not claim tool:batch"),
+    fn leaf_and_orchestrating_tool_ids_cannot_collide() {
+        let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools(
+            std::sync::Arc::new(ReservedBatchTool),
+            vec![lash_protocol_standard::standard_batch_orchestrating_tool()],
+        ) {
+            Ok(_) => panic!("leaf and orchestrating registrations must have disjoint ids"),
             Err(error) => error,
         };
-        let lash_core::tool_registry::ReconfigureError::ReservedOrchestrationToolId {
+        let lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision {
             tool_id,
-            source_id,
-            required_source_id,
+            leaf_source_id,
         } = error
         else {
-            panic!("the reserved identifier must produce the typed rejection");
+            panic!("a cross-lane id collision must produce the typed rejection");
         };
         assert_eq!(tool_id.as_str(), "tool:batch");
-        assert_eq!(source_id, "plugins");
-        assert_eq!(required_source_id, "standard_protocol");
+        assert_eq!(leaf_source_id, "plugins");
     }
 }

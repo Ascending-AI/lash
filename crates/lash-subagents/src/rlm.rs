@@ -149,6 +149,48 @@ impl RlmSubagentToolsProvider {
     }
 }
 
+struct SpawnAgentOrchestratingTool {
+    provider: Arc<RlmSubagentToolsProvider>,
+}
+
+pub(crate) fn spawn_agent_orchestrating_tool(
+    provider: Arc<RlmSubagentToolsProvider>,
+) -> lash_core::facade_support::OrchestratingToolDef {
+    let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
+        Arc::new(SpawnAgentOrchestratingTool { provider });
+    // SAFETY: this crate owns the spawn-agent tool contract and body.
+    unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
+}
+
+#[async_trait]
+impl lash_core::facade_support::OrchestratingToolImplementation for SpawnAgentOrchestratingTool {
+    fn manifest(&self) -> lash_core::ToolManifest {
+        spawn_agent_tool_definition(&self.provider.registry.names()).manifest()
+    }
+
+    fn contract(&self) -> Arc<lash_core::ToolContract> {
+        Arc::new(spawn_agent_tool_definition(&self.provider.registry.names()).contract())
+    }
+
+    async fn prepare_tool_call(
+        &self,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolResult> {
+        let args = call.pending.args.clone();
+        self.provider
+            .prepare_spawn_agent(&args, call.context, call.tool_id, call.pending)
+            .await
+    }
+
+    async fn execute(
+        &self,
+        args: &Value,
+        context: &lash_core::facade_support::OrchestrationContext<'_>,
+    ) -> ToolResult {
+        finalise_tool_result(self.provider.execute_orchestration(args, context).await)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PreparedSpawnAgent {
     process_id: String,
@@ -191,30 +233,13 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
         &self,
         tool_id: &lash_core::ToolId,
         pending: PendingToolCall,
-        context: &ToolPrepareContext,
+        _context: &ToolPrepareContext,
     ) -> Result<PreparedToolCall, ToolResult> {
-        if pending.tool_name == "spawn_agent" {
-            let args = pending.args.clone();
-            self.prepare_spawn_agent(&args, context, tool_id.clone(), pending)
-                .await
-        } else {
-            Ok(PreparedToolCall::identity(tool_id.clone(), pending))
-        }
+        Ok(PreparedToolCall::identity(tool_id.clone(), pending))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         let result = match call.name {
-            "spawn_agent" => {
-                let Some(context) =
-                    lash_core::facade_support::first_party_orchestration_context(call.context)
-                else {
-                    return finalise_tool_result(Err(
-                        "spawn_agent executes only through the first-party process-replay path"
-                            .to_string(),
-                    ));
-                };
-                self.execute_orchestration(call.args, &context).await
-            }
             "submit_error" => return rlm_support::submit_error_tool_result(call.args),
             other => Err(format!("Unknown tool: {other}")),
         };
@@ -223,16 +248,15 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
 }
 
 impl RlmSubagentToolsProvider {
-    /// Build the cached subagent tool provider. The served definitions are
-    /// fixed once the provider is constructed (they depend only on the
-    /// registered capability names and whether `submit_error` is exposed).
-    pub(crate) fn into_provider(self) -> StaticToolProvider<Self> {
-        let definitions = self.tool_definitions();
+    /// Build the leaf-only provider for `submit_error`. `spawn_agent` is
+    /// registered separately in the orchestrating lane.
+    pub(crate) fn into_leaf_provider(self) -> StaticToolProvider<Self> {
+        let definitions = self.leaf_tool_definitions();
         StaticToolProvider::new(definitions, self)
     }
 
-    fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        let mut definitions = rlm_subagent_tool_definitions(&self.registry.names());
+    fn leaf_tool_definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions = Vec::new();
         if self.include_submit_error {
             definitions.push(rlm_support::submit_error_tool_definition());
         }
@@ -240,6 +264,7 @@ impl RlmSubagentToolsProvider {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn rlm_subagent_tool_definitions(capability_names: &[String]) -> Vec<ToolDefinition> {
     vec![spawn_agent_tool_definition(capability_names)]
 }

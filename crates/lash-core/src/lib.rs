@@ -83,16 +83,9 @@ pub mod facade_support {
         SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainError,
         SelectedQueuedWorkDrainOutcome, SelectedQueuedWorkDrainRefusalCause,
     };
-    pub use crate::tool_provider::orchestration::OrchestrationContext;
-    /// Recover the restricted workflow context for a runtime-selected,
-    /// first-party orchestration call. Registry registration reserves each id
-    /// to its first-party source, and dispatch verifies that resolved source;
-    /// leaf providers always receive `None`.
-    pub fn first_party_orchestration_context<'run>(
-        context: &crate::ToolContext<'run>,
-    ) -> Option<OrchestrationContext<'run>> {
-        OrchestrationContext::from_tool_context(context)
-    }
+    pub use crate::tool_provider::orchestration::{
+        OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
+    };
     /// Build the core-level tool-registry projection through the same plugin
     /// composition path used for runtime sessions.
     pub fn build_core_tool_registry(

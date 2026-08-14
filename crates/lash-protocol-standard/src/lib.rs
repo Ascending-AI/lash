@@ -35,13 +35,15 @@ pub mod scenario_contracts;
 use batch::batch_tool_definition;
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, LlmOutputPart, LlmResponse,
-    ProtocolBuildInput, SessionError, ToolCall, ToolContract, ToolManifest, ToolProvider,
-    ToolResult, TurnDriverConfig, TurnDriverPreamble, facade_support::ToolInvocation,
-    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
-    facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
-    facade_support::reasoning_part,
+    ProtocolBuildInput, SessionError, ToolResult, TurnDriverConfig, TurnDriverPreamble,
+    facade_support::ToolInvocation, facade_support::TurnFinish, facade_support::TurnOutcome,
+    facade_support::TurnStop, facade_support::append_assistant_text_part,
+    facade_support::normalized_response_parts, facade_support::reasoning_part,
 };
 use serde_json::Value;
+
+#[cfg(test)]
+use lash_core::{ToolCall, ToolContract, ToolManifest, ToolProvider};
 
 const STANDARD_EXECUTION_SECTION: &str = r#"Use direct tool calls.
 
@@ -94,7 +96,8 @@ impl SessionPlugin for StandardProtocolPlugin {
         reg.protocol().session(Arc::new(StandardProtocolSession))?;
         reg.protocol()
             .protocol_driver(Arc::new(StandardProtocolDriver))?;
-        reg.tools().provider(Arc::new(StandardProtocolTools))?;
+        reg.tools()
+            .orchestrating(standard_batch_orchestrating_tool())?;
         Ok(())
     }
 }
@@ -144,39 +147,35 @@ fn turn_limit_exhausted_message(message_id: String, max_turns: usize) -> Message
     }
 }
 
-struct StandardProtocolTools;
-
 /// First-party facade support for hosts whose protocol driver is not Standard
-/// but which still install the native batch operation.
+/// but which enable the native batch orchestrating operation in their builder
+/// configuration.
 #[doc(hidden)]
-pub fn standard_batch_tool_provider() -> Arc<dyn ToolProvider> {
-    Arc::new(StandardProtocolTools)
+pub fn standard_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {
+    let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
+        Arc::new(StandardBatchOrchestratingTool);
+    // SAFETY: this crate owns the Standard batch tool contract and body.
+    unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
 }
 
+struct StandardBatchOrchestratingTool;
+
 #[async_trait]
-impl ToolProvider for StandardProtocolTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        vec![batch_tool_definition().manifest()]
+impl lash_core::facade_support::OrchestratingToolImplementation for StandardBatchOrchestratingTool {
+    fn manifest(&self) -> lash_core::ToolManifest {
+        batch_tool_definition().manifest()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        (name == "batch").then(|| Arc::new(batch_tool_definition().contract()))
+    fn contract(&self) -> Arc<lash_core::ToolContract> {
+        Arc::new(batch_tool_definition().contract())
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        match call.name {
-            "batch" => {
-                let Some(context) =
-                    lash_core::facade_support::first_party_orchestration_context(call.context)
-                else {
-                    return ToolResult::err_fmt(
-                        "batch requires the first-party process-replay path",
-                    );
-                };
-                execute_orchestration(call.args, &context).await
-            }
-            _ => ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
-        }
+    async fn execute(
+        &self,
+        args: &Value,
+        context: &lash_core::facade_support::OrchestrationContext<'_>,
+    ) -> ToolResult {
+        execute_orchestration(args, context).await
     }
 }
 

@@ -50,6 +50,10 @@ pub struct ToolStateEntry {
     /// the model. Hosts toggle this via `set_tool_membership`.
     #[serde(default = "is_member_default", skip_serializing_if = "is_default_member")]
     member: bool,
+    /// Registration lane is durable registry identity. Missing values from
+    /// pre-cutover snapshots decode as leaf registrations.
+    #[serde(default, skip_serializing_if = "is_leaf_registration")]
+    registration_kind: ToolRegistrationKind,
 }
 
 impl ToolStateEntry {
@@ -59,6 +63,7 @@ impl ToolStateEntry {
             manifest,
             orphaned: false,
             member: true,
+            registration_kind: ToolRegistrationKind::Leaf,
         }
     }
 
@@ -80,6 +85,10 @@ impl ToolStateEntry {
     pub fn is_member(&self) -> bool {
         self.member && !self.orphaned
     }
+}
+
+fn is_leaf_registration(kind: &ToolRegistrationKind) -> bool {
+    *kind == ToolRegistrationKind::Leaf
 }
 
 #[derive(Clone, Debug, Default)]
@@ -185,6 +194,12 @@ impl<'de> Deserialize<'de> for ToolState {
 #[async_trait::async_trait]
 pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     fn id(&self) -> &str;
+    fn source_key(&self) -> ToolSourceKey {
+        ToolSourceKey::Leaf(self.id().to_string())
+    }
+    fn registration_kind(&self) -> ToolRegistrationKind {
+        ToolRegistrationKind::Leaf
+    }
     fn advertised_tools(&self) -> Vec<ToolManifest>;
     fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
         self.advertised_tools()
@@ -213,6 +228,14 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         args: &serde_json::Value,
         context: &ToolContext<'_>,
     ) -> ToolResult;
+    async fn execute_orchestrating(
+        &self,
+        _tool_id: &ToolId,
+        _args: &serde_json::Value,
+        _context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> ToolResult {
+        ToolResult::err_fmt("leaf tools cannot execute in the orchestrating registration lane")
+    }
     fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
         false
     }

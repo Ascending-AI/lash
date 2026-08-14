@@ -258,8 +258,9 @@ impl AgentScenarioSetup {
                 ))
                 .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
                     "agent-scenario-standard-batch",
-                    lash_core::facade_support::PluginSpec::new()
-                        .with_tool_provider(lash_protocol_standard::standard_batch_tool_provider()),
+                    lash_core::facade_support::PluginSpec::new().with_orchestrating_tool(
+                        lash_protocol_standard::standard_batch_orchestrating_tool(),
+                    ),
                 )));
         }
         if self.install_llm_tools {
