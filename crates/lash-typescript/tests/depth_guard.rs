@@ -78,7 +78,7 @@ fn delimiter_free_nesting_returns_a_named_diagnostic_without_aborting() {
     const SHAPES: [&str; 5] = ["not", "minus", "typeof", "ternary", "binary"];
     if let Some(shape) = std::env::var_os(CHILD_ENV) {
         let shape = shape.to_string_lossy();
-        let source = delimiter_free_source(&shape, 10_000);
+        let source = delimiter_free_source(&shape, 4_000);
         let error = lash_typescript::parse(&source).expect_err("nesting must be rejected");
         assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
         return;
@@ -414,6 +414,17 @@ const RECURSIVE_FAMILIES: &[(&str, &str, &str)] = &[
     ("statement-block", "{", "const q = 1;"),
     ("statement-label", "a:", "1;"),
     ("statement-label-distinct", "l:", "1;"),
+    // Contextual keywords are legal label names. They are ordinary identifiers
+    // to the parser and reserved words to the ASI rules, and the label charge
+    // must not be gated on the second answer.
+    ("statement-label-type", "type:", "1;"),
+    ("statement-label-of", "of:", "1;"),
+    ("statement-label-let", "let:", "1;"),
+    ("statement-label-keyof", "keyof:", "1;"),
+    ("statement-label-readonly", "readonly:", "1;"),
+    ("statement-label-as", "as:", "1;"),
+    ("statement-label-alternating", "type:of:", "1;"),
+    ("statement-label-mixed-reserved", "type:a:let:", "1;"),
     ("statement-try", "try {", "const q = 1;"),
     ("statement-switch", "switch (a) {", "const q = 1;"),
     ("statement-class", "class C {", ""),
@@ -450,6 +461,9 @@ fn family_source(unit: &str, tail: &str, repeats: usize, per_line: bool) -> Stri
     } else {
         unit.to_string()
     };
+    // Never build a source the size guard would reject before the nesting guard
+    // sees it: the unit sweep is about the nesting diagnostic.
+    let repeats = repeats.min((lash_typescript::MAX_SOURCE_BYTES - 64) / unit.len().max(1));
     let body = unit.repeat(repeats);
     // A leading binding keeps the postfix, member and cast families applied to a
     // real expression, which is the shape that recurses.
@@ -468,7 +482,9 @@ fn family_source(unit: &str, tail: &str, repeats: usize, per_line: bool) -> Stri
 #[test]
 fn every_recursive_production_family_rejects_without_aborting() {
     const CHILD_ENV: &str = "LASH_TS_FAMILY_CHILD";
-    const REPEATS: usize = 100_000;
+    // Fill the accepted source bound, which is the deepest an accepted cell
+    // can nest. For a two-byte unit that is over thirty thousand levels.
+    const REPEATS: usize = lash_typescript::MAX_SOURCE_BYTES / 2;
     if let Some(family) = std::env::var_os(CHILD_ENV) {
         let family = family.to_string_lossy().to_string();
         let (_, unit, tail) = RECURSIVE_FAMILIES
@@ -658,7 +674,7 @@ fn lexical_source(unit: &str, repeats: usize, per_line: bool) -> String {
 #[test]
 fn lexical_units_reject_without_aborting() {
     const CHILD_ENV: &str = "LASH_TS_LEXICAL_CHILD";
-    const REPEATS: usize = 20_000;
+    const REPEATS: usize = 4_000;
     if let Some(unit) = std::env::var_os(CHILD_ENV) {
         let unit = unit.to_string_lossy().to_string();
         let sources = [
