@@ -458,6 +458,34 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             justfile,
         )
         self.assertIn("run build", justfile)
+        self.assertIn(
+            'npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" test',
+            justfile,
+        )
+
+    def test_asserting_operator_e2es_are_in_functional_matrix(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        functional = workflow_job_block(workflow, "functional-e2e")
+
+        for name, recipe in (
+            ("process-operations", "process-operations-e2e"),
+            ("version-bump-recreation", "version-bump-recreation-e2e"),
+            ("session-lease-triage", "session-lease-triage-e2e"),
+        ):
+            self.assertIn(f"- name: {name}", functional)
+            self.assertIn(f"recipe: {recipe}", functional)
+            self.assertIn(f"artifact: {name}", functional)
+
+        for artifact_dir in (
+            "process-operations",
+            "version-bump-recreation",
+            "session-lease-triage",
+        ):
+            self.assertIn(
+                f"target/functional-e2e-artifacts/{artifact_dir}", functional
+            )
+        self.assertIn("if: failure() && matrix.artifact != 'none'", functional)
+        self.assertIn("Upload functional E2E failure artifacts", functional)
 
     def test_sim_search_lane_is_sharded_and_budgeted_at_plan_targets(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
