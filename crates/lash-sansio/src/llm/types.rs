@@ -552,7 +552,7 @@ impl std::error::Error for NonNegativeFiniteF64Error {}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GenerationProjectionProvenance {
-    stop_sequences_replaced_by_protocol: bool,
+    stop_sequences_suppressed_by_protocol: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -573,8 +573,9 @@ pub struct GenerationOptions {
     /// Literal sequences that terminate generation. Adapters emit these only
     /// on provider wires with a native stop-sequence field; streaming callers
     /// must still be prepared to stop locally when a provider cannot. A
-    /// protocol with a grammar-owned boundary may replace this entire list;
-    /// the resulting disposition is `ReplacedProtocolOwned`, not `Applied`.
+    /// protocol whose grammar owns the response boundary may suppress this
+    /// entire list; the resulting disposition is `SuppressedProtocolOwned`,
+    /// not `Applied`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stop_sequences: Vec<String>,
     /// In-process projection provenance. This is not caller generation intent
@@ -590,17 +591,18 @@ impl GenerationOptions {
             .map(|value| value as u64)
     }
 
-    /// Replace caller stop sequences with a protocol-owned boundary and retain
-    /// whether a non-empty caller list was displaced for disposition reporting.
-    pub fn replace_stop_sequences_for_protocol(&mut self, stop_sequences: Vec<String>) {
+    /// Suppress caller stop sequences because the protocol grammar owns the
+    /// response boundary, retaining whether caller intent was displaced for
+    /// disposition reporting.
+    pub fn suppress_stop_sequences_for_protocol(&mut self) {
         self.projection_provenance
-            .stop_sequences_replaced_by_protocol = !self.stop_sequences.is_empty();
-        self.stop_sequences = stop_sequences;
+            .stop_sequences_suppressed_by_protocol = !self.stop_sequences.is_empty();
+        self.stop_sequences.clear();
     }
 
-    pub fn stop_sequences_replaced_by_protocol(&self) -> bool {
+    pub fn stop_sequences_suppressed_by_protocol(&self) -> bool {
         self.projection_provenance
-            .stop_sequences_replaced_by_protocol
+            .stop_sequences_suppressed_by_protocol
     }
 
     /// Layer these options over `base`: an option this value sets wins, an
@@ -644,10 +646,10 @@ pub enum GenerationOptionDisposition {
     NotRequested,
     /// The caller asked for it and the request carries it.
     Applied,
-    /// A protocol replaced the caller's non-empty stop list with its own
-    /// response boundary. This is intentional protocol ownership, but the
-    /// caller's requested value did not reach the wire.
-    ReplacedProtocolOwned,
+    /// A protocol suppressed the caller's non-empty stop list because its
+    /// grammar owns the response boundary. This is intentional protocol
+    /// ownership, but the caller's requested value did not reach the wire.
+    SuppressedProtocolOwned,
     /// The caller asked for it and it is not expressible here: the endpoint
     /// has no field for it, or this adapter's use of the endpoint does not
     /// send one. Codex declines request controls by policy even when its
@@ -696,7 +698,7 @@ impl GenerationOptionDisposition {
     pub fn is_omitted(self) -> bool {
         matches!(
             self,
-            Self::ReplacedProtocolOwned | Self::OmittedUnsupported | Self::OmittedSamplingPinned
+            Self::SuppressedProtocolOwned | Self::OmittedUnsupported | Self::OmittedSamplingPinned
         )
     }
 
@@ -955,6 +957,9 @@ pub struct ExecutionEvidence {
     pub provider_request_id: Option<String>,
     #[serde(default)]
     pub reasoning_output_tokens: Option<u64>,
+    /// Provider-reported terminal reason in that provider's own vocabulary.
+    /// Compatible gateways prefer their native reason over a normalized
+    /// OpenAI-compatible `finish_reason` when both are present.
     #[serde(default)]
     pub provider_finish_reason: Option<String>,
 }
@@ -1090,12 +1095,12 @@ mod generation_disposition_tests {
         assert_eq!(untouched, GenerationDisposition::default());
         assert!(untouched.nothing_omitted());
 
-        let replaced = GenerationDisposition {
-            stop_sequences: GenerationOptionDisposition::ReplacedProtocolOwned,
+        let suppressed = GenerationDisposition {
+            stop_sequences: GenerationOptionDisposition::SuppressedProtocolOwned,
             ..Default::default()
         };
-        assert!(!replaced.nothing_omitted());
-        assert!(!replaced.fully_honored());
+        assert!(!suppressed.nothing_omitted());
+        assert!(!suppressed.fully_honored());
 
         let dropped = GenerationDisposition {
             output_token_cap: GenerationOptionDisposition::applied(true),

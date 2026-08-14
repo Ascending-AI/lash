@@ -73,21 +73,6 @@ fn transform_final_response(
     mut response: lash_core::LlmResponse,
 ) -> lash_core::LlmResponse {
     if !detector.cell_closed {
-        if !crate::response_boundary::stopped_at_owned_cell_boundary(&response) {
-            return response;
-        }
-        let Some(closed) = crate::response_boundary::close_unclosed_owned_cell(&response.full_text)
-        else {
-            return response;
-        };
-        response.full_text = closed.clone();
-        response
-            .parts
-            .retain(|part| !matches!(part, lash_core::LlmOutputPart::Text { .. }));
-        response.parts.push(lash_core::LlmOutputPart::Text {
-            text: closed,
-            response_meta: None,
-        });
         return response;
     }
 
@@ -635,54 +620,6 @@ mod tests {
         let transformed = transform_final_response(&d, response.clone());
         assert_eq!(transformed.full_text, response.full_text);
         assert_eq!(transformed.parts, response.parts);
-    }
-
-    #[test]
-    fn provider_stop_sequence_closes_a_streamed_cell_when_the_literal_is_withheld() {
-        let mut detector = CellDetector::new();
-        assert_eq!(
-            detector
-                .process_chunk("Visible.\n<lashlang>\nfinish \"ok\"")
-                .chunk,
-            "Visible.\n"
-        );
-        assert!(detector.inside_cell);
-        assert!(!detector.cell_closed);
-
-        let response = lash_core::LlmResponse {
-            full_text: "Visible.\n<lashlang>\nfinish \"ok\"".to_string(),
-            parts: vec![lash_core::LlmOutputPart::Text {
-                text: "Visible.\n<lashlang>\nfinish \"ok\"".to_string(),
-                response_meta: None,
-            }],
-            terminal_reason: lash_core::LlmTerminalReason::Stop,
-            execution_evidence: Some(lash_core::ExecutionEvidence {
-                provider_finish_reason: Some("stop_sequence".to_string()),
-                ..Default::default()
-            }),
-            generation_disposition: Some(lash_core::GenerationDisposition {
-                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
-                ..Default::default()
-            }),
-            ..lash_core::LlmResponse::default()
-        };
-
-        let transformed = transform_final_response(&detector, response);
-        assert_eq!(
-            transformed.full_text,
-            "Visible.\n<lashlang>\nfinish \"ok\"\n</lashlang>"
-        );
-        assert_eq!(
-            transformed
-                .parts
-                .iter()
-                .filter_map(|part| match part {
-                    lash_core::LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            vec![transformed.full_text.as_str()]
-        );
     }
 
     #[test]

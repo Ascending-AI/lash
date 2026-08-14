@@ -418,8 +418,8 @@ impl From<core_llm::GenerationOptionDisposition> for RemoteGenerationOptionDispo
         match value {
             core_llm::GenerationOptionDisposition::NotRequested => Self::NotRequested,
             core_llm::GenerationOptionDisposition::Applied => Self::Applied,
-            core_llm::GenerationOptionDisposition::ReplacedProtocolOwned => {
-                Self::ReplacedProtocolOwned
+            core_llm::GenerationOptionDisposition::SuppressedProtocolOwned => {
+                Self::SuppressedProtocolOwned
             }
             core_llm::GenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
             core_llm::GenerationOptionDisposition::OmittedSamplingPinned => {
@@ -435,8 +435,8 @@ impl From<RemoteGenerationOptionDisposition> for core_llm::GenerationOptionDispo
         match value {
             RemoteGenerationOptionDisposition::NotRequested => Self::NotRequested,
             RemoteGenerationOptionDisposition::Applied => Self::Applied,
-            RemoteGenerationOptionDisposition::ReplacedProtocolOwned => {
-                Self::ReplacedProtocolOwned
+            RemoteGenerationOptionDisposition::SuppressedProtocolOwned => {
+                Self::SuppressedProtocolOwned
             }
             RemoteGenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
             RemoteGenerationOptionDisposition::OmittedSamplingPinned => {

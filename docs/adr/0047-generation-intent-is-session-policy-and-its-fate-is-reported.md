@@ -82,12 +82,13 @@ the trace record, and the remote mirror, so a host asserts "nothing was dropped"
 trusting that one temperature survived every model a run touched.
 
 Protocol-owned response boundaries are the deliberate exception to caller ownership. A
-protocol projector may replace a non-empty caller `stop_sequences` list when its grammar
-requires one unambiguous boundary. That replacement is not `Applied`: the runtime reports
-`ReplacedProtocolOwned`, which makes both `nothing_omitted()` and `fully_honored()` false.
+protocol projector may suppress a non-empty caller `stop_sequences` list when the protocol
+grammar owns the boundary and a provider wire stop could truncate that grammar. The wire
+then carries no stop sequences. That suppression is not `Applied`: the runtime reports
+`SuppressedProtocolOwned`, which makes both `nothing_omitted()` and `fully_honored()` false.
 Projection provenance is carried in-process on the projected request, then copied onto the
 response, partial response, and every attempt record; it is not a caller-controlled wire
-flag. An empty caller list remains ordinary protocol intent rather than a replacement.
+flag. An empty caller list remains `NotRequested`.
 
 Prompt-cache intent follows the same rule. An explicit `cache_breakpoint` is `Applied` when
 the adapter emits its cache-control dialect (including OpenAI's `prompt_cache_key`) and

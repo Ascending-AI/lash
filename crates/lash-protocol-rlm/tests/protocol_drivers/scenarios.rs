@@ -545,8 +545,11 @@ fn rlm_protocol_scenario_plugin_stream_mask_splices_chunk_spanning_cell_for_reex
                 "\" second\"\nfinish be",
                 "ta\n</lash",
                 "lang>",
+                "\n<lashlang>\nfinish \"must not be consumed\"\n</lashlang>",
             ],
-            vec![text_part(RESPONSE)],
+            vec![text_part(&format!(
+                "{RESPONSE}\n<lashlang>\nfinish \"must not be consumed\"\n</lashlang>"
+            ))],
         )
         .expect(RlmProtocolExpectations {
             initial_request_tools_empty: true,

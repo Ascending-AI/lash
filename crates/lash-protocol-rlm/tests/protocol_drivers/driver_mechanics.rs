@@ -126,7 +126,7 @@ fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
 }
 
 #[test]
-fn provider_stop_sequence_closes_and_executes_the_owned_cell_boundary() {
+fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
@@ -156,24 +156,23 @@ fn provider_stop_sequence_closes_and_executes_the_owned_cell_boundary() {
     });
 
     let effects = drain_effects(&mut machine);
+    assert!(find_checkpoint(&effects).is_some());
     assert!(
-        effects.iter().any(
-            |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print \"hi\"")
-        )
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
     );
     assert!(effects.iter().any(|effect| matches!(
         effect,
         Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
             if content == "Before"
     )));
-    assert!(
-        !machine
-            .messages()
+    assert!(machine.messages().iter().any(|message| {
+        message
+            .parts
             .iter()
-            .any(|message| message.parts.iter().any(|part| part
-                .content
-                .contains("stop sequence may consume a literal `</lashlang>`")))
-    );
+            .any(|part| part.content.contains("standalone delimiter line"))
+    }));
 }
 
 #[test]
@@ -217,7 +216,7 @@ fn natural_stop_without_applied_boundary_does_not_close_or_execute_a_cell() {
 }
 
 #[test]
-fn stop_sequence_evidence_without_an_applied_protocol_stop_does_not_close_the_cell() {
+fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
@@ -226,7 +225,13 @@ fn stop_sequence_evidence_without_an_applied_protocol_stop_does_not_close_the_ce
     );
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "Visible plan.\n<lashlang>\nprint \"unfinished\"";
+    let text = concat!(
+        "<lashlang>\n",
+        "print \"kept\"\n",
+        "</lashlang>\n",
+        "print \"discarded\"\n",
+        "finish \"also discarded\"",
+    );
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
@@ -234,25 +239,19 @@ fn stop_sequence_evidence_without_an_applied_protocol_stop_does_not_close_the_ce
             full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
-            execution_evidence: Some(lash_core::ExecutionEvidence {
-                provider_finish_reason: Some("stop_sequence".to_string()),
-                ..Default::default()
-            }),
-            generation_disposition: Some(lash_core::GenerationDisposition {
-                stop_sequences: lash_core::GenerationOptionDisposition::NotRequested,
-                ..Default::default()
-            }),
             ..LlmResponse::default()
         }),
     });
 
     let effects = drain_effects(&mut machine);
-    assert!(find_checkpoint(&effects).is_some());
     assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+        effects.iter().any(
+            |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print \"kept\"")
+        )
     );
+    assert!(!effects.iter().any(|effect| {
+        matches!(effect, Effect::ExecCode { code, .. } if code.contains("discarded"))
+    }));
 }
 
 #[test]

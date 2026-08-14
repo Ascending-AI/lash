@@ -302,21 +302,10 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         ));
 
         let mut generation = ctx.config.generation.clone();
-        // RLM owns the generation boundary. Keeping unrelated caller stops
-        // would make a provider's generic `Stop` terminal reason ambiguous.
-        // The typed replacement helper retains that ownership for the
-        // response and attempt dispositions.
-        if retry_requires_literal_cell_boundary(ctx.events) {
-            // Some provider dialects report the same generic stop reason for a
-            // natural ending and a matched stop sequence. Retrying without a
-            // wire stop lets the literal tag reach the parser without ever
-            // treating that ambiguous reason as proof of closure.
-            generation.replace_stop_sequences_for_protocol(Vec::new());
-        } else {
-            generation.replace_stop_sequences_for_protocol(vec![
-                crate::cell_scan::LASHLANG_END_TAG.to_string(),
-            ]);
-        }
+        // The paired-tag grammar is RLM's response boundary. Provider wire
+        // stops, including caller-supplied ones, could withhold that literal
+        // boundary and leave the parser with a truncated cell.
+        generation.suppress_stop_sequences_for_protocol();
 
         Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
@@ -341,28 +330,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             provider_trace: None,
         })
     }
-}
-
-fn retry_requires_literal_cell_boundary(events: &[lash_core::SessionHistoryRecord]) -> bool {
-    for record in events.iter().rev() {
-        let lash_core::SessionHistoryRecord::Protocol(event) = record else {
-            continue;
-        };
-        match crate::projection::decode_rlm_protocol_event(event) {
-            Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(_)) => return false,
-            Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                if diagnostic.phase == "llm_extraction" =>
-            {
-                return diagnostic
-                    .payload
-                    .get("decision")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("retry_unclosed_cell");
-            }
-            _ => {}
-        }
-    }
-    false
 }
 
 fn required_output_block(termination: &RlmTermination) -> Option<String> {
@@ -569,7 +536,7 @@ pub(crate) fn render_conformance_history_message(
 mod tests {
     use super::*;
     use lash_core::session_model::{ConversationRecord, MessageRole, Part, SessionHistoryRecord};
-    use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent, RlmTrajectoryEntry};
+    use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
 
     fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
         SessionHistoryRecord::Conversation(ConversationRecord {
@@ -628,15 +595,6 @@ mod tests {
                 id: id.to_string(),
                 reasoning: String::new(),
                 prose: prose.to_string(),
-            },
-        )))
-    }
-
-    fn extraction_diagnostic(decision: &str) -> SessionHistoryRecord {
-        SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmDiagnostic(
-            RlmDiagnosticEvent {
-                phase: "llm_extraction".to_string(),
-                payload: serde_json::json!({ "decision": decision }),
             },
         )))
     }
@@ -728,14 +686,14 @@ mod tests {
     }
 
     #[test]
-    fn rlm_projector_requests_the_closing_tag_as_a_stop_sequence() {
+    fn rlm_projector_sends_no_stop_sequence_without_caller_stops() {
         let request = project_iteration_request(&projector(100), &[], 0, "test-model");
-        assert_eq!(request.generation.stop_sequences, ["</lashlang>"]);
-        assert!(!request.generation.stop_sequences_replaced_by_protocol());
+        assert!(request.generation.stop_sequences.is_empty());
+        assert!(!request.generation.stop_sequences_suppressed_by_protocol());
     }
 
     #[test]
-    fn rlm_projector_records_protocol_ownership_for_every_nonempty_caller_stop_list() {
+    fn rlm_projector_suppresses_every_nonempty_caller_stop_list() {
         for caller_stops in [
             vec!["caller-boundary".to_string()],
             vec!["</lashlang>".to_string()],
@@ -750,41 +708,9 @@ mod tests {
                     ..Default::default()
                 },
             );
-            assert_eq!(request.generation.stop_sequences, ["</lashlang>"]);
-            assert!(request.generation.stop_sequences_replaced_by_protocol());
+            assert!(request.generation.stop_sequences.is_empty());
+            assert!(request.generation.stop_sequences_suppressed_by_protocol());
         }
-    }
-
-    #[test]
-    fn rlm_projector_retries_an_ambiguous_unclosed_cell_without_a_provider_stop_boundary() {
-        let request = project_iteration_request_with_generation(
-            &projector(100),
-            &[extraction_diagnostic("retry_unclosed_cell")],
-            1,
-            "test-model",
-            lash_core::GenerationOptions {
-                stop_sequences: vec!["caller-boundary".to_string()],
-                ..Default::default()
-            },
-        );
-
-        assert!(request.generation.stop_sequences.is_empty());
-        assert!(request.generation.stop_sequences_replaced_by_protocol());
-    }
-
-    #[test]
-    fn rlm_projector_restores_its_stop_boundary_after_a_completed_cell() {
-        let request = project_iteration_request(
-            &projector(100),
-            &[
-                extraction_diagnostic("retry_unclosed_cell"),
-                step_event(1, "print 1", "1"),
-            ],
-            2,
-            "test-model",
-        );
-
-        assert_eq!(request.generation.stop_sequences, ["</lashlang>"]);
     }
 
     fn message_text(message: &LlmMessage) -> String {

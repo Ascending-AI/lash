@@ -11,7 +11,6 @@ mod plugin;
 mod projection;
 mod protocol;
 mod public_error;
-mod response_boundary;
 mod rlm_support;
 pub mod scenario_contracts;
 mod stream_mask;

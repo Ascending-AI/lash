@@ -677,6 +677,24 @@ fn cell_extraction_silently_drops_trailing_text_after_cell() {
 }
 
 #[test]
+fn standalone_close_tag_line_inside_multiline_source_is_the_cell_boundary() {
+    let text = concat!(
+        "<lashlang>\n",
+        "payload = \"\"\"\n",
+        "</lashlang>\n",
+        "this text is outside the cell\n",
+        "\"\"\"\n",
+        "finish payload\n",
+        "</lashlang>",
+    );
+    let extraction = extract_lashlang_cell(text)
+        .expect("the first standalone closing-tag line owns the boundary")
+        .expect("cell extracts");
+
+    assert_eq!(extraction.code, "payload = \"\"\"");
+}
+
+#[test]
 fn cell_extraction_rejects_multiple_cells() {
     let text = "<lashlang>\nprint 1\n</lashlang>\n<lashlang>\nfinish 2\n</lashlang>";
     assert!(matches!(

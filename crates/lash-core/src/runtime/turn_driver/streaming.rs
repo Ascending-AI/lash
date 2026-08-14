@@ -81,28 +81,28 @@ fn record_clamped_output_token_cap(
     }
 }
 
-/// Narrow the adapter's wire-level report when protocol projection replaced
+/// Narrow the adapter's wire-level report when protocol projection suppressed
 /// caller-owned stop sequences before the request reached the adapter.
-fn record_protocol_owned_stop_replacement(
+fn record_protocol_owned_stop_suppression(
     result: &mut Result<LlmResponse, LlmCallError>,
     call_record: Option<&mut crate::LlmCallRecord>,
 ) {
-    fn replace(disposition: &mut Option<crate::GenerationDisposition>) {
+    fn suppress(disposition: &mut Option<crate::GenerationDisposition>) {
         disposition.get_or_insert_default().stop_sequences =
-            crate::GenerationOptionDisposition::ReplacedProtocolOwned;
+            crate::GenerationOptionDisposition::SuppressedProtocolOwned;
     }
 
     match result {
-        Ok(response) => replace(&mut response.generation_disposition),
+        Ok(response) => suppress(&mut response.generation_disposition),
         Err(error) => {
             if let Some(partial) = error.partial_response.as_deref_mut() {
-                replace(&mut partial.generation_disposition);
+                suppress(&mut partial.generation_disposition);
             }
         }
     }
     if let Some(call_record) = call_record {
         for attempt in &mut call_record.attempts {
-            replace(&mut attempt.generation_disposition);
+            suppress(&mut attempt.generation_disposition);
         }
     }
 }
@@ -230,8 +230,8 @@ impl RuntimeTurnDriver<'_> {
         cancel: &CancellationToken,
     ) -> RuntimeLlmCallOutcome {
         let mut request = (*request).clone();
-        let protocol_replaced_stop_sequences =
-            request.generation.stop_sequences_replaced_by_protocol();
+        let protocol_suppressed_stop_sequences =
+            request.generation.stop_sequences_suppressed_by_protocol();
         let clamped_output_token_cap = self
             .policy
             .model
@@ -534,8 +534,8 @@ impl RuntimeTurnDriver<'_> {
         if clamped_output_token_cap {
             record_clamped_output_token_cap(&mut result, call_record.as_mut());
         }
-        if protocol_replaced_stop_sequences {
-            record_protocol_owned_stop_replacement(&mut result, call_record.as_mut());
+        if protocol_suppressed_stop_sequences {
+            record_protocol_owned_stop_suppression(&mut result, call_record.as_mut());
         }
 
         self.finish_assistant_stream_hooks(assistant_stream_finish_reason(
@@ -1358,7 +1358,7 @@ mod clamp_report_tests {
     }
 
     #[test]
-    fn protocol_stop_replacement_updates_response_and_attempt_ledger() {
+    fn protocol_stop_suppression_updates_response_and_attempt_ledger() {
         let mut result: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
             generation_disposition: applied(),
             ..LlmResponse::default()
@@ -1381,7 +1381,7 @@ mod clamp_report_tests {
             }],
         };
 
-        record_protocol_owned_stop_replacement(&mut result, Some(&mut call_record));
+        record_protocol_owned_stop_suppression(&mut result, Some(&mut call_record));
 
         let response = result.expect("response");
         assert_eq!(
@@ -1389,14 +1389,14 @@ mod clamp_report_tests {
                 .generation_disposition
                 .expect("response disposition")
                 .stop_sequences,
-            crate::GenerationOptionDisposition::ReplacedProtocolOwned
+            crate::GenerationOptionDisposition::SuppressedProtocolOwned
         );
         assert_eq!(
             call_record.attempts[0]
                 .generation_disposition
                 .expect("attempt disposition")
                 .stop_sequences,
-            crate::GenerationOptionDisposition::ReplacedProtocolOwned
+            crate::GenerationOptionDisposition::SuppressedProtocolOwned
         );
     }
 }

@@ -1651,7 +1651,7 @@ fn every_generation_option_disposition_crosses_the_boundary_in_both_directions()
     for core in [
         core_llm::GenerationOptionDisposition::NotRequested,
         core_llm::GenerationOptionDisposition::Applied,
-        core_llm::GenerationOptionDisposition::ReplacedProtocolOwned,
+        core_llm::GenerationOptionDisposition::SuppressedProtocolOwned,
         core_llm::GenerationOptionDisposition::OmittedUnsupported,
         core_llm::GenerationOptionDisposition::OmittedSamplingPinned,
         core_llm::GenerationOptionDisposition::ClampedToCapacity,
@@ -1661,8 +1661,8 @@ fn every_generation_option_disposition_crosses_the_boundary_in_both_directions()
     }
 
     assert_eq!(
-        serde_json::to_value(RemoteGenerationOptionDisposition::ReplacedProtocolOwned)
+        serde_json::to_value(RemoteGenerationOptionDisposition::SuppressedProtocolOwned)
             .expect("serialize"),
-        serde_json::json!("replaced_protocol_owned")
+        serde_json::json!("suppressed_protocol_owned")
     );
 }

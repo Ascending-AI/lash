@@ -20,7 +20,7 @@ impl CellExtractionError {
     pub(super) fn message(self) -> &'static str {
         match self {
             Self::UnclosedCell => {
-                "Model response started a `<lashlang>` block but did not close it. Retry with a complete paired block. The provider's stop sequence may consume a literal `</lashlang>` — if your program or prose must contain it, restructure to avoid the literal."
+                "Model response started a `<lashlang>` block but did not close it. Retry with a complete paired block. A line whose trimmed content is exactly `</lashlang>` closes the cell, including inside multiline source text; construct that content without a standalone delimiter line."
             }
             Self::MultipleCells => {
                 "Model response contained multiple `<lashlang>...</lashlang>` blocks. The blocks were discarded; reply with exactly one paired block containing all work for this step."
@@ -46,22 +46,15 @@ pub fn project_visible_assistant_prose(text: &str) -> String {
 ///
 /// Keep exactly one complete cell and discard anything after it.
 ///
-/// A caller may confirm that the provider stopped specifically on RLM's owned
-/// delimiter. Only that typed evidence closes a cell whose literal delimiter
-/// was withheld; a generic provider stop leaves it unclosed for retry.
-pub(super) fn normalize_cell_boundary(text: &str, close_at_owned_stop: bool) -> String {
+/// The literal delimiter parsed by [`first_lashlang_cell_span`] is the only
+/// authority that closes a cell.
+pub(super) fn normalize_cell_boundary(text: &str) -> String {
     if let Some(span) = first_lashlang_cell_span(text) {
         let trailing = &text[span.end_tag_end..];
         if first_lashlang_cell_span(trailing).is_some() {
             return text.to_string();
         }
         return text[..span.end_tag_end].to_string();
-    }
-
-    if close_at_owned_stop
-        && let Some(closed) = crate::response_boundary::close_unclosed_owned_cell(text)
-    {
-        return closed;
     }
 
     text.to_string()

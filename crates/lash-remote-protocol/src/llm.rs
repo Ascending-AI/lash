@@ -182,7 +182,7 @@ pub enum RemoteGenerationOptionDisposition {
     #[default]
     NotRequested,
     Applied,
-    ReplacedProtocolOwned,
+    SuppressedProtocolOwned,
     OmittedUnsupported,
     OmittedSamplingPinned,
     ClampedToCapacity,
