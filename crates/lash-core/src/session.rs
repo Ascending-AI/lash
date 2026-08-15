@@ -117,6 +117,10 @@ pub struct Session {
     /// and we skip the section/Vec-join work in
     /// `lash_sansio::PromptTemplate::render`.
     prompt_cache: Arc<lash_sansio::PromptCache>,
+    /// Fingerprint of the last model-facing composition emitted to the trace
+    /// sink for this resident session. Effect-driver clones share the slot so
+    /// a mid-turn execution-environment refresh cannot double-emit it.
+    composition_trace_fingerprint: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl Session {
@@ -132,6 +136,7 @@ impl Session {
             context_prompt_contributions: Vec::new(),
             tool_catalog_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
             prompt_cache: Arc::new(lash_sansio::PromptCache::new()),
+            composition_trace_fingerprint: Arc::new(std::sync::Mutex::new(None)),
         };
 
         let protocol_session = Arc::clone(session.plugins().protocol_session());
@@ -156,7 +161,17 @@ impl Session {
             context_prompt_contributions: self.context_prompt_contributions.clone(),
             tool_catalog_cache: Arc::clone(&self.tool_catalog_cache),
             prompt_cache: Arc::clone(&self.prompt_cache),
+            composition_trace_fingerprint: Arc::clone(&self.composition_trace_fingerprint),
         }
+    }
+
+    pub(crate) fn record_composition_trace_fingerprint(&self, fingerprint: &str) -> bool {
+        let mut last = self.composition_trace_fingerprint.lock_recover();
+        if last.as_deref() == Some(fingerprint) {
+            return false;
+        }
+        *last = Some(fingerprint.to_string());
+        true
     }
 
     pub fn session_id(&self) -> &str {

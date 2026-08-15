@@ -442,6 +442,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     provider_id: request.policy.recorded_provider_id().to_string(),
                     model: request.policy.model.clone(),
                     turn_budget: request.policy.turn_budget,
+                    prompt: request.policy.prompt.clone(),
                 },
                 current_frame_node_id: Some(current_frame_node_id),
             },

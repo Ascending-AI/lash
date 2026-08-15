@@ -426,6 +426,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             provider_id: request.policy.recorded_provider_id().to_string(),
             model: request.policy.model.clone(),
             turn_budget: request.policy.turn_budget,
+            prompt: request.policy.prompt.clone(),
         };
         let head = lash_core::store::SessionHeadMeta::assemble(
             lash_core::store::SessionHeadPayload {

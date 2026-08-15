@@ -1132,6 +1132,7 @@ pub(super) fn apply_persisted_session_config(
 ) {
     policy.model = config.model.clone();
     policy.provider_id = config.provider_id.clone();
+    policy.prompt = config.prompt.clone();
 }
 
 /// Restore-time headroom shared by every bare next-turn `turn_index + 1`.

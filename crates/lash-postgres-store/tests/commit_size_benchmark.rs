@@ -79,6 +79,7 @@ fn realistic_commit(
         provider_id: "benchmark".to_string(),
         model: state.policy.model,
         turn_budget: state.policy.turn_budget,
+        prompt: state.policy.prompt,
     };
     commit.graph = GraphAppend {
         leaf_node_id: nodes.last().map(|node| node.node_id.clone()),

@@ -411,6 +411,11 @@ mod asserted_examples {
                 instructions_present: true,
             },
             TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },
+            TraceEvent::CompositionChanged {
+                fingerprint: "sha256:composition".to_string(),
+                rendered_system_prompt: "Use only approved tools.".to_string(),
+                tool_schemas: request.tools.clone(),
+            },
         ];
         let event_wire = serde_json::to_value(&events).expect("trace events must serialize");
         assert_eq!(event_wire[0]["type"], "prompt_built");
@@ -453,6 +458,21 @@ mod asserted_examples {
         assert_eq!(event_wire[10]["instructions_present"], true);
         assert!(event_wire[11]["type"] == "rolling_history_compaction_completed");
         assert_eq!(event_wire[11]["summary_nodes"], 1);
+        assert_eq!(event_wire[12]["type"], "composition_changed");
+        assert_eq!(event_wire[12]["fingerprint"], "sha256:composition");
+        assert_eq!(
+            event_wire[12]["rendered_system_prompt"],
+            "Use only approved tools."
+        );
+        assert_eq!(event_wire[12]["tool_schemas"][0]["name"], "search_docs");
+        assert_eq!(
+            event_wire[12]["tool_schemas"][0]["input_schema"]["required"][0],
+            "query"
+        );
+        assert_eq!(
+            event_wire[12]["tool_schemas"][0]["output_schema"]["required"][0],
+            "matches"
+        );
     }
 }
 

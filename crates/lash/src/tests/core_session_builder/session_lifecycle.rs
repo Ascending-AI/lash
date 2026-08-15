@@ -1352,6 +1352,43 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
 }
 
 #[tokio::test]
+async fn session_created_yesterday_reopens_with_its_committed_prompt_layer() -> Result<()> {
+    let expected_prompt = lash_core::PromptLayer::new().with_contribution(
+        lash_core::PromptContribution::guidance(
+            "Yesterday's policy",
+            "Continue with the committed prompt configuration.",
+        ),
+    );
+    let mut persisted_policy =
+        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+    persisted_policy.provider_id = mock_provider().kind().to_string();
+    persisted_policy.model = mock_model_spec();
+    persisted_policy.prompt = expected_prompt.clone();
+    let persisted = RuntimeSessionState {
+        session_id: "created-yesterday".to_string(),
+        policy: persisted_policy,
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(SnapshotStore::with_state(persisted));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let reopened = core
+        .session("created-yesterday")
+        .store(store)
+        .open()
+        .await?;
+
+    assert_eq!(reopened.policy_snapshot().prompt, expected_prompt);
+    Ok(())
+}
+
+#[tokio::test]
 async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())

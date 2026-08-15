@@ -102,6 +102,7 @@ impl SnapshotStore {
             provider_id: state.policy.recorded_provider_id().to_string(),
             model: state.policy.model.clone(),
             turn_budget: state.policy.turn_budget,
+            prompt: state.policy.prompt.clone(),
         };
         let mut components = std::collections::BTreeMap::new();
         if let Some(tool_state) = state.tool_state_snapshot() {

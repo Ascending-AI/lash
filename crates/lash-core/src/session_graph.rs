@@ -316,6 +316,14 @@ pub struct PersistedSessionConfig {
     pub provider_id: String,
     pub model: crate::ModelSpec,
     pub turn_budget: crate::TurnBudget,
+    /// Session prompt configuration required to continue a cold-loaded
+    /// session with the composition it last committed.
+    ///
+    /// Heads written before this field existed omitted it and the runtime
+    /// reconstructed an empty layer. The serde default deliberately preserves
+    /// that historical behavior for old sessions.
+    #[serde(default, skip_serializing_if = "crate::PromptLayer::is_empty")]
+    pub prompt: crate::PromptLayer,
 }
 
 impl PersistedSessionConfig {
@@ -330,6 +338,7 @@ impl PersistedSessionConfig {
             provider_id: String::new(),
             model: crate::ModelSpec::default(),
             turn_budget,
+            prompt: crate::PromptLayer::new(),
         }
     }
 }
@@ -685,6 +694,7 @@ impl SessionNodeRecord {
             provider_id: assignment.policy.recorded_provider_id().to_string(),
             model: assignment.policy.model.clone(),
             turn_budget: assignment.policy.turn_budget,
+            prompt: assignment.policy.prompt.clone(),
         })
     }
 

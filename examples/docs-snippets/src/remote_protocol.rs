@@ -1330,8 +1330,10 @@ mod asserted_tool_examples {
             provider_id: String::new(),
             model: lash::ModelSpec::default(),
             turn_budget: core_budget,
+            prompt: lash::prompt::PromptLayer::new(),
         };
         assert_eq!(persisted.turn_budget, core_budget);
+        assert!(persisted.prompt.is_empty());
 
         let cap_code = lash::runtime::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded;
         assert!(cap_code.is_retryable());

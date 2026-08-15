@@ -8,7 +8,7 @@ use lash_trace::{
 
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmOutputPart, LlmOutputSpec, LlmRequest,
-    LlmRole, LlmToolChoice, LlmUsage,
+    LlmRole, LlmToolChoice, LlmToolSpec, LlmUsage,
 };
 use crate::session_model::TokenUsage;
 use crate::{ToolCallOutcome, ToolCallOutput};
@@ -168,6 +168,7 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
             set_span(context, None, parent);
         }
         TraceEvent::PromptBuilt { .. }
+        | TraceEvent::CompositionChanged { .. }
         | TraceEvent::RollingHistoryCompactionNeeded { .. }
         | TraceEvent::RollingHistoryPromptPruned { .. }
         | TraceEvent::EffectEnvelopeDiff { .. }
@@ -302,18 +303,7 @@ pub(crate) fn trace_llm_request(req: &LlmRequest) -> TraceLlmRequest {
         },
         messages: req.messages.iter().map(trace_llm_message).collect(),
         attachments: req.attachments.iter().map(trace_attachment).collect(),
-        tools: req
-            .tools
-            .iter()
-            .map(|tool| TraceToolSpec {
-                name: tool.name.clone(),
-                description: tool.description.clone(),
-                input_schema: serde_json::to_value(&tool.input_schema)
-                    .unwrap_or(serde_json::Value::Null),
-                output_schema: serde_json::to_value(&tool.output_schema)
-                    .unwrap_or(serde_json::Value::Null),
-            })
-            .collect(),
+        tools: req.tools.iter().map(trace_tool_spec).collect(),
         tool_choice: match req.tool_choice {
             LlmToolChoice::Auto => "auto",
             LlmToolChoice::None => "none",
@@ -323,6 +313,41 @@ pub(crate) fn trace_llm_request(req: &LlmRequest) -> TraceLlmRequest {
         output_spec: req.output_spec.as_ref().map(trace_output_spec),
         stream: req.stream_events.is_some(),
     }
+}
+
+fn trace_tool_spec(tool: &LlmToolSpec) -> TraceToolSpec {
+    TraceToolSpec {
+        name: tool.name.clone(),
+        description: tool.description.clone(),
+        input_schema: serde_json::to_value(&tool.input_schema)
+            .expect("SchemaContract serialization is infallible"),
+        output_schema: serde_json::to_value(&tool.output_schema)
+            .expect("SchemaContract serialization is infallible"),
+    }
+}
+
+pub(crate) fn trace_composition_snapshot(req: &LlmRequest) -> (String, String, Vec<TraceToolSpec>) {
+    let rendered_system_prompt = req
+        .messages
+        .first()
+        .filter(|message| matches!(message.role, LlmRole::System))
+        .map(|message| {
+            message
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                    _ => None,
+                })
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    let tool_schemas = req.tools.iter().map(trace_tool_spec).collect::<Vec<_>>();
+    let fingerprint_preimage =
+        serde_json::to_vec(&(rendered_system_prompt.as_str(), tool_schemas.as_slice()))
+            .expect("composition trace snapshot serialization is infallible");
+    let fingerprint = lash_trace::sha256_hex(fingerprint_preimage);
+    (fingerprint, rendered_system_prompt, tool_schemas)
 }
 
 pub(crate) fn trace_tool_call_output(output: &ToolCallOutput) -> lash_trace::TraceToolCallOutput {

@@ -296,6 +296,9 @@ where
             }
             TraceEvent::SessionStarted { .. } => self.emit_instant(record, "lash.session", None),
             TraceEvent::PromptBuilt { .. } => self.emit_instant(record, "lash.prompt", None),
+            TraceEvent::CompositionChanged { .. } => {
+                self.emit_instant(record, "lash.composition.changed", None)
+            }
             TraceEvent::RollingHistoryCompactionNeeded { .. } => {
                 self.emit_instant(record, "lash.rolling_history.compaction_needed", None)
             }
@@ -433,6 +436,36 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 options,
                 "lash.prompt.components_json",
                 components,
+            );
+        }
+        TraceEvent::CompositionChanged {
+            fingerprint,
+            rendered_system_prompt,
+            tool_schemas,
+        } => {
+            attrs.push(KeyValue::new(
+                "lash.composition.fingerprint",
+                fingerprint.clone(),
+            ));
+            attrs.push(KeyValue::new(
+                "lash.composition.prompt_chars",
+                rendered_system_prompt.chars().count() as i64,
+            ));
+            attrs.push(KeyValue::new(
+                "lash.composition.tool_count",
+                tool_schemas.len() as i64,
+            ));
+            push_payload_json(
+                &mut attrs,
+                options,
+                "lash.composition.rendered_system_prompt_json",
+                rendered_system_prompt,
+            );
+            push_payload_json(
+                &mut attrs,
+                options,
+                "lash.composition.tool_schemas_json",
+                tool_schemas,
             );
         }
         TraceEvent::RollingHistoryCompactionNeeded {
@@ -1276,6 +1309,57 @@ mod tests {
         assert_eq!(
             protocol_step_diagnostic_phase(&diagnostic("exec_code_completed")),
             Some("exec_code_completed")
+        );
+    }
+
+    #[test]
+    fn composition_change_projects_fingerprint_counts_and_opt_in_full_payload() {
+        let record = TraceRecord::new(
+            TraceContext::default().for_session("session-1"),
+            TraceEvent::CompositionChanged {
+                fingerprint: "composition-sha".to_string(),
+                rendered_system_prompt: "system policy".to_string(),
+                tool_schemas: vec![crate::TraceToolSpec {
+                    name: "search".to_string(),
+                    description: "Search documents".to_string(),
+                    input_schema: serde_json::json!({ "type": "object" }),
+                    output_schema: serde_json::json!({ "type": "array" }),
+                }],
+            },
+        );
+        let attrs = event_attributes(
+            &record,
+            &OtelTraceOptions {
+                include_payload_json: true,
+                ..OtelTraceOptions::default()
+            },
+        );
+        let attribute = |key: &str| {
+            attrs
+                .iter()
+                .find(|attribute| attribute.key.as_str() == key)
+                .map(|attribute| &attribute.value)
+                .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
+        };
+
+        assert_eq!(
+            attribute("lash.composition.fingerprint"),
+            &OtelValue::String("composition-sha".into())
+        );
+        assert_eq!(
+            attribute("lash.composition.prompt_chars"),
+            &OtelValue::I64(13)
+        );
+        assert_eq!(attribute("lash.composition.tool_count"), &OtelValue::I64(1));
+        assert!(
+            attribute("lash.composition.rendered_system_prompt_json")
+                .to_string()
+                .contains("system policy")
+        );
+        assert!(
+            attribute("lash.composition.tool_schemas_json")
+                .to_string()
+                .contains("search")
         );
     }
 

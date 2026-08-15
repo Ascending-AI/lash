@@ -64,6 +64,9 @@ fn default_root_session_id() -> String {
 pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 3;
 
 #[cfg(test)]
+mod fig1376_tests;
+
+#[cfg(test)]
 mod persisted_state_tests {
     use super::*;
 
@@ -79,6 +82,7 @@ mod persisted_state_tests {
                     provider_id: "stored-provider".to_string(),
                     model: crate::ModelSpec::default(),
                     turn_budget: crate::TurnBudget::Unbounded,
+                    prompt: crate::PromptLayer::new(),
                 },
                 checkpoint_ref: None,
                 token_ledger: Vec::new(),
@@ -445,6 +449,7 @@ fn persisted_session_config_from_state(
         provider_id: state.policy.recorded_provider_id().to_string(),
         model: state.policy.model.clone(),
         turn_budget: state.policy.turn_budget,
+        prompt: state.policy.prompt.clone(),
     }
 }
 
@@ -984,6 +989,7 @@ fn persisted_session_state_from_head(
     };
     state.policy.model = head.config.model.clone();
     state.policy.provider_id = head.config.provider_id.clone();
+    state.policy.prompt = head.config.prompt.clone();
     crate::runtime::state::apply_session_checkpoint(&mut state, checkpoint)?;
     Ok(state)
 }

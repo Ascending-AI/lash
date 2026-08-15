@@ -111,6 +111,16 @@ fn event_samples() -> Vec<TraceEvent> {
             prompt_chars: 12,
             components: Vec::new(),
         },
+        TraceEvent::CompositionChanged {
+            fingerprint: "composition-sha".to_string(),
+            rendered_system_prompt: "system policy".to_string(),
+            tool_schemas: vec![lash_trace::TraceToolSpec {
+                name: "search".to_string(),
+                description: "Search documents".to_string(),
+                input_schema: json!({ "type": "object" }),
+                output_schema: json!({ "type": "array" }),
+            }],
+        },
         TraceEvent::RollingHistoryCompactionNeeded {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
@@ -267,6 +277,7 @@ const ALL_TRACE_EVENT_KINDS: &[&str] = &[
     "session_started",
     "turn_started",
     "prompt_built",
+    "composition_changed",
     "rolling_history_compaction_needed",
     "rolling_history_prompt_pruned",
     "rolling_history_compaction_started",
@@ -306,6 +317,62 @@ fn event_samples_cover_every_variant() {
     assert_eq!(
         sampled, canonical,
         "event_samples must pin exactly one representative per TraceEvent variant"
+    );
+}
+
+#[test]
+fn composition_change_is_an_additive_complete_snapshot_at_schema_version_four() {
+    let record = TraceRecord::new(
+        TraceContext::default().for_session("composition-session"),
+        TraceEvent::CompositionChanged {
+            fingerprint: "4c94f3".to_string(),
+            rendered_system_prompt: "Follow the stored policy.".to_string(),
+            tool_schemas: vec![lash_trace::TraceToolSpec {
+                name: "search".to_string(),
+                description: "Search documents".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": { "query": { "type": "string" } },
+                    "required": ["query"]
+                }),
+                output_schema: json!({
+                    "type": "object",
+                    "properties": { "matches": { "type": "array" } },
+                    "required": ["matches"]
+                }),
+            }],
+        },
+    );
+    let mut json = serde_json::to_value(&record).expect("serialize composition snapshot");
+
+    assert_eq!(json["schema_version"], 4);
+    assert_eq!(json["type"], "composition_changed");
+    assert_eq!(json["fingerprint"], "4c94f3");
+    assert_eq!(json["rendered_system_prompt"], "Follow the stored policy.");
+    assert_eq!(json["tool_schemas"][0]["name"], "search");
+    assert_eq!(
+        json["tool_schemas"][0]["input_schema"]["required"][0],
+        "query"
+    );
+    assert_eq!(
+        json["tool_schemas"][0]["output_schema"]["required"][0],
+        "matches"
+    );
+
+    let object = json.as_object_mut().expect("trace record object");
+    assert!(
+        object.remove("type").is_some()
+            && object.remove("fingerprint").is_some()
+            && object.remove("rendered_system_prompt").is_some()
+            && object.remove("tool_schemas").is_some(),
+        "the field-strip probe removes exactly the additive event payload"
+    );
+    assert_eq!(
+        object.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+        ["schema_version", "id", "timestamp", "context"]
+            .into_iter()
+            .collect(),
+        "stripping the additive event leaves the pre-existing trace-record envelope"
     );
 }
 

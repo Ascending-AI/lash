@@ -303,27 +303,27 @@ pub(crate) async fn load_state_from_store(
     Ok(state)
 }
 
-/// Stamp the host's freshly resolved policy over the loaded one.
+/// Reconcile the host's freshly resolved policy with continuation-owned facts.
 ///
 /// ADR 0030's single resolution point: the host supplies the session's
 /// configuration when it constructs *or reopens* a session, and that value is
-/// reconciled before the runtime starts. So this is deliberately wholesale —
-/// model, prompt, turn budget and generation options all come from the host,
-/// and a mid-run
+/// reconciled before the runtime starts. Model, turn budget, and generation
+/// options come from the host, and a mid-run
 /// [`LashRuntime::update_session_config`](lash_core::facade_support::LashRuntime::update_session_config)
 /// change lasts until the host reopens with a spec that says otherwise, for
-/// every one of them alike. A session opened at a fork point is a reopen like
-/// any other; branching history does not branch configuration.
+/// every one of them alike.
 ///
-/// `provider_id` is the exception, and stays the recorded one: it names which
-/// provider produced the history rather than which provider the host is
-/// configured with now. It is also the only configuration a store keeps
-/// besides the model — `PersistedSessionConfig` is those
-/// two facts — so there is no third opinion here to reconcile against.
+/// The recorded `provider_id` and persisted prompt layer are continuation
+/// facts. The provider id names which provider produced the history, while the
+/// prompt is the session configuration that produced and must continue that
+/// history. Both survive reconciliation; hosts can deliberately change the
+/// live prompt through the session config API after open.
 fn reconcile_loaded_state_policy(state: &mut RuntimeSessionState, policy: &SessionPolicy) {
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
+    let persisted_prompt = state.policy.prompt.clone();
     state.policy = policy.clone();
     state.policy.provider_id = recorded_provider_id;
+    state.policy.prompt = persisted_prompt;
 }
 
 async fn load_persisted_state(
@@ -1243,17 +1243,21 @@ mod reconcile_tests {
             .expect("valid test model")
     }
 
-    /// The host's policy wins for every configured field alike, including
-    /// generation options: ADR 0030 resolves the whole session model at open,
-    /// so a reopen cannot pair the host's new model with the store's old
-    /// sampling. Only the recorded provider id survives from the store.
+    /// The host's policy wins for reopen-selected fields, including generation
+    /// options: ADR 0030 resolves the session model at open, so a reopen cannot
+    /// pair the host's new model with the store's old sampling. The recorded
+    /// provider id and continuation-owned prompt survive from the store.
     #[test]
     fn host_policy_wins_over_loaded_state_including_generation() {
+        let persisted_prompt = lash_core::PromptLayer::new().with_contribution(
+            lash_core::PromptContribution::guidance("Persisted", "persisted prompt"),
+        );
         let mut state = RuntimeSessionState {
             session_id: "session".to_string(),
             policy: SessionPolicy {
                 provider_id: "recorded-provider".to_string(),
                 model: model("recorded-model"),
+                prompt: persisted_prompt.clone(),
                 generation: lash_core::GenerationOptions {
                     seed: Some(7),
                     ..Default::default()
@@ -1279,5 +1283,6 @@ mod reconcile_tests {
         assert_eq!(state.policy.provider_id, "recorded-provider");
         assert_eq!(state.policy.model.id, "host-model");
         assert_eq!(state.policy.generation, host.generation);
+        assert_eq!(state.policy.prompt, persisted_prompt);
     }
 }

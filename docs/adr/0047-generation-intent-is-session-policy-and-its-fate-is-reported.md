@@ -51,22 +51,25 @@ callers write against, and flipping it after release breaks silently rather than
 time.
 
 Reopen follows ADR 0030 rather than inventing its own authority: **the host's configuration
-wins, for generation exactly as for the model and the prompt.** The facade reconciles the
-policy it resolves from the host's spec over loaded state, so a mid-run
+wins for generation exactly as for the model.** The facade reconciles those fields from the
+host's spec over loaded state, so a mid-run
 `update_session_config` change lasts until the host reopens with a spec that says otherwise
 — the same lifetime a mid-run `set_model` has. Pairing the host's new model with the
-store's old temperature would be the anomaly.
+store's old temperature would be the anomaly. The prompt layer is a continuation-owned
+exception: FIG-1376 persists and restores the exact layer the session committed so a cold
+reopen does not silently change the model-facing composition.
 
 That is the whole story on the durable side, because the session store is not a carrier of
-generation intent at all: what it records of a session's configuration is
-`PersistedSessionConfig` — provider id and model, the two facts that identify what produced
-the history. Generation options travel on the policy through the seams that hand a *whole*
+generation intent at all: `PersistedSessionConfig` records provider id, model, turn budget,
+and prompt layer, but no generation options. Generation options travel on the policy through
+the seams that hand a *whole*
 policy across a boundary and find no host on the far side: a process/remote execution
 environment, and a `RuntimeSessionState` a core embedder holds and hands back to
 `LashRuntime`. Forking is the case that makes the rule visible. A fork creates a session
 head at a retained point, not a second authority over configuration, so a branch resolves
-the host's spec when it opens exactly as a reopen of its source would; only `provider_id`
-comes from the record, naming the provider that produced the history the branch continues.
+the host's spec when it opens exactly as a reopen of its source would; `provider_id` and the
+prompt layer come from the record, naming and preserving the configuration of the history
+the branch continues.
 
 Session-wide defaults make the adapter's silent omissions matter. Anthropic drops a
 caller-set temperature when the model's host-declared capability pins sampling or extended

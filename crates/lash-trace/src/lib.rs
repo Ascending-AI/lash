@@ -265,6 +265,16 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         components: Vec<TracePromptComponent>,
     },
+    /// Complete model-facing composition captured only when its fingerprint
+    /// changes for a resident session.
+    CompositionChanged {
+        /// SHA-256 of the JSON array `[rendered_system_prompt, tool_schemas]`.
+        fingerprint: String,
+        rendered_system_prompt: String,
+        /// Full model-facing tool contracts in request order. This is kept
+        /// even when empty so the event is a self-contained snapshot.
+        tool_schemas: Vec<TraceToolSpec>,
+    },
     RollingHistoryCompactionNeeded {
         context_budget_tokens: usize,
         max_context_tokens: usize,
@@ -439,6 +449,7 @@ impl TraceEvent {
             Self::SessionStarted { .. } => "session_started",
             Self::TurnStarted { .. } => "turn_started",
             Self::PromptBuilt { .. } => "prompt_built",
+            Self::CompositionChanged { .. } => "composition_changed",
             Self::RollingHistoryCompactionNeeded { .. } => "rolling_history_compaction_needed",
             Self::RollingHistoryCompactionStarted { .. } => "rolling_history_compaction_started",
             Self::RollingHistoryCompactionCompleted { .. } => {
