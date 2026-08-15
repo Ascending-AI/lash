@@ -789,7 +789,12 @@ finish probe.exit_code == 0"#.into(),
                 },
                 shell_start_output_schema(),
             )
-            .with_activation(lash_core::ToolActivation::Internal),
+            .with_activation(lash_core::ToolActivation::Internal)
+            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+                ["shell"],
+                "run_start_command",
+                &[],
+            )),
         ]
     }
 
