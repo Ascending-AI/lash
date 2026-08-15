@@ -212,6 +212,21 @@ pub trait RestateProcessRunner: Send + Sync + 'static {
         &self,
         request: RestateProcessCancelRequest,
     ) -> Result<(), PluginError>;
+
+    async fn finish_process_parent_end(
+        &self,
+        plan: lash_core::ProcessParentEndPlan,
+        _scoped_effect_controller: ScopedEffectController<'_>,
+    ) -> Result<(), PluginError> {
+        if plan.actions.is_empty() {
+            Ok(())
+        } else {
+            Err(PluginError::Session(format!(
+                "Restate process runner cannot execute {} retained parent-end actions",
+                plan.actions.len()
+            )))
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -268,6 +283,16 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
     ) -> Result<(), PluginError> {
         self.worker
             .request_process_cancel(&request.process_id, request.reason)
+            .await
+    }
+
+    async fn finish_process_parent_end(
+        &self,
+        plan: lash_core::ProcessParentEndPlan,
+        scoped_effect_controller: ScopedEffectController<'_>,
+    ) -> Result<(), PluginError> {
+        self.worker
+            .execute_parent_end_plan_with_scoped_effect_controller(plan, scoped_effect_controller)
             .await
     }
 }

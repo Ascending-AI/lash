@@ -148,6 +148,20 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entr
             }
             entry
         }
+        lash_core::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
+            let status = match outcome {
+                lash_core::ToolIntentExecutionOutcome::Executed { .. } => "executed",
+                lash_core::ToolIntentExecutionOutcome::Refused { .. } => "refused",
+                lash_core::ToolIntentExecutionOutcome::ProtocolRefused { .. } => "protocol_refused",
+            };
+            Entry::new(Kind::Tool, actor(), "tool.intent")
+                .attr(Attr::id("call", IdKind::Call, call_id))
+                .attr(Attr::text(
+                    "kind",
+                    outcome.kind().map_or("batch", |kind| kind.as_str()),
+                ))
+                .attr(Attr::text("status", status))
+        }
         lash_core::TurnEvent::QueuedInputAccepted { applications } => {
             Entry::new(Kind::Ingress, actor(), "queued_input.accepted")
                 .attr(Attr::int("inputs", applications.len() as u64))

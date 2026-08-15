@@ -426,6 +426,7 @@ mod tests {
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools,
+            tool_registry: None,
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),
@@ -448,6 +449,8 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
@@ -568,6 +571,7 @@ mod tests {
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
+            tool_registry: None,
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),
@@ -590,6 +594,8 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
@@ -663,6 +669,7 @@ mod tests {
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
+            tool_registry: None,
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),
@@ -685,6 +692,8 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),

@@ -35,6 +35,9 @@ pub use usage_activity::*;
 // Bumped to 32: session process originators retain their optional agent-frame
 // elevation. Exact version negotiation prevents an older peer from silently
 // dropping that authority before a process wake is enqueued.
+// Bumped to 36: tool-intent outcomes and replay attribution are typed on the
+// wire alongside sealed LLM attempt ledgers; activity events are the canonical
+// remote evidence surface for both additions.
 // Bumped to 35: sealed LLM attempt ledgers and provider execution evidence are
 // carried by remote turn results and semantic activity streams.
 // Bumped to 34: generation disposition renamed the protocol-owned stop value
@@ -73,7 +76,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 35;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 36;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

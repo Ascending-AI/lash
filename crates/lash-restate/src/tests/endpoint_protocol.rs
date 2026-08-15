@@ -583,6 +583,98 @@ pub(super) fn encode_run_replay<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
+/// Build a replay journal from two `RunCommand` suspensions captured from the
+/// same endpoint invocation. The first completion advances the handler into
+/// the second command; omitting the second completion preserves the exact
+/// mid-command interruption, while including it yields a fully replayable
+/// journal.
+pub(super) fn encode_captured_run_and_interrupted_call_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    run_suspension: &[u8],
+    call_suspension: &[u8],
+    call_completion: Option<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let run_command = restate_message_frame(run_suspension, 0x0411)
+        .ok_or_else(|| TerminalError::new("first interruption omitted its RunCommand"))?;
+    let proposal = restate_message_frame(run_suspension, 0x0005)
+        .ok_or_else(|| TerminalError::new("first interruption omitted its run proposal"))?;
+    let (run_id, run_value) = proposed_run_completion(
+        proposal
+            .get(8..)
+            .ok_or_else(|| TerminalError::new("run proposal omitted its payload"))?,
+    )
+    .ok_or_else(|| TerminalError::new("captured run proposal was invalid"))?;
+    let call = restate_call_frames(call_suspension)
+        .and_then(|calls| calls.into_iter().next())
+        .ok_or_else(|| TerminalError::new("second interruption omitted its CallCommand"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 3));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(run_command);
+    body.extend_from_slice(&call.frame);
+    body.extend_from_slice(&encode_run_completion(run_id, run_value));
+    if let Some(completion) = call_completion {
+        let completion = serde_json::to_vec(&completion).map_err(TerminalError::from_error)?;
+        body.extend_from_slice(&encode_call_completion(
+            call.result_completion_id,
+            &completion,
+        ));
+    }
+    Ok(body.freeze())
+}
+
+pub(super) fn encode_completed_intent_drain_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    attempt_suspension: &[u8],
+    call_suspension: &[u8],
+    outcome_suspension: &[u8],
+    call_completion: serde_json::Value,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let first_run = restate_message_frame(attempt_suspension, 0x0411)
+        .ok_or_else(|| TerminalError::new("attempt interruption omitted its RunCommand"))?;
+    let first_proposal = restate_message_frame(attempt_suspension, 0x0005)
+        .ok_or_else(|| TerminalError::new("attempt interruption omitted its proposal"))?;
+    let (first_id, first_value) = proposed_run_completion(
+        first_proposal
+            .get(8..)
+            .ok_or_else(|| TerminalError::new("attempt proposal omitted payload"))?,
+    )
+    .ok_or_else(|| TerminalError::new("attempt proposal was invalid"))?;
+    let call = restate_call_frames(call_suspension)
+        .and_then(|calls| calls.into_iter().next())
+        .ok_or_else(|| TerminalError::new("intent interruption omitted its CallCommand"))?;
+    let second_run = restate_message_frame(outcome_suspension, 0x0411)
+        .ok_or_else(|| TerminalError::new("outcome interruption omitted its RunCommand"))?;
+    let second_proposal = restate_message_frame(outcome_suspension, 0x0005)
+        .ok_or_else(|| TerminalError::new("outcome interruption omitted its proposal"))?;
+    let (second_id, second_value) = proposed_run_completion(
+        second_proposal
+            .get(8..)
+            .ok_or_else(|| TerminalError::new("outcome proposal omitted payload"))?,
+    )
+    .ok_or_else(|| TerminalError::new("outcome proposal was invalid"))?;
+    let call_completion =
+        serde_json::to_vec(&call_completion).map_err(TerminalError::from_error)?;
+
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 4));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(first_run);
+    body.extend_from_slice(&call.frame);
+    body.extend_from_slice(second_run);
+    body.extend_from_slice(&encode_run_completion(first_id, first_value));
+    body.extend_from_slice(&encode_call_completion(
+        call.result_completion_id,
+        &call_completion,
+    ));
+    body.extend_from_slice(&encode_run_completion(second_id, second_value));
+    Ok(body.freeze())
+}
+
 /// FIG-779: `SleepCommand` (0x040C) carrying only `wake_up_time` and its
 /// completion id, as the SDK writes it for `ctx.sleep()`.
 fn encode_sleep_command(completion_id: u32) -> Bytes {
@@ -922,6 +1014,7 @@ pub(super) async fn invoke_endpoint_with_named_call_responses<T: serde::Serializ
             service,
             handler,
             encode_invocation_body(key, input)?,
+            Vec::new(),
             responses,
         ),
     )
@@ -934,6 +1027,7 @@ async fn invoke_endpoint_body_with_named_call_responses_unbounded(
     service: &str,
     handler: &str,
     invocation_body: Bytes,
+    invocation_ids: Vec<String>,
     mut responses: Vec<(String, serde_json::Value)>,
 ) -> Result<Bytes, TerminalError> {
     let (input_sender, receiver) = tokio::sync::mpsc::channel(8);
@@ -942,6 +1036,7 @@ async fn invoke_endpoint_body_with_named_call_responses_unbounded(
         .await
         .map_err(|err| TerminalError::new(format!("endpoint input failed: {err}")))?;
     let mut input_sender = Some(input_sender);
+    let mut invocation_ids = invocation_ids.into_iter();
     let response = endpoint.handle(
         http::Request::builder()
             .uri(format!("/invoke/{service}/{handler}"))
@@ -994,6 +1089,33 @@ async fn invoke_endpoint_body_with_named_call_responses_unbounded(
                         .map_err(|err| {
                             TerminalError::new(format!("run completion input failed: {err}"))
                         })?;
+                }
+                0x040E => {
+                    let completion_id = u32::try_from(
+                        protobuf_varint_field(&output[decoded + 8..frame_end], 10).ok_or_else(
+                            || TerminalError::new("one-way call omitted its invocation-id index"),
+                        )?,
+                    )
+                    .map_err(|_| {
+                        TerminalError::new("one-way call invocation-id index exceeded u32")
+                    })?;
+                    if let Some(invocation_id) = invocation_ids.next() {
+                        input_sender
+                            .as_mut()
+                            .expect("endpoint input remains open for invocation ids")
+                            .send(encode_invocation_id_completion(
+                                completion_id,
+                                &invocation_id,
+                            ))
+                            .await
+                            .map_err(|err| {
+                                TerminalError::new(format!(
+                                    "invocation-id completion input failed: {err}"
+                                ))
+                            })?;
+                    } else {
+                        drop(input_sender.take());
+                    }
                 }
                 0x040D => {
                     let call = decode_call_frame(&output[decoded..frame_end])
@@ -1073,6 +1195,146 @@ pub(super) fn encode_captured_run_and_call_replay<T: serde::Serialize>(
             call.result_completion_id,
             &completion,
         ));
+    }
+    Ok(body.freeze())
+}
+
+/// Splices the exact command prefix emitted around a journaled `RunCommand`,
+/// including any one-way or call commands that were incorrectly emitted from
+/// inside the run body. Replaying that prefix is the FIG-1127 mutation oracle:
+/// when a nested route is unguarded, the skipped run body shifts the next
+/// command onto the captured nested command and Restate reports RT0016.
+/// The journal command frame types an invocation emitted, in order
+/// (`0x0411` RunCommand, `0x040D` CallCommand, `0x040E` OneWayCommand).
+///
+/// Byte-level determinism evidence: a redrive that replays a captured journal
+/// must re-issue no command beyond the recorded ones, so the frame-type sequence
+/// is directly comparable against a literal.
+pub(super) fn restate_command_frame_types(input: &[u8]) -> Vec<u16> {
+    let mut cursor = 0;
+    let mut types = Vec::new();
+    while cursor + 8 <= input.len() {
+        let header = u64::from_be_bytes(
+            input[cursor..cursor + 8]
+                .try_into()
+                .expect("restate frame header"),
+        );
+        let message_type = (header >> 48) as u16;
+        let payload_len =
+            usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).expect("restate frame payload length");
+        let frame_end = cursor + 8 + payload_len;
+        if frame_end > input.len() {
+            break;
+        }
+        if matches!(message_type, 0x040D | 0x040E | 0x0411) {
+            types.push(message_type);
+        }
+        cursor = frame_end;
+    }
+    types
+}
+
+pub(super) fn encode_captured_run_command_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    first_output: &[u8],
+    invocation_ids: &[String],
+    call_completions: &[serde_json::Value],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let proposed_completion = restate_message_frame(first_output, 0x0005)
+        .ok_or_else(|| TerminalError::new("first attempt omitted its run completion proposal"))?;
+    let (run_completion_id, run_value) = proposed_run_completion(
+        proposed_completion
+            .get(8..)
+            .ok_or_else(|| TerminalError::new("run completion proposal omitted its payload"))?,
+    )
+    .ok_or_else(|| TerminalError::new("first attempt proposed an invalid run completion"))?;
+
+    let mut cursor = 0;
+    let mut commands = Vec::new();
+    while cursor < first_output.len() {
+        let header = u64::from_be_bytes(
+            first_output
+                .get(cursor..cursor + 8)
+                .ok_or_else(|| TerminalError::new("truncated command frame header"))?
+                .try_into()
+                .map_err(|_| TerminalError::new("invalid command frame header"))?,
+        );
+        let message_type = (header >> 48) as u16;
+        let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF)
+            .map_err(|_| TerminalError::new("command frame length exceeded usize"))?;
+        let frame_end = cursor
+            .checked_add(8 + payload_len)
+            .ok_or_else(|| TerminalError::new("command frame length overflow"))?;
+        let frame = first_output
+            .get(cursor..frame_end)
+            .ok_or_else(|| TerminalError::new("truncated command frame"))?;
+        if matches!(message_type, 0x040D | 0x040E | 0x0411) {
+            commands.push((message_type, Bytes::copy_from_slice(frame)));
+        }
+        cursor = frame_end;
+    }
+    if !commands.iter().any(|(kind, _)| *kind == 0x0411) {
+        return Err(TerminalError::new("first attempt omitted its RunCommand"));
+    }
+
+    let known_entries = u32::try_from(1 + commands.len())
+        .map_err(|_| TerminalError::new("too many commands in replay fixture"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, known_entries));
+    body.extend_from_slice(&encode_input_command(&input));
+    for (_, frame) in &commands {
+        body.extend_from_slice(frame);
+    }
+    body.extend_from_slice(&encode_run_completion(run_completion_id, run_value));
+
+    let mut invocation_ids = invocation_ids.iter();
+    let mut call_completions = call_completions.iter();
+    for (kind, frame) in commands {
+        match kind {
+            0x040E => {
+                let completion_id = u32::try_from(
+                    protobuf_varint_field(
+                        frame
+                            .get(8..)
+                            .ok_or_else(|| TerminalError::new("one-way command omitted payload"))?,
+                        10,
+                    )
+                    .ok_or_else(|| {
+                        TerminalError::new("one-way command omitted invocation-id index")
+                    })?,
+                )
+                .map_err(|_| {
+                    TerminalError::new("one-way command invocation-id index exceeded u32")
+                })?;
+                let invocation_id = invocation_ids.next().ok_or_else(|| {
+                    TerminalError::new("replay fixture omitted one-way invocation id")
+                })?;
+                body.extend_from_slice(&encode_invocation_id_completion(
+                    completion_id,
+                    invocation_id,
+                ));
+            }
+            0x040D => {
+                let call = decode_call_frame(&frame)
+                    .ok_or_else(|| TerminalError::new("invalid captured call command"))?;
+                let completion = call_completions.next().ok_or_else(|| {
+                    TerminalError::new(format!(
+                        "replay fixture omitted completion for `{}`",
+                        call.handler
+                    ))
+                })?;
+                let completion =
+                    serde_json::to_vec(completion).map_err(TerminalError::from_error)?;
+                body.extend_from_slice(&encode_call_completion(
+                    call.result_completion_id,
+                    &completion,
+                ));
+            }
+            0x0411 => {}
+            _ => unreachable!("only selected command types are retained"),
+        }
     }
     Ok(body.freeze())
 }

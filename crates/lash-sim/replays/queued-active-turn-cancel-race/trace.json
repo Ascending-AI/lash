@@ -6413,6 +6413,153 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "intents": [
+                {
+                  "intent": {
+                    "on_parent_end": "abandon",
+                    "request": {
+                      "disposition": "externally_owned",
+                      "event_types": [
+                        {
+                          "name": "process.cancel_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.first_started",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.waiting",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.resumed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.external_ref_set",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.observer_added",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.observer_removed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.subscription_retargeted",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.completed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {
+                            "terminal": {
+                              "await_output": {
+                                "pointer": "/await_output"
+                              },
+                              "status": "completed"
+                            }
+                          }
+                        },
+                        {
+                          "name": "process.failed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {
+                            "terminal": {
+                              "await_output": {
+                                "pointer": "/await_output"
+                              },
+                              "status": "failed"
+                            }
+                          }
+                        },
+                        {
+                          "name": "process.cancelled",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {
+                            "terminal": {
+                              "await_output": {
+                                "pointer": "/await_output"
+                              },
+                              "status": "cancelled"
+                            }
+                          }
+                        },
+                        {
+                          "name": "process.abandoned",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {
+                            "terminal": {
+                              "await_output": {
+                                "pointer": "/await_output"
+                              },
+                              "status": "abandoned"
+                            }
+                          }
+                        }
+                      ],
+                      "id": "effect/sleep/session-004/001:intent-child",
+                      "input": {
+                        "metadata": {
+                          "durable_key": "sleep/session-004/001"
+                        },
+                        "type": "external"
+                      },
+                      "originator": {
+                        "scope": "lash-sim-durable-effect",
+                        "type": "host"
+                      }
+                    },
+                    "session_id": "session-004"
+                  },
+                  "kind": "start_process"
+                }
+              ],
+              "protocol_version": 1
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/001",
@@ -6555,6 +6702,153 @@
         },
         "runtime_effect_outcome": {
           "launch": {
+            "intents": {
+              "intents": [
+                {
+                  "intent": {
+                    "on_parent_end": "abandon",
+                    "request": {
+                      "disposition": "externally_owned",
+                      "event_types": [
+                        {
+                          "name": "process.cancel_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.first_started",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.waiting",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.resumed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.external_ref_set",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.observer_added",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.observer_removed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.subscription_retargeted",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.completed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {
+                            "terminal": {
+                              "await_output": {
+                                "pointer": "/await_output"
+                              },
+                              "status": "completed"
+                            }
+                          }
+                        },
+                        {
+                          "name": "process.failed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {
+                            "terminal": {
+                              "await_output": {
+                                "pointer": "/await_output"
+                              },
+                              "status": "failed"
+                            }
+                          }
+                        },
+                        {
+                          "name": "process.cancelled",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {
+                            "terminal": {
+                              "await_output": {
+                                "pointer": "/await_output"
+                              },
+                              "status": "cancelled"
+                            }
+                          }
+                        },
+                        {
+                          "name": "process.abandoned",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {
+                            "terminal": {
+                              "await_output": {
+                                "pointer": "/await_output"
+                              },
+                              "status": "abandoned"
+                            }
+                          }
+                        }
+                      ],
+                      "id": "effect/sleep/session-004/001:intent-child",
+                      "input": {
+                        "metadata": {
+                          "durable_key": "sleep/session-004/001"
+                        },
+                        "type": "external"
+                      },
+                      "originator": {
+                        "scope": "lash-sim-durable-effect",
+                        "type": "host"
+                      }
+                    },
+                    "session_id": "session-004"
+                  },
+                  "kind": "start_process"
+                }
+              ],
+              "protocol_version": 1
+            },
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/001",

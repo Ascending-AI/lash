@@ -3,9 +3,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ensure_protocol_version;
 use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
+use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
 // Wire mirror of the runtime usage counters. This is a deliberately versioned
 // protocol boundary, kept independent of the internal types so the wire format
@@ -56,6 +56,38 @@ pub struct RemoteTurnActivity {
 }
 
 impl RemoteTurnActivity {
+    /// Decodes one JSON activity with the version gate ahead of the flattened
+    /// event vocabulary.
+    ///
+    /// A previous peer cannot deserialize a newly added `type` variant. Probe
+    /// the sibling version first so that mixed-version streams return
+    /// [`RemoteProtocolError::UnsupportedProtocolVersion`] instead of an
+    /// opaque unknown-variant error.
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        Self::decode_json_expecting_protocol_version(bytes, REMOTE_PROTOCOL_VERSION)
+    }
+
+    pub(crate) fn decode_json_expecting_protocol_version(
+        bytes: &[u8],
+        expected_version: u32,
+    ) -> Result<Self, RemoteProtocolError> {
+        #[derive(Deserialize)]
+        struct VersionProbe {
+            protocol_version: u32,
+        }
+
+        let probe: VersionProbe = serde_json::from_slice(bytes)?;
+        if probe.protocol_version != expected_version {
+            return Err(RemoteProtocolError::UnsupportedProtocolVersion {
+                actual: probe.protocol_version,
+                expected: expected_version,
+            });
+        }
+        let activity: Self = serde_json::from_slice(bytes)?;
+        activity.validate()?;
+        Ok(activity)
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnActivity", "id", &self.id)?;
@@ -130,6 +162,10 @@ pub enum RemoteTurnEvent {
         graph_key: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_call_id: Option<String>,
+    },
+    ToolIntentOutcome {
+        call_id: String,
+        outcome: crate::RemoteToolIntentExecutionOutcome,
     },
     FinalValue {
         value: serde_json::Value,

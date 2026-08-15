@@ -35,13 +35,15 @@ pub mod scenario_contracts;
 use batch::batch_tool_definition;
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, LlmOutputPart, LlmResponse,
-    ProtocolBuildInput, SessionError, ToolCall, ToolContract, ToolManifest, ToolProvider,
-    ToolResult, TurnDriverConfig, TurnDriverPreamble, facade_support::ToolInvocation,
-    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
-    facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
-    facade_support::reasoning_part,
+    ProtocolBuildInput, SessionError, ToolResult, TurnDriverConfig, TurnDriverPreamble,
+    facade_support::ToolInvocation, facade_support::TurnFinish, facade_support::TurnOutcome,
+    facade_support::TurnStop, facade_support::append_assistant_text_part,
+    facade_support::normalized_response_parts, facade_support::reasoning_part,
 };
 use serde_json::Value;
+
+#[cfg(test)]
+use lash_core::{ToolCall, ToolContract, ToolManifest, ToolProvider};
 
 const STANDARD_EXECUTION_SECTION: &str = r#"Use direct tool calls.
 
@@ -94,7 +96,8 @@ impl SessionPlugin for StandardProtocolPlugin {
         reg.protocol().session(Arc::new(StandardProtocolSession))?;
         reg.protocol()
             .protocol_driver(Arc::new(StandardProtocolDriver))?;
-        reg.tools().provider(Arc::new(StandardProtocolTools))?;
+        reg.tools()
+            .orchestrating(standard_batch_orchestrating_tool())?;
         Ok(())
     }
 }
@@ -144,23 +147,39 @@ fn turn_limit_exhausted_message(message_id: String, max_turns: usize) -> Message
     }
 }
 
-struct StandardProtocolTools;
+/// First-party facade support for hosts whose protocol driver is not Standard
+/// but which enable the native batch orchestrating operation in their builder
+/// configuration.
+///
+/// Pass this definition to
+/// [`lash_core::facade_support::PluginSpec::with_orchestrating_tool`] from the
+/// plugin installed on the facade builder. The definition's capability-bearing
+/// constructor remains sealed inside this crate.
+pub fn standard_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {
+    let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
+        Arc::new(StandardBatchOrchestratingTool);
+    // SAFETY: this crate owns the Standard batch tool contract and body.
+    unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
+}
+
+struct StandardBatchOrchestratingTool;
 
 #[async_trait]
-impl ToolProvider for StandardProtocolTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        vec![batch_tool_definition().manifest()]
+impl lash_core::facade_support::OrchestratingToolImplementation for StandardBatchOrchestratingTool {
+    fn manifest(&self) -> lash_core::ToolManifest {
+        batch_tool_definition().manifest()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        (name == "batch").then(|| Arc::new(batch_tool_definition().contract()))
+    fn contract(&self) -> Arc<lash_core::ToolContract> {
+        Arc::new(batch_tool_definition().contract())
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        match call.name {
-            "batch" => execute_batch_tool_call(call).await,
-            _ => ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
-        }
+    async fn execute(
+        &self,
+        args: &Value,
+        context: &lash_core::facade_support::OrchestrationContext<'_>,
+    ) -> ToolResult {
+        execute_orchestration(args, context).await
     }
 }
 
@@ -171,8 +190,10 @@ struct BatchCallSpec {
     parameters: Value,
 }
 
-async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
-    let args = call.args;
+async fn execute_orchestration(
+    args: &Value,
+    context: &lash_core::facade_support::OrchestrationContext<'_>,
+) -> ToolResult {
     let specs = match parse_batch_specs(args) {
         Ok(specs) => specs,
         Err(err) => return err,
@@ -180,7 +201,6 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
 
     let mut immediate_outcomes = Vec::new();
     let mut parallel_specs = Vec::new();
-    let dispatch = call.context.dispatch();
 
     for spec in specs.into_iter().take(BATCH_MAX_TOOL_CALLS) {
         if spec.tool == "batch" {
@@ -193,7 +213,7 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
             }));
             continue;
         }
-        let Some(manifest) = dispatch.callable_tool_manifest(&spec.tool) else {
+        let Some(manifest) = context.callable_tool_manifest(&spec.tool) else {
             let error = format!("Tool '{}' is unavailable in this session", spec.tool);
             immediate_outcomes.push(serde_json::json!({
                 "index": spec.index,
@@ -209,7 +229,7 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
             ToolInvocation::new(
                 format!(
                     "{}:{:02}",
-                    call.context.tool_call_id().unwrap_or("batch"),
+                    context.tool_call_id().unwrap_or("batch"),
                     spec.index
                 ),
                 manifest.id,
@@ -218,8 +238,8 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
         ));
     }
 
-    let mut parallel_outcomes = dispatch
-        .batch(
+    let mut parallel_outcomes = context
+        .call_tool_batch(
             parallel_specs
                 .iter()
                 .map(|(_, invocation)| invocation.clone())
@@ -246,7 +266,10 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
         );
         result_record.insert(
             "duration_ms".to_string(),
-            serde_json::json!(tool_record.duration_ms),
+            // Batch results are replay data. Wall-clock child timing remains
+            // available on traces, but cannot participate in a cross-tier
+            // literal outcome.
+            serde_json::json!(0),
         );
         result_record.insert(
             if tool_record.output.is_success() {
@@ -752,7 +775,8 @@ mod tests {
                         input_json: serde_json::json!({
                             "tool_calls": [
                                 {"tool": "alpha", "parameters": {}},
-                                {"tool": "beta", "parameters": {"value": "fail"}}
+                                {"tool": "beta", "parameters": {"value": "fail"}},
+                                {"tool": "internal_probe", "parameters": {}}
                             ]
                         })
                         .to_string(),
@@ -787,6 +811,7 @@ mod tests {
     struct BatchRuntimeTools {
         barrier: Arc<Barrier>,
         started: Arc<AtomicUsize>,
+        internal_executed: Arc<AtomicUsize>,
     }
 
     fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
@@ -811,17 +836,29 @@ mod tests {
             vec![
                 runtime_test_tool("alpha").manifest(),
                 runtime_test_tool("beta").manifest(),
+                runtime_test_tool("internal_probe")
+                    .with_activation(lash_core::ToolActivation::Internal)
+                    .manifest(),
             ]
         }
 
         fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
             match name {
                 "alpha" | "beta" => Some(Arc::new(runtime_test_tool(name).contract())),
+                "internal_probe" => Some(Arc::new(
+                    runtime_test_tool(name)
+                        .with_activation(lash_core::ToolActivation::Internal)
+                        .contract(),
+                )),
                 _ => None,
             }
         }
 
         async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+            if call.name == "internal_probe" {
+                self.internal_executed.fetch_add(1, Ordering::SeqCst);
+                return ToolResult::ok(serde_json::json!("internal body ran"));
+            }
             self.started.fetch_add(1, Ordering::SeqCst);
             if timeout(Duration::from_millis(100), self.barrier.wait())
                 .await
@@ -838,18 +875,35 @@ mod tests {
         }
     }
 
+    type RecordedEffectFrame = (lash_core::RuntimeEffectKind, Option<String>);
+
     #[derive(Clone, Default)]
     struct CountingEffectController {
-        kinds: Arc<std::sync::Mutex<Vec<lash_core::RuntimeEffectKind>>>,
+        frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
     }
 
     impl CountingEffectController {
         fn count(&self, kind: lash_core::RuntimeEffectKind) -> usize {
-            self.kinds
+            self.frames
                 .lock_recover()
                 .iter()
-                .filter(|candidate| **candidate == kind)
+                .filter(|(candidate, _)| *candidate == kind)
                 .count()
+        }
+
+        fn tool_attempt_names(&self) -> Vec<String> {
+            let mut names = self
+                .frames
+                .lock_recover()
+                .iter()
+                .filter_map(|(kind, name)| {
+                    (*kind == lash_core::RuntimeEffectKind::ToolAttempt)
+                        .then(|| name.clone())
+                        .flatten()
+                })
+                .collect::<Vec<_>>();
+            names.sort();
+            names
         }
     }
 
@@ -930,7 +984,15 @@ mod tests {
             local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
         {
-            self.kinds.lock_recover().push(envelope.command.kind());
+            let name = match &envelope.command {
+                lash_core::RuntimeEffectCommand::ToolAttempt { call, .. } => {
+                    Some(call.tool_name.clone())
+                }
+                _ => None,
+            };
+            self.frames
+                .lock_recover()
+                .push((envelope.command.kind(), name));
             if matches!(
                 &envelope.command,
                 lash_core::RuntimeEffectCommand::PeekAwaitEvent { .. }
@@ -942,7 +1004,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn standard_batch_tool_rejects_nested_batch_inside_durable_attempt() {
+    async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_attempt() {
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let saw_batch_result = Arc::new(AtomicBool::new(false));
         let provider = BatchRuntimeProvider {
@@ -966,6 +1028,7 @@ mod tests {
         );
         host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
         let started = Arc::new(AtomicUsize::new(0));
+        let internal_executed = Arc::new(AtomicUsize::new(0));
         let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
             Arc::new(StandardProtocolPluginFactory::new()),
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
@@ -974,6 +1037,7 @@ mod tests {
                     BatchRuntimeTools {
                         barrier: Arc::new(Barrier::new(2)),
                         started: Arc::clone(&started),
+                        internal_executed: Arc::clone(&internal_executed),
                     },
                 )),
             )),
@@ -1026,12 +1090,23 @@ mod tests {
             lash_core::facade_support::TurnOutcome::Finished(_)
         ));
         assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
-        assert_eq!(started.load(Ordering::SeqCst), 0);
-        assert!(!saw_batch_result.load(Ordering::SeqCst));
-        assert_eq!(controller.count(lash_core::RuntimeEffectKind::ToolBatch), 1);
+        assert_eq!(started.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            internal_executed.load(Ordering::SeqCst),
+            0,
+            "a batch child must not cross normal admission into an Internal provider"
+        );
+        assert!(saw_batch_result.load(Ordering::SeqCst));
+        assert_eq!(controller.count(lash_core::RuntimeEffectKind::ToolBatch), 2);
         assert_eq!(
             controller.count(lash_core::RuntimeEffectKind::ToolAttempt),
-            1
+            2,
+            "only alpha and beta are attempts; the batch body itself has no ToolAttempt frame"
+        );
+        assert_eq!(
+            controller.tool_attempt_names(),
+            vec!["alpha".to_string(), "beta".to_string()],
+            "the runtime-owned batch orchestration body is never enclosed by ToolAttempt"
         );
     }
 

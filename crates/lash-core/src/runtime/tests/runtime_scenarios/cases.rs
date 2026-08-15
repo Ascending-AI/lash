@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RuntimeScenarioCoverage {
     pub(crate) test_name: &'static str,
-    pub(crate) declared_test: fn(),
     pub(crate) display_name: &'static str,
     pub(crate) owned_invariant: &'static str,
 }
@@ -14,7 +13,6 @@ macro_rules! runtime_scenario_coverage {
     ($test_fn:ident, $display_name:literal, $owned_invariant:literal) => {
         RuntimeScenarioCoverage {
             test_name: stringify!($test_fn),
-            declared_test: $test_fn,
             display_name: $display_name,
             owned_invariant: $owned_invariant,
         }
@@ -66,6 +64,11 @@ const STALE_LEASE_EXPIRY: RuntimeScenarioCoverage = runtime_scenario_coverage!(
     "stale session lease expiry",
     "An unexpired stale holder stays busy; TTL expiry advances the fence and the successor stays protected."
 );
+const TOOL_INTENT_DRAIN: RuntimeScenarioCoverage = runtime_scenario_coverage!(
+    runtime_scenario_opted_in_provider_drains_every_v1_tool_intent,
+    "opted-in provider tool-intent drain",
+    "A real runtime turn commits an opted-in provider attempt, then realizes all four v1 intent kinds through the production coordinator."
+);
 
 pub(crate) const RUNTIME_SCENARIO_COVERAGE: &[RuntimeScenarioCoverage] = &[
     COMMAND_BEFORE_TURN_WORK,
@@ -77,14 +80,14 @@ pub(crate) const RUNTIME_SCENARIO_COVERAGE: &[RuntimeScenarioCoverage] = &[
     CHECKPOINT_REDRIVE_CANCEL,
     SESSION_LEASE_RELEASE_FAULT,
     STALE_LEASE_EXPIRY,
+    TOOL_INTENT_DRAIN,
 ];
 
 #[test]
 fn runtime_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(RUNTIME_SCENARIO_COVERAGE.len(), 9);
+    assert_eq!(RUNTIME_SCENARIO_COVERAGE.len(), 10);
     let mut names = BTreeSet::new();
     for coverage in RUNTIME_SCENARIO_COVERAGE {
-        let _declared_test = coverage.declared_test;
         assert!(
             coverage.test_name.starts_with("runtime_scenario_"),
             "unexpected Runtime Scenario test name {}",
@@ -478,4 +481,227 @@ async fn runtime_scenario_waits_for_stale_session_lease_ttl() {
         .phase(RuntimeLeasePhase::expire_stale_holder())
         .run()
         .await;
+}
+
+struct RuntimeScenarioIntentProvider {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+fn runtime_scenario_intent_tool() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        "tool:runtime_scenario_intents",
+        "runtime_scenario_intents",
+        "Emit every v1 tool intent kind.",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for RuntimeScenarioIntentProvider {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![runtime_scenario_intent_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "runtime_scenario_intents")
+            .then(|| Arc::new(runtime_scenario_intent_tool().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+        panic!("the runtime scenario provider must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == runtime_scenario_intent_tool().id()
+    }
+
+    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let session_id = call.context.session_id().to_string();
+        crate::ToolAttemptResult::done(
+            crate::ToolResultDone::ok(serde_json::json!({"provider": "done"})),
+            crate::ToolIntents::v1(vec![
+                crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+                    session_id: session_id.clone(),
+                    request: crate::ProcessStartRequest::external(
+                        "runtime-scenario-intent-child",
+                        crate::ProcessOriginator::host_scoped("runtime-scenario"),
+                        serde_json::json!({"kind": "start"}),
+                    ),
+                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
+                })),
+                crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
+                    session_id: session_id.clone(),
+                    process_id: "runtime-scenario-intent-target".to_string(),
+                    signal_name: "resume".to_string(),
+                    payload: serde_json::json!({"kind": "signal"}),
+                }),
+                crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+                    session_id: session_id.clone(),
+                    process_id: "runtime-scenario-intent-target".to_string(),
+                    event_type: "runtime.intent.note".to_string(),
+                    payload: serde_json::json!({"kind": "emit"}),
+                }),
+                crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
+                    session_id,
+                    process_id: "runtime-scenario-intent-target".to_string(),
+                    reason: Some("runtime scenario complete".to_string()),
+                }),
+            ]),
+        )
+    }
+}
+
+#[tokio::test]
+async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
+    let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let tool_provider: Arc<dyn crate::ToolProvider> = Arc::new(RuntimeScenarioIntentProvider {
+        calls: Arc::clone(&provider_calls),
+    });
+    let model_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let transport = crate::testing::TestProvider::builder()
+        .kind("mock")
+        .complete({
+            let model_calls = Arc::clone(&model_calls);
+            move |_| {
+                let model_calls = Arc::clone(&model_calls);
+                async move {
+                    Ok(
+                        match model_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+                            0 => crate::LlmResponse {
+                                parts: vec![crate::LlmOutputPart::ToolCall {
+                                    call_id: "runtime-scenario-intent-call".to_string(),
+                                    tool_name: "runtime_scenario_intents".to_string(),
+                                    input_json: "{}".to_string(),
+                                    replay: None,
+                                }],
+                                response_metadata: Default::default(),
+                                ..crate::LlmResponse::default()
+                            },
+                            1 => crate::LlmResponse {
+                                full_text: "intent drain complete".to_string(),
+                                parts: vec![crate::LlmOutputPart::Text {
+                                    text: "intent drain complete".to_string(),
+                                    response_meta: None,
+                                }],
+                                response_metadata: Default::default(),
+                                ..crate::LlmResponse::default()
+                            },
+                            index => panic!("unexpected model call {index}"),
+                        },
+                    )
+                }
+            }
+        })
+        .build();
+    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tool_provider, transport).await;
+    let registry = runtime
+        .host
+        .process_registry
+        .as_ref()
+        .expect("runtime scenario process registry")
+        .clone();
+    registry
+        .register_process_with_observers(
+            crate::ProcessRegistration::new(
+                "runtime-scenario-intent-target",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([
+                crate::ProcessEventType {
+                    name: "signal.resume".to_string(),
+                    payload_schema: crate::LashSchema::any(),
+                    semantics: crate::ProcessEventSemanticsSpec::default(),
+                },
+                crate::ProcessEventType {
+                    name: "runtime.intent.note".to_string(),
+                    payload_schema: crate::LashSchema::any(),
+                    semantics: crate::ProcessEventSemanticsSpec::default(),
+                },
+            ]),
+            &["root".to_string()],
+        )
+        .await
+        .expect("register runtime scenario intent target");
+
+    let turn_scope = named_turn_scope("root", "runtime-scenario-intent-turn");
+    let wake_controller = turn_scope
+        .owned_controller()
+        .expect("runtime scenario turn owns its controller");
+    let wake_key = wake_controller
+        .await_event_key(
+            &crate::ExecutionScope::process("runtime-scenario-intent-target"),
+            crate::AwaitEventWaitIdentity::process_signal(
+                "runtime-scenario-intent-target",
+                "resume",
+                1,
+            ),
+        )
+        .await
+        .expect("mint runtime-tier process-signal wait");
+    let wake_wait = {
+        let wake_controller = Arc::clone(&wake_controller);
+        let wake_key = wake_key.clone();
+        crate::task::spawn(async move {
+            wake_controller
+                .await_await_event(&wake_key, tokio_util::sync::CancellationToken::new(), None)
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    let turn = runtime
+        .run_turn_assembled(
+            crate::TurnInput::text("run intent scenario"),
+            tokio_util::sync::CancellationToken::new(),
+            turn_scope,
+        )
+        .await
+        .expect("run opted-in provider intent turn");
+    assert_eq!(turn.assistant_output.safe_text, "intent drain complete");
+    assert_eq!(provider_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), wake_wait)
+            .await
+            .expect("SignalProcess intent must wake the parked runtime-tier wait")
+            .expect("runtime-tier wait task")
+            .expect("runtime-tier wait resolution"),
+        crate::Resolution::Ok(serde_json::json!({"kind": "signal"}))
+    );
+    let events = registry
+        .events_after("runtime-scenario-intent-target", 0)
+        .await
+        .expect("read literal intent target events");
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "process.observer_added",
+            "signal.resume",
+            "runtime.intent.note",
+            "process.cancel_requested",
+        ]
+    );
+    assert!(
+        registry
+            .list_processes(&crate::ProcessListFilter {
+                status: crate::ProcessStatusFilter::Any,
+                ..crate::ProcessListFilter::default()
+            })
+            .await
+            .expect("list intent-created processes")
+            .iter()
+            .any(|record| matches!(
+                record.input.as_ref(),
+                crate::ProcessInput::External { metadata }
+                    if metadata == &serde_json::json!({"kind": "start"})
+            )),
+        "the StartProcess declaration must realize through the runtime"
+    );
 }

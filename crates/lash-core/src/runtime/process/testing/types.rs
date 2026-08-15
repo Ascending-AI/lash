@@ -20,6 +20,8 @@ pub struct TestLocalProcessRegistry {
     pub(super) tombstones: Arc<Mutex<HashMap<String, ProcessTombstone>>>,
     pub(super) leases: Arc<Mutex<ManagedLeaseMap>>,
     pub(super) handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
+    pub(super) tool_intent_submissions:
+        Arc<Mutex<HashMap<String, crate::ToolIntentSubmissionRecord>>>,
     pub(super) execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     pub(super) wake_mark_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     pub(super) append_target_snapshot_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
@@ -61,4 +63,5 @@ pub(super) struct ManagedProcessRecord {
     pub(super) change_seq: u64,
     pub(super) events: Vec<ProcessEvent>,
     pub(super) keyed_events: HashMap<String, ProcessEvent>,
+    pub(super) parent_end_actions: Option<Vec<crate::ToolIntentParentEndAction>>,
 }

@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) mod control;
 mod controller_error;
+mod process_local;
 mod scoped;
 mod task_panic;
 mod trigger;
@@ -21,7 +22,8 @@ pub use control::{
     Resolution, ResolveOutcome, RuntimeEffectController, ScopedEffectController, SegmentProgress,
 };
 pub(crate) use control::{
-    EffectTaskController, RuntimeEffectControllerHandle, drive_effect_controller_task,
+    EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,
+    drive_effect_controller_task,
 };
 pub use controller_error::RuntimeEffectControllerError;
 pub use trigger::TriggerLocalExecution;
@@ -33,8 +35,6 @@ use crate::provider::ProviderHandle;
 use crate::runtime::{RuntimeStreamEvent, RuntimeTurnDriver};
 use crate::sansio::LlmCallError;
 use crate::{PluginError, RuntimeError};
-#[cfg(test)]
-use control::EffectControllerTaskRequest;
 use control::{RemoteLocalExecutionRequest, ScopedEffectControllerInner};
 
 use super::envelope::{
@@ -101,127 +101,21 @@ impl ProcessTurnCancellation {
     }
 }
 
+/// Observer invoked after a process side effect and before durable outcome
+/// recording.
+///
+/// This is public for **effect-host implementors** and
+/// **conformance-suite embedders** that must model a host crash in that exact
+/// interval.
+pub type ProcessOutcomeObserver = Arc<dyn Fn(&ProcessEffectOutcome) + Send + Sync + 'static>;
+
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work_driver: Option<crate::ProcessWorkDriver>,
+    pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
-}
-
-impl ProcessLocalExecution {
-    pub async fn execute(
-        self,
-        command: ProcessCommand,
-    ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
-        let Self {
-            registry,
-            process_work_driver,
-            turn_cancellation,
-        } = self;
-        match command {
-            ProcessCommand::Start {
-                registration,
-                observers,
-                execution_context: _,
-            } => {
-                let record =
-                    InlineRuntimeEffectController::start_process(registry, registration, observers)
-                        .await?;
-                if let Some(driver) = process_work_driver.as_ref() {
-                    driver.claim_and_run_pending("process_start").await?;
-                }
-                Ok(ProcessEffectOutcome::Start {
-                    record: Box::new(record),
-                })
-            }
-            ProcessCommand::List {
-                session_scope,
-                mode,
-            } => {
-                let entries = match mode {
-                    crate::ProcessListMode::Live => {
-                        registry
-                            .list_live_observed_by(&session_scope.session_id)
-                            .await?
-                    }
-                    crate::ProcessListMode::All => {
-                        registry.list_observed_by(&session_scope.session_id).await?
-                    }
-                };
-                Ok(ProcessEffectOutcome::List { entries })
-            }
-            ProcessCommand::Transfer {
-                from_scope,
-                to_scope,
-                process_ids,
-            } => {
-                registry
-                    .transfer_observers(
-                        &from_scope.session_id,
-                        &to_scope.session_id,
-                        &process_ids,
-                        crate::ProcessObserverBy::host("runtime-effect-transfer"),
-                    )
-                    .await?;
-                Ok(ProcessEffectOutcome::Transfer)
-            }
-            ProcessCommand::DeleteSession { session_id } => {
-                let report = registry.delete_session_process_state(&session_id).await?;
-                Ok(ProcessEffectOutcome::DeleteSession { report })
-            }
-            ProcessCommand::Await { process_id } => {
-                let await_terminal = || async {
-                    if let Some(driver) = process_work_driver.as_ref() {
-                        driver.await_terminal(&process_id).await
-                    } else {
-                        crate::ProcessAwaiter::polling(Arc::clone(&registry))
-                            .await_terminal(&process_id)
-                            .await
-                    }
-                };
-                let output = if let Some(turn_cancellation) = turn_cancellation {
-                    tokio::select! {
-                        biased;
-                        output = await_terminal() => output?,
-                        _ = turn_cancellation.cancellation.cancelled() => {
-                            InlineRuntimeEffectController::request_process_cancel(
-                                Arc::clone(&registry),
-                                &process_id,
-                                Some("turn cancelled while awaiting process".to_string()),
-                            )
-                            .await?;
-                            await_terminal().await?
-                        }
-                    }
-                } else {
-                    await_terminal().await?
-                };
-                Ok(ProcessEffectOutcome::Await {
-                    output: Box::new(output),
-                })
-            }
-            ProcessCommand::Cancel { process_id, reason } => {
-                let record = InlineRuntimeEffectController::request_process_cancel(
-                    registry,
-                    &process_id,
-                    reason,
-                )
-                .await?;
-                Ok(ProcessEffectOutcome::Cancel {
-                    record: Box::new(record),
-                })
-            }
-            ProcessCommand::Signal {
-                process_id,
-                request,
-                ..
-            } => {
-                let result = registry.append_event(&process_id, request).await?;
-                Ok(ProcessEffectOutcome::Signal {
-                    event: Box::new(result.event),
-                })
-            }
-        }
-    }
+    pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
+    pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
 #[allow(private_interfaces)]
@@ -251,11 +145,13 @@ pub(super) struct LocalDirectEffectRunner {
 struct LocalToolBatchEffectRunner<'run> {
     context: crate::RuntimeExecutionContext<'run>,
     child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+    completion_key: Option<crate::AwaitEventKey>,
 }
 
 struct LocalPreparedToolAttemptEffectRunner<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     tool_context: crate::ToolContext<'run>,
+    completion_key: Option<crate::AwaitEventKey>,
 }
 
 struct RemoteEffectRunner {
@@ -447,6 +343,62 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    pub(crate) fn with_process_effect_controller(
+        mut self,
+        controller: Arc<dyn RuntimeEffectController>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
+            effect_controller: current,
+            ..
+        }) = &mut self.state
+        {
+            *current = Some(controller);
+        }
+        self
+    }
+
+    /// Installs an observer after a process side effect has completed but
+    /// before a durable controller receives the outcome to record.
+    ///
+    /// This is an **effect-host implementor** and **conformance-suite
+    /// embedder** seam. Panicking from the observer models a host crash in
+    /// that exact interval.
+    pub fn with_process_outcome_observer(mut self, observer: ProcessOutcomeObserver) -> Self {
+        if let RuntimeEffectLocalExecutorState::Process(execution) = &mut self.state {
+            execution.outcome_observer = Some(observer);
+        }
+        self
+    }
+
+    /// Binds the durable environment store used after an admitted process
+    /// start reaches local realization.
+    ///
+    /// This is an **integrator class 3: effect-host implementor** seam for
+    /// executors that realize serialized process-start commands.
+    pub fn with_process_env_store(
+        mut self,
+        store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Process(execution) = &mut self.state {
+            execution.process_env_store = Some(store);
+        }
+        self
+    }
+
+    /// Removes and returns the process outcome observer.
+    ///
+    /// This is public for **effect-host implementors** that transfer local
+    /// execution into a durable controller while preserving the conformance
+    /// fault seam.
+    pub fn take_process_outcome_observer(&mut self) -> Option<ProcessOutcomeObserver> {
+        match &mut self.state {
+            RuntimeEffectLocalExecutorState::Process(execution) => {
+                execution.outcome_observer.take()
+            }
+            _ => None,
+        }
+    }
+
     /// Binds process registry and optional work-driver services for effect-host implementors
     /// executing process effects inline.
     pub fn processes(
@@ -457,7 +409,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
                 registry,
                 process_work_driver,
+                process_env_store: None,
                 turn_cancellation: None,
+                effect_controller: None,
+                outcome_observer: None,
             }),
             replay_trace: None,
         }
@@ -537,6 +492,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             pending_turn_input_claims: driver.pending_turn_input_claims.clone(),
             pending_checkpoint_turn_input_claim: driver.pending_checkpoint_turn_input_claim.clone(),
             checkpoint_messages: driver.checkpoint_messages.clone(),
+            recorded_intent_outcomes: driver.recorded_intent_outcomes.clone(),
             session_execution_lease: driver.session_execution_lease.clone(),
             runtime_lease_owner: driver.runtime_lease_owner.clone(),
             turn_phase_probe: driver.turn_phase_probe.clone(),
@@ -580,6 +536,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub(crate) fn tool_batch(
         context: crate::RuntimeExecutionContext<'run>,
         child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
+        completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = context.replay_validation_trace();
         if let Some(context) = context.to_static() {
@@ -588,6 +545,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     LocalToolBatchEffectRunner {
                         context,
                         child_trace_hooks,
+                        completion_key,
                     },
                 )),
                 replay_trace,
@@ -597,6 +555,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Runner(Box::new(LocalToolBatchEffectRunner {
                 context,
                 child_trace_hooks,
+                completion_key,
             })),
             replay_trace,
         }
@@ -605,6 +564,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub(crate) fn prepared_tool_attempt(
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
         tool_context: crate::ToolContext<'run>,
+        completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = tool_context.replay_validation_trace();
         if let (Some(dispatch), Some(tool_context)) =
@@ -615,6 +575,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     LocalPreparedToolAttemptEffectRunner {
                         dispatch: Arc::new(dispatch),
                         tool_context,
+                        completion_key,
                     },
                 )),
                 replay_trace,
@@ -625,6 +586,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 LocalPreparedToolAttemptEffectRunner {
                     dispatch,
                     tool_context,
+                    completion_key,
                 },
             )),
             replay_trace,
@@ -966,14 +928,12 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::ToolBatch { batch } => {
-                let outcome = self
-                    .context
-                    .execute_prepared_tool_batch_launches(
-                        batch,
-                        envelope.invocation,
-                        self.child_trace_hooks,
-                    )
-                    .await?;
+                let outcome = Box::pin(self.context.execute_prepared_tool_batch_launches(
+                    batch,
+                    envelope.invocation,
+                    self.child_trace_hooks,
+                ))
+                .await?;
                 Ok(RuntimeEffectOutcome::ToolBatch {
                     launches: outcome.launches,
                     triggers: outcome.triggers,
@@ -993,6 +953,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                     max_attempts,
                     envelope.invocation,
                     child_execution_trace_hook,
+                    self.completion_key,
                 ))
                 .await?;
                 Ok(RuntimeEffectOutcome::ToolAttempt {
@@ -1040,6 +1001,7 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         let tool_context = self
             .tool_context
             .with_attempt_dispatch(Arc::clone(&dispatch), envelope.invocation);
+        tool_context.install_prederived_completion_key(self.completion_key);
         let outcome = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
             dispatch.as_ref(),
             call,
@@ -1090,19 +1052,17 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     call_record,
                 })
             }
-            RuntimeEffectCommand::ToolBatch { batch } => runner
-                .driver
-                .run_tool_batch(
-                    batch,
-                    envelope.invocation,
-                    &runner.event_tx,
-                    &runner.cancellation,
-                )
-                .await
-                .map(|outcome| RuntimeEffectOutcome::ToolBatch {
-                    launches: outcome.launches,
-                    triggers: outcome.triggers,
-                }),
+            RuntimeEffectCommand::ToolBatch { batch } => Box::pin(runner.driver.run_tool_batch(
+                batch,
+                envelope.invocation,
+                &runner.event_tx,
+                &runner.cancellation,
+            ))
+            .await
+            .map(|outcome| RuntimeEffectOutcome::ToolBatch {
+                launches: outcome.launches,
+                triggers: outcome.triggers,
+            }),
             RuntimeEffectCommand::ExecCode { language, code } => {
                 let result = runner
                     .driver
@@ -1461,16 +1421,17 @@ impl InlineRuntimeEffectController {
         registry: Arc<dyn crate::ProcessRegistry>,
         process_id: &str,
         reason: Option<String>,
+        replay: Option<crate::RuntimeReplay>,
     ) -> Result<ProcessRecord, PluginError> {
         // Cancellation is a durable signal: the cancel event is what the
         // runner-run process observes, so the inline controller appends it and
         // no longer tracks an in-process cancellation token.
-        registry
-            .append_event(
-                process_id,
-                crate::ProcessEventAppendRequest::cancel_requested(process_id, reason.clone()),
-            )
-            .await?;
+        let mut request =
+            crate::ProcessEventAppendRequest::cancel_requested(process_id, reason.clone());
+        if let Some(replay) = replay {
+            request = request.with_optional_replay(Some(replay));
+        }
+        registry.append_event(process_id, request).await?;
         registry
             .get_process(process_id)
             .await?

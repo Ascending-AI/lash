@@ -13,6 +13,7 @@ use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolResult};
 mod attachments;
 mod direct_completion;
 mod dispatch;
+pub(crate) mod orchestration;
 mod process;
 pub(crate) mod process_events;
 mod session;
@@ -21,10 +22,287 @@ mod triggers;
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
-pub use process::ToolSessionProcessAdmin;
+pub use process::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
 pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;
 pub use triggers::ToolTriggerClient;
+
+/// Integrator class 3 session reads available inside a recorded leaf attempt.
+#[derive(Clone)]
+pub struct AttemptSessionReads {
+    session_id: String,
+    sessions: Arc<dyn SessionStateService>,
+}
+
+impl AttemptSessionReads {
+    /// Integrator class 3 read of the attempt session's effective model policy.
+    pub async fn model(&self) -> Result<session::ToolSessionModel, PluginError> {
+        let snapshot = self.snapshot_current().await?;
+        let generation = snapshot
+            .policy
+            .model
+            .clamped_generation(&snapshot.policy.generation);
+        Ok(session::ToolSessionModel {
+            model: snapshot.policy.model.id,
+            model_variant: snapshot.policy.model.variant,
+            model_capability: snapshot.policy.model.capability,
+            generation,
+        })
+    }
+
+    /// Integrator class 3 snapshot of the bound session without an effect controller.
+    pub async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
+        self.sessions.snapshot_session(&self.session_id).await
+    }
+
+    /// Integrator class 3 snapshot of a named session through controller-free reads.
+    pub async fn snapshot(
+        &self,
+        session_id: impl AsRef<str>,
+    ) -> Result<SessionSnapshot, PluginError> {
+        self.sessions.snapshot_session(session_id.as_ref()).await
+    }
+
+    /// Integrator class 3 read of the bound session's serialized tool catalog.
+    pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
+        self.sessions.tool_catalog(&self.session_id).await
+    }
+
+    /// Integrator class 3 shared read of the immutable serialized tool catalog.
+    pub async fn shared_tool_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
+        self.sessions.shared_tool_catalog(&self.session_id).await
+    }
+}
+
+/// Integrator class 3 controller-free process reads for a recorded leaf attempt.
+#[derive(Clone)]
+pub struct AttemptProcessReads {
+    session_id: String,
+    processes: Arc<dyn crate::ProcessService>,
+}
+
+impl AttemptProcessReads {
+    /// Integrator class 3 listing through the attempt-safe process filter.
+    pub async fn list_handles_filtered(
+        &self,
+        filter: &crate::ProcessListFilter,
+    ) -> Result<Vec<crate::ProcessHandleSummary>, PluginError> {
+        Ok(self
+            .processes
+            .list_visible_for_attempt(&self.session_id, filter.list_mode())
+            .await?
+            .into_iter()
+            .filter(|record| filter.matches_record(record))
+            .map(crate::ProcessHandleSummary::from_record)
+            .collect())
+    }
+}
+
+/// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
+#[derive(Clone)]
+pub struct AttemptContext<'run> {
+    session_id: String,
+    execution_scope_id: String,
+    agent_frame_id: crate::AgentFrameId,
+    sessions: AttemptSessionReads,
+    processes: AttemptProcessReads,
+    cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    async_process_id: Option<String>,
+    runtime_process_id: Option<String>,
+    attachment_store: Arc<crate::SessionAttachmentStore>,
+    direct_completions: crate::DirectCompletionClient<'run>,
+    provider: Option<crate::ProviderHandle>,
+    prepared_payload: serde_json::Value,
+    tool_execution_binding: serde_json::Value,
+    tool_call_id: Option<String>,
+    attempt_number: u32,
+    max_attempts: u32,
+    replay_key: Option<String>,
+    execution_env_spec: crate::ProcessExecutionEnvSpec,
+    completion_key: Option<crate::AwaitEventKey>,
+    completion_supported: bool,
+    phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+}
+
+impl<'run> AttemptContext<'run> {
+    pub(crate) fn from_tool_context(
+        context: &ToolContext<'run>,
+        execution_scope_id: String,
+        completion_key: Option<crate::AwaitEventKey>,
+        completion_supported: bool,
+    ) -> Self {
+        let phase_probe = context
+            .runtime_execution_context
+            .as_ref()
+            .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
+        let provider = context
+            .runtime_dispatch
+            .as_ref()
+            .and_then(|dispatch| dispatch.turn_context.provider().cloned());
+        Self {
+            session_id: context.session_id.clone(),
+            execution_scope_id,
+            agent_frame_id: context.agent_frame_id.clone(),
+            sessions: AttemptSessionReads {
+                session_id: context.session_id.clone(),
+                sessions: Arc::clone(&context.sessions),
+            },
+            processes: AttemptProcessReads {
+                session_id: context.session_id.clone(),
+                processes: Arc::clone(&context.processes),
+            },
+            cancellation_token: context.cancellation_token.clone(),
+            async_process_id: context.async_process_id.clone(),
+            runtime_process_id: context.runtime_process_id.clone(),
+            attachment_store: Arc::clone(&context.attachment_store),
+            direct_completions: context.direct_completions.clone(),
+            provider,
+            prepared_payload: context.prepared_payload.clone(),
+            tool_execution_binding: context.tool_execution_binding.clone(),
+            tool_call_id: context.tool_call_id.clone(),
+            attempt_number: context.attempt_number,
+            max_attempts: context.max_attempts,
+            replay_key: context.replay_key.clone(),
+            execution_env_spec: context.execution_env_spec.clone(),
+            completion_key,
+            completion_supported,
+            phase_probe,
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn __for_testing(
+        context: &ToolContext<'run>,
+        execution_scope_id: impl Into<String>,
+    ) -> Self {
+        Self::from_tool_context(context, execution_scope_id.into(), None, false)
+    }
+
+    /// Integrator class 3 identity for the session that owns this recorded attempt.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+    /// Integrator class 3 durable turn or process scope used for intent identity.
+    pub fn execution_scope_id(&self) -> &str {
+        &self.execution_scope_id
+    }
+    /// Integrator class 3 agent-frame identity that authorized this provider attempt.
+    pub fn agent_frame_id(&self) -> &str {
+        &self.agent_frame_id
+    }
+    /// Integrator class 3 controller-free session reads for this attempt.
+    pub fn sessions(&self) -> AttemptSessionReads {
+        self.sessions.clone()
+    }
+    /// Integrator class 3 controller-free process reads for this attempt.
+    pub fn processes(&self) -> AttemptProcessReads {
+        self.processes.clone()
+    }
+    /// Integrator class 3 cooperative cancellation token supplied by the attempt host.
+    pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
+        self.cancellation_token.as_ref()
+    }
+    /// Integrator class 3 asynchronous process handle associated with this attempt.
+    pub fn async_process_id(&self) -> Option<&str> {
+        self.async_process_id.as_deref()
+    }
+    /// Integrator class 3 durable process currently executing this attempt, if any.
+    pub fn runtime_process_id(&self) -> Option<&str> {
+        self.runtime_process_id.as_deref()
+    }
+    /// Integrator class 3 attachment capability for durable tool output.
+    pub fn attachments(&self) -> ToolAttachmentClient {
+        ToolAttachmentClient {
+            store: Arc::clone(&self.attachment_store),
+        }
+    }
+    /// Integrator class 3 direct-completion client attributed to this attempt call.
+    pub fn direct_completions(&self) -> ToolDirectCompletionClient<'run> {
+        ToolDirectCompletionClient {
+            session_id: self.session_id.clone(),
+            tool_call_id: self.tool_call_id.clone(),
+            direct_completions: self.direct_completions.clone(),
+            parent_invocation: None,
+        }
+    }
+    /// Integrator class 3 resolved model provider visible to the attempt host.
+    pub fn provider(&self) -> Option<&crate::ProviderHandle> {
+        self.provider.as_ref()
+    }
+    /// Integrator class 3 payload sealed by the provider's prepare phase.
+    pub fn prepared_payload(&self) -> &serde_json::Value {
+        &self.prepared_payload
+    }
+    /// Integrator class 3 protocol-owned execution binding for this tool call.
+    pub fn tool_execution_binding(&self) -> &serde_json::Value {
+        &self.tool_execution_binding
+    }
+    /// Integrator class 3 stable provider call id used to derive intent identities.
+    pub fn tool_call_id(&self) -> Option<&str> {
+        self.tool_call_id.as_deref()
+    }
+    /// Integrator class 3 one-based retry attempt number.
+    pub fn attempt_number(&self) -> u32 {
+        self.attempt_number
+    }
+    /// Integrator class 3 retry ceiling sealed for this invocation.
+    pub fn max_attempts(&self) -> u32 {
+        self.max_attempts
+    }
+    /// Integrator class 3 durable attempt replay key when supplied by the host.
+    pub fn replay_key(&self) -> Option<&str> {
+        self.replay_key.as_deref()
+    }
+    /// Return the recorded process execution environment for a leaf intent
+    /// that starts a tool- or engine-backed process.
+    ///
+    /// This accessor is part of ADR 0051's protocol and process-engine
+    /// implementor class: a leaf [`ToolProvider`] declaring `StartProcess`
+    /// must copy the captured environment into the durable request instead of
+    /// rebuilding it from mutable host state.
+    pub fn process_execution_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
+        self.execution_env_spec.clone()
+    }
+    /// Integrator class 3 decode of the sealed payload into a provider-owned type.
+    pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        serde_json::from_value(self.prepared_payload.clone())
+    }
+    /// Integrator class 3 named, attempt-attributed runtime phase for fault probes.
+    pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
+        crate::runtime::RuntimeNamedPhase::begin(self.phase_probe.clone(), phase)
+    }
+    /// Integrator class 3 durable completion key or typed host-capability refusal.
+    pub fn completion_key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+        if !self.completion_supported {
+            return Err(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
+                "completion keys require an effect controller with process-loss-safe await-event routing",
+            ));
+        }
+        self.completion_key.clone().ok_or_else(|| {
+            crate::RuntimeError::new(
+                crate::RuntimeErrorCode::ToolCompletionKeyMissingCallId,
+                "completion keys require a prepared tool call id",
+            )
+        })
+    }
+    /// Integrator class 3 canonical identity for one declared intent index.
+    pub fn intent_identity(
+        &self,
+        intent_index: usize,
+    ) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
+        crate::derive_tool_intent_identity(
+            &self.session_id,
+            &self.execution_scope_id,
+            self.tool_call_id.as_deref(),
+            intent_index,
+        )
+    }
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct ToolCompletionState {
@@ -32,7 +310,7 @@ pub(crate) struct ToolCompletionState {
 }
 
 impl ToolCompletionState {
-    fn store(
+    pub(crate) fn store(
         &self,
         key: crate::AwaitEventKey,
     ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
@@ -46,6 +324,10 @@ impl ToolCompletionState {
 
     pub(crate) fn take(&self) -> Option<crate::AwaitEventKey> {
         self.key.lock_recover().take()
+    }
+
+    pub(crate) fn load(&self) -> Option<crate::AwaitEventKey> {
+        self.key.lock_recover().clone()
     }
 }
 
@@ -295,6 +577,11 @@ impl<'run> ToolContextBuilder<'run> {
 }
 
 impl<'run> ToolContext<'run> {
+    pub(crate) fn install_prederived_completion_key(&self, key: Option<crate::AwaitEventKey>) {
+        if let Some(key) = key {
+            let _ = self.completion.store(key);
+        }
+    }
     pub(crate) fn replay_validation_trace(&self) -> Option<crate::RuntimeEffectReplayTrace> {
         self.runtime_execution_context
             .as_ref()
@@ -417,6 +704,7 @@ impl<'run> ToolContext<'run> {
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),
             effect_controller: self.effect_controller.clone(),
+            parent_invocation: self.parent_invocation.clone(),
         }
     }
 
@@ -436,10 +724,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
-    /// Provides process lifecycle operations to tool implementors under the call's session and
-    /// execution scopes.
-    pub fn processes(&self) -> ToolSessionProcessAdmin<'run> {
-        ToolSessionProcessAdmin {
+    pub(crate) fn process_admin(&self) -> InternalProcessAdmin<'run> {
+        InternalProcessAdmin {
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
             processes: Arc::clone(&self.processes),
@@ -988,6 +1274,13 @@ pub struct ToolCall<'a> {
     pub context: &'a ToolContext<'a>,
 }
 
+/// Per-call inputs handed to a leaf provider that opts into the controller-free attempt shape.
+pub struct AttemptToolCall<'a> {
+    pub name: &'a str,
+    pub args: &'a serde_json::Value,
+    pub context: &'a AttemptContext<'a>,
+}
+
 /// Trait for providing tools to the sandbox. Implement this per-project.
 ///
 /// Implementations supply cheap [`ToolManifest`]s, lazily resolved
@@ -1034,6 +1327,62 @@ pub trait ToolProvider: Send + Sync + 'static {
         )))
     }
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult;
+    /// Execute an owner-bound internal process body.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class. The
+    /// default preserves legacy pure implementations while exposing durable
+    /// process capabilities only to providers that explicitly override this
+    /// internal-only route.
+    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolResult {
+        self.execute(ToolCall {
+            name: call.name,
+            args: call.args,
+            context: call.context.__tool_context(),
+        })
+        .await
+    }
+    /// Whether this tool id uses the leaf attempt signature. Durable leaf
+    /// behavior must opt in; the legacy `ToolContext` fallback has no process
+    /// administration and is retained only for pure provider implementations.
+    fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
+        false
+    }
+    /// Whether this leaf tool may return deferred completion. The coordinator
+    /// reserves a completion key only for tools that declare this capability.
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
+    }
+    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        crate::ToolAttemptResult::from_tool_result(ToolResult::failure(crate::ToolFailure {
+            class: crate::ToolFailureClass::Unavailable,
+            code: "tool_attempt_context_not_implemented".to_string(),
+            message: format!(
+                "tool `{}` has not implemented the leaf AttemptContext signature",
+                call.name
+            ),
+            source: crate::ToolFailureSource::Runtime,
+            retry: crate::ToolRetryDisposition::Never,
+            raw: None,
+        }))
+    }
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
+            return crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format!(
+                "Unknown tool id: {tool_id}"
+            )));
+        };
+        self.execute_attempt(AttemptToolCall {
+            name: &manifest.name,
+            args,
+            context,
+        })
+        .await
+    }
     async fn execute_granted(
         &self,
         grant: &ToolExecutionGrant,
@@ -1046,6 +1395,17 @@ pub trait ToolProvider: Send + Sync + 'static {
             grant.manifest.id
         ))
     }
+    async fn execute_granted_attempt(
+        &self,
+        grant: &ToolExecutionGrant,
+        _args: &serde_json::Value,
+        _context: &AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format_args!(
+            "Granted leaf execution is unsupported for tool id `{}`",
+            grant.manifest.id
+        )))
+    }
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
@@ -1056,6 +1416,26 @@ pub trait ToolProvider: Send + Sync + 'static {
             return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
         };
         self.execute(ToolCall {
+            name: &manifest.name,
+            args,
+            context,
+        })
+        .await
+    }
+
+    /// Resolve and execute an owner-bound internal process tool by stable id.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &InternalProcessContext<'_>,
+    ) -> ToolResult {
+        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
+            return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
+        };
+        self.execute_internal(InternalProcessToolCall {
             name: &manifest.name,
             args,
             context,

@@ -7,14 +7,14 @@ use lash_sansio::core_support::*;
 
 use super::context::ToolDispatchContext;
 
-pub(super) async fn execute_tool_attempt<'run>(
+pub(super) async fn execute_leaf_tool_attempt<'run>(
     context: &ToolDispatchContext<'run>,
     manifest: &ToolManifest,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
     attempt: u32,
     max_attempts: u32,
-) -> ToolResult {
+) -> crate::ToolAttemptResult {
     let tool_name = manifest.name.as_str();
     execute_once(
         context,
@@ -24,14 +24,14 @@ pub(super) async fn execute_tool_attempt<'run>(
     .await
 }
 
-pub(super) async fn execute_granted_tool_attempt<'run>(
+pub(super) async fn execute_granted_leaf_tool_attempt<'run>(
     context: &ToolDispatchContext<'run>,
     grant: &crate::ToolExecutionGrant,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
     attempt: u32,
     max_attempts: u32,
-) -> ToolResult {
+) -> crate::ToolAttemptResult {
     let tool_name = grant.manifest.name.as_str();
     execute_granted_once(
         context,
@@ -42,22 +42,28 @@ pub(super) async fn execute_granted_tool_attempt<'run>(
     .await
 }
 
-async fn execute_once<'run>(
+pub(crate) async fn execute_once<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
-) -> ToolResult {
+) -> crate::ToolAttemptResult {
     let args = &prepared.args;
-    let mut result = std::panic::AssertUnwindSafe(context.tools.execute_by_id(
-        &prepared.tool_id,
-        args,
-        &tool_context,
-    ))
-    .catch_unwind()
-    .await
-    .unwrap_or_else(tool_panicked);
-    normalize_tool_result_attachments(context, &prepared.tool_name, &mut result).await;
-    result
+    let mut attempt_result = if context.tools.supports_attempt_context(&prepared.tool_id) {
+        execute_with_attempt_context(context, prepared, &tool_context).await
+    } else {
+        crate::ToolAttemptResult::from_tool_result(
+            std::panic::AssertUnwindSafe(context.tools.execute_by_id(
+                &prepared.tool_id,
+                args,
+                &tool_context,
+            ))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(tool_panicked),
+        )
+    };
+    normalize_attempt_result_attachments(context, &prepared.tool_name, &mut attempt_result).await;
+    attempt_result
 }
 
 async fn execute_granted_once<'run>(
@@ -65,17 +71,70 @@ async fn execute_granted_once<'run>(
     grant: &crate::ToolExecutionGrant,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
-) -> ToolResult {
-    let mut result = std::panic::AssertUnwindSafe(context.tools.execute_granted(
-        grant,
+) -> crate::ToolAttemptResult {
+    let mut attempt_result = if context.tools.supports_attempt_context(&prepared.tool_id) {
+        let attempt_context = build_attempt_context(prepared, &tool_context).await;
+        match attempt_context {
+            Ok(attempt_context) => std::panic::AssertUnwindSafe(
+                context
+                    .tools
+                    .execute_granted_attempt(grant, &prepared.args, &attempt_context),
+            )
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|payload| {
+                crate::ToolAttemptResult::from_tool_result(tool_panicked(payload))
+            }),
+            Err(result) => crate::ToolAttemptResult::from_tool_result(result),
+        }
+    } else {
+        crate::ToolAttemptResult::from_tool_result(
+            std::panic::AssertUnwindSafe(context.tools.execute_granted(
+                grant,
+                &prepared.args,
+                &tool_context,
+            ))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(tool_panicked),
+        )
+    };
+    normalize_attempt_result_attachments(context, &grant.manifest.name, &mut attempt_result).await;
+    attempt_result
+}
+
+async fn execute_with_attempt_context(
+    context: &ToolDispatchContext<'_>,
+    prepared: &PreparedToolCall,
+    tool_context: &ToolContext<'_>,
+) -> crate::ToolAttemptResult {
+    let attempt_context = match build_attempt_context(prepared, tool_context).await {
+        Ok(context) => context,
+        Err(result) => return crate::ToolAttemptResult::from_tool_result(result),
+    };
+    std::panic::AssertUnwindSafe(context.tools.execute_attempt_by_id(
+        &prepared.tool_id,
         &prepared.args,
-        &tool_context,
+        &attempt_context,
     ))
     .catch_unwind()
     .await
-    .unwrap_or_else(tool_panicked);
-    normalize_tool_result_attachments(context, &grant.manifest.name, &mut result).await;
-    result
+    .unwrap_or_else(|payload| crate::ToolAttemptResult::from_tool_result(tool_panicked(payload)))
+}
+
+async fn build_attempt_context<'run>(
+    _prepared: &PreparedToolCall,
+    tool_context: &ToolContext<'run>,
+) -> Result<crate::AttemptContext<'run>, ToolResult> {
+    let scoped = tool_context.effect_controller.scoped();
+    let completion_key = tool_context.completion.load();
+    let completion_supported = completion_key.is_some();
+    Ok(crate::AttemptContext::from_tool_context(
+        tool_context,
+        scoped.scope_id().to_string(),
+        completion_key,
+        completion_supported,
+    ))
 }
 
 fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolResult {
@@ -137,6 +196,21 @@ async fn normalize_tool_result_attachments(
             );
             *result = ToolResult::from_output(output);
         }
+    }
+}
+
+async fn normalize_attempt_result_attachments(
+    context: &ToolDispatchContext<'_>,
+    tool_name: &str,
+    result: &mut crate::ToolAttemptResult,
+) {
+    let crate::ToolAttemptResult::Done { result, .. } = result else {
+        return;
+    };
+    let mut tool_result = ToolResult::from_output(result.clone().into_output());
+    normalize_tool_result_attachments(context, tool_name, &mut tool_result).await;
+    if let ToolResult::Done(output) = tool_result {
+        *result = crate::ToolResultDone::from_output(*output);
     }
 }
 

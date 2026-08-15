@@ -10,6 +10,7 @@ use lash_sansio::sync::MutexExt;
 // rustdoc then resolves the whole merged doc — including the submodule's own
 // intra-doc links — against *this* module's scope, where none of the linked
 // items exist.
+pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod checkpoint_observer;
 pub mod conformance;
@@ -394,7 +395,7 @@ where
     )
 }
 
-struct EmptyToolProvider;
+pub struct EmptyToolProvider;
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for EmptyToolProvider {
@@ -481,6 +482,7 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools: provider,
+        tool_registry: None,
         tool_catalog: Arc::new(tool_catalog),
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -498,6 +500,7 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::clone(&attachment_store),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -576,6 +579,608 @@ pub fn code_execution_context_with_trigger_store_and_effect_controller(
         Some(crate::TriggerRouter::new(trigger_store, None, None)),
         effect_controller,
     )
+}
+
+/// Builds the production-shaped `ToolContext` installed while a controller-owned
+/// `ToolAttempt` local executor is open. Durable-adapter tests use this to prove
+/// that tool-facing clients refuse before entering a nested controller command.
+pub fn atomic_tool_context_with_services<'run>(
+    scoped_effect_controller: crate::ScopedEffectController<'run>,
+    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
+    parent_invocation: crate::RuntimeInvocation,
+) -> crate::ToolContext<'run> {
+    crate::ToolContext::from_dispatch(atomic_tool_dispatch_with_services(
+        scoped_effect_controller,
+        session_lifecycle,
+        processes,
+        trigger_router,
+        parent_invocation,
+        "atomic-tool-test-session",
+    ))
+    .build()
+}
+
+fn atomic_tool_dispatch_with_services<'run>(
+    scoped_effect_controller: crate::ScopedEffectController<'run>,
+    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
+    parent_invocation: crate::RuntimeInvocation,
+    session_id: &str,
+) -> Arc<crate::tool_dispatch::ToolDispatchContext<'run>> {
+    atomic_tool_dispatch_with_provider_and_services(
+        scoped_effect_controller,
+        session_lifecycle,
+        processes,
+        trigger_router,
+        parent_invocation,
+        session_id,
+        Arc::new(EmptyToolProvider),
+        crate::ToolCatalog::from_tool_definitions(Vec::new()),
+        Arc::new(crate::SystemClock),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn atomic_tool_dispatch_with_provider_and_services<'run>(
+    scoped_effect_controller: crate::ScopedEffectController<'run>,
+    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
+    parent_invocation: crate::RuntimeInvocation,
+    session_id: &str,
+    tools: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    clock: Arc<dyn crate::Clock>,
+) -> Arc<crate::tool_dispatch::ToolDispatchContext<'run>> {
+    let host = Arc::new(MockSessionManager::default());
+    let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
+        .build_session(session_id, None)
+        .expect("build atomic-tool test plugin session");
+    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
+    let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
+    let execution_env_spec = crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
+    Arc::new(crate::tool_dispatch::ToolDispatchContext {
+        plugins,
+        tools,
+        tool_registry: None,
+        tool_catalog: Arc::new(tool_catalog),
+        sessions: host.clone(),
+        session_lifecycle,
+        session_graph: host,
+        processes,
+        trigger_router,
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(
+            scoped_effect_controller,
+        ),
+        direct_completions: crate::DirectCompletionClient::unavailable(
+            "direct completions are unavailable in this test context",
+        ),
+        parent_invocation: Some(parent_invocation),
+        execution_env_spec,
+        session_id: session_id.to_string(),
+        agent_frame_id: String::new(),
+        event_tx,
+        checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+        trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
+        attachment_store,
+        attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+        turn_context: crate::TurnContext::default(),
+        clock,
+    })
+}
+
+#[derive(Debug)]
+struct FrozenToolCoordinatorClock(std::time::Instant);
+
+#[async_trait::async_trait]
+impl crate::Clock for FrozenToolCoordinatorClock {
+    fn now(&self) -> std::time::Instant {
+        self.0
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        1_700_000_000_000
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.timestamp_datetime().to_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp_millis(self.timestamp_ms() as i64)
+            .expect("frozen coordinator timestamp")
+    }
+
+    async fn sleep(&self, _duration: std::time::Duration) {}
+
+    async fn sleep_until(&self, _deadline: std::time::Instant) {}
+}
+
+/// Execute one opted-in provider through the production attempt coordinator,
+/// intent drain, and model-return projection against supplied durable services.
+///
+/// This is public for **conformance-suite embedders** that compare the same
+/// provider and intent contract across durable backends.
+pub async fn coordinate_tool_provider_with_services(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    session_id: &str,
+    definition: crate::ToolDefinition,
+    provider: Arc<dyn crate::ToolProvider>,
+    call: crate::PreparedToolCall,
+) -> Result<crate::sansio::CompletedToolCall, String> {
+    let parent_invocation = crate::RuntimeInvocation::effect(
+        crate::RuntimeScope::for_turn(session_id, scoped_effect_controller.scope_id(), 1, 0),
+        format!("tool-batch:{}", call.call_id),
+        crate::RuntimeEffectKind::ToolBatch,
+        format!("tool-batch:{}", call.call_id),
+    );
+    let dispatch = atomic_tool_dispatch_with_provider_and_services(
+        scoped_effect_controller,
+        Arc::new(MockSessionManager::default()),
+        processes,
+        None,
+        parent_invocation.clone(),
+        session_id,
+        provider,
+        crate::ToolCatalog::from_tool_definitions(vec![definition]),
+        Arc::new(FrozenToolCoordinatorClock(std::time::Instant::now())),
+    );
+    let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
+        .prepared_call(&call)
+        .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
+        .build();
+    let coordinated = crate::tool_dispatch::coordinate_tool_invocation(
+        dispatch.as_ref(),
+        call.clone(),
+        None,
+        crate::ToolRetryPolicy::Never,
+        crate::tool_dispatch::ToolAttemptEffectIdentity::Batch {
+            parent: parent_invocation,
+            replay_suffix: call.call_id.clone(),
+        },
+        tool_context.cancellation_token().cloned(),
+        None,
+        None,
+        |completion_key| {
+            crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
+                Arc::clone(&dispatch),
+                tool_context.clone(),
+                completion_key,
+            )
+        },
+    )
+    .await;
+    let crate::tool_dispatch::ToolCallLaunch::Done(outcome) = coordinated.launch else {
+        return Err("the literal differential provider unexpectedly deferred".to_string());
+    };
+    let outcome = *outcome;
+    let mut model_return = dispatch
+        .plugins
+        .project_tool_result(crate::plugin::ToolResultProjectionContext {
+            session_id: session_id.to_string(),
+            call_id: call.call_id.clone(),
+            tool_name: outcome.record.tool.clone(),
+            args: outcome.record.args.clone(),
+            output: outcome.record.output.clone(),
+            duration_ms: outcome.record.duration_ms,
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    model_return.parts.extend(
+        outcome
+            .intent_outcomes
+            .iter()
+            .map(|intent| crate::ModelToolReturnPart::text(intent.model_addendum())),
+    );
+    Ok(crate::sansio::CompletedToolCall {
+        call_id: call.call_id,
+        tool_name: outcome.record.tool,
+        args: outcome.record.args,
+        output: outcome.record.output,
+        model_return,
+        duration_ms: outcome.record.duration_ms,
+        intent_outcomes: outcome.intent_outcomes,
+        replay: call.replay,
+    })
+}
+
+/// Execute a recorded tool-intent drain through the production process-command
+/// route while retaining a small, backend-neutral differential-test surface.
+pub async fn execute_tool_intents_with_services(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    session_id: &str,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+) -> Vec<crate::ToolIntentExecutionOutcome> {
+    let parent_invocation = crate::RuntimeInvocation::effect(
+        crate::RuntimeScope::new(session_id),
+        format!("tool-intent-drain:{tool_call_id}"),
+        crate::RuntimeEffectKind::ToolBatch,
+        format!("tool-intent-drain:{tool_call_id}"),
+    );
+    let dispatch = atomic_tool_dispatch_with_services(
+        scoped_effect_controller,
+        Arc::new(MockSessionManager::default()),
+        processes,
+        None,
+        parent_invocation,
+        session_id,
+    );
+    crate::tool_dispatch::execute_final_tool_intents(
+        dispatch.as_ref(),
+        Some(tool_call_id),
+        intents,
+        None,
+    )
+    .await
+}
+
+/// A `ProcessService` that applies the production command-runner guard, then
+/// routes **every** `ProcessCommand` through the operation scope's effect
+/// controller exactly as `ProcessCommandRunner` does.
+///
+/// The FIG-1127 review found that stubbing the sibling routes here made the
+/// harness structurally incapable of reaching `await_process`, `cancel`,
+/// `signal`, `list_visible` and `transfer` — the routes that turned out to be
+/// unguarded. The stubs are gone: this service now mirrors the production
+/// routing decision per method, so a route that journals in production journals
+/// here too.
+struct EffectBackedProcessService {
+    registry: Arc<dyn crate::ProcessRegistry>,
+}
+
+impl EffectBackedProcessService {
+    async fn execute(
+        &self,
+        scope: crate::ProcessOpScope<'_>,
+        command: crate::ProcessCommand,
+    ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
+        let effect_id = command.effect_id();
+        // Production derives the nested invocation from the parent invocation
+        // the ToolContext carries (`process_effect_invocation`), so a nested
+        // command inherits the attempt's replay-key lineage. Use the same
+        // helper, not a lookalike.
+        let invocation = crate::runtime::causal::process_effect_invocation(
+            "atomic-tool-test-session",
+            scope.parent_invocation.clone(),
+            &effect_id,
+        );
+        let controller = scope.controller();
+        let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
+            controller,
+            scope.effect_controller.scoped().execution_scope().clone(),
+        )
+        .map_err(crate::RuntimeEffectControllerError::from)?;
+        let local_executor =
+            crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None)
+                .with_process_effect_controller(
+                    proxy
+                        .owned_controller()
+                        .expect("effect-task proxy owns its controller"),
+                );
+        let outcome = crate::runtime::effect::drive_effect_controller_task(
+            controller,
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::process(command),
+            ),
+            local_executor,
+            requests,
+        )
+        .await?;
+        outcome.into_process().map_err(crate::PluginError::from)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessService for EffectBackedProcessService {
+    async fn list_visible_for_attempt(
+        &self,
+        session_id: &str,
+        mode: crate::ProcessListMode,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        match mode {
+            crate::ProcessListMode::Live => self.registry.list_live_observed_by(session_id).await,
+            crate::ProcessListMode::All => self.registry.list_observed_by(session_id).await,
+        }
+    }
+
+    async fn start_from_request(
+        &self,
+        _session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+        let observers = request.observers.clone();
+        let env_ref = request
+            .env_spec
+            .as_ref()
+            .map(|_| crate::ProcessExecutionEnvRef::new("process-env:atomic-tool-test"));
+        let registration = request.into_registration(env_ref);
+        let command = crate::ProcessCommand::Start {
+            registration,
+            observers,
+            env_spec: None,
+            execution_context: Box::new(crate::ProcessExecutionContext::default()),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Start { record } => {
+                Ok(crate::ProcessHandleSummary::from_record(*record))
+            }
+            _ => unreachable!("start command returns start outcome"),
+        }
+    }
+
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+        self.start_from_request(session_id, request, scope).await
+    }
+
+    async fn start(
+        &self,
+        _session_id: &str,
+        registration: crate::ProcessRegistration,
+        options: crate::ProcessStartOptions,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let command = crate::ProcessCommand::Start {
+            registration,
+            observers: options.initial_observers,
+            env_spec: None,
+            execution_context: Box::new(crate::ProcessExecutionContext::default()),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Start { record } => Ok(*record),
+            _ => unreachable!("start command returns start outcome"),
+        }
+    }
+
+    /// Production writes the terminal through the registry, not the controller
+    /// (`complete_external_process`), so this route journals nothing.
+    async fn complete_external(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        await_output: crate::ProcessAwaitOutput,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
+        self.registry
+            .complete_process(
+                process_id,
+                await_output,
+                crate::ProcessCompletionAuthority::ExternalOwner,
+            )
+            .await
+    }
+
+    async fn await_process(
+        &self,
+        process_id: &str,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+        let command = crate::ProcessCommand::Await {
+            process_id: process_id.to_string(),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Await { output } => Ok(*output),
+            _ => unreachable!("await command returns await outcome"),
+        }
+    }
+
+    async fn list_visible(
+        &self,
+        session_id: &str,
+        mode: crate::ProcessListMode,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        let command = crate::ProcessCommand::List {
+            session_scope: crate::SessionScope::new(session_id),
+            mode,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::List { entries } => Ok(entries),
+            _ => unreachable!("list command returns list outcome"),
+        }
+    }
+
+    /// Production authorizes visibility with a registry observer read
+    /// (`validate_process_handles_observed_inner`), so this route journals
+    /// nothing.
+    async fn validate_visible(
+        &self,
+        session_id: &str,
+        process_ids: &[String],
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        for process_id in process_ids {
+            if !self.registry.is_observer(session_id, process_id).await? {
+                return Err(crate::PluginError::Session(format!(
+                    "process handle `{process_id}` is not visible in this session"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    async fn cancel(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let command = crate::ProcessCommand::Cancel {
+            process_id: process_id.to_string(),
+            reason: Some("requested by tool".to_string()),
+            replay: None,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            _ => unreachable!("cancel command returns cancel outcome"),
+        }
+    }
+
+    async fn cancel_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let command = crate::ProcessCommand::Cancel {
+            process_id: process_id.to_string(),
+            reason,
+            replay: None,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            _ => unreachable!("cancel command returns cancel outcome"),
+        }
+    }
+
+    async fn finish_recorded_intent_parent(
+        &self,
+        _session_id: &str,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
+        match self
+            .execute(
+                scope,
+                crate::ProcessCommand::ParentEnd {
+                    identity,
+                    process_id,
+                    policy,
+                    reason,
+                },
+            )
+            .await?
+        {
+            crate::ProcessEffectOutcome::ParentEnd { outcome } => Ok(*outcome),
+            _ => unreachable!("parent-end command returns parent-end outcome"),
+        }
+    }
+
+    async fn signal(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let event_type = crate::process_signal_event_type(&signal_name)?;
+        let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
+            format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
+        );
+        let command = crate::ProcessCommand::Signal {
+            process_id: process_id.to_string(),
+            signal_name,
+            signal_id,
+            request,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
+            _ => unreachable!("signal command returns signal outcome"),
+        }
+    }
+
+    async fn signal_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.signal(
+            session_id,
+            process_id,
+            signal_name,
+            signal_id,
+            payload,
+            scope,
+        )
+        .await
+    }
+
+    async fn emit_event(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let command = crate::ProcessCommand::EmitEvent {
+            process_id: process_id.to_string(),
+            request: crate::ProcessEventAppendRequest::new(event_type, payload)
+                .with_replay_key(replay_key),
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::EmitEvent { event, .. } => Ok(*event),
+            _ => unreachable!("emit-event command returns emit-event outcome"),
+        }
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.emit_event(
+            session_id, process_id, event_type, replay_key, payload, scope,
+        )
+        .await
+    }
+
+    async fn transfer(
+        &self,
+        from_session_id: &str,
+        to_session_id: &str,
+        process_ids: Vec<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        let command = crate::ProcessCommand::Transfer {
+            from_scope: crate::SessionScope::new(from_session_id),
+            to_scope: crate::SessionScope::new(to_session_id),
+            process_ids,
+        };
+        match self.execute(scope, command).await? {
+            crate::ProcessEffectOutcome::Transfer => Ok(()),
+            _ => unreachable!("transfer command returns transfer outcome"),
+        }
+    }
+}
+
+/// Builds a process service whose starts cross the supplied operation scope's
+/// effect controller, matching the production durable process-start route.
+pub fn effect_backed_process_service(
+    registry: Arc<dyn crate::ProcessRegistry>,
+) -> Arc<dyn crate::ProcessService> {
+    Arc::new(EffectBackedProcessService { registry })
 }
 
 /// Convenience helper for the common tool-test shape: build a
@@ -774,6 +1379,42 @@ impl crate::plugin::SessionGraphService for MockSessionManager {}
 
 #[async_trait::async_trait]
 impl crate::ProcessService for MockSessionManager {
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, PluginError> {
+        let observers = request.observers.clone();
+        let env_ref = request
+            .env_spec
+            .as_ref()
+            .map(|_| crate::ProcessExecutionEnvRef::new("process-env:mock-recorded-intent"));
+        let record = self
+            .start(
+                session_id,
+                request.into_registration(env_ref),
+                crate::ProcessStartOptions::new().with_initial_observers(observers),
+                scope,
+            )
+            .await?;
+        Ok(crate::ProcessHandleSummary::from_record(record))
+    }
+
+    async fn finish_recorded_intent_parent(
+        &self,
+        _session_id: &str,
+        _identity: crate::ToolIntentIdentity,
+        _process_id: String,
+        _policy: crate::ProcessParentEndPolicy,
+        _reason: String,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
+        Err(PluginError::Session(
+            "recorded parent-end commands are unavailable in this mock".to_string(),
+        ))
+    }
+
     async fn start(
         &self,
         _session_id: &str,
@@ -871,6 +1512,23 @@ impl crate::ProcessService for MockSessionManager {
             self.process_registry.clone(),
             process_id,
             Some("requested by test".to_string()),
+            None,
+        )
+        .await
+    }
+
+    async fn cancel_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        reason: Option<String>,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, PluginError> {
+        crate::InlineRuntimeEffectController::request_process_cancel(
+            self.process_registry.clone(),
+            process_id,
+            reason,
+            None,
         )
         .await
     }
@@ -891,6 +1549,45 @@ impl crate::ProcessService for MockSessionManager {
                 crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
                     format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
                 ),
+            )
+            .await
+            .map(|result| result.event)
+    }
+
+    async fn signal_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, PluginError> {
+        self.signal(
+            session_id,
+            process_id,
+            signal_name,
+            signal_id,
+            payload,
+            scope,
+        )
+        .await
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        _session_id: &str,
+        process_id: &str,
+        event_type: String,
+        replay_key: String,
+        payload: serde_json::Value,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, PluginError> {
+        self.process_registry
+            .append_event(
+                process_id,
+                crate::ProcessEventAppendRequest::new(event_type, payload)
+                    .with_replay_key(replay_key),
             )
             .await
             .map(|result| result.event)
@@ -946,7 +1643,7 @@ mod test_protocol_fakes {
 
     pub fn test_standard_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
         vec![Arc::new(TestProtocolFactory {
-            id: "protocol_standard",
+            id: "test_protocol",
             include_batch: true,
             decode_code_create_options: false,
             session_override: None,
@@ -960,7 +1657,7 @@ mod test_protocol_fakes {
         code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
     ) -> Arc<dyn PluginFactory> {
         Arc::new(TestProtocolFactory {
-            id: "protocol_standard",
+            id: "test_protocol",
             include_batch: true,
             decode_code_create_options: false,
             session_override: Some(session),

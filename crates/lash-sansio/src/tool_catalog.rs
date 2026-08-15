@@ -3,8 +3,8 @@ use std::sync::{Arc, OnceLock};
 
 use crate::llm::types::LlmToolSpec;
 use crate::{
-    PromptContribution, PromptFingerprint, ToolContract, ToolDefinition, ToolManifest,
-    prompt_tool_names_fingerprint,
+    PromptContribution, PromptFingerprint, ToolActivation, ToolContract, ToolDefinition,
+    ToolManifest, prompt_tool_names_fingerprint,
 };
 
 pub type ToolContractResolver =
@@ -139,7 +139,10 @@ impl ToolCatalog {
     }
 
     pub(crate) fn callable_tools_iter(&self) -> impl Iterator<Item = &ToolManifest> {
-        self.tools.iter().map(|tool| &tool.manifest)
+        self.tools
+            .iter()
+            .map(|tool| &tool.manifest)
+            .filter(|manifest| manifest.activation != ToolActivation::Internal)
     }
 
     pub fn callable_tools(&self) -> Vec<ToolManifest> {
@@ -149,17 +152,15 @@ impl ToolCatalog {
     /// Membership test: a tool is in the catalog (callable) or it does not
     /// exist to the model.
     pub fn has_callable_tool(&self, tool_name: &str) -> bool {
-        self.tools
-            .iter()
-            .any(|tool| tool.manifest.name == tool_name)
+        self.callable_tools_iter()
+            .any(|manifest| manifest.name == tool_name)
     }
 
     pub fn tool_names(&self) -> Arc<Vec<String>> {
         Arc::clone(self.tool_names.get_or_init(|| {
             Arc::new(
-                self.tools
-                    .iter()
-                    .map(|tool| tool.manifest.name.clone())
+                self.callable_tools_iter()
+                    .map(|manifest| manifest.name.clone())
                     .collect(),
             )
         }))
@@ -176,6 +177,7 @@ impl ToolCatalog {
             Arc::new(
                 self.tools
                     .iter()
+                    .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
                     .filter_map(|tool| {
                         self.resolve_contract(&tool.manifest.name)
                             .map(|contract| contract.model_tool(&tool.manifest))
@@ -284,6 +286,20 @@ mod tests {
         assert!(catalog.has_callable_tool("read_file"));
         assert!(catalog.has_callable_tool("grep"));
         assert!(!catalog.has_callable_tool("absent"));
+    }
+
+    #[test]
+    fn internal_members_are_resolvable_but_never_model_callable() {
+        let mut internal = tool("internal_runner");
+        internal.manifest.activation = ToolActivation::Internal;
+        let catalog =
+            build_tool_catalog(build_input(vec![tool("read_file"), internal], Vec::new()));
+
+        assert_eq!(catalog.tools.len(), 2);
+        assert!(catalog.resolve_contract("internal_runner").is_some());
+        assert!(!catalog.has_callable_tool("internal_runner"));
+        assert_eq!(catalog.tool_names().as_ref(), &["read_file".to_string()]);
+        assert_eq!(catalog.model_tool_specs().len(), 1);
     }
 
     #[test]

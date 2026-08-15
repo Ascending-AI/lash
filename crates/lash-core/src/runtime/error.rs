@@ -92,6 +92,15 @@ pub enum RuntimeErrorCode {
     PostgresEffectJournalRetirement,
     QueuedWork,
     ProcessPanicked,
+    /// ADR 0051 effect-host implementor diagnostic for a process-command
+    /// refusal whose target is outside the invoking session's visible set.
+    ProcessNotVisible,
+    /// ADR 0051 effect-host implementor diagnostic for a write or cancellation
+    /// refused because the recorded target is already terminal.
+    ProcessAlreadyTerminal,
+    /// ADR 0051 effect-host implementor diagnostic for a process-command
+    /// refusal whose terminal target has been replaced by a retention tombstone.
+    ProcessNoLongerRetained,
     ProcessRegistryUnavailable,
     ProcessSignalWaitCancelled,
     ProcessSignalWaitTimeout,
@@ -266,6 +275,9 @@ impl RuntimeErrorCode {
             Self::PostgresEffectJournalRetirement => "postgres_effect_journal_retirement",
             Self::QueuedWork => "queued_work",
             Self::ProcessPanicked => "process_panicked",
+            Self::ProcessNotVisible => "process_not_visible",
+            Self::ProcessAlreadyTerminal => "process_already_terminal",
+            Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
             Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
@@ -463,6 +475,9 @@ impl RuntimeErrorCode {
                 | Self::PostgresAwaitEventSign
                 | Self::RestateEffectController
                 | Self::ProcessPanicked
+                | Self::ProcessNotVisible
+                | Self::ProcessAlreadyTerminal
+                | Self::ProcessNoLongerRetained
                 | Self::ProcessRegistryUnavailable
                 | Self::ProcessSignalWaitCancelled
                 | Self::ProcessSignalWaitTimeout
@@ -596,6 +611,9 @@ impl RuntimeErrorCode {
             "postgres_effect_journal_retirement" => Self::PostgresEffectJournalRetirement,
             "queued_work" => Self::QueuedWork,
             "process_panicked" => Self::ProcessPanicked,
+            "process_not_visible" => Self::ProcessNotVisible,
+            "process_already_terminal" => Self::ProcessAlreadyTerminal,
+            "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
             "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,
@@ -949,6 +967,9 @@ mod tests {
             | RuntimeErrorCode::PostgresAwaitEventSign
             | RuntimeErrorCode::RestateEffectController
             | RuntimeErrorCode::ProcessPanicked
+            | RuntimeErrorCode::ProcessNotVisible
+            | RuntimeErrorCode::ProcessAlreadyTerminal
+            | RuntimeErrorCode::ProcessNoLongerRetained
             | RuntimeErrorCode::ProcessRegistryUnavailable
             | RuntimeErrorCode::ProcessSignalWaitCancelled
             | RuntimeErrorCode::ProcessSignalWaitTimeout
@@ -1098,6 +1119,9 @@ mod tests {
             RuntimeErrorCode::PostgresEffectJournalRetirement,
             RuntimeErrorCode::QueuedWork,
             RuntimeErrorCode::ProcessPanicked,
+            RuntimeErrorCode::ProcessNotVisible,
+            RuntimeErrorCode::ProcessAlreadyTerminal,
+            RuntimeErrorCode::ProcessNoLongerRetained,
             RuntimeErrorCode::ProcessRegistryUnavailable,
             RuntimeErrorCode::ProcessSignalWaitCancelled,
             RuntimeErrorCode::ProcessSignalWaitTimeout,

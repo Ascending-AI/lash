@@ -445,6 +445,10 @@ where
         true
     }
 
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::OrdinalAddressed
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         true
     }
@@ -610,8 +614,76 @@ where
             )
             .await
             .map(|result| RuntimeEffectOutcome::Process { result }),
+            RestateEffectExecution::DurableProcessCommand {
+                invocation,
+                command,
+            } => {
+                let envelope = RuntimeEffectEnvelope::new(
+                    invocation.clone(),
+                    RuntimeEffectCommand::Process {
+                        command: command.clone(),
+                    },
+                );
+                let reconstructed_envelope = envelope.canonical_form()?;
+                let outcome = execute_restate_process_command(
+                    &self.context,
+                    &invocation,
+                    *command,
+                    local_executor,
+                    |_| {},
+                    |_, _| {},
+                )
+                .await
+                .map(|result| RuntimeEffectOutcome::Process { result });
+                let recorded_envelope = Arc::new(reconstructed_envelope.clone());
+                let recorded = self
+                    .record_effect(
+                        &invocation,
+                        Box::pin(async move {
+                            RecordedRuntimeEffect {
+                                envelope: recorded_envelope,
+                                outcome,
+                            }
+                        }),
+                    )
+                    .await
+                    .map_err(|error| {
+                        RuntimeEffectControllerError::new(
+                            RuntimeErrorCode::RestateEffectController,
+                            error.to_string(),
+                        )
+                    })?;
+                validate_recorded_effect_envelope(recorded, &reconstructed_envelope, None)?
+            }
             RestateEffectExecution::DirectLocal { envelope } => {
                 local_executor.execute(envelope).await
+            }
+            RestateEffectExecution::DurableToolBatch { envelope } => {
+                // Child attempts remain direct so they can emit their own journal
+                // commands. Record the settled aggregate afterward: parent-end
+                // teardown reconstructs exclusively from this durable outcome.
+                let reconstructed_envelope = envelope.canonical_form()?;
+                let invocation = envelope.invocation.clone();
+                let outcome = local_executor.execute(envelope).await;
+                let recorded_envelope = Arc::new(reconstructed_envelope.clone());
+                let recorded = self
+                    .record_effect(
+                        &invocation,
+                        Box::pin(async move {
+                            RecordedRuntimeEffect {
+                                envelope: recorded_envelope,
+                                outcome,
+                            }
+                        }),
+                    )
+                    .await
+                    .map_err(|error| {
+                        RuntimeEffectControllerError::new(
+                            RuntimeErrorCode::RestateEffectController,
+                            error.to_string(),
+                        )
+                    })?;
+                validate_recorded_effect_envelope(recorded, &reconstructed_envelope, None)?
             }
             RestateEffectExecution::Timer {
                 invocation,
@@ -875,15 +947,31 @@ async fn execute_restate_process_command<'ctx, C>(
 where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
+    let mut local_executor = local_executor;
+    let outcome_observer = local_executor.take_process_outcome_observer();
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
+    let process_env_store = execution.process_env_store;
     let turn_cancellation = execution.turn_cancellation;
-    match command {
+    let outcome = match command {
         ProcessCommand::Start {
-            registration,
+            mut registration,
             observers,
+            env_spec,
             execution_context,
         } => {
+            if let Some(env_spec) = env_spec.as_ref() {
+                let env_store = process_env_store.as_ref().ok_or_else(|| {
+                    RuntimeEffectControllerError::foreign(
+                        "process_env_store_unavailable",
+                        "admitted Restate process start carries an execution environment but the executor has no environment store",
+                    )
+                })?;
+                let env_ref =
+                    lash_core::runtime::persist_process_execution_env(env_store.as_ref(), env_spec)
+                        .await?;
+                registration = registration.with_execution_env_ref(Some(env_ref));
+            }
             let record = schedule_restate_process(
                 registry,
                 registration,
@@ -1022,20 +1110,21 @@ where
                 output: Box::new(output),
             })
         }
-        ProcessCommand::Cancel { process_id, reason } => {
+        ProcessCommand::Cancel {
+            process_id,
+            reason,
+            replay,
+        } => {
             let record = registry
                 .get_process(&process_id)
                 .await?
                 .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-            registry
-                .append_event(
-                    &process_id,
-                    lash_core::ProcessEventAppendRequest::cancel_requested(
-                        &process_id,
-                        reason.clone(),
-                    ),
-                )
-                .await?;
+            let mut request =
+                lash_core::ProcessEventAppendRequest::cancel_requested(&process_id, reason.clone());
+            if let Some(replay) = replay {
+                request = request.with_optional_replay(Some(replay));
+            }
+            registry.append_event(&process_id, request).await?;
             context
                 .request_process_workflow_cancel(RestateProcessCancelRequest { process_id, reason })
                 .await
@@ -1044,6 +1133,69 @@ where
                 })?;
             Ok(ProcessEffectOutcome::Cancel {
                 record: Box::new(record),
+            })
+        }
+        ProcessCommand::ParentEnd {
+            identity,
+            process_id,
+            policy,
+            reason,
+        } => {
+            let outcome = match policy {
+                lash_core::ProcessParentEndPolicy::Abandon => {
+                    lash_core::ToolIntentParentEndOutcome::Abandoned {
+                        identity,
+                        process_id,
+                    }
+                }
+                lash_core::ProcessParentEndPolicy::Cancel => {
+                    let result: Result<(), lash_core::PluginError> = async {
+                        registry.get_process(&process_id).await?.ok_or_else(|| {
+                            lash_core::PluginError::Session(format!(
+                                "unknown process `{process_id}`"
+                            ))
+                        })?;
+                        registry
+                            .append_event(
+                                &process_id,
+                                lash_core::ProcessEventAppendRequest::cancel_requested(
+                                    &process_id,
+                                    Some(reason.clone()),
+                                ),
+                            )
+                            .await?;
+                        context
+                            .request_process_workflow_cancel(RestateProcessCancelRequest {
+                                process_id: process_id.clone(),
+                                reason: Some(reason),
+                            })
+                            .await
+                            .map_err(|err| {
+                                RestateEffectError::BackgroundScheduler(err.to_string())
+                                    .into_plugin_error()
+                            })?;
+                        Ok(())
+                    }
+                    .await;
+                    match result {
+                        Ok(()) => lash_core::ToolIntentParentEndOutcome::Cancelled {
+                            identity,
+                            process_id,
+                        },
+                        Err(error) => {
+                            let error = RuntimeEffectControllerError::from(error);
+                            lash_core::ToolIntentParentEndOutcome::Refused {
+                                identity,
+                                process_id,
+                                code: error.code.as_str().to_string(),
+                                message: error.message,
+                            }
+                        }
+                    }
+                }
+            };
+            Ok(ProcessEffectOutcome::ParentEnd {
+                outcome: Box::new(outcome),
             })
         }
         ProcessCommand::Signal {
@@ -1078,7 +1230,21 @@ where
                 event: Box::new(result.event),
             })
         }
+        ProcessCommand::EmitEvent {
+            process_id,
+            request,
+        } => {
+            let result = registry.append_event(&process_id, request).await?;
+            Ok(ProcessEffectOutcome::EmitEvent {
+                event: Box::new(result.event),
+                wake_delivery: result.wake_delivery.map(Box::new),
+            })
+        }
+    };
+    if let (Ok(outcome), Some(observer)) = (&outcome, outcome_observer) {
+        observer(outcome);
     }
+    outcome
 }
 
 async fn signal_ordinal_for_event(
@@ -1132,7 +1298,14 @@ pub(crate) enum RestateEffectExecution {
         invocation: RuntimeInvocation,
         command: Box<ProcessCommand>,
     },
+    DurableProcessCommand {
+        invocation: RuntimeInvocation,
+        command: Box<ProcessCommand>,
+    },
     DirectLocal {
+        envelope: RuntimeEffectEnvelope,
+    },
+    DurableToolBatch {
         envelope: RuntimeEffectEnvelope,
     },
     Timer {
@@ -1156,12 +1329,13 @@ impl RestateEffectExecution {
     fn invocation(&self) -> &RuntimeInvocation {
         match self {
             Self::DirectProcess { invocation, .. }
+            | Self::DurableProcessCommand { invocation, .. }
             | Self::Timer { invocation, .. }
             | Self::AwaitEvent { invocation, .. }
             | Self::PeekAwaitEvent { invocation, .. } => invocation,
-            Self::DirectLocal { envelope } | Self::JournaledRun { envelope } => {
-                &envelope.invocation
-            }
+            Self::DirectLocal { envelope }
+            | Self::DurableToolBatch { envelope }
+            | Self::JournaledRun { envelope } => &envelope.invocation,
         }
     }
 }
@@ -1191,12 +1365,30 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
         command,
     } = envelope;
     match command {
+        RuntimeEffectCommand::Process { command }
+            if matches!(
+                command.as_ref(),
+                ProcessCommand::ParentEnd { .. } | ProcessCommand::Signal { .. }
+            ) =>
+        {
+            RestateEffectExecution::DurableProcessCommand {
+                invocation,
+                command,
+            }
+        }
         RuntimeEffectCommand::Process { command } => RestateEffectExecution::DirectProcess {
             invocation,
             command,
         },
-        command @ (RuntimeEffectCommand::ToolBatch { .. }
-        | RuntimeEffectCommand::ExecCode { .. }) => RestateEffectExecution::DirectLocal {
+        command @ RuntimeEffectCommand::ToolBatch { .. } => {
+            RestateEffectExecution::DurableToolBatch {
+                envelope: RuntimeEffectEnvelope {
+                    invocation,
+                    command,
+                },
+            }
+        }
+        command @ RuntimeEffectCommand::ExecCode { .. } => RestateEffectExecution::DirectLocal {
             envelope: RuntimeEffectEnvelope {
                 invocation,
                 command,

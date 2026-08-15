@@ -91,6 +91,15 @@ impl From<PluginError> for RuntimeEffectControllerError {
     fn from(err: PluginError) -> Self {
         match err {
             PluginError::RuntimeEffectController(err) => err,
+            err @ PluginError::ProcessNotVisible { .. } => {
+                Self::new(RuntimeErrorCode::ProcessNotVisible, err.to_string())
+            }
+            err @ PluginError::ProcessAlreadyTerminal { .. } => {
+                Self::new(RuntimeErrorCode::ProcessAlreadyTerminal, err.to_string())
+            }
+            err @ PluginError::ProcessNoLongerRetained { .. } => {
+                Self::new(RuntimeErrorCode::ProcessNoLongerRetained, err.to_string())
+            }
             err => Self::new(RuntimeErrorCode::Plugin, err.to_string()),
         }
     }
@@ -125,6 +134,34 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_target_discriminators_survive_the_effect_controller_boundary() {
+        for (error, expected) in [
+            (
+                PluginError::ProcessNotVisible {
+                    process_id: "missing".to_string(),
+                },
+                RuntimeErrorCode::ProcessNotVisible,
+            ),
+            (
+                PluginError::ProcessAlreadyTerminal {
+                    process_id: "done".to_string(),
+                    status: crate::ProcessStatus::Completed,
+                },
+                RuntimeErrorCode::ProcessAlreadyTerminal,
+            ),
+            (
+                PluginError::ProcessNoLongerRetained {
+                    terminal_label: "completed".to_string(),
+                    pruned_at_ms: 42,
+                },
+                RuntimeErrorCode::ProcessNoLongerRetained,
+            ),
+        ] {
+            assert_eq!(RuntimeEffectControllerError::from(error).code, expected);
+        }
+    }
 
     #[test]
     fn permanent_store_integrity_errors_are_terminal_and_non_retryable() {

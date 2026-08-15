@@ -111,7 +111,10 @@ histogram.
    at "the DOM has two rows": determine whether the store has one committed assistant
    message (a **render** defect) or two (a **commit** defect projected faithfully), and
    whether the trace shows one execution or two. That split *is* the diagnosis and decides
-   the pipeline stage the RCA names.
+   the pipeline stage the RCA names. Apply the narrow settlement exception in
+   `RULES.md` for a journal-first process-command refusal: the attempt frame/trace preserves
+   the provider value while the intent outcome and turn/API/DOM projection carry the typed
+   refusal. Count that exact, identity-matched two-row settlement as designed behavior.
 3. **One turn execution per unit of work.** Exactly one `turn_completed` trace record per
    composer send and exactly one per Red press. Extra assistant rows over one
    `turn_completed` are projection duplication; extra `turn_completed` records are a

@@ -14,8 +14,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_core::{
-    ToolCall, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolPrepareCall,
-    ToolPrepareContext, ToolProvider, ToolResult, sansio::PendingToolCall,
+    AttemptToolCall, InternalProcessToolCall, ToolCall, ToolContract, ToolDefinition, ToolId,
+    ToolManifest, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolResult,
+    sansio::PendingToolCall,
 };
 
 /// Per-call execution behavior for a [`StaticToolProvider`].
@@ -29,6 +30,37 @@ pub trait StaticToolExecute: Send + Sync + 'static {
     /// Execute a resolved tool call. Dispatch on `call.name` when serving more
     /// than one tool.
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult;
+
+    /// Execute a tool resolved as an internal owner-bound process body.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
+    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolResult {
+        self.execute(ToolCall {
+            name: call.name,
+            args: call.args,
+            context: call.context.__tool_context(),
+        })
+        .await
+    }
+
+    /// Opt one fixed tool id into the sealed leaf-attempt signature.
+    fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
+        false
+    }
+
+    /// Execute an opted-in fixed tool as an atomic leaf attempt.
+    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
+        let result = ToolResult::err_fmt(format!(
+            "leaf attempt execution is unavailable for tool `{}`",
+            call.name
+        ));
+        match result {
+            ToolResult::Done(output) => lash_core::ToolAttemptResult::done_without_intents(
+                lash_core::ToolResultDone::from_output(*output),
+            ),
+            ToolResult::Pending(pending) => lash_core::ToolAttemptResult::pending(pending),
+        }
+    }
 
     /// Optional argument-preparation hook, mirroring
     /// [`ToolProvider::prepare_tool_call`]. Defaults to the identity transform.
@@ -124,5 +156,17 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         self.executor.execute(call).await
+    }
+
+    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolResult {
+        self.executor.execute_internal(call).await
+    }
+
+    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
+        self.executor.supports_attempt_context(tool_id)
+    }
+
+    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
+        self.executor.execute_attempt(call).await
     }
 }

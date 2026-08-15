@@ -2,8 +2,8 @@ use super::*;
 use crate::plugin::{PluginHost, PluginSession, StaticPluginFactory};
 use crate::runtime::RuntimeEffectControllerHandle;
 use crate::{
-    ToolCall, ToolCallOutcome, ToolContext, ToolProvider, ToolResult, ToolRetryDisposition,
-    ToolRetryPolicy,
+    ProcessRegistry as _, ToolCall, ToolCallOutcome, ToolContext, ToolProvider, ToolResult,
+    ToolRetryDisposition, ToolRetryPolicy,
 };
 use lash_sansio::core_support::*;
 use lash_sansio::sync::MutexExt;
@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
+
+mod internal_activation;
 
 type AttemptObservation = (u32, u32, Option<String>);
 type SharedAttemptObservations = Arc<std::sync::Mutex<Vec<AttemptObservation>>>;
@@ -161,6 +163,549 @@ async fn scheduler_runs_every_item_concurrently_and_preserves_order() {
 
 struct MockTools;
 
+struct InternalProbeTools {
+    executed: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for InternalProbeTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![
+            test_tool("internal_probe").with_activation(crate::ToolActivation::Internal),
+        ])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "internal_probe").then(|| {
+            Arc::new(
+                test_tool("internal_probe")
+                    .with_activation(crate::ToolActivation::Internal)
+                    .contract(),
+            )
+        })
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        self.executed.fetch_add(1, Ordering::SeqCst);
+        ToolResult::ok(json!("internal body ran"))
+    }
+}
+
+#[derive(Clone)]
+struct AttemptIntentTools {
+    definition: crate::ToolDefinition,
+    calls: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct RetryingIntentTools {
+    definition: crate::ToolDefinition,
+    calls: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct FixedAttemptIntentTools {
+    definition: crate::ToolDefinition,
+    intents: crate::ToolIntents,
+    calls: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct OrderedBatchIntentTools {
+    definitions: Vec<crate::ToolDefinition>,
+    second_attempt_finished: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for OrderedBatchIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(self.definitions.clone())
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        contract_from(self.definitions.clone(), name)
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("ordered batch intent law uses AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        self.definitions.iter().any(|tool| tool.id() == tool_id)
+    }
+
+    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        if call.name == "intent_batch_first" {
+            self.second_attempt_finished.notified().await;
+        } else {
+            assert_eq!(call.name, "intent_batch_second");
+            self.second_attempt_finished.notify_one();
+        }
+        let call_id = call
+            .context
+            .tool_call_id()
+            .expect("ordered batch calls carry ids");
+        crate::ToolAttemptResult::done(
+            crate::ToolResultDone::ok(json!({"completed": call.name})),
+            crate::ToolIntents::v1(
+                [0, 1]
+                    .into_iter()
+                    .map(|intent_index| {
+                        let event_type = format!("{call_id}.intent.{intent_index}");
+                        crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+                            session_id: "session".to_string(),
+                            process_id: "intent-law-target".to_string(),
+                            event_type,
+                            payload: json!({"call_id": call_id, "intent_index": intent_index}),
+                        })
+                    })
+                    .collect(),
+            ),
+        )
+    }
+}
+
+#[derive(Clone)]
+struct BlockingAttemptIntentTools {
+    definition: crate::ToolDefinition,
+    entered: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for BlockingAttemptIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![self.definition.clone()])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("pre-result cancellation law uses AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == self.definition.id()
+    }
+
+    async fn execute_attempt(&self, _call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        self.entered.notify_one();
+        std::future::pending().await
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for FixedAttemptIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![self.definition.clone()])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("fixed intent law uses AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == self.definition.id()
+    }
+
+    async fn execute_attempt(&self, _call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        crate::ToolAttemptResult::done(
+            crate::ToolResultDone::ok(json!({"provider": "recorded"})),
+            self.intents.clone(),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntentPausePoint {
+    AfterToolAttemptCommit,
+    BeforeProcessCommand(usize),
+    AfterProcessCommandCommit(usize),
+}
+
+struct IntentReplayController {
+    inline: crate::InlineRuntimeEffectController,
+    recorded: std::sync::Mutex<
+        BTreeMap<String, Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError>>,
+    >,
+    frame_sightings: std::sync::Mutex<BTreeMap<String, Vec<String>>>,
+    process_commands: AtomicUsize,
+    pause: std::sync::Mutex<Option<IntentPausePoint>>,
+    pause_entered: tokio::sync::Notify,
+    pause_release: tokio::sync::Notify,
+}
+
+#[derive(Debug)]
+struct FrozenIntentLawClock {
+    now: std::time::Instant,
+}
+
+impl FrozenIntentLawClock {
+    fn new() -> Self {
+        Self {
+            now: std::time::Instant::now(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for FrozenIntentLawClock {
+    fn now(&self) -> std::time::Instant {
+        self.now
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        1_700_000_000_000
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.timestamp_datetime().to_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp_millis(self.timestamp_ms() as i64)
+            .expect("fixed intent-law timestamp")
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
+}
+
+impl IntentReplayController {
+    fn new(pause: Option<IntentPausePoint>) -> Self {
+        Self {
+            inline: crate::InlineRuntimeEffectController::default(),
+            recorded: std::sync::Mutex::new(BTreeMap::new()),
+            frame_sightings: std::sync::Mutex::new(BTreeMap::new()),
+            process_commands: AtomicUsize::new(0),
+            pause: std::sync::Mutex::new(pause),
+            pause_entered: tokio::sync::Notify::new(),
+            pause_release: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn take_pause(&self, expected: IntentPausePoint) -> bool {
+        let mut pause = self.pause.lock_recover();
+        if pause.as_ref() == Some(&expected) {
+            pause.take();
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn pause_if(&self, expected: IntentPausePoint) {
+        if self.take_pause(expected) {
+            self.pause_entered.notify_one();
+            self.pause_release.notified().await;
+        }
+    }
+
+    async fn wait_until_paused(&self) {
+        self.pause_entered.notified().await;
+    }
+
+    fn release(&self) {
+        self.pause_release.notify_one();
+    }
+
+    fn frame_sightings(&self) -> BTreeMap<String, Vec<String>> {
+        self.frame_sightings.lock_recover().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for IntentReplayController {
+    async fn await_event_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+        self.inline.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        self.inline.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
+        self.inline.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<crate::Resolution, crate::RuntimeError> {
+        self.inline.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.inline
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.inline
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for IntentReplayController {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let replay_key = envelope
+            .invocation
+            .replay_key()
+            .expect("law effects carry replay keys")
+            .to_string();
+        let frame = serde_json::to_string(&envelope).expect("serialize law effect frame");
+        self.frame_sightings
+            .lock_recover()
+            .entry(replay_key.clone())
+            .or_default()
+            .push(frame);
+        if let Some(result) = self.recorded.lock_recover().get(&replay_key).cloned() {
+            return result;
+        }
+
+        let kind = envelope.command.kind();
+        let process_ordinal = (kind == crate::RuntimeEffectKind::Process)
+            .then(|| self.process_commands.fetch_add(1, Ordering::SeqCst) + 1);
+        if let Some(ordinal) = process_ordinal {
+            self.pause_if(IntentPausePoint::BeforeProcessCommand(ordinal))
+                .await;
+        }
+        let result = match envelope.command {
+            crate::RuntimeEffectCommand::Process { command } => local_executor
+                .into_process()?
+                .execute(*command)
+                .await
+                .map(|result| crate::RuntimeEffectOutcome::Process { result }),
+            command => {
+                local_executor
+                    .execute(crate::RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        command,
+                    ))
+                    .await
+            }
+        };
+        self.recorded
+            .lock_recover()
+            .insert(replay_key, result.clone());
+        if kind == crate::RuntimeEffectKind::ToolAttempt {
+            self.pause_if(IntentPausePoint::AfterToolAttemptCommit)
+                .await;
+        }
+        if let Some(ordinal) = process_ordinal {
+            self.pause_if(IntentPausePoint::AfterProcessCommandCommit(ordinal))
+                .await;
+        }
+        result
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for RetryingIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![self.definition.clone()])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("retry intent law uses AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == self.definition.id()
+    }
+
+    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+            crate::EmitProcessEventIntent {
+                session_id: "session".to_string(),
+                process_id: "retry-intent-target".to_string(),
+                event_type: "attempt.retry.final".to_string(),
+                payload: json!({"attempt": call.context.attempt_number()}),
+            },
+        )]);
+        if attempt == 1 {
+            crate::ToolAttemptResult::done(
+                crate::ToolResultDone::failure(crate::ToolFailure::safe_retry(
+                    crate::ToolFailureClass::External,
+                    "retry_once",
+                    "literal first attempt failure",
+                    Some(0),
+                )),
+                intents,
+            )
+        } else {
+            crate::ToolAttemptResult::done(crate::ToolResultDone::ok(json!("done")), intents)
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for AttemptIntentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![self.definition.clone()])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("the legacy ToolContext entrypoint must not run for an AttemptContext provider")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == self.definition.id()
+    }
+
+    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(call.context.session_id(), "session");
+        assert_eq!(call.context.tool_call_id(), Some("attempt-intents-call"));
+        assert_eq!(call.context.attempt_number(), 1);
+        assert_eq!(call.context.max_attempts(), 1);
+        assert!(call.context.replay_key().is_some());
+        assert!(call.context.cancellation_token().is_some());
+        assert_eq!(call.context.prepared_payload(), &serde_json::Value::Null);
+        assert_eq!(
+            call.context.tool_execution_binding(),
+            &serde_json::Value::Null
+        );
+        let _phase = call.context.named_phase("attempt-context-law");
+        call.context
+            .sessions()
+            .snapshot_current()
+            .await
+            .expect("attempt session snapshot read");
+        call.context
+            .sessions()
+            .model()
+            .await
+            .expect("attempt session model read");
+        assert_eq!(
+            call.context
+                .sessions()
+                .tool_catalog()
+                .await
+                .expect("attempt catalog read"),
+            Vec::<serde_json::Value>::new()
+        );
+        assert_eq!(
+            call.context
+                .processes()
+                .list_handles_filtered(&crate::ProcessListFilter::default())
+                .await
+                .expect("controller-free attempt process read")
+                .len(),
+            1
+        );
+        call.context
+            .attachments()
+            .put(
+                vec![1, 2, 3],
+                crate::AttachmentCreateMeta::new(
+                    crate::MediaType::parse("application/octet-stream")
+                        .expect("literal media type"),
+                    None,
+                    Some("attempt.bin".to_string()),
+                ),
+            )
+            .await
+            .expect("content-addressed attempt attachment write");
+        assert_eq!(
+            call.context
+                .direct_completions()
+                .complete(
+                    crate::DirectRequest::text("attempt-model", "attempt prompt"),
+                    "attempt-context-law",
+                )
+                .await
+                .expect("attempt-local direct completion")
+                .text,
+            "attempt direct ok"
+        );
+        assert_eq!(
+            call.context
+                .completion_key()
+                .expect_err("non-deferable provider receives no completion key")
+                .code,
+            crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime
+        );
+        crate::ToolAttemptResult::done(
+            crate::ToolResultDone::ok(json!({"provider": "done"})),
+            crate::ToolIntents::v1(vec![
+                crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+                    session_id: "session".to_string(),
+                    request: crate::ProcessStartRequest::external(
+                        "provider-supplied-id-is-replaced",
+                        crate::ProcessOriginator::host_scoped("attempt-intents-test"),
+                        json!({"source": "recorded-attempt"}),
+                    ),
+                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
+                })),
+                crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
+                    session_id: "session".to_string(),
+                    process_id: "attempt-intents-target".to_string(),
+                    signal_name: "resume".to_string(),
+                    payload: json!({"ordinal": 1}),
+                }),
+                crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+                    session_id: "session".to_string(),
+                    process_id: "attempt-intents-target".to_string(),
+                    event_type: "attempt.intent.note".to_string(),
+                    payload: json!({"ordinal": 2}),
+                }),
+                crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
+                    session_id: "session".to_string(),
+                    process_id: "attempt-intents-target".to_string(),
+                    reason: Some("literal final intent".to_string()),
+                }),
+            ]),
+        )
+    }
+}
+
 #[async_trait::async_trait]
 impl ToolProvider for MockTools {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
@@ -216,6 +761,14 @@ impl ToolProvider for PendingProbeTools {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
+        tool_id == self.definition.id()
+            && matches!(
+                self.mode,
+                PendingProbeMode::PendingWithKey | PendingProbeMode::FailureThenPending
+            )
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
@@ -340,6 +893,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -363,6 +917,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -391,6 +946,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -414,6 +970,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -449,6 +1006,7 @@ fn projection_policy_dispatch_context(
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -472,6 +1030,7 @@ fn projection_policy_dispatch_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -640,6 +1199,7 @@ fn lazy_contract_dispatch_context(
     ToolDispatchContext {
         plugins: test_plugins(provider),
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -663,6 +1223,7 @@ fn lazy_contract_dispatch_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -698,6 +1259,7 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -721,6 +1283,7 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -743,6 +1306,7 @@ fn exact_dispatch_context_with_plugins(
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -766,6 +1330,7 @@ fn exact_dispatch_context_with_plugins(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -869,6 +1434,7 @@ fn pending_dispatch_context(
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -892,6 +1458,7 @@ fn pending_dispatch_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -932,6 +1499,7 @@ fn parallel_dispatch_context(
     ToolDispatchContext {
         plugins,
         tools,
+        tool_registry: None,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -955,6 +1523,7 @@ fn parallel_dispatch_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
@@ -1803,3 +2372,122 @@ async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
             .all(|item| item.get("success").and_then(|value| value.as_bool()) == Some(false))
     );
 }
+
+/// The v1 provider seam law: an opted-in leaf is called through the public
+/// coordinator path and every declared intent kind is realized after its final
+/// attempt is committed, in declaration order.
+#[tokio::test]
+async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinator() {
+    let definition = named_beta_tool("attempt_intents");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider: Arc<dyn ToolProvider> = Arc::new(AttemptIntentTools {
+        definition: definition.clone(),
+        calls: Arc::clone(&calls),
+    });
+    let mut context = exact_dispatch_context(provider);
+    context.direct_completions = crate::DirectCompletionClient::from_fn(|_, _| {
+        Ok(crate::plugin::DirectCompletion {
+            text: "attempt direct ok".to_string(),
+            usage: crate::TokenUsage::default(),
+            llm_call: crate::LlmCallRecord {
+                call_id: crate::LlmCallId("attempt-direct-call".to_string()),
+                label: None,
+                attempts: Vec::new(),
+            },
+        })
+    });
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let event_types = ["signal.resume", "attempt.intent.note"]
+        .into_iter()
+        .map(|name| crate::ProcessEventType {
+            name: name.to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: crate::ProcessEventSemanticsSpec::default(),
+        })
+        .collect::<Vec<_>>();
+    registry
+        .register_process_with_observers(
+            crate::ProcessRegistration::new(
+                "attempt-intents-target",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::Rerunnable,
+                crate::ProcessProvenance::host(),
+            )
+            .with_extra_event_types(event_types),
+            &["session".to_string()],
+        )
+        .await
+        .expect("register intent target");
+    context.processes = crate::testing::effect_backed_process_service(registry);
+
+    let prepared = crate::PreparedToolCall::from_parts(
+        "attempt-intents-call",
+        definition.id().to_string(),
+        "attempt_intents",
+        json!({"value": "drive"}),
+        None,
+        serde_json::Value::Null,
+    );
+    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
+        .prepared_call(&prepared)
+        .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
+        .build();
+    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
+        &context,
+        prepared,
+        None,
+        tool_context,
+    )
+    .await;
+
+    let ToolCallLaunch::Done(outcome) = launch else {
+        panic!("the non-deferred provider must complete synchronously");
+    };
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        outcome
+            .intent_outcomes
+            .iter()
+            .map(crate::ToolIntentExecutionOutcome::kind)
+            .collect::<Vec<_>>(),
+        vec![
+            Some(crate::ToolIntentKind::StartProcess),
+            Some(crate::ToolIntentKind::SignalProcess),
+            Some(crate::ToolIntentKind::EmitProcessEvent),
+            Some(crate::ToolIntentKind::CancelProcess),
+        ]
+    );
+    assert!(
+        outcome
+            .intent_outcomes
+            .iter()
+            .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
+    );
+}
+
+#[tokio::test]
+async fn empty_batch_dispatches_v0_and_v2_to_a_typed_protocol_refusal() {
+    let context = dispatch_context();
+    for recorded in [0, 2] {
+        let outcomes = execute_final_tool_intents(
+            &context,
+            Some("empty-version-call"),
+            &crate::ToolIntents {
+                protocol_version: recorded,
+                intents: Vec::new(),
+            },
+            None,
+        )
+        .await;
+        assert_eq!(
+            outcomes,
+            vec![crate::ToolIntentExecutionOutcome::ProtocolRefused {
+                refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded },
+            }]
+        );
+    }
+}
+
+include!("tests/intent_laws.rs");

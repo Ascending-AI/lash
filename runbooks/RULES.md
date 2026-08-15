@@ -173,6 +173,15 @@ message and a doubled durable commit under a single execution are both projectio
 and only the cross-check separates them. When they disagree, record which layers agreed and
 which did not; that split is the diagnosis, so never normalize it away.
 
+One tool-level split is deliberate and must be scored as agreement, not an Abort: when a
+leaf provider returns successfully but a declared `shell.write` or `processes.cancel`
+command is refused during journal-first realization, the immutable `ToolAttempt` frame and
+its per-attempt trace row retain the provider's pre-realization value. The recorded typed
+intent outcome and the projected turn/API/DOM tool result carry the refusal. Require the
+same call identity, the exact typed refusal code/message, and one attempt plus one intent
+outcome; any different split, duplicate, missing row, or disagreement among the projected
+turn/API/DOM surfaces remains a contract violation → Abort/RCA.
+
 ## When to STOP (Abort triggers)
 
 Stop immediately on **any** of:

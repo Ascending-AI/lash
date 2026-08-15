@@ -28,6 +28,8 @@ mod embedding_turns;
 mod example_agent_service;
 mod example_agent_workbench;
 mod execution_modes;
+#[cfg(test)]
+mod fig1294_ingress;
 mod index;
 mod operations;
 mod persistence;

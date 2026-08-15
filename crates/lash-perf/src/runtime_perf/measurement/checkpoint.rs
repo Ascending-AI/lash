@@ -842,6 +842,7 @@ fn completed_checkpoint_tool(index: usize, call: PendingToolCall) -> CompletedTo
         ),
         output,
         duration_ms: 1,
+        intent_outcomes: Vec::new(),
         replay: call.replay,
     }
 }

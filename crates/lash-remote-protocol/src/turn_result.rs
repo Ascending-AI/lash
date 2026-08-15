@@ -270,6 +270,91 @@ pub struct RemoteToolCallSummary {
     pub duration_ms: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteToolIntentIdentity {
+    pub session_id: String,
+    pub execution_scope_id: String,
+    pub tool_call_id: String,
+    pub intent_index: u32,
+    pub replay_key: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteToolIntentKind {
+    StartProcess,
+    SignalProcess,
+    CancelProcess,
+    EmitProcessEvent,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProcessParentEndPolicy {
+    Abandon,
+    #[default]
+    Cancel,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteToolIntentParentEnd {
+    pub process_id: String,
+    pub policy: RemoteProcessParentEndPolicy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum RemoteToolIntentRefusalReason {
+    UnsupportedProtocolVersion {
+        recorded: u16,
+    },
+    MissingToolCallId,
+    IntentIndexOverflow,
+    CountBudgetExceeded {
+        actual: usize,
+        maximum: usize,
+    },
+    CanonicalByteBudgetExceeded {
+        actual: usize,
+        maximum: usize,
+    },
+    PerKindBudgetExceeded {
+        kind: RemoteToolIntentKind,
+        actual: usize,
+        maximum: usize,
+    },
+    SessionMismatch {
+        expected: String,
+        recorded: String,
+    },
+    CommandFailed {
+        code: String,
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RemoteToolIntentExecutionOutcome {
+    Executed {
+        identity: RemoteToolIntentIdentity,
+        kind: RemoteToolIntentKind,
+        result: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_end: Option<RemoteToolIntentParentEnd>,
+    },
+    Refused {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<RemoteToolIntentIdentity>,
+        intent_index: u32,
+        kind: RemoteToolIntentKind,
+        refusal: RemoteToolIntentRefusalReason,
+    },
+    ProtocolRefused {
+        refusal: RemoteToolIntentRefusalReason,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", content = "payload", rename_all = "snake_case")]
 pub enum RemoteToolCallOutcome {

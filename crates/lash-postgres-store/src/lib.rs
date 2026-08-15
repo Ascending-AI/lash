@@ -19,10 +19,11 @@
 //! tables are not is rejected at open with a per-object diff rather than failing at
 //! the first query — or silently losing a guard, which is what a dropped unique
 //! index or a dropped cascade does. [`SchemaCheck`] controls whether a structural
-//! mismatch is fatal; the component version stamp is unconditional and no
-//! [`SchemaCheck`] relaxes it. [`PostgresStorage::verify_schema_for`] exposes the
-//! same check against a bare pool so a host can gate its own migration CI on it.
-//! See ADR 0052.
+//! mismatch is fatal. A component-version mismatch is fatal unless Lash-managed
+//! `Enforce` mode carries an explicit migration from the exact published source
+//! shape; no [`SchemaCheck`] relaxes the remaining boundary.
+//! [`PostgresStorage::verify_schema_for`] exposes the same check against a bare
+//! pool so a host can gate its own migration CI on it. See ADR 0052.
 //!
 //! Do not run schema migrations concurrently with an open or a verification:
 //! lash's advisory lock serializes only the participants that take it.
@@ -177,7 +178,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 50 adds the runtime-minted executor discriminator and store-authored
 // lease term to session lease rows. Older stores are rejected and recreated;
 // there is no compatibility read path.
-const SCHEMA_VERSION: i32 = 50;
+// Version 48 remains reserved by FIG-1133.
+// Version 51 adds durable runtime-owned tool-intent first-submission rows and
+// process-parent teardown retention. Lash-managed version-50 stores take the
+// explicit 50 -> 51 creation-only migration at open.
+const SCHEMA_VERSION: i32 = 51;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -738,7 +743,8 @@ pub use effect_replay::{
 };
 use schema_shape::{
     AWAIT_EVENT_SIGNING_SECRET_BYTES, ComponentVersion, SchemaShape, read_component_version,
-    read_search_path, resolve_installation, verify_schema_shape,
+    read_search_path, resolve_installation, verify_schema_migration_source_shape,
+    verify_schema_shape,
 };
 pub use schema_shape::{
     ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,

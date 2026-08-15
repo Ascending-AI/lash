@@ -52,6 +52,7 @@
           "rlm_process.resolve_environment": 2.174,
           "rlm_process.shutdown": 0.778,
           "rlm_process.start": 20.206,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.398
         }
       },
@@ -93,6 +94,7 @@
           "rlm_lashlang.print_project": 2.392,
           "rlm_lashlang.rehydrate_projected_globals": 6.106,
           "rlm_lashlang.resolve_projected_bindings": 8.798,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.346,
           "turn_input_ingress.enqueue_to_claim_to_projection": 396.048
         }
@@ -123,6 +125,7 @@
           "post_commit_delivery": 4.95,
           "prepared_turn": 39.642,
           "prompt_build": 3.304,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 3.268
         }
       },
@@ -185,6 +188,7 @@
           "rlm_lashlang.execute": 2.352,
           "rlm_lashlang.rehydrate_projected_globals": 1.944,
           "rlm_lashlang.resolve_projected_bindings": 3.27,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.758
         }
       },
@@ -205,6 +209,7 @@
           "rlm_lashlang.execute": 40.806,
           "rlm_lashlang.rehydrate_projected_globals": 1.936,
           "rlm_lashlang.resolve_projected_bindings": 2.372,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.05
         }
       },
@@ -225,6 +230,7 @@
           "rlm_lashlang.execute": 10.842,
           "rlm_lashlang.rehydrate_projected_globals": 4.3,
           "rlm_lashlang.resolve_projected_bindings": 9.41,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.51
         }
       },
@@ -246,6 +252,7 @@
           "rlm_lashlang.print_project": 4.054,
           "rlm_lashlang.rehydrate_projected_globals": 14.772,
           "rlm_lashlang.resolve_projected_bindings": 2.678,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.32
         }
       },
@@ -266,6 +273,7 @@
           "rlm_lashlang.execute": 2.398,
           "rlm_lashlang.rehydrate_projected_globals": 1.814,
           "rlm_lashlang.resolve_projected_bindings": 3.274,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.332
         }
       },
@@ -286,6 +294,7 @@
           "rlm_lashlang.execute": 61.058,
           "rlm_lashlang.rehydrate_projected_globals": 2.174,
           "rlm_lashlang.resolve_projected_bindings": 3.834,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.592
         }
       },
@@ -319,6 +328,7 @@
           "rlm_process.resolve_environment": 83.682,
           "rlm_process.shutdown": 12.26,
           "rlm_process.start": 357.864,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.336
         }
       },
@@ -351,6 +361,7 @@
           "rlm_process.resolve_environment": 77.348,
           "rlm_process.shutdown": 11.532,
           "rlm_process.start": 244.974,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.226
         }
       },
@@ -383,6 +394,7 @@
           "rlm_process.resolve_environment": 143.088,
           "rlm_process.shutdown": 32.694,
           "rlm_process.start": 425.886,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.178
         }
       },
@@ -403,6 +415,7 @@
           "rlm_lashlang.execute": 2.366,
           "rlm_lashlang.rehydrate_projected_globals": 5.472,
           "rlm_lashlang.resolve_projected_bindings": 2.652,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 10.23
         }
       },
@@ -435,6 +448,7 @@
           "rlm_process.resolve_environment": 27.216,
           "rlm_process.shutdown": 8.576,
           "rlm_process.start": 244.706,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.354
         }
       },
@@ -455,6 +469,7 @@
           "rlm_lashlang.execute": 44.788,
           "rlm_lashlang.rehydrate_projected_globals": 2.254,
           "rlm_lashlang.resolve_projected_bindings": 2.59,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.12
         }
       },
@@ -483,6 +498,7 @@
           "rlm_process.resolve_environment": 53.58,
           "rlm_process.shutdown": 3.722,
           "trigger.occurrence_to_delivery": 119.93,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.484
         }
       },
@@ -499,6 +515,7 @@
           "post_commit_delivery": 4.844,
           "prepared_turn": 48.686,
           "prompt_build": 6.476,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.4
         }
       },
@@ -516,6 +533,7 @@
           "prepared_turn": 279.66,
           "prompt_build": 5.544,
           "sqlite_store_reopen.runtime_reopen": 1554.57,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 136.928
         }
       },
@@ -532,6 +550,7 @@
           "post_commit_delivery": 6.274,
           "prepared_turn": 53.554,
           "prompt_build": 26.962,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.518
         }
       },
@@ -548,6 +567,7 @@
           "post_commit_delivery": 3.874,
           "prepared_turn": 18.08,
           "prompt_build": 2.666,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.15
         }
       },
@@ -564,6 +584,7 @@
           "post_commit_delivery": 4.22,
           "prepared_turn": 45.244,
           "prompt_build": 2.732,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.166
         }
       },
@@ -580,6 +601,7 @@
           "post_commit_delivery": 3.566,
           "prepared_turn": 22.25,
           "prompt_build": 2.53,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.092
         }
       },
@@ -635,6 +657,7 @@
           "store_reopen.persisted_load": 8.604,
           "store_reopen.runtime_hydration": 437.646,
           "store_reopen.store_factory_create": 0.25,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 4.55
         }
       },
@@ -651,6 +674,7 @@
           "post_commit_delivery": 4.008,
           "prepared_turn": 23.712,
           "prompt_build": 5.662,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.32
         }
       },
@@ -672,6 +696,7 @@
           "rlm_lashlang.rehydrate_projected_globals": 1.762,
           "rlm_lashlang.resolve_projected_bindings": 3.096,
           "trace_jsonl.inspect_files": 1.244,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 8.358
         }
       },
@@ -689,6 +714,7 @@
           "prepared_turn": 28.512,
           "prompt_build": 7.118,
           "trace_jsonl.inspect_files": 4.72,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.36
         }
       },
@@ -706,6 +732,7 @@
           "prepared_turn": 32.982,
           "prompt_build": 11.4,
           "turn_cancel.request_to_token_to_seal": 113.948,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 5.304
         }
       },
@@ -751,6 +778,7 @@
           "post_commit_delivery": 9.416,
           "prepared_turn": 57.29,
           "prompt_build": 14.642,
+          "tool_intent.parent_end": 0.69,
           "turn_cancel.start_gate": 2.706
         }
       }

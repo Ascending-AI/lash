@@ -11,16 +11,17 @@ mod validation;
 pub use envelope::{
     CheckpointClaimSet, LlmAttachmentSpec, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
     RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeScope,
-    RuntimeSubject, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome,
-    ToolCallLaunch,
+    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay,
+    RuntimeReplayAttribution, RuntimeScope, RuntimeSubject, ToolAttemptEffectOutcome,
+    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
 };
 pub use executor::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
-    InlineRuntimeEffectController, ProcessTurnCancellation, Resolution, ResolveOutcome,
-    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopedEffectController, SegmentProgress,
+    InlineRuntimeEffectController, ProcessOutcomeObserver, ProcessTurnCancellation, Resolution,
+    ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
+    ScopedEffectController, SegmentProgress,
 };
 pub use inline_host::InlineEffectHost;
 pub use lash_sansio::CausalRef;
@@ -30,8 +31,8 @@ pub use validation::{
 };
 
 pub(crate) use executor::{
-    EffectTaskController, ProcessRunner, RuntimeEffectControllerHandle, TurnEffectStateUpdate,
-    drive_effect_controller_task,
+    EffectControllerTaskRequest, EffectTaskController, ProcessRunner,
+    RuntimeEffectControllerHandle, TurnEffectStateUpdate, drive_effect_controller_task,
 };
 pub(crate) use outcome::{
     LlmTraceFailure, apply_direct_outcome, emit_llm_trace_completed, emit_llm_trace_failed,
@@ -276,6 +277,7 @@ mod tests {
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration,
                 observers: Vec::new(),
+                env_spec: None,
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
         );
@@ -294,6 +296,7 @@ mod tests {
             registration,
             observers,
             execution_context,
+            ..
         } = *command
         else {
             panic!("wrong process command");
@@ -377,6 +380,7 @@ mod tests {
                     output: crate::ToolCallOutput::success(serde_json::json!({"done": "call-1"})),
                     duration_ms: 7,
                 }),
+                intents: crate::ToolIntents::default(),
             }),
             triggers: Vec::new(),
         }

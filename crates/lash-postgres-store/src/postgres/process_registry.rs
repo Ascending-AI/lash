@@ -1,24 +1,27 @@
 use crate::*;
 use lash_core::facade_support;
+#[path = "process_registry/continuation_store.rs"]
+mod continuation_store;
+#[path = "process_registry/parent_end.rs"]
+mod parent_end;
 mod prune;
 mod retention;
+#[path = "process_registry/tool_intent_submission.rs"]
+mod tool_intent_submission;
 mod wake_delivery;
 #[path = "process_registry/worklist.rs"]
 mod worklist;
-
 use prune::prune_process_rows_tx;
 use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
 use wake_delivery::{
     claim_pending_wake_deliveries, decode_wake_delivery_row, load_wake_delivery_tx,
     update_wake_delivery_state, wake_delivery_report,
 };
-
 #[async_trait::async_trait]
 impl ProcessRegistry for PostgresProcessRegistry {
     fn wake_delivery_config(&self) -> lash_core::WakeDeliveryConfig {
         self.wake_delivery_config
     }
-
     fn with_runtime_clock(
         &self,
         clock: Arc<dyn lash_core::Clock>,
@@ -547,6 +550,17 @@ impl ProcessRegistry for PostgresProcessRegistry {
         await_output: ProcessAwaitOutput,
         authority: lash_core::ProcessCompletionAuthority,
     ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
+        self.complete_process_with_parent_end(process_id, await_output, authority, Vec::new())
+            .await
+    }
+
+    async fn complete_process_with_parent_end(
+        &self,
+        process_id: &str,
+        await_output: ProcessAwaitOutput,
+        authority: lash_core::ProcessCompletionAuthority,
+        parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
+    ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
         // Load (FOR UPDATE), validate the authority against the row's declared
         // disposition, and append the terminal event as one transaction. The
         // `FOR UPDATE` row lock held from the load through the commit is the
@@ -625,6 +639,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?;
                 record = projected_record;
                 save_process_tx(&mut tx, &record).await?;
+                parent_end::insert(&mut tx, process_id, &parent_end_actions).await?;
                 insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
                     .await?;
                 advance_wake_allocation_floor_tx(
@@ -644,6 +659,16 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
+    ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
+        self.complete_process_with_lease_and_parent_end(lease, await_output, Vec::new())
+            .await
+    }
+
+    async fn complete_process_with_lease_and_parent_end(
+        &self,
+        lease: &ProcessLease,
+        await_output: ProcessAwaitOutput,
+        parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
     ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let process_id = lease.process_id.as_str();
@@ -722,6 +747,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .map_err(plugin_sqlx_error)?;
         record = projected_record;
         save_process_tx(&mut tx, &record).await?;
+        parent_end::insert(&mut tx, process_id, &parent_end_actions).await?;
         insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config).await?;
         advance_wake_allocation_floor_tx(&mut tx, wake_session_id.as_deref(), process_id, sequence)
             .await?;
@@ -757,7 +783,45 @@ impl ProcessRegistry for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
     }
+    async fn list_pending_parent_end_plans(
+        &self,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core::ProcessParentEndPlan>, PluginError> {
+        parent_end::list(&self.pool, limit).await
+    }
 
+    async fn get_pending_parent_end_plan(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<lash_core::ProcessParentEndPlan>, PluginError> {
+        parent_end::get(&self.pool, process_id).await
+    }
+    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
+        parent_end::complete(&self.pool, process_id).await
+    }
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: lash_core::ToolIntentSubmissionRecord,
+    ) -> Result<lash_core::ToolIntentSubmissionAdmission, PluginError> {
+        tool_intent_submission::admit(&self.pool, submission).await
+    }
+    async fn complete_tool_intent_submission(
+        &self,
+        replay_key: &str,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<lash_core::ToolIntentSubmissionRecord, PluginError> {
+        tool_intent_submission::complete(&self.pool, replay_key, outcome).await
+    }
+    async fn pending_tool_intent_parent_end(
+        &self,
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<lash_core::ToolIntentSubmissionRecord>, PluginError> {
+        tool_intent_submission::pending_parent_end(&self.pool, session_id, execution_scope_id).await
+    }
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
+        tool_intent_submission::complete_parent_end(&self.pool, replay_key).await
+    }
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,
@@ -1414,6 +1478,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
                    WHERE delivery.process_id = lash_processes.process_id
                      AND delivery.state IN ('pending', 'enqueuing')
                )
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_process_parent_end_plans AS plan
+                   WHERE plan.process_id = lash_processes.process_id
+               )
              ORDER BY process_id ASC
              FOR UPDATE",
         )
@@ -1457,91 +1525,6 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(report)
-    }
-}
-
-#[async_trait::async_trait]
-impl ProcessContinuationStore for PostgresProcessRegistry {
-    async fn put_segment_handover(
-        &self,
-        process_id: &str,
-        handover: PersistedSegmentHandover,
-    ) -> Result<(), PluginError> {
-        let encoded = serde_json::to_string(&handover).map_err(process_decode_error)?;
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let result = sqlx::query(
-            "INSERT INTO lash_process_segment_handovers
-             (process_id, segment_ordinal, handover_json) VALUES ($1, $2, $3)
-             ON CONFLICT (process_id, segment_ordinal) DO UPDATE
-             SET handover_json = EXCLUDED.handover_json
-             WHERE lash_process_segment_handovers.handover_json = EXCLUDED.handover_json",
-        )
-        .bind(process_id)
-        .bind(handover.segment_ordinal as i64)
-        .bind(encoded)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        if result.rows_affected() == 0 {
-            return Err(PluginError::Session(format!(
-                "process `{process_id}` segment {} handover conflict",
-                handover.segment_ordinal
-            )));
-        }
-        sqlx::query(
-            "DELETE FROM lash_process_segment_handovers
-             WHERE process_id = $1 AND segment_ordinal < $2 - 1",
-        )
-        .bind(process_id)
-        .bind(handover.segment_ordinal as i64)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(())
-    }
-
-    async fn get_segment_handover(
-        &self,
-        process_id: &str,
-        segment_ordinal: u64,
-    ) -> Result<Option<PersistedSegmentHandover>, PluginError> {
-        let json: Option<String> = sqlx::query_scalar(
-            "SELECT handover_json FROM lash_process_segment_handovers
-             WHERE process_id = $1 AND segment_ordinal = $2",
-        )
-        .bind(process_id)
-        .bind(segment_ordinal as i64)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-            .transpose()
-    }
-
-    async fn latest_segment_handover(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<PersistedSegmentHandover>, PluginError> {
-        let json: Option<String> = sqlx::query_scalar(
-            "SELECT handover_json FROM lash_process_segment_handovers
-             WHERE process_id = $1 ORDER BY segment_ordinal DESC LIMIT 1",
-        )
-        .bind(process_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-            .transpose()
-    }
-
-    async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError> {
-        sqlx::query("DELETE FROM lash_process_segment_handovers WHERE process_id = $1")
-            .bind(process_id)
-            .execute(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        Ok(())
     }
 }
 

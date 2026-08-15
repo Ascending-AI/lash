@@ -86,6 +86,10 @@ impl AwaitEventResolver for PostgresEffectHost {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::KeyAddressed
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         true
     }
@@ -199,6 +203,10 @@ impl AwaitEventResolver for PostgresRuntimeEffectController {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::KeyAddressed
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         true
     }
@@ -251,9 +259,27 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.inner
-            .execute_effect(&self.scope, envelope, local_executor)
-            .await
+        if matches!(
+            envelope.command,
+            lash_core::RuntimeEffectCommand::ToolBatch { .. }
+        ) {
+            // Re-enter the coordinator on redrive so each child command is
+            // reconstructed and crosses its own key-addressed journal row.
+            // The aggregate remains durable: after the child drain settles,
+            // the ordinary driver records (or validates) the ToolBatch outcome.
+            let settled = local_executor.execute(envelope.clone()).await;
+            return Box::pin(self.inner.execute_effect(
+                &self.scope,
+                envelope,
+                RuntimeEffectLocalExecutor::testing(move |_| async move { settled }),
+            ))
+            .await;
+        }
+        Box::pin(
+            self.inner
+                .execute_effect(&self.scope, envelope, local_executor),
+        )
+        .await
     }
 }
 

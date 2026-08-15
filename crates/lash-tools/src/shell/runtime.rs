@@ -6,7 +6,11 @@
 
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::io::Read;
 use std::io::Write;
+#[cfg(unix)]
+use std::os::fd::FromRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{
@@ -110,9 +114,13 @@ pub(crate) struct StartCommandParams {
     pub(crate) login: bool,
     pub(crate) max_output_tokens: Option<usize>,
     /// Launch the command as a Detached Command (ADR 0019): its own session,
-    /// no PTY retained, host/OS-owned from birth. lash records only an
-    /// immediately-terminal audit fact and never tracks it as running.
+    /// no PTY retained, host/OS-owned from birth. lash records a durable audit
+    /// fact before launch and normally completes it immediately;
+    /// lash never tracks the detached OS process as running.
     pub(crate) detach: bool,
+    /// Stable id of the ExternallyOwned audit row produced by the detached
+    /// launcher body. Present exactly when `detach` is true.
+    pub(crate) detached_process_id: Option<String>,
 }
 
 /// Identity of a launched [Detached Command](StartCommandParams::detach) — the
@@ -163,6 +171,37 @@ pub(crate) struct ShellRuntime {
     cwd: PathBuf,
     table: Arc<ShellProcessTable>,
     next_session_id: Arc<AtomicI32>,
+    #[cfg(test)]
+    detached_launch_gate: Option<Arc<DetachedLaunchGate>>,
+}
+
+#[cfg(test)]
+pub(crate) struct DetachedLaunchGate {
+    entered: std::sync::Barrier,
+    release: std::sync::Barrier,
+}
+
+#[cfg(test)]
+impl DetachedLaunchGate {
+    pub(crate) fn new() -> Self {
+        Self {
+            entered: std::sync::Barrier::new(2),
+            release: std::sync::Barrier::new(2),
+        }
+    }
+
+    pub(crate) fn wait_until_entered(&self) {
+        self.entered.wait();
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.wait();
+    }
+
+    fn park_spawn(&self) {
+        self.entered.wait();
+        self.release.wait();
+    }
 }
 
 impl ShellRuntime {
@@ -174,11 +213,19 @@ impl ShellRuntime {
             cwd,
             table: Arc::new(ShellProcessTable::new()),
             next_session_id: Arc::new(AtomicI32::new(1)),
+            #[cfg(test)]
+            detached_launch_gate: None,
         }
     }
 
     pub(crate) fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.cwd = cwd.into();
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_detached_launch_gate(mut self, gate: Arc<DetachedLaunchGate>) -> Self {
+        self.detached_launch_gate = Some(gate);
         self
     }
 
@@ -340,7 +387,27 @@ impl ShellRuntime {
     /// or process-map entry, so it will never track, signal, or stop it again;
     /// the returned identity is the whole of what lash retains. Because the child
     /// is its own session leader, its pgid equals its pid.
-    pub(crate) fn spawn_detached(
+    pub(crate) async fn spawn_detached(
+        &self,
+        command: String,
+        workdir: PathBuf,
+        login: bool,
+        shell_path: String,
+    ) -> ShellResult<DetachedLaunch> {
+        let runtime = self.clone();
+        tokio::task::spawn_blocking(move || {
+            runtime.spawn_detached_blocking(&command, &workdir, login, &shell_path)
+        })
+        .await
+        .map_err(|error| {
+            shell_io_failure(
+                "spawn_detached_command_failed",
+                format!("Detached launcher task failed: {error}"),
+            )
+        })?
+    }
+
+    fn spawn_detached_blocking(
         &self,
         command: &str,
         workdir: &Path,
@@ -356,18 +423,54 @@ impl ShellRuntime {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
+        #[cfg(test)]
+        if let Some(gate) = &self.detached_launch_gate {
+            gate.park_spawn();
+        }
+
+        #[cfg(unix)]
+        let (read_fd, write_fd) = detached_identity_pipe().map_err(|error| {
+            shell_io_failure(
+                "spawn_detached_command_failed",
+                format!("Failed to create detached launch identity pipe: {error}"),
+            )
+        })?;
+
         #[cfg(unix)]
         unsafe {
             use std::os::unix::process::CommandExt;
-            cmd.pre_exec(|| {
+            cmd.pre_exec(move || {
                 if libc::setsid() == -1 {
                     return Err(std::io::Error::last_os_error());
                 }
+                let detached_pid = libc::fork();
+                if detached_pid == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if detached_pid > 0 {
+                    let bytes = (detached_pid as u32).to_ne_bytes();
+                    let written =
+                        libc::write(write_fd, bytes.as_ptr().cast::<libc::c_void>(), bytes.len());
+                    libc::_exit(i32::from(written != bytes.len() as isize));
+                }
+                if libc::setpgid(0, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                libc::close(read_fd);
                 Ok(())
             });
         }
 
-        let child = cmd.spawn().map_err(|err| {
+        let child_result = cmd.spawn();
+        #[cfg(unix)]
+        unsafe {
+            libc::close(write_fd);
+        }
+        let mut child = child_result.map_err(|err| {
+            #[cfg(unix)]
+            unsafe {
+                libc::close(read_fd);
+            }
             shell_io_failure(
                 "spawn_detached_command_failed",
                 format!(
@@ -377,15 +480,54 @@ impl ShellRuntime {
                 ),
             )
         })?;
-        let pid = child.id();
-        // Reap the child in a fire-and-forget thread so it does not zombie inside
-        // the worker while both live. If the worker exits first, the child (its
-        // own session) keeps running and init reaps it — lash retains no handle.
-        std::thread::spawn(move || {
-            let mut child = child;
-            let _ = child.wait();
-        });
+
+        #[cfg(unix)]
+        let pid = {
+            let mut bytes = [0_u8; std::mem::size_of::<u32>()];
+            let mut reader = unsafe { std::fs::File::from_raw_fd(read_fd) };
+            if let Err(error) = reader.read_exact(&mut bytes) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(shell_io_failure(
+                    "spawn_detached_command_failed",
+                    format!("Detached launcher did not report its child identity: {error}"),
+                ));
+            }
+            let pid = u32::from_ne_bytes(bytes);
+            let status = child.wait().map_err(|error| {
+                shell_io_failure(
+                    "spawn_detached_command_failed",
+                    format!("Failed to reap detached launcher: {error}"),
+                )
+            })?;
+            if !status.success() {
+                return Err(shell_io_failure(
+                    "spawn_detached_command_failed",
+                    format!("Detached launcher exited with {status}"),
+                ));
+            }
+            pid
+        };
+
+        #[cfg(not(unix))]
+        let pid = {
+            let pid = child.id();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            pid
+        };
         Ok(DetachedLaunch { pid, pgid: pid })
+    }
+
+    /// Stop a detached launch when its durable audit row could not be written.
+    pub(crate) fn stop_detached(&self, launch: DetachedLaunch) {
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(-(launch.pgid as i32), libc::SIGKILL);
+        }
+        #[cfg(not(unix))]
+        let _ = launch;
     }
 
     pub(crate) fn allocate_handle_id(&self) -> String {
@@ -818,6 +960,36 @@ impl ShellRuntime {
             }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn detached_identity_pipe() -> std::io::Result<(libc::c_int, libc::c_int)> {
+    let mut fds = [0_i32; 2];
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok((fds[0], fds[1]))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn detached_identity_pipe() -> std::io::Result<(libc::c_int, libc::c_int)> {
+    let mut fds = [0_i32; 2];
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    for fd in fds {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } == -1
+        {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                libc::close(fds[0]);
+                libc::close(fds[1]);
+            }
+            return Err(error);
+        }
+    }
+    Ok((fds[0], fds[1]))
 }
 
 async fn wait_for_pipe_readers(handles: &mut Vec<tokio::task::JoinHandle<()>>) {

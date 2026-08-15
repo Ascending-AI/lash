@@ -439,6 +439,13 @@ impl<'run> ScopedEffectController<'run> {
             scope: self.scope.clone(),
         })
     }
+
+    pub(crate) fn owned_controller(&self) -> Option<Arc<dyn RuntimeEffectController>> {
+        match &self.controller {
+            ScopedEffectControllerInner::Shared(controller) => Some(Arc::clone(controller)),
+            ScopedEffectControllerInner::Borrowed(_) => None,
+        }
+    }
 }
 
 pub(crate) mod facade_ops {
@@ -448,13 +455,53 @@ pub(crate) mod facade_ops {
     ///
     /// This is not integrator surface, carries no stability promise, and exists
     /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    #[async_trait::async_trait]
     pub trait ScopedEffectControllerFacadeOps {
         fn execution_scope(&self) -> &ExecutionScope;
+
+        /// Executes one facade-owned process effect while making this controller
+        /// available to the local process command itself. Borrowed controllers
+        /// are proxied across the process task boundary; shared controllers can
+        /// be passed through directly.
+        #[doc(hidden)]
+        async fn execute_process_effect(
+            &self,
+            envelope: RuntimeEffectEnvelope,
+            local_executor: RuntimeEffectLocalExecutor<'static>,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
     }
 
+    #[async_trait::async_trait]
     impl ScopedEffectControllerFacadeOps for ScopedEffectController<'_> {
         fn execution_scope(&self) -> &ExecutionScope {
             &self.scope
+        }
+
+        async fn execute_process_effect(
+            &self,
+            envelope: RuntimeEffectEnvelope,
+            local_executor: RuntimeEffectLocalExecutor<'static>,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+            let controller = self.controller();
+            let (owned_controller, task_requests) = if let Some(owned) = self.owned_controller() {
+                (owned, None)
+            } else {
+                let (proxy, requests) =
+                    EffectTaskController::scoped(controller, self.execution_scope().clone())?;
+                (
+                    proxy
+                        .owned_controller()
+                        .expect("effect-task proxy owns its controller"),
+                    Some(requests),
+                )
+            };
+            let local_executor = local_executor.with_process_effect_controller(owned_controller);
+            if let Some(task_requests) = task_requests {
+                drive_effect_controller_task(controller, envelope, local_executor, task_requests)
+                    .await
+            } else {
+                controller.execute_effect(envelope, local_executor).await
+            }
         }
     }
 }
@@ -521,6 +568,7 @@ pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     replay_ownership: crate::EffectReplayOwnership,
     durable_workflow_controller: bool,
+    journal_addressing: crate::EffectJournalAddressing,
     allows_process_lifetime_completion_keys: bool,
     supports_concurrent_effects: bool,
 }
@@ -541,6 +589,7 @@ impl EffectTaskController {
             requests,
             replay_ownership: controller.replay_ownership(),
             durable_workflow_controller: controller.durable_workflow_controller(),
+            journal_addressing: controller.journal_addressing(),
             allows_process_lifetime_completion_keys: controller
                 .allows_process_lifetime_completion_keys(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
@@ -560,6 +609,10 @@ impl AwaitEventResolver for EffectTaskController {
 
     fn durable_workflow_controller(&self) -> bool {
         self.durable_workflow_controller
+    }
+
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        self.journal_addressing
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {
@@ -765,6 +818,16 @@ pub trait AwaitEventResolver: Send + Sync {
     /// re-driven by a durable engine.
     fn durable_workflow_controller(&self) -> bool {
         false
+    }
+
+    /// Describes how this boundary addresses replayed journal entries.
+    ///
+    /// Keep this capability independent from any future
+    /// `durable_workflow_controller()` capability. The two are candidates for
+    /// a consolidated controller-traits surface, but durability and journal
+    /// addressing answer different questions today.
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        crate::EffectJournalAddressing::Runtime
     }
 
     /// Whether [`ToolContext::completion_key`](crate::ToolContext::completion_key)

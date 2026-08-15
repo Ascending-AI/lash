@@ -50,6 +50,11 @@ pub struct ToolStateEntry {
     /// the model. Hosts toggle this via `set_tool_membership`.
     #[serde(default = "is_member_default", skip_serializing_if = "is_default_member")]
     member: bool,
+    /// Persisted registration-lane hint. Missing values from pre-cutover
+    /// snapshots decode as leaf registrations; on rebind the live source is
+    /// authoritative and re-derives the effective lane.
+    #[serde(default, skip_serializing_if = "is_leaf_registration")]
+    registration_kind: ToolRegistrationKind,
 }
 
 impl ToolStateEntry {
@@ -59,6 +64,7 @@ impl ToolStateEntry {
             manifest,
             orphaned: false,
             member: true,
+            registration_kind: ToolRegistrationKind::Leaf,
         }
     }
 
@@ -80,6 +86,10 @@ impl ToolStateEntry {
     pub fn is_member(&self) -> bool {
         self.member && !self.orphaned
     }
+}
+
+fn is_leaf_registration(kind: &ToolRegistrationKind) -> bool {
+    *kind == ToolRegistrationKind::Leaf
 }
 
 #[derive(Clone, Debug, Default)]
@@ -185,6 +195,12 @@ impl<'de> Deserialize<'de> for ToolState {
 #[async_trait::async_trait]
 pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     fn id(&self) -> &str;
+    fn source_key(&self) -> ToolSourceKey {
+        ToolSourceKey::Leaf(self.id().to_string())
+    }
+    fn registration_kind(&self) -> ToolRegistrationKind {
+        ToolRegistrationKind::Leaf
+    }
     fn advertised_tools(&self) -> Vec<ToolManifest>;
     fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
         self.advertised_tools()
@@ -213,6 +229,31 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         args: &serde_json::Value,
         context: &ToolContext<'_>,
     ) -> ToolResult;
+    async fn execute_orchestrating(
+        &self,
+        _tool_id: &ToolId,
+        _args: &serde_json::Value,
+        _context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> ToolResult {
+        ToolResult::err_fmt("leaf tools cannot execute in the orchestrating registration lane")
+    }
+    fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
+        false
+    }
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
+    }
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        let _ = (args, context);
+        crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format_args!(
+            "AttemptContext execution is unsupported for tool id `{tool_id}`"
+        )))
+    }
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
@@ -223,5 +264,13 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
             return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
         self.execute(&manifest.name, args, context).await
+    }
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::InternalProcessContext<'_>,
+    ) -> ToolResult {
+        self.execute_by_id(tool_id, args, context.__tool_context()).await
     }
 }

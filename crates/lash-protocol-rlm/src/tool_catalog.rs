@@ -1,5 +1,5 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
-use lash_core::{ToolCatalog, facade_support::ToolCatalogContribution};
+use lash_core::{ToolActivation, ToolCatalog, facade_support::ToolCatalogContribution};
 use lash_lashlang_runtime::required_tool_lashlang_executable;
 
 /// RLM catalog assembly. The catalog is a flat callable set: every member is
@@ -19,6 +19,7 @@ pub(crate) fn rlm_prompt_tool_docs(tool_catalog: &ToolCatalog) -> String {
     tool_catalog
         .tools
         .iter()
+        .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
         .filter_map(|tool| {
             let contract = tool_catalog.resolve_contract(&tool.manifest.name)?;
             let binding = required_tool_lashlang_executable(&tool.manifest)
@@ -35,6 +36,9 @@ pub(crate) fn rlm_prompt_tool_docs(tool_catalog: &ToolCatalog) -> String {
 
 fn validate_rlm_lashlang_bindings(ctx: &ToolCatalogContext) -> Result<(), PluginError> {
     for tool in &ctx.tools {
+        if tool.activation == ToolActivation::Internal {
+            continue;
+        }
         required_tool_lashlang_executable(tool)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
     }
@@ -130,6 +134,28 @@ mod tests {
                 .contains("missing an explicit `lashlang.tool` binding"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn rlm_catalog_ignores_internal_members_without_lashlang_bindings() {
+        let internal = ToolDefinition::raw(
+            "tool:test/internal_runner",
+            "internal_runner",
+            "Runtime-owned process body",
+            ToolContract::default_input_schema(),
+            json!({ "type": "string" }),
+        )
+        .with_activation(ToolActivation::Internal);
+
+        rlm_tool_catalog(ToolCatalogContext {
+            session_id: "session".to_string(),
+            tools: vec![internal.manifest()],
+            resolve_contract: None,
+            tool_access: lash_core::SessionToolAccess::default(),
+            subagent: None,
+            extensions: Default::default(),
+        })
+        .expect("internal process bodies are not Lashlang-callable catalog members");
     }
 
     #[test]

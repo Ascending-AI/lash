@@ -341,8 +341,16 @@ fn build_tool_registry(
     tool_access: &SessionToolAccess,
     tool_snapshot: Option<crate::ToolState>,
 ) -> Result<Arc<crate::ToolRegistry>, PluginError> {
-    let registry = crate::ToolRegistry::from_tool_providers_with_hidden_tools(
-        contributions.tool_providers.clone(),
+    let mut providers_by_source = BTreeMap::<String, Vec<Arc<dyn crate::ToolProvider>>>::new();
+    for registered in &contributions.tool_providers {
+        providers_by_source
+            .entry(registered.plugin_id.clone())
+            .or_default()
+            .push(Arc::clone(&registered.hook));
+    }
+    let registry = crate::ToolRegistry::from_tool_registrations_with_hidden_tools(
+        providers_by_source.into_iter().collect(),
+        contributions.orchestrating_tools.clone(),
         tool_access.hidden_tools.clone(),
     )
     .map_err(|err| PluginError::Registration(format!("failed to build tool registry: {err}")))?;

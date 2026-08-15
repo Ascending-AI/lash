@@ -296,14 +296,15 @@ pub use effect::{
     CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
     InlineEffectHost, InlineRuntimeEffectController, LlmAttachmentSpec, LlmRequestSpec,
-    ProcessCommand, ProcessEffectOutcome, ProcessTurnCancellation, Resolution, ResolveOutcome,
-    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    ProcessCommand, ProcessEffectOutcome, ProcessOutcomeObserver, ProcessTurnCancellation,
+    Resolution, ResolveOutcome, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchSummary, RuntimeEffectReplayTrace, RuntimeInvocation,
-    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeScope, RuntimeSleepOptions, RuntimeSubject,
-    ScopedEffectController, SegmentProgress, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolBatchEffectOutcome, ToolCallLaunch, validate_replayed_effect_envelope,
+    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
+    RuntimeSleepOptions, RuntimeSubject, ScopedEffectController, SegmentProgress,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
+    validate_replayed_effect_envelope,
 };
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
@@ -341,8 +342,8 @@ pub use process::{
     ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInfraError, ProcessInput,
     ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
     ProcessListMode, ProcessLiveReferenceSummary, ProcessObserverBy, ProcessOpScope,
-    ProcessOriginator, ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
+    ProcessOriginator, ProcessOutcome, ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
     ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone, ProcessToolVisibilityFilter,
@@ -1196,6 +1197,10 @@ pub enum TurnEvent {
         /// a `batch` dispatch. `None` for top-level tool calls.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_call_id: Option<String>,
+    },
+    ToolIntentOutcome {
+        call_id: String,
+        outcome: crate::ToolIntentExecutionOutcome,
     },
     FinalValue {
         value: serde_json::Value,

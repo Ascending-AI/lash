@@ -114,6 +114,10 @@ impl AwaitEventResolver for SqliteEffectHost {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::KeyAddressed
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         true
     }
@@ -293,6 +297,10 @@ impl AwaitEventResolver for SqliteRuntimeEffectController {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        lash_core::EffectJournalAddressing::KeyAddressed
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         self.allows_process_lifetime_completion_keys
     }
@@ -345,9 +353,11 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.inner
-            .execute_effect(&self.scope, envelope, local_executor)
-            .await
+        Box::pin(
+            self.inner
+                .execute_effect(&self.scope, envelope, local_executor),
+        )
+        .await
     }
 }
 

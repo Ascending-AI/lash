@@ -5,14 +5,14 @@
 //!
 //! * `seed` — create the store this binary expects, put live sessions, a live
 //!   background process with a pending wake, and a fired trigger delivery in it,
-//!   then stamp the *previous* component version onto
-//!   `lash_schema_versions`. That is a store an older lash owned: the recorded
-//!   version is the whole gate lash enforces, so rewinding it reproduces the
-//!   refusal exactly, without needing an older binary in the checkout.
-//! * `refuse` — prove the exact-match gate refuses that store, and refuses a
-//!   store stamped one version *ahead* just as hard. The second direction is the
-//!   forward-only claim: an old binary meeting a recreated store gets the same
-//!   refusal, so "redeploy the previous image" cannot boot.
+//!   then rewind only `lash_schema_versions`. The result deliberately diverges:
+//!   its live catalog has current artifacts while its ledger names the one
+//!   explicitly migratable predecessor.
+//! * `refuse` — prove that divergence gets its own typed refusal before DDL,
+//!   prove a genuinely older version remains a reject-and-recreate boundary,
+//!   and prove a store stamped one version *ahead* is refused just as hard. The
+//!   last direction is the forward-only claim: an old binary meeting a recreated
+//!   store cannot boot.
 //! * `recreate` — perform the recreation bump (drop every `lash_*` object, then
 //!   open), and record that nothing seeded survived it.
 //! * `health` — verify the three durable surfaces on the recreated store, reusing
@@ -428,8 +428,9 @@ async fn seed(database_url: &str) -> Result<()> {
         live_process.status
     );
 
-    // Stamp the previous component version: from here the store looks exactly
-    // like one an older lash created and still owns.
+    // Rewind only the ledger. The catalog intentionally retains the current
+    // artifacts so the next phase can prove Lash distinguishes divergence from
+    // the genuine component-50 migration source shape.
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
 
@@ -454,25 +455,82 @@ async fn seed(database_url: &str) -> Result<()> {
 
 async fn refuse(database_url: &str) -> Result<()> {
     let pool = admin_pool(database_url).await?;
-    let older = recorded_version(&pool).await?;
+    let divergent = recorded_version(&pool).await?;
 
     let (opened, error) = open_attempt(database_url).await;
     let expected_version = expected_version_from_refusal(&error)?;
     anyhow::ensure!(
         !opened,
-        "the older store at version {older} was opened instead of refused"
+        "the divergent store recorded at version {divergent} was opened instead of refused"
     );
     anyhow::ensure!(
-        expected_version == older + 1,
-        "the refusal expected {expected_version}, which is not one ahead of the recorded {older}"
+        expected_version == divergent + 1,
+        "the refusal expected {expected_version}, which is not one ahead of the recorded {divergent}"
     );
     emit(json!({
-        "checkpoint": "refused_older_store",
-        "direction": "new binary, older store",
-        "found_version": older,
+        "checkpoint": "refused_divergent_store",
+        "direction": "recorded predecessor, current schema artifacts",
+        "found_version": divergent,
         "expected_version": expected_version,
         "opened": opened,
         "error": error,
+    }));
+
+    // Remove the current-only artifacts to leave the published component-50
+    // catalog, then stamp a non-migratable older version. This makes the next
+    // refusal and recreation exercise an older shape rather than merely another
+    // integer over the current catalog.
+    sqlx::query("DROP TABLE lash_tool_intent_submissions")
+        .execute(&pool)
+        .await
+        .context("remove current tool-intent artifact for older-store check")?;
+    sqlx::query("DROP TABLE lash_process_parent_end_plans")
+        .execute(&pool)
+        .await
+        .context("remove current parent-end artifact for older-store check")?;
+    let current_artifact_count: i64 = sqlx::query_scalar(
+        "SELECT count(*)
+           FROM pg_catalog.pg_class AS class
+           JOIN pg_catalog.pg_namespace AS namespace
+             ON namespace.oid = class.relnamespace
+          WHERE namespace.nspname = current_schema()
+            AND class.relname = ANY($1)",
+    )
+    .bind(vec![
+        "idx_lash_tool_intent_submissions_scope",
+        "lash_process_parent_end_plans",
+        "lash_tool_intent_submissions",
+    ])
+    .fetch_one(&pool)
+    .await
+    .context("count current-only artifacts in the older-store fixture")?;
+    anyhow::ensure!(
+        current_artifact_count == 0,
+        "older-store fixture retained {current_artifact_count} current-only artifacts"
+    );
+
+    // Versions older than the sole explicit migration remain the ordinary
+    // reject-and-recreate boundary. Leave this stamp in place after all refusal
+    // checks so the next phase exercises recreation from that path.
+    let older = divergent - 1;
+    stamp_version(&pool, older).await?;
+    let (opened_older, error_older) = open_attempt(database_url).await;
+    anyhow::ensure!(
+        !opened_older,
+        "the genuinely older store at version {older} was opened instead of refused"
+    );
+    anyhow::ensure!(
+        expected_version_from_refusal(&error_older)? == expected_version,
+        "the older-version refusal disagrees about the version this binary expects"
+    );
+    emit(json!({
+        "checkpoint": "refused_older_store",
+        "direction": "new binary, non-migratable older version",
+        "found_version": older,
+        "expected_version": expected_version,
+        "current_artifact_count": current_artifact_count,
+        "opened": opened_older,
+        "error": error_older,
     }));
 
     // The forward-only direction: stamp the version a *newer* lash would have
@@ -497,8 +555,8 @@ async fn refuse(database_url: &str) -> Result<()> {
         "error": error_newer,
     }));
 
-    // Leave the store as an older deployment again, so `recreate` starts from the
-    // state the runbook describes.
+    // Leave the non-migratable older version in place so `recreate` proves that
+    // path still reaches a clean current store.
     stamp_version(&pool, older).await?;
     Ok(())
 }

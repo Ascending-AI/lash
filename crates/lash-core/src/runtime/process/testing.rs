@@ -30,6 +30,9 @@ use super::validation::{
 mod continuation;
 #[cfg(test)]
 mod identity;
+mod local_helpers;
+#[path = "testing/parent_end.rs"]
+mod parent_end;
 mod raw_state;
 mod support;
 mod types;
@@ -41,83 +44,7 @@ use support::{
 };
 use types::{ManagedLeaseMap, ManagedProcessRecord};
 pub use types::{RawProcessRegistryStateForTesting, TestLocalProcessRegistry};
-
 impl TestLocalProcessRegistry {
-    #[doc(hidden)]
-    pub async fn worklist_page_reads_for_testing(
-        &self,
-    ) -> Vec<(usize, Option<super::ProcessWorklistCursor>)> {
-        self.worklist_page_reads.lock().await.clone()
-    }
-
-    async fn next_change_seq(&self) -> u64 {
-        let mut next = self.next_change_seq.lock().await;
-        *next = next.saturating_add(1);
-        *next
-    }
-
-    async fn process_miss(&self, process_id: &str) -> PluginError {
-        self.tombstones.lock().await.get(process_id).map_or_else(
-            || PluginError::Session(format!("unknown process `{process_id}`")),
-            |tombstone| PluginError::ProcessNoLongerRetained {
-                terminal_label: tombstone.terminal_label.clone(),
-                pruned_at_ms: tombstone.pruned_at_ms,
-            },
-        )
-    }
-
-    async fn insert_process(
-        &self,
-        registration: ProcessRegistration,
-        observers: &[SessionId],
-    ) -> Result<ProcessRecord, PluginError> {
-        let registration = prepare_process_registration(registration)?;
-        let registration_fingerprint =
-            crate::runtime::process_registration_fingerprint(&registration, observers);
-        let mut observer_set = observers.to_vec();
-        observer_set.sort();
-        observer_set.dedup();
-        let mut managed = self.managed.lock().await;
-        if let Some(existing) = managed.get(&registration.id) {
-            if existing.record.registration_fingerprint == registration_fingerprint {
-                return Ok(existing.record.clone());
-            }
-            return Err(PluginError::Session(format!(
-                "process `{}` registration fingerprint conflict: existing {}, new {}",
-                registration.id, existing.record.registration_fingerprint, registration_fingerprint
-            )));
-        }
-        let id = registration.id.clone();
-        let wake_session_id = registration.wake_session_id.clone();
-        let record = ProcessRecord::from_prepared_registration(
-            registration,
-            registration_fingerprint,
-            self.clock.timestamp_ms(),
-        );
-        let change_seq = self.next_change_seq().await;
-        managed.insert(
-            id.clone(),
-            ManagedProcessRecord {
-                record: record.clone(),
-                change_seq,
-                events: Vec::new(),
-                keyed_events: HashMap::new(),
-            },
-        );
-        if let Some(target) = wake_session_id {
-            self.wake_targets.lock().await.insert(id.clone(), target);
-        }
-        for session_id in observer_set {
-            self.observers
-                .lock()
-                .await
-                .entry(session_id)
-                .or_default()
-                .insert(id.clone());
-        }
-        Ok(record)
-    }
-
     async fn append_managed_event(
         &self,
         record: &mut ManagedProcessRecord,
@@ -626,6 +553,17 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
+        self.complete_process_with_parent_end(process_id, await_output, authority, Vec::new())
+            .await
+    }
+
+    async fn complete_process_with_parent_end(
+        &self,
+        process_id: &str,
+        await_output: ProcessAwaitOutput,
+        authority: ProcessCompletionAuthority,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
         let _transaction = self.transaction.lock().await;
         // Hold the `managed` lock across load→validate→append so no other
         // completion can complete, prune, and re-register the row with a
@@ -700,6 +638,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 .await;
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
+                record.parent_end_actions = (!actions.is_empty()).then_some(actions);
                 if let Some(replay) = event.invocation.replay.clone() {
                     record.keyed_events.insert(replay.key, event.clone());
                 }
@@ -714,6 +653,16 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        self.complete_process_with_lease_and_parent_end(lease, await_output, Vec::new())
+            .await
+    }
+
+    async fn complete_process_with_lease_and_parent_end(
+        &self,
+        lease: &ProcessLease,
+        await_output: ProcessAwaitOutput,
+        actions: Vec<crate::ToolIntentParentEndAction>,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
         if let Some(error) = self.process_terminal_write_error.lock().await.clone() {
             return Err(error);
@@ -808,6 +757,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 )
                 .await;
                 record.record = projected_record;
+                record.parent_end_actions = (!actions.is_empty()).then_some(actions);
                 if let Some(replay) = event.invocation.replay.clone() {
                     record.keyed_events.insert(replay.key, event.clone());
                 }
@@ -821,7 +771,95 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         current.expires_at_epoch_ms = 0;
         Ok(ProcessCompletionOutcome::Committed(record.record.clone()))
     }
+    async fn list_pending_parent_end_plans(
+        &self,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::ProcessParentEndPlan>, PluginError> {
+        parent_end::list(self, limit).await
+    }
 
+    async fn get_pending_parent_end_plan(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
+        parent_end::get(self, process_id).await
+    }
+    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
+        parent_end::complete(self, process_id).await
+    }
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let replay_key = submission.identity.replay_key.clone();
+        let mut submissions = self.tool_intent_submissions.lock().await;
+        if let Some(existing) = submissions.get(&replay_key) {
+            return Ok(crate::ToolIntentSubmissionAdmission::Existing(Box::new(
+                existing.clone(),
+            )));
+        }
+        submissions.insert(replay_key, submission);
+        Ok(crate::ToolIntentSubmissionAdmission::Admitted)
+    }
+
+    async fn complete_tool_intent_submission(
+        &self,
+        replay_key: &str,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut submissions = self.tool_intent_submissions.lock().await;
+        let submission = submissions.get_mut(replay_key).ok_or_else(|| {
+            PluginError::Session(format!("unknown tool-intent submission `{replay_key}`"))
+        })?;
+        if submission.outcome.is_none() {
+            submission.outcome = Some(outcome);
+        }
+        Ok(submission.clone())
+    }
+
+    async fn pending_tool_intent_parent_end(
+        &self,
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut pending = self
+            .tool_intent_submissions
+            .lock()
+            .await
+            .values()
+            .filter(|submission| {
+                submission.identity.session_id == session_id
+                    && submission.identity.execution_scope_id == execution_scope_id
+                    && !submission.parent_end_settled
+                    && matches!(
+                        submission.outcome,
+                        Some(crate::ToolIntentExecutionOutcome::Executed {
+                            parent_end: Some(_),
+                            ..
+                        })
+                    )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        pending.sort_by_key(|submission| submission.identity.intent_index);
+        Ok(pending)
+    }
+
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
+        if let Some(submission) = self
+            .tool_intent_submissions
+            .lock()
+            .await
+            .get_mut(replay_key)
+        {
+            submission.parent_end_settled = true;
+        }
+        Ok(())
+    }
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,
@@ -1486,7 +1524,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let mut pruned_events = 0;
         let prunable: HashSet<String> = {
             let mut managed = self.managed.lock().await;
-            let prunable: Vec<String> = managed
+            let mut prunable: Vec<String> = managed
                 .iter()
                 .filter(|(_, record)| {
                     record.record.is_terminal() && record.record.updated_at_ms < cutoff_epoch_ms
@@ -1498,8 +1536,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 })
                 .filter(|(_, record)| max_change_seq.is_none_or(|max| record.change_seq <= max))
                 .filter(|(id, _)| !processes_with_pending_deliveries.contains(*id))
+                .filter(|(_, record)| record.parent_end_actions.is_none())
                 .map(|(id, _)| id.clone())
                 .collect();
+            prunable.sort();
             let pruned_at_ms = self.clock.timestamp_ms();
             for id in &prunable {
                 if let Some(record) = managed.remove(id) {

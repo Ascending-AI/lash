@@ -185,6 +185,19 @@ fn replay_mismatch_classification_is_host_usable() {
     assert_eq!(summary.first_divergent_paths, ["command.duration_ms"]);
 }
 
+#[test]
+fn process_command_refusal_codes_are_stable_for_effect_hosts() {
+    use lash::runtime::RuntimeErrorCode;
+
+    let not_visible = RuntimeErrorCode::ProcessNotVisible;
+    let already_terminal = RuntimeErrorCode::ProcessAlreadyTerminal;
+    let no_longer_retained = RuntimeErrorCode::ProcessNoLongerRetained;
+
+    assert_eq!(not_visible.as_str(), "process_not_visible");
+    assert_eq!(already_terminal.as_str(), "process_already_terminal");
+    assert_eq!(no_longer_retained.as_str(), "process_no_longer_retained");
+}
+
 async fn commit_conflict_retry(
     core: &LashCore,
     session: &LashSession,

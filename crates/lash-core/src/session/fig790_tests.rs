@@ -183,6 +183,43 @@ impl EffectBackedProcessService {
 
 #[async_trait::async_trait]
 impl crate::ProcessService for EffectBackedProcessService {
+    async fn start_from_recorded_intent(
+        &self,
+        _session_id: &str,
+        _request: crate::ProcessStartRequest,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "recorded intent start is not used by the FIG-790 fixture".to_string(),
+        ))
+    }
+
+    async fn finish_recorded_intent_parent(
+        &self,
+        _session_id: &str,
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
+        match self
+            .execute(
+                scope,
+                crate::ProcessCommand::ParentEnd {
+                    identity,
+                    process_id,
+                    policy,
+                    reason,
+                },
+            )
+            .await?
+        {
+            crate::ProcessEffectOutcome::ParentEnd { outcome } => Ok(*outcome),
+            _ => unreachable!("parent-end command returns parent-end outcome"),
+        }
+    }
+
     async fn start(
         &self,
         _session_id: &str,
@@ -248,6 +285,7 @@ impl crate::ProcessService for EffectBackedProcessService {
                 crate::ProcessCommand::Cancel {
                     process_id: process_id.to_string(),
                     reason: Some("turn cancelled while awaiting process".to_string()),
+                    replay: None,
                 },
             )
             .await?
@@ -255,6 +293,16 @@ impl crate::ProcessService for EffectBackedProcessService {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
             _ => unreachable!("cancel command returns cancel outcome"),
         }
+    }
+
+    async fn cancel_recorded_intent(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        _reason: Option<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.cancel(session_id, process_id, scope).await
     }
 
     async fn signal(
@@ -268,6 +316,34 @@ impl crate::ProcessService for EffectBackedProcessService {
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         Err(crate::PluginError::Session(
             "signal is not used by the FIG-790 fixture".to_string(),
+        ))
+    }
+
+    async fn signal_recorded_intent(
+        &self,
+        _session_id: &str,
+        _process_id: &str,
+        _signal_name: String,
+        _signal_id: String,
+        _payload: serde_json::Value,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "recorded intent signal is not used by the FIG-790 fixture".to_string(),
+        ))
+    }
+
+    async fn emit_event_recorded_intent(
+        &self,
+        _session_id: &str,
+        _process_id: &str,
+        _event_type: String,
+        _replay_key: String,
+        _payload: serde_json::Value,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        Err(crate::PluginError::Session(
+            "recorded intent event is not used by the FIG-790 fixture".to_string(),
         ))
     }
 
@@ -316,6 +392,7 @@ fn fig790_process_await_context(
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools: Arc::new(NoopTools),
+        tool_registry: None,
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
         sessions: host.clone(),
         session_lifecycle: host.clone(),
@@ -336,6 +413,7 @@ fn fig790_process_await_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::clone(&attachment_store),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),

@@ -1,4 +1,8 @@
 //! Tests for the Restate adapter (extracted from lib.rs).
+//!
+//! The obsolete FIG-1127 nested-command refusal fixture was removed with the
+//! journal-capable leaf surface. Current intent and process-replay laws cover
+//! Restate at its sanctioned seams.
 
 use super::*;
 use crate::controller::context::guard_restate_context_future;
@@ -58,15 +62,17 @@ mod replay_corpus;
 mod tool_context_conformance;
 use endpoint_protocol::{
     encode_call_replay, encode_captured_run_and_call_replay,
-    encode_completed_captured_sleep_replay, encode_completed_sleep_replay,
-    encode_effectful_process_terminal_replay, encode_one_way_call_replay,
-    encode_pending_sleep_replay, encode_process_segment_send_replay,
+    encode_captured_run_and_interrupted_call_replay, encode_captured_run_command_replay,
+    encode_completed_captured_sleep_replay, encode_completed_intent_drain_replay,
+    encode_completed_sleep_replay, encode_effectful_process_terminal_replay,
+    encode_one_way_call_replay, encode_pending_sleep_replay, encode_process_segment_send_replay,
     encode_process_terminal_delivery_replay, encode_run_replay,
     encode_two_one_way_calls_and_call_replay, invoke_endpoint, invoke_endpoint_body,
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
-    invoke_process_workflow_endpoint, restate_call_frames, restate_error_message,
-    restate_message_types, restate_output_failure_message, restate_output_json,
+    invoke_process_workflow_endpoint, restate_call_frames, restate_command_frame_types,
+    restate_error_message, restate_message_types, restate_output_failure_message,
+    restate_output_json,
 };
 
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
@@ -4108,7 +4114,7 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
             RuntimeEffectCommand::ToolBatch {
                 batch: lash_core::PreparedToolBatch::new("batch", vec![prepared_tool_call()]),
             },
-            "direct_local",
+            "durable_tool_batch",
         ),
         (
             RuntimeEffectCommand::ExecCode {
@@ -4151,7 +4157,9 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
         });
         let actual = match execution {
             RestateEffectExecution::DirectProcess { .. } => "direct_process",
+            RestateEffectExecution::DurableProcessCommand { .. } => "durable_process_command",
             RestateEffectExecution::DirectLocal { .. } => "direct_local",
+            RestateEffectExecution::DurableToolBatch { .. } => "durable_tool_batch",
             RestateEffectExecution::Timer { .. } => "timer",
             RestateEffectExecution::AwaitEvent { .. } => "await_event",
             RestateEffectExecution::PeekAwaitEvent { .. } => "peek_await_event",
@@ -4540,15 +4548,359 @@ struct ReplayableRecordingContext {
     runs: Mutex<Vec<String>>,
     records: Mutex<HashMap<String, Vec<u8>>>,
     replaying: AtomicBool,
+    append_missing_on_replay: AtomicBool,
     peek_records: Mutex<Vec<Option<Resolution>>>,
     peek_cursor: AtomicUsize,
     events: Arc<RecordingContext>,
     process_worker: Mutex<Option<DurableProcessWorker>>,
+    defer_process_workflows: AtomicBool,
+    replay_process_workflow_starts_from_journal: AtomicBool,
+    live_process_workflow_starts: AtomicUsize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+struct ToolIntentJournalCorpusFixture {
+    crash_point: String,
+    captured_from_endpoint_interruption: bool,
+    invocation_body_bytes: Vec<u8>,
+    expected_response_command_frame_types: Vec<u16>,
+    expected_output: Option<serde_json::Value>,
+    expected_signal_events: usize,
+}
+
+const TOOL_INTENT_CORPUS_KEY: &str = "tool-intent-corpus-v1";
+const TOOL_INTENT_CORPUS_SESSION: &str = "tool-intent-corpus-session";
+const TOOL_INTENT_CORPUS_TURN: &str = "tool-intent-corpus-turn";
+const TOOL_INTENT_CORPUS_TARGET: &str = "tool-intent-corpus-target";
+
+#[restate_sdk::workflow]
+trait ToolIntentCorpusReplay {
+    async fn run(input: Json<()>) -> HandlerResult<Json<serde_json::Value>>;
+}
+
+struct ToolIntentCorpusReplayImpl {
+    registry: Arc<dyn ProcessRegistry>,
+}
+
+impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(()): Json<()>,
+    ) -> HandlerResult<Json<serde_json::Value>> {
+        let controller = RestateRuntimeEffectController::new(ctx);
+        let scope = ExecutionScope::turn(TOOL_INTENT_CORPUS_SESSION, TOOL_INTENT_CORPUS_TURN);
+        let attempt = controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    RuntimeInvocation::effect(
+                        RuntimeScope::for_turn(
+                            TOOL_INTENT_CORPUS_SESSION,
+                            TOOL_INTENT_CORPUS_TURN,
+                            0,
+                            0,
+                        ),
+                        "tool-intent-corpus-attempt",
+                        RuntimeEffectKind::ToolAttempt,
+                        "tool-intent-corpus-attempt",
+                    ),
+                    RuntimeEffectCommand::ToolAttempt {
+                        call: prepared_tool_call_with(
+                            "tool-intent-corpus-call",
+                            "tool_intent_corpus",
+                        ),
+                        execution_grant: None,
+                        attempt: 1,
+                        max_attempts: 1,
+                    },
+                ),
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    Ok(RuntimeEffectOutcome::ToolAttempt {
+                        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
+                            record: Box::new(completed_tool_record(
+                                "tool-intent-corpus-call",
+                                "tool_intent_corpus",
+                            )),
+                            intents: lash_core::ToolIntents::v1(vec![
+                                lash_core::ToolIntent::SignalProcess(
+                                    lash_core::SignalProcessIntent {
+                                        session_id: TOOL_INTENT_CORPUS_SESSION.to_string(),
+                                        process_id: TOOL_INTENT_CORPUS_TARGET.to_string(),
+                                        signal_name: "resume".to_string(),
+                                        payload: serde_json::json!({
+                                            "source": "checked-in-endpoint-corpus"
+                                        }),
+                                    },
+                                ),
+                            ]),
+                        }),
+                        triggers: Vec::new(),
+                    })
+                }),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::ToolAttempt { launch, .. } = attempt else {
+            return Err(TerminalError::new("corpus attempt returned the wrong effect").into());
+        };
+        let lash_core::ToolAttemptLaunch::Done { intents, .. } = *launch else {
+            return Err(TerminalError::new("corpus attempt did not finish").into());
+        };
+        let outcomes = lash_core::testing::execute_tool_intents_with_services(
+            controller
+                .scoped_effect_controller(scope)
+                .map_err(TerminalError::from_error)?,
+            lash_core::testing::effect_backed_process_service(Arc::clone(&self.registry)),
+            TOOL_INTENT_CORPUS_SESSION,
+            "tool-intent-corpus-call",
+            &intents,
+        )
+        .await;
+        Ok(Json(
+            serde_json::to_value(outcomes).map_err(TerminalError::from_error)?,
+        ))
+    }
+}
+
+async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessRegistry>) {
+    let clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
+    let registry = lash_sqlite_store::SqliteProcessRegistry::memory()
+        .await
+        .expect("open corpus process registry")
+        .with_runtime_clock(clock)
+        .expect("install fixed corpus clock");
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                TOOL_INTENT_CORPUS_TARGET,
+                ProcessInput::External {
+                    metadata: serde_json::json!({"fixture": "endpoint-corpus"}),
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+        )
+        .await
+        .expect("seed corpus signal target");
+    let endpoint = Endpoint::builder()
+        .bind(
+            ToolIntentCorpusReplayImpl {
+                registry: Arc::clone(&registry),
+            }
+            .serve(),
+        )
+        .build();
+    (endpoint, registry)
+}
+
+#[derive(Debug)]
+struct ToolIntentCorpusClock;
+
+#[async_trait::async_trait]
+impl lash_core::Clock for ToolIntentCorpusClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        1_700_000_000_123
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        "2023-11-14T22:13:20.123Z".to_string()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp_millis(self.timestamp_ms() as i64)
+            .expect("fixed corpus timestamp")
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
+}
+
+async fn replay_tool_intent_corpus_fixture(
+    fixture: &ToolIntentJournalCorpusFixture,
+) -> (Vec<u16>, Option<serde_json::Value>, usize) {
+    let (endpoint, registry) = tool_intent_corpus_endpoint().await;
+    let response = invoke_endpoint_body(
+        &endpoint,
+        "ToolIntentCorpusReplay",
+        "run",
+        bytes::Bytes::from(fixture.invocation_body_bytes.clone()),
+    )
+    .await
+    .expect("feed checked-in corpus bytes through the Restate endpoint");
+    let signal_events = registry
+        .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
+        .await
+        .expect("read corpus signal outcomes")
+        .into_iter()
+        .filter(|event| event.event_type == "signal.resume")
+        .count();
+    (
+        restate_command_frame_types(&response),
+        restate_output_json::<serde_json::Value>(&response),
+        signal_events,
+    )
+}
+
+#[tokio::test]
+async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes() {
+    for checked_in in [
+        include_bytes!("../tests/fixtures/tool_intent_journals/v1-mid-drain.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v1-mid-intent.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v1-full-drain.json").as_slice(),
+    ] {
+        let fixture: ToolIntentJournalCorpusFixture =
+            serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
+        assert!(
+            fixture.captured_from_endpoint_interruption,
+            "{} must name its real endpoint-interruption provenance",
+            fixture.crash_point
+        );
+        let (command_frames, output, signal_events) =
+            replay_tool_intent_corpus_fixture(&fixture).await;
+        assert_eq!(
+            command_frames, fixture.expected_response_command_frame_types,
+            "{} response command frames",
+            fixture.crash_point
+        );
+        assert_eq!(
+            output, fixture.expected_output,
+            "{} output",
+            fixture.crash_point
+        );
+        assert_eq!(
+            signal_events, fixture.expected_signal_events,
+            "{} literal process outcome count",
+            fixture.crash_point
+        );
+    }
+}
+
+/// Regeneration is deliberately separate from the replay law above: the law
+/// only consumes checked-in bytes. This ignored capture utility obtains each
+/// prefix by closing a real endpoint invocation at the named `RunCommand`.
+#[tokio::test]
+#[ignore = "explicit corpus capture utility"]
+async fn capture_tool_intent_journal_corpus_from_real_endpoint_interruptions() {
+    let (endpoint, _) = tool_intent_corpus_endpoint().await;
+    let first_interruption = invoke_endpoint(
+        &endpoint,
+        "ToolIntentCorpusReplay",
+        "run",
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+    )
+    .await
+    .expect("interrupt at the ToolAttempt run");
+    let mid_drain = encode_captured_run_command_replay(
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+        &first_interruption,
+        &[],
+        &[],
+    )
+    .expect("capture the completed-attempt journal prefix");
+    let second_interruption = invoke_endpoint_body(
+        &endpoint,
+        "ToolIntentCorpusReplay",
+        "run",
+        mid_drain.clone(),
+    )
+    .await
+    .expect("interrupt at the intent command run");
+    let call_completion = serde_json::to_value(ResolveOutcome::Accepted)
+        .expect("serialize durable-wait resolution outcome");
+    let mid_intent = encode_captured_run_and_interrupted_call_replay(
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+        &first_interruption,
+        &second_interruption,
+        None,
+    )
+    .expect("capture pending intent-command journal");
+    let progressed = encode_captured_run_and_interrupted_call_replay(
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+        &first_interruption,
+        &second_interruption,
+        Some(call_completion.clone()),
+    )
+    .expect("complete the intent's nested durable-wait call");
+    let third_interruption =
+        invoke_endpoint_body(&endpoint, "ToolIntentCorpusReplay", "run", progressed)
+            .await
+            .expect("interrupt while recording the settled intent outcome");
+    let full = encode_completed_intent_drain_replay(
+        TOOL_INTENT_CORPUS_KEY,
+        &(),
+        &first_interruption,
+        &second_interruption,
+        &third_interruption,
+        call_completion,
+    )
+    .expect("capture completed intent-command journal");
+
+    let captures = [
+        (
+            "v1-mid-drain",
+            "after_tool_attempt_before_signal_command",
+            mid_drain,
+        ),
+        (
+            "v1-mid-intent",
+            "after_signal_command_commit_before_reply",
+            mid_intent,
+        ),
+        ("v1-full-drain", "full_drain", full),
+    ];
+    for (name, crash_point, invocation_body) in captures {
+        let mut fixture = ToolIntentJournalCorpusFixture {
+            crash_point: crash_point.to_string(),
+            captured_from_endpoint_interruption: true,
+            invocation_body_bytes: invocation_body.to_vec(),
+            expected_response_command_frame_types: Vec::new(),
+            expected_output: None,
+            expected_signal_events: 0,
+        };
+        let (frames, output, signal_events) = replay_tool_intent_corpus_fixture(&fixture).await;
+        fixture.expected_response_command_frame_types = frames;
+        fixture.expected_output = output;
+        fixture.expected_signal_events = signal_events;
+        let mut bytes = serde_json::to_vec_pretty(&fixture).expect("serialize corpus fixture");
+        bytes.push(b'\n');
+        std::fs::write(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/tool_intent_journals")
+                .join(format!("{name}.json")),
+            bytes,
+        )
+        .expect("write captured endpoint corpus fixture");
+    }
 }
 
 impl ReplayableRecordingContext {
     fn start_replay(&self) {
         self.replaying.store(true, Ordering::SeqCst);
+        self.append_missing_on_replay.store(false, Ordering::SeqCst);
+        self.peek_cursor.store(0, Ordering::SeqCst);
+    }
+
+    fn start_replay_allowing_journal_extension(&self) {
+        self.replaying.store(true, Ordering::SeqCst);
+        self.append_missing_on_replay.store(true, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
     }
 
@@ -4616,6 +4968,15 @@ impl ReplayableRecordingContext {
 
     fn install_process_worker(&self, worker: DurableProcessWorker) {
         *self.process_worker.lock_recover() = Some(worker);
+    }
+
+    fn defer_process_workflows(&self) {
+        self.defer_process_workflows.store(true, Ordering::SeqCst);
+    }
+
+    fn replay_process_workflow_starts_from_journal(&self) {
+        self.replay_process_workflow_starts_from_journal
+            .store(true, Ordering::SeqCst);
     }
 }
 
@@ -4795,14 +5156,20 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         let replaying = self.replaying.load(Ordering::SeqCst);
         if replaying {
             let recorded = self.records.lock_recover().get(&effect_name).cloned();
-            return Box::pin(async move {
-                let bytes = recorded.ok_or_else(|| {
-                    TerminalError::new(format!("missing recorded effect `{effect_name}`"))
-                })?;
-                serde_json::from_slice(&bytes)
-                    .map(Json)
-                    .map_err(TerminalError::from_error)
-            });
+            if let Some(bytes) = recorded {
+                return Box::pin(async move {
+                    serde_json::from_slice(&bytes)
+                        .map(Json)
+                        .map_err(TerminalError::from_error)
+                });
+            }
+            if !self.append_missing_on_replay.load(Ordering::SeqCst) {
+                return Box::pin(async move {
+                    Err(TerminalError::new(format!(
+                        "missing recorded effect `{effect_name}`"
+                    )))
+                });
+            }
         }
 
         let context = Arc::clone(self);
@@ -4825,6 +5192,19 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         let worker = self.process_worker.lock_recover().clone();
         let context = Arc::clone(self);
         Box::pin(async move {
+            if context.replaying.load(Ordering::SeqCst)
+                && context
+                    .replay_process_workflow_starts_from_journal
+                    .load(Ordering::SeqCst)
+            {
+                return Ok(format!("invocation-{}", registration.id));
+            }
+            if context.defer_process_workflows.load(Ordering::SeqCst) {
+                return Ok(format!("invocation-{}", registration.id));
+            }
+            context
+                .live_process_workflow_starts
+                .fetch_add(1, Ordering::SeqCst);
             let Some(worker) = worker else {
                 return Err(TerminalError::new("process workflow start is unsupported"));
             };
@@ -4852,7 +5232,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                     .await
                     .map_err(TerminalError::from_error)?
                 {
-                    lash_core::ProcessRunOutcome::Terminal(output) => break *output,
+                    lash_core::ProcessRunOutcome::Terminal(output)
+                    | lash_core::ProcessRunOutcome::TerminalWithParentEnd { output, .. } => {
+                        break *output;
+                    }
                     lash_core::ProcessRunOutcome::SegmentBoundary(next) => handover = Some(next),
                 }
             };
@@ -4870,7 +5253,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     where
         'ctx: 'run,
     {
-        Box::pin(async { Err(TerminalError::new("process workflow cancel is unsupported")) })
+        Box::pin(async { Ok(()) })
     }
 
     fn await_event<'run>(
@@ -5073,6 +5456,21 @@ async fn restate_positional_replay_records_tool_attempt_as_one_command() {
                     Ok(RuntimeEffectOutcome::ToolAttempt {
                         launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                             record: Box::new(completed_tool_record("call-fast", "fast_tool")),
+                            intents: lash_core::ToolIntents::v1(vec![
+                                lash_core::ToolIntent::StartProcess(Box::new(
+                                    lash_core::StartProcessIntent {
+                                        session_id: "session".to_string(),
+                                        request: lash_core::ProcessStartRequest::external(
+                                            "positional-replay-child",
+                                            lash_core::ProcessOriginator::host_scoped(
+                                                "restate-positional-law",
+                                            ),
+                                            serde_json::json!({"captured": true}),
+                                        ),
+                                        on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
+                                    },
+                                )),
+                            ]),
                         }),
                         triggers: Vec::new(),
                     })
@@ -5087,7 +5485,7 @@ async fn restate_positional_replay_records_tool_attempt_as_one_command() {
     };
     assert!(matches!(
         &*launch,
-        lash_core::ToolAttemptLaunch::Done { record } if record.call_id.as_deref() == Some("call-fast")
+        lash_core::ToolAttemptLaunch::Done { record, .. } if record.call_id.as_deref() == Some("call-fast")
     ));
     assert_eq!(context.record_count(), 1);
     assert_eq!(context.runs().len(), 1);
@@ -5109,7 +5507,7 @@ async fn restate_positional_replay_records_tool_attempt_as_one_command() {
     };
     assert!(matches!(
         &*launch,
-        lash_core::ToolAttemptLaunch::Done { record } if record.call_id.as_deref() == Some("call-fast")
+        lash_core::ToolAttemptLaunch::Done { record, .. } if record.call_id.as_deref() == Some("call-fast")
     ));
     assert_eq!(context.record_count(), 1);
     assert_eq!(context.runs().len(), 2);
@@ -5735,6 +6133,274 @@ fn replay_test_input(turn_id: &str) -> lash_core::TurnInput {
     input
 }
 
+struct Fig1293EchoTools;
+
+fn fig1293_echo_tool() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:fig1293_echo",
+        "fig1293_echo",
+        "Return the supplied literal value.",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "value": {} },
+            "required": ["value"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({
+            "type": "object",
+            "properties": { "echo": {} },
+            "required": ["echo"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Fig1293EchoTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![fig1293_echo_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "fig1293_echo").then(|| Arc::new(fig1293_echo_tool().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        lash_core::ToolResult::ok(serde_json::json!({
+            "echo": call.args.get("value").cloned().unwrap_or_default(),
+        }))
+    }
+}
+
+fn fig1293_migrated_tool_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
+    let echo: Arc<dyn lash_core::ToolProvider> = Arc::new(Fig1293EchoTools);
+    vec![
+        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
+        Arc::new(lash_tools::shell::StandardShellPluginFactory::new()),
+        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+        Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
+            lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                lash_subagents::StaticCapability::new(
+                    "default",
+                    lash_core::facade_support::SessionSpec::inherit(),
+                ),
+            )),
+        ))),
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "fig1293-echo",
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(echo),
+        )),
+    ]
+}
+
+async fn fig1293_seed_control_target(registry: &Arc<dyn ProcessRegistry>, session_id: &str) {
+    registry
+        .register_process_with_observers(
+            ProcessRegistration::new(
+                "fig1293-control-target",
+                ProcessInput::External {
+                    metadata: serde_json::json!({"fixture": "fig1293"}),
+                },
+                lash_core::RecoveryDisposition::Rerunnable,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.stdin".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[session_id.to_string()],
+        )
+        .await
+        .expect("register FIG-1293 control target");
+}
+
+struct RestateParentEndIntentProvider {
+    calls: Arc<AtomicUsize>,
+}
+
+fn restate_parent_end_intent_tool() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:restate_parent_end_intent",
+        "restate_parent_end_intent",
+        "Start a child with recorded Cancel parent-end policy.",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for RestateParentEndIntentProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![restate_parent_end_intent_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "restate_parent_end_intent")
+            .then(|| Arc::new(restate_parent_end_intent_tool().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        panic!("the Restate parent-end law must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == restate_parent_end_intent_tool().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({"started": true})),
+            lash_core::ToolIntents::v1(
+                ["first", "second"]
+                    .into_iter()
+                    .map(|child| {
+                        lash_core::ToolIntent::StartProcess(Box::new(
+                            lash_core::StartProcessIntent {
+                                session_id: call.context.session_id().to_string(),
+                                request: lash_core::ProcessStartRequest::new(
+                                    format!("restate-parent-end-child-{child}"),
+                                    ProcessInput::Engine {
+                                        kind: "restate-parent-end-law".to_string(),
+                                        payload: serde_json::json!({
+                                            "source": "restate-parent-end-law",
+                                            "child": child,
+                                        }),
+                                    },
+                                    lash_core::RecoveryDisposition::Rerunnable,
+                                    lash_core::ProcessOriginator::host_scoped(
+                                        "restate-parent-end-law",
+                                    ),
+                                )
+                                .with_env_spec(
+                                    lash_core::ProcessExecutionEnvSpec::new(
+                                        lash_core::PluginOptions::default(),
+                                        lash_core::testing::mock_session_policy(),
+                                    ),
+                                ),
+                                on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
+                            },
+                        ))
+                    })
+                    .collect(),
+            ),
+        )
+    }
+}
+
+#[derive(Default)]
+struct RestateParentEndFaultState {
+    crash_before_record_remaining: AtomicUsize,
+    crash_after_recorded_parent_end: AtomicUsize,
+    recorded_parent_end_count: AtomicUsize,
+    completed_local_side_effects: AtomicUsize,
+    frames: Mutex<Vec<RuntimeEffectEnvelope>>,
+    outcomes: Mutex<Vec<lash_core::ToolIntentParentEndOutcome>>,
+}
+
+struct RestateParentEndFaultController {
+    inner: RestateRuntimeEffectController<'static, Arc<ReplayableRecordingContext>>,
+    state: Arc<RestateParentEndFaultState>,
+}
+
+impl AwaitEventResolver for RestateParentEndFaultController {
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        self.inner.replay_ownership()
+    }
+
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        self.inner.journal_addressing()
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.inner.allows_process_lifetime_completion_keys()
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for RestateParentEndFaultController {
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        let is_parent_end = matches!(
+            &envelope.command,
+            RuntimeEffectCommand::Process { command }
+                if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+        );
+        if is_parent_end {
+            self.state.frames.lock_recover().push(envelope.clone());
+        }
+        let crash_before_record = is_parent_end
+            && self
+                .state
+                .crash_before_record_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok();
+        let outcome = if crash_before_record {
+            let state = Arc::clone(&self.state);
+            self.inner
+                .execute_effect(
+                    envelope,
+                    local_executor.with_process_outcome_observer(Arc::new(move |outcome| {
+                        assert!(matches!(outcome, ProcessEffectOutcome::ParentEnd { .. }));
+                        state
+                            .completed_local_side_effects
+                            .fetch_add(1, Ordering::SeqCst);
+                        panic!(
+                            "injected crash after Restate ParentEnd side effect and before outcome recording"
+                        );
+                    })),
+                )
+                .await
+        } else {
+            self.inner.execute_effect(envelope, local_executor).await
+        };
+        if let Ok(RuntimeEffectOutcome::Process {
+            result: ProcessEffectOutcome::ParentEnd { outcome },
+        }) = &outcome
+        {
+            self.state.outcomes.lock_recover().push((**outcome).clone());
+            let recorded = self
+                .state
+                .recorded_parent_end_count
+                .fetch_add(1, Ordering::SeqCst)
+                + 1;
+            let crash_after = self
+                .state
+                .crash_after_recorded_parent_end
+                .load(Ordering::SeqCst);
+            if crash_after != 0 && recorded == crash_after {
+                panic!(
+                    "injected crash after a Restate ParentEnd outcome and before the next command"
+                );
+            }
+        }
+        outcome
+    }
+}
+
+struct PanicAtToolIntentParentEnd;
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAtToolIntentParentEnd {
+    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn begin_named(&self, phase: &str) {
+        if phase == "tool_intent.parent_end" {
+            panic!("injected crash after ToolBatch commit and before parent-end teardown");
+        }
+    }
+}
+
 async fn replay_test_runtime(
     session_id: &str,
     policy: lash_core::SessionPolicy,
@@ -5825,6 +6491,370 @@ async fn run_restate_replay_turn(
         )
         .await
         .expect("run replay test turn")
+}
+
+async fn run_restate_replay_turn_with_parent_end_fault(
+    runtime: &mut lash_core::facade_support::LashRuntime,
+    context: Arc<ReplayableRecordingContext>,
+    state: Arc<RestateParentEndFaultState>,
+    session_id: &str,
+    turn_id: &str,
+) -> lash_core::facade_support::AssembledTurn {
+    let scope = durable_turn_scope(session_id, turn_id);
+    let inner: RestateRuntimeEffectController<'static, Arc<ReplayableRecordingContext>> =
+        RestateRuntimeEffectController::new(context);
+    let scoped_effect_controller = ScopedEffectController::shared(
+        Arc::new(RestateParentEndFaultController { inner, state }),
+        scope,
+    )
+    .expect("shared Restate parent-end fault controller");
+    runtime
+        .stream_turn(
+            replay_test_input(turn_id),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                scoped_effect_controller,
+            ),
+        )
+        .await
+        .expect("run replay test turn with ParentEnd fault")
+}
+
+#[tokio::test]
+async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "fig1293-restate-migrated-tools";
+    let turn_id = "fig1293-restate-migrated-turn";
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let model_calls = Arc::clone(&model_calls);
+            move |_| {
+                let model_calls = Arc::clone(&model_calls);
+                async move {
+                    Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
+                        0 => lash_core::LlmResponse {
+                            parts: vec![
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-shell-start".to_string(),
+                                    tool_name: "start_command".to_string(),
+                                    input_json: serde_json::json!({"cmd": "printf tracked"})
+                                        .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-shell-detach".to_string(),
+                                    tool_name: "start_command".to_string(),
+                                    input_json: serde_json::json!({"cmd": "true", "detach": true})
+                                        .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-shell-write".to_string(),
+                                    tool_name: "write_stdin".to_string(),
+                                    input_json: serde_json::json!({
+                                        "process_id": "fig1293-control-target",
+                                        "chars": "fig1293\n",
+                                        "close_stdin": false,
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-process-cancel".to_string(),
+                                    tool_name: "cancel_process".to_string(),
+                                    input_json: serde_json::json!({
+                                        "process_id": "fig1293-control-target",
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-spawn-agent".to_string(),
+                                    tool_name: "spawn_agent".to_string(),
+                                    input_json: serde_json::json!({
+                                        "capability": "default",
+                                        "task": "Return the literal child result.",
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-batch".to_string(),
+                                    tool_name: "batch".to_string(),
+                                    input_json: serde_json::json!({
+                                        "tool_calls": [
+                                            {"tool": "fig1293_echo", "parameters": {"value": "alpha"}},
+                                            {"tool": "fig1293_echo", "parameters": {"value": "beta"}},
+                                        ]
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                            ],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        1 => lash_core::LlmResponse {
+                            full_text: "child literal".to_string(),
+                            parts: vec![lash_core::LlmOutputPart::Text {
+                                text: "child literal".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        2 => lash_core::LlmResponse {
+                            full_text: "migrated tools complete".to_string(),
+                            parts: vec![lash_core::LlmOutputPart::Text {
+                                text: "migrated tools complete".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        index => panic!("unexpected FIG-1293 model call {index}"),
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    host.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
+    let store = Arc::new(
+        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+            .await
+            .expect("open FIG-1293 session store"),
+    );
+    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
+    let policy = replay_test_policy(session_id);
+    let initial_state = replay_test_state(session_id, &policy);
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let process_registry = process_registry();
+    fig1293_seed_control_target(&process_registry, session_id).await;
+    let plugin_factories = fig1293_migrated_tool_factories();
+    context.install_process_worker(DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(
+                plugin_factories.clone(),
+            )),
+            host.clone(),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            Arc::clone(&process_registry),
+            lash_core::testing::runtime_lease_owner(),
+        ),
+    ));
+
+    let mut first = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy.clone(),
+        initial_state.clone(),
+        host.clone(),
+        Arc::clone(&runtime_store),
+        plugin_factories.clone(),
+        Some(Arc::clone(&process_registry)),
+    )
+    .await;
+    first.set_turn_phase_probe(Arc::new(PanicAtToolIntentParentEnd));
+    let first_context = Arc::clone(&context);
+    let crashed = tokio::spawn(async move {
+        run_restate_replay_turn(&mut first, first_context, session_id, turn_id).await
+    })
+    .await
+    .expect_err("FIG-1293 first turn must crash after its ToolBatch commit");
+    assert!(crashed.is_panic());
+
+    let before = context.recorded_runtime_effect_envelopes();
+    let attempt_names = before
+        .iter()
+        .filter_map(|(_, envelope)| match &envelope.command {
+            RuntimeEffectCommand::ToolAttempt { call, .. } => Some(call.tool_name.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        attempt_names,
+        vec![
+            "start_command".to_string(),
+            "start_command".to_string(),
+            "write_stdin".to_string(),
+            "cancel_process".to_string(),
+            "fig1293_echo".to_string(),
+            "fig1293_echo".to_string(),
+        ],
+        "leaf tools and batch children are attempts; batch, spawn_agent, and the shell process body are not"
+    );
+    let outer_batch = before
+        .iter()
+        .find(|(_, envelope)| {
+            envelope.invocation.caused_by.is_none()
+                && matches!(
+                    &envelope.command,
+                    RuntimeEffectCommand::ToolBatch { batch }
+                        if batch.calls.iter().any(|child| child.call.tool_name == "spawn_agent")
+                )
+        })
+        .expect("outer FIG-1293 Restate tool-batch frame");
+    let outer_causal_ref = outer_batch
+        .1
+        .invocation
+        .causal_ref()
+        .expect("outer FIG-1293 Restate batch causal ref");
+    let outer_recorded: RecordedRuntimeEffect = serde_json::from_slice(
+        context
+            .records
+            .lock_recover()
+            .get(outer_batch.0.as_str())
+            .expect("outer FIG-1293 Restate recorded outcome"),
+    )
+    .expect("decode outer FIG-1293 Restate outcome");
+    let outer_outcome_json = serde_json::to_string(&outer_recorded.outcome)
+        .expect("encode outer FIG-1293 Restate outcome");
+    assert!(
+        !outer_outcome_json.contains(r#""status":"refused""#),
+        "every migrated Restate public intent must execute: {outer_outcome_json}",
+    );
+    for kind in ["start_process", "signal_process", "cancel_process"] {
+        assert!(
+            outer_outcome_json.contains(&format!(r#""kind":"{kind}""#)),
+            "missing executed Restate {kind} outcome: {outer_outcome_json}",
+        );
+    }
+    let direct_orchestration_children = before
+        .iter()
+        .map(|(_, envelope)| envelope)
+        .filter(|envelope| {
+            let is_spawn_command = match &envelope.command {
+                RuntimeEffectCommand::Process { command } => match command.as_ref() {
+                    ProcessCommand::Start { registration, .. } => {
+                        registration.id == "process:subagent:fig1293-spawn-agent"
+                    }
+                    ProcessCommand::Await { process_id } => {
+                        process_id == "process:subagent:fig1293-spawn-agent"
+                    }
+                    _ => false,
+                },
+                _ => false,
+            };
+            let is_nested_batch = matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolBatch { batch }
+                    if batch.calls.iter().any(|child| child.call.tool_name == "fig1293_echo")
+            );
+            (is_spawn_command || is_nested_batch)
+                && envelope.invocation.caused_by.as_ref() == Some(&outer_causal_ref)
+        })
+        .count();
+    assert_eq!(
+        direct_orchestration_children, 1,
+        "the recorded protocol batch must be a direct child; Restate process service-call frames are asserted by the PostgreSQL envelope law and the endpoint E2E",
+    );
+
+    assert!(
+        context.live_process_workflow_starts.load(Ordering::SeqCst) > 0,
+        "the first invocation must cross the production process-workflow start path"
+    );
+    // Fixture-only replay substitution: captured Restate service-call results
+    // stand in for the substrate journal on the second invocation. The live
+    // assertion above prevents this flag from masking production-path coverage.
+    context.replay_process_workflow_starts_from_journal();
+    context.start_replay_allowing_journal_extension();
+    let mut replay = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy,
+        initial_state,
+        host,
+        runtime_store,
+        plugin_factories,
+        Some(process_registry),
+    )
+    .await;
+    let turn =
+        run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
+    assert!(matches!(
+        turn.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(_)
+    ));
+    assert_eq!(model_calls.load(Ordering::SeqCst), 3);
+    let outputs = turn
+        .tool_calls
+        .iter()
+        .map(|record| (record.tool.clone(), record.output.value_for_projection()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outputs,
+        vec![
+            (
+                "start_command".to_string(),
+                serde_json::json!({
+                    "__handle__": "process",
+                    "done": false,
+                    "id": "tool-intent:v1:sha256:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
+                    "process_id": "tool-intent:v1:sha256:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
+                    "running": true,
+                    "status": "running",
+                }),
+            ),
+            (
+                "start_command".to_string(),
+                serde_json::json!({
+                    "__handle__": "process",
+                    "done": true,
+                    "id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
+                    "process_id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
+                    "running": false,
+                    "status": "detached",
+                }),
+            ),
+            (
+                "write_stdin".to_string(),
+                serde_json::json!({
+                    "process_id": "fig1293-control-target",
+                    "sequence": 2,
+                    "status": "signalled",
+                }),
+            ),
+            (
+                "cancel_process".to_string(),
+                serde_json::json!({
+                    "process_id": "fig1293-control-target",
+                    "status": "cancelled",
+                }),
+            ),
+            (
+                "spawn_agent".to_string(),
+                serde_json::json!("child literal")
+            ),
+            (
+                "batch".to_string(),
+                serde_json::json!({
+                    "results": [
+                        {
+                            "duration_ms": 0,
+                            "index": 0,
+                            "result": {"echo": "alpha"},
+                            "success": true,
+                            "tool": "fig1293_echo",
+                        },
+                        {
+                            "duration_ms": 0,
+                            "index": 1,
+                            "result": {"echo": "beta"},
+                            "success": true,
+                            "tool": "fig1293_echo",
+                        },
+                    ]
+                }),
+            ),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -5943,6 +6973,479 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         )
         .expect("count turn commit stamps");
     assert_eq!(rows, 1);
+}
+
+#[tokio::test]
+async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "restate-parent-end-replay";
+    let turn_id = "restate-parent-end-turn-1";
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RestateParentEndIntentProvider {
+        calls: Arc::clone(&provider_calls),
+    });
+    let tool_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "restate-parent-end-tools",
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
+        ));
+    let plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> =
+        lash_core::testing::test_standard_protocol_factories()
+            .into_iter()
+            .chain([tool_plugin])
+            .collect();
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let model_calls = Arc::clone(&model_calls);
+            move |_| {
+                let model_calls = Arc::clone(&model_calls);
+                async move {
+                    Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
+                        0 => lash_core::LlmResponse {
+                            parts: vec![lash_core::LlmOutputPart::ToolCall {
+                                call_id: "restate-parent-end-call".to_string(),
+                                tool_name: "restate_parent_end_intent".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        1 => lash_core::LlmResponse {
+                            full_text: "parent end complete".to_string(),
+                            parts: vec![lash_core::LlmOutputPart::Text {
+                                text: "parent end complete".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        },
+                        index => panic!("unexpected Restate parent-end model call {index}"),
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    host.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
+    let store = Arc::new(
+        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+            .await
+            .expect("open parent-end session store"),
+    );
+    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
+    let policy = replay_test_policy(session_id);
+    let initial_state = replay_test_state(session_id, &policy);
+    let context = Arc::new(ReplayableRecordingContext::default());
+    context.defer_process_workflows();
+    let process_registry = process_registry();
+    context.install_process_worker(DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(
+                plugin_factories.clone(),
+            )),
+            host.clone(),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            Arc::clone(&process_registry),
+            lash_core::testing::runtime_lease_owner(),
+        ),
+    ));
+
+    let mut first = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy.clone(),
+        initial_state.clone(),
+        host.clone(),
+        Arc::clone(&runtime_store),
+        plugin_factories.clone(),
+        Some(Arc::clone(&process_registry)),
+    )
+    .await;
+    first.set_turn_phase_probe(Arc::new(PanicAtToolIntentParentEnd));
+    let first_context = Arc::clone(&context);
+    let crashed = tokio::spawn(async move {
+        run_restate_replay_turn(&mut first, first_context, session_id, turn_id).await
+    })
+    .await
+    .expect_err("the phase probe crashes after the Restate ToolBatch commit");
+    assert!(crashed.is_panic());
+    let before = context.recorded_runtime_effect_envelopes();
+    assert!(
+        before.iter().any(|(_, envelope)| {
+            matches!(envelope.command, RuntimeEffectCommand::ToolBatch { .. })
+        }),
+        "recorded effects before parent end: {:?}",
+        before
+            .iter()
+            .map(|(name, envelope)| (name, format!("{:?}", envelope.command)))
+            .collect::<Vec<_>>()
+    );
+    assert!(!before.iter().any(|(_, envelope)| {
+        matches!(
+            &envelope.command,
+            RuntimeEffectCommand::Process { command }
+                if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+        )
+    }));
+    let recorded_parent_end = context
+        .records
+        .lock_recover()
+        .values()
+        .filter_map(|bytes| serde_json::from_slice::<RecordedRuntimeEffect>(bytes).ok())
+        .any(|recorded| {
+            matches!(
+                recorded.outcome,
+                Ok(RuntimeEffectOutcome::ToolBatch { launches, .. })
+                    if launches.iter().any(|launch| matches!(
+                        launch,
+                        lash_core::runtime::ToolCallLaunch::Done { result }
+                            if result.intent_outcomes.iter().any(|outcome| matches!(
+                                outcome,
+                                lash_core::ToolIntentExecutionOutcome::Executed {
+                                    parent_end: Some(_),
+                                    ..
+                                }
+                            ))
+                    ))
+            )
+        });
+    assert!(
+        recorded_parent_end,
+        "the Restate ToolBatch outcome durably carries parent-end metadata before the crash; records: {:?}",
+        context
+            .records
+            .lock_recover()
+            .values()
+            .filter_map(|bytes| serde_json::from_slice::<RecordedRuntimeEffect>(bytes).ok())
+            .map(|recorded| recorded.outcome)
+            .collect::<Vec<_>>()
+    );
+
+    context.start_replay_allowing_journal_extension();
+    let mut parent_end_fault_replay = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy.clone(),
+        initial_state.clone(),
+        host.clone(),
+        Arc::clone(&runtime_store),
+        plugin_factories.clone(),
+        Some(Arc::clone(&process_registry)),
+    )
+    .await;
+    let fault_state = Arc::new(RestateParentEndFaultState::default());
+    fault_state
+        .crash_before_record_remaining
+        .store(1, Ordering::SeqCst);
+    let fault_context = Arc::clone(&context);
+    let task_fault_state = Arc::clone(&fault_state);
+    let fault_result = tokio::spawn(async move {
+        run_restate_replay_turn_with_parent_end_fault(
+            &mut parent_end_fault_replay,
+            fault_context,
+            task_fault_state,
+            session_id,
+            turn_id,
+        )
+        .await
+    })
+    .await;
+    let crashed = fault_result.expect_err("crash after the first Restate ParentEnd side effect");
+    assert!(crashed.is_panic());
+    assert_eq!(
+        fault_state
+            .completed_local_side_effects
+            .load(Ordering::SeqCst),
+        1,
+        "the Restate fault lands after the first side effect and before its outcome record"
+    );
+    assert_eq!(
+        fault_state.outcomes.lock_recover().as_slice(),
+        [],
+        "the crash prevents the first typed Restate outcome from returning"
+    );
+    assert_eq!(
+        fault_state
+            .frames
+            .lock_recover()
+            .iter()
+            .map(|envelope| serde_json::json!({
+                "replay_key": envelope.invocation.replay_key(),
+                "command": &envelope.command,
+            }))
+            .collect::<Vec<_>>(),
+        vec![serde_json::json!({
+            "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d:parent-end:process:parent-end:tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+            "command": {
+                "type": "process",
+                "command": {
+                    "op": "parent_end",
+                    "identity": {
+                        "session_id": "restate-parent-end-replay",
+                        "execution_scope_id": "restate-parent-end-turn-1",
+                        "tool_call_id": "restate-parent-end-call",
+                        "intent_index": 0,
+                        "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d"
+                    },
+                    "process_id": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                    "policy": "cancel",
+                    "reason": "recorded start intent parent ended with cancel policy"
+                }
+            }
+        })]
+    );
+    let after_interval_crash = context.recorded_runtime_effect_envelopes();
+    assert_eq!(
+        after_interval_crash
+            .iter()
+            .filter(|(_, envelope)| matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            ))
+            .count(),
+        0,
+        "the interrupted first ParentEnd has no Restate outcome record"
+    );
+
+    context.start_replay_allowing_journal_extension();
+    let mut between_commands_replay = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy.clone(),
+        initial_state.clone(),
+        host.clone(),
+        Arc::clone(&runtime_store),
+        plugin_factories.clone(),
+        Some(Arc::clone(&process_registry)),
+    )
+    .await;
+    let between_commands_state = Arc::new(RestateParentEndFaultState::default());
+    between_commands_state
+        .crash_after_recorded_parent_end
+        .store(1, Ordering::SeqCst);
+    let between_commands_context = Arc::clone(&context);
+    let task_between_commands_state = Arc::clone(&between_commands_state);
+    let crashed = tokio::spawn(async move {
+        run_restate_replay_turn_with_parent_end_fault(
+            &mut between_commands_replay,
+            between_commands_context,
+            task_between_commands_state,
+            session_id,
+            turn_id,
+        )
+        .await
+    })
+    .await
+    .expect_err("crash after the first Restate outcome and before the second command");
+    assert!(crashed.is_panic());
+    assert_eq!(
+        between_commands_state.outcomes.lock_recover().as_slice(),
+        [lash_core::ToolIntentParentEndOutcome::Cancelled {
+            identity: lash_core::ToolIntentIdentity {
+                session_id: "restate-parent-end-replay".to_string(),
+                execution_scope_id: "restate-parent-end-turn-1".to_string(),
+                tool_call_id: "restate-parent-end-call".to_string(),
+                intent_index: 0,
+                replay_key: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+            },
+            process_id: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+        }]
+    );
+    assert_eq!(
+        context
+            .recorded_runtime_effect_envelopes()
+            .iter()
+            .filter(|(_, envelope)| matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            ))
+            .count(),
+        1,
+        "the between-command crash records only the first ParentEnd outcome"
+    );
+
+    context.start_replay_allowing_journal_extension();
+    let mut replay = replay_test_runtime_with_plugins_and_registry(
+        session_id,
+        policy,
+        initial_state,
+        host,
+        Arc::clone(&runtime_store),
+        plugin_factories,
+        Some(Arc::clone(&process_registry)),
+    )
+    .await;
+    let redriven =
+        run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
+    assert!(matches!(
+        redriven.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(_)
+    ));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(model_calls.load(Ordering::SeqCst), 2);
+    let after = context.recorded_runtime_effect_envelopes();
+    let parent_end_frames = after
+        .iter()
+        .filter(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            )
+        })
+        .count();
+    assert_eq!(
+        parent_end_frames, 2,
+        "redrive journals both ParentEnd commands"
+    );
+    let literal_parent_end_frames = after
+        .iter()
+        .filter(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            )
+        })
+        .map(|(_, envelope)| {
+            serde_json::json!({
+                "replay_key": envelope.invocation.replay_key(),
+                "command": &envelope.command,
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        literal_parent_end_frames,
+        vec![
+            serde_json::json!({
+                "replay_key": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c:parent-end:process:parent-end:tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c",
+                "command": {
+                    "type": "process",
+                    "command": {
+                        "op": "parent_end",
+                        "identity": {
+                            "session_id": "restate-parent-end-replay",
+                            "execution_scope_id": "restate-parent-end-turn-1",
+                            "tool_call_id": "restate-parent-end-call",
+                            "intent_index": 1,
+                            "replay_key": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c"
+                        },
+                        "process_id": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c",
+                        "policy": "cancel",
+                        "reason": "recorded start intent parent ended with cancel policy"
+                    }
+                }
+            }),
+            serde_json::json!({
+                "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d:parent-end:process:parent-end:tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                "command": {
+                    "type": "process",
+                    "command": {
+                        "op": "parent_end",
+                        "identity": {
+                            "session_id": "restate-parent-end-replay",
+                            "execution_scope_id": "restate-parent-end-turn-1",
+                            "tool_call_id": "restate-parent-end-call",
+                            "intent_index": 0,
+                            "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d"
+                        },
+                        "process_id": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                        "policy": "cancel",
+                        "reason": "recorded start intent parent ended with cancel policy"
+                    }
+                }
+            }),
+        ]
+    );
+    let recorded = context.records.lock_recover().clone();
+    let literal_parent_end_outcomes = after
+        .iter()
+        .filter(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::ParentEnd { .. })
+            )
+        })
+        .map(|(name, _)| {
+            let recorded: RecordedRuntimeEffect = serde_json::from_slice(
+                recorded
+                    .get(name)
+                    .expect("recorded Restate ParentEnd bytes"),
+            )
+            .expect("decode recorded Restate ParentEnd");
+            let Ok(RuntimeEffectOutcome::Process {
+                result: ProcessEffectOutcome::ParentEnd { outcome },
+            }) = recorded.outcome
+            else {
+                panic!("Restate ParentEnd frame stored another outcome")
+            };
+            *outcome
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        literal_parent_end_outcomes,
+        vec![
+            lash_core::ToolIntentParentEndOutcome::Cancelled {
+                identity: lash_core::ToolIntentIdentity {
+                    session_id: "restate-parent-end-replay".to_string(),
+                    execution_scope_id: "restate-parent-end-turn-1".to_string(),
+                    tool_call_id: "restate-parent-end-call".to_string(),
+                    intent_index: 1,
+                    replay_key: "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c".to_string(),
+                },
+                process_id: "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c".to_string(),
+            },
+            lash_core::ToolIntentParentEndOutcome::Cancelled {
+                identity: lash_core::ToolIntentIdentity {
+                    session_id: "restate-parent-end-replay".to_string(),
+                    execution_scope_id: "restate-parent-end-turn-1".to_string(),
+                    tool_call_id: "restate-parent-end-call".to_string(),
+                    intent_index: 0,
+                    replay_key: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+                },
+                process_id: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+            },
+        ]
+    );
+    let processes = process_registry
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        })
+        .await
+        .expect("list Restate parent-end processes");
+    let children = processes
+        .iter()
+        .filter(|record| {
+            matches!(
+                record.input.as_ref(),
+                ProcessInput::Engine { kind, payload }
+                    if kind == "restate-parent-end-law"
+                        && payload.get("source")
+                            == Some(&serde_json::json!("restate-parent-end-law"))
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(children.len(), 2, "find both Restate parent-end children");
+    for child in children {
+        let cancel_count = process_registry
+            .events_after(&child.id, 0)
+            .await
+            .expect("read Restate parent-end child events")
+            .into_iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count();
+        assert_eq!(cancel_count, 1, "Cancel applies exactly once after redrive");
+    }
 }
 
 /// FIG-460: a dropped suspended handler leaves its advisory lease live, but a
@@ -6182,6 +7685,33 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
             other => lash_core::ToolResult::err_fmt(format!("unknown replay tool `{other}`")),
         }
     }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == Self::scalar_definition().id()
+    }
+
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == Self::pending_definition().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        assert_eq!(call.name, "replay_scalar_counter");
+        self.scalar_invocations.fetch_add(1, Ordering::SeqCst);
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({ "value": "counted" })),
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::SignalProcess(
+                lash_core::SignalProcessIntent {
+                    session_id: call.context.session_id().to_string(),
+                    process_id: "restate-recorded-intent-target".to_string(),
+                    signal_name: "resume".to_string(),
+                    payload: serde_json::json!({"source": "recorded-scalar-attempt"}),
+                },
+            )]),
+        )
+    }
 }
 
 #[tokio::test]
@@ -6245,10 +7775,12 @@ finish (await handle)?
         })
         .build()
         .into_handle();
+    let corpus_clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
-    );
+    )
+    .with_clock(Arc::clone(&corpus_clock));
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
@@ -6273,7 +7805,28 @@ finish (await handle)?
     let policy = replay_test_policy(session_id);
     let initial_state = replay_test_state(session_id, &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
-    let process_registry = process_registry();
+    let process_registry = process_registry()
+        .with_runtime_clock(corpus_clock)
+        .expect("SQLite process registry accepts the fixed corpus clock");
+    process_registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                "restate-recorded-intent-target",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[session_id.to_string()],
+        )
+        .await
+        .expect("register the recorded-intent signal target");
     let process_worker =
         DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
@@ -6285,6 +7838,29 @@ finish (await handle)?
             lash_core::testing::runtime_lease_owner(),
         ));
     context.install_process_worker(process_worker);
+    let signal_wait_controller =
+        Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
+    let signal_wait_key = signal_wait_controller
+        .await_event_key(
+            &ExecutionScope::process("restate-recorded-intent-target"),
+            AwaitEventWaitIdentity::process_signal("restate-recorded-intent-target", "resume", 1),
+        )
+        .await
+        .expect("mint captured-journal process-signal wait");
+    let signal_wait = {
+        let signal_wait_controller = Arc::clone(&signal_wait_controller);
+        let signal_wait_key = signal_wait_key.clone();
+        tokio::spawn(async move {
+            signal_wait_controller
+                .await_await_event(
+                    &signal_wait_key,
+                    tokio_util::sync::CancellationToken::new(),
+                    None,
+                )
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
 
     let mut first = Box::pin(replay_test_runtime_with_plugins_and_registry(
         session_id,
@@ -6324,6 +7900,14 @@ finish (await handle)?
         first_turn.outcome,
         lash_core::facade_support::TurnOutcome::Finished(_)
     ));
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), signal_wait)
+            .await
+            .expect("Restate SignalProcess intent must wake the parked wait")
+            .expect("Restate signal wait task")
+            .expect("Restate signal wait resolution"),
+        Resolution::Ok(serde_json::json!({"source": "recorded-scalar-attempt"}))
+    );
     assert_eq!(scalar_invocations.load(Ordering::SeqCst), 1);
     let first_recorded_envelopes = context.recorded_runtime_effect_envelopes();
     let scalar_tool_attempts = first_recorded_envelopes
@@ -6363,6 +7947,45 @@ finish (await handle)?
         "the real journaling host must derive its run identity from the caller-emitted envelope"
     );
     let scalar_envelope_hash = scalar_envelope.stable_hash().expect("scalar envelope hash");
+    let (signal_effect_name, signal_envelope) = first_recorded_envelopes
+        .iter()
+        .find(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::Signal { .. })
+            )
+        })
+        .expect("production SignalProcess command envelope");
+    let signal_envelope_hash = signal_envelope
+        .stable_hash()
+        .expect("signal command envelope hash");
+    let first_intent_events = process_registry
+        .events_after("restate-recorded-intent-target", 0)
+        .await
+        .expect("read the first recorded-intent event set")
+        .into_iter()
+        .filter(|event| event.event_type == "signal.resume")
+        .collect::<Vec<_>>();
+    assert_eq!(first_intent_events.len(), 1, "one signal command drains");
+    assert_eq!(first_intent_events[0].event_type, "signal.resume");
+    assert_eq!(
+        first_intent_events[0].payload,
+        serde_json::json!({"source": "recorded-scalar-attempt"})
+    );
+    let first_intent_event_bytes =
+        serde_json::to_vec(&first_intent_events).expect("serialize first intent events");
+    process_registry
+        .complete_process(
+            "restate-recorded-intent-target",
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::json!("live state mutated after drain"),
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("terminalize the intent target before redrive");
     let recorded_effect_count = first_recorded_envelopes.len();
 
     context
@@ -6380,7 +8003,7 @@ finish (await handle)?
         host,
         retry_store,
         plugin_factories,
-        Some(process_registry),
+        Some(Arc::clone(&process_registry)),
     ))
     .await;
     let replay_turn =
@@ -6419,6 +8042,36 @@ finish (await handle)?
         scalar_envelope_hash,
         "the caller must reconstruct the same ToolAttempt envelope on replay"
     );
+    let replayed_signal = replayed_envelopes
+        .iter()
+        .find(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::Process { command }
+                    if matches!(command.as_ref(), ProcessCommand::Signal { .. })
+            )
+        })
+        .expect("redriven production SignalProcess command envelope");
+    assert_eq!(
+        replayed_signal
+            .1
+            .stable_hash()
+            .expect("redriven signal command envelope hash"),
+        signal_envelope_hash,
+        "the redriven process-command frame must be byte-identical"
+    );
+    let replayed_intent_events = process_registry
+        .events_after("restate-recorded-intent-target", 0)
+        .await
+        .expect("read redriven recorded-intent events")
+        .into_iter()
+        .filter(|event| event.event_type == "signal.resume")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        serde_json::to_vec(&replayed_intent_events).expect("serialize redriven intent events"),
+        first_intent_event_bytes,
+        "live terminal mutation cannot change, suppress, or duplicate the recorded signal outcome"
+    );
     assert_eq!(
         context
             .runs()
@@ -6427,6 +8080,15 @@ finish (await handle)?
             .count(),
         2,
         "the production caller must cross the journaling host once live and once on replay"
+    );
+    assert_eq!(
+        context
+            .runs()
+            .iter()
+            .filter(|effect_name| *effect_name == signal_effect_name)
+            .count(),
+        2,
+        "the production SignalProcess command must cross the Restate journal once live and once on redrive"
     );
 }
 
@@ -6443,6 +8105,7 @@ async fn restate_controller_schedules_process_workflow_without_running_executor(
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec!["session".to_string()],
+                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
@@ -6522,6 +8185,7 @@ async fn restate_controller_replays_process_start_await_command_sequence() {
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration: external_registration(process_id),
                 observers: Vec::new(),
+                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         )
@@ -6622,6 +8286,7 @@ async fn restate_controller_start_emits_send_when_external_ref_already_exists() 
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration,
                 observers: Vec::new(),
+                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         ),
@@ -6649,6 +8314,7 @@ async fn run_parent_shaped_start_await_suspend_flow(
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration: external_registration(process_id),
                 observers: Vec::new(),
+                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         ),
@@ -6770,6 +8436,7 @@ async fn restate_controller_schedules_lashlang_process_with_serializable_input()
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: Vec::new(),
+                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
@@ -7086,6 +8753,7 @@ async fn restate_controller_cancel_requests_call_workflow_cancel() {
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_id: "task-cancel".to_string(),
                     reason: Some("user requested".to_string()),
+                    replay: None,
                 }),
             ),
             RuntimeEffectLocalExecutor::processes(registry, None),
@@ -7733,6 +9401,7 @@ fn restate_segment_tool_attempt_outcome(ordinal: u64) -> RuntimeEffectOutcome {
                 &format!("matrix-call-{ordinal}"),
                 "matrix_tool",
             )),
+            intents: lash_core::ToolIntents::default(),
         }),
         triggers: Vec::new(),
     }
@@ -8172,6 +9841,7 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec!["session".to_string()],
+                    env_spec: None,
                     execution_context: Box::new(execution_context),
                 }),
             ),
@@ -8234,6 +9904,7 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_id: "task-smoke".to_string(),
                     reason: Some("stop-smoke".to_string()),
+                    replay: None,
                 }),
             ),
             RuntimeEffectLocalExecutor::processes(registry, None),
@@ -8432,6 +10103,490 @@ fn recovery_worker_with_plugins(
     )
 }
 
+struct ProcessParentIntentTool {
+    calls: Arc<AtomicUsize>,
+}
+
+impl ProcessParentIntentTool {
+    fn definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::raw(
+            "tool:process_parent_intent",
+            "process_parent_intent",
+            "Optionally start a child carrying a Cancel-at-parent-end policy.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "emit": { "type": "boolean" },
+                    "child": { "type": "string" }
+                },
+                "required": ["emit", "child"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "object" }),
+        )
+        .with_lashlang_binding(LashlangToolBinding::new(["tools"], "process_parent_intent"))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for ProcessParentIntentTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "process_parent_intent").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        panic!("the process-parent law must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == Self::definition().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let child = call
+            .args
+            .get("child")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("missing-child");
+        let intents = if call
+            .args
+            .get("emit")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+                lash_core::StartProcessIntent {
+                    session_id: call.context.session_id().to_string(),
+                    request: lash_core::ProcessStartRequest::external(
+                        format!("ignored-{child}"),
+                        lash_core::ProcessOriginator::host_scoped("process-parent-law"),
+                        serde_json::json!({"process_parent_child": child}),
+                    ),
+                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
+                },
+            ))])
+        } else {
+            lash_core::ToolIntents::default()
+        };
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({"child": child})),
+            intents,
+        )
+    }
+}
+
+fn process_parent_intent_plugin(
+    calls: Arc<AtomicUsize>,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(lash_core::plugin::StaticPluginFactory::new(
+        "process-parent-intent",
+        lash_core::facade_support::PluginSpec::new()
+            .with_tool_provider(Arc::new(ProcessParentIntentTool { calls })),
+    ))
+}
+
+struct PanicOnceAfterDurableProcessTerminal {
+    crashes: AtomicUsize,
+}
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicOnceAfterDurableProcessTerminal {
+    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn begin_named(&self, phase: &str) {
+        if phase == "process.parent_end.after_terminal"
+            && self.crashes.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            panic!("injected crash after durable process terminal and before parent teardown");
+        }
+    }
+}
+
+fn process_parent_worker(
+    registry: Arc<dyn ProcessRegistry>,
+    plugin: Arc<dyn lash_core::facade_support::PluginFactory>,
+    probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
+) -> DurableProcessWorker {
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        RECOVERY_PROCESS_ENV_STORE.clone();
+    let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_process_env_store(process_env_store)
+    .with_process_engine(Arc::new(
+        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+            lash_lashlang_runtime::LashlangSurface::default(),
+        ),
+    ));
+    let plugins = vec![
+        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
+            as Arc<dyn lash_core::facade_support::PluginFactory>,
+        plugin,
+    ];
+    DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(plugins)),
+            runtime_host,
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            registry,
+            lash_core::testing::runtime_lease_owner(),
+        )
+        .with_session_policy(recovery_session_policy())
+        .with_turn_phase_probe_slot(probe_slot),
+    )
+}
+
+async fn process_parent_lashlang_registration(
+    process_id: &str,
+    env_ref: lash_core::ProcessExecutionEnvRef,
+) -> ProcessRegistration {
+    let module = lashlang::parse(
+        r#"
+        process main() {
+          early = await tools.process_parent_intent({ emit: true, child: "segmented" })?
+          later = await tools.process_parent_intent({ emit: false, child: "none" })?
+          finish later.child
+        }
+        "#,
+    )
+    .expect("parse segmented process-parent law");
+    let contract = ProcessParentIntentTool::definition().contract();
+    let mut resources = lashlang::LashlangHostCatalog::new();
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "process_parent_intent",
+            "tool:process_parent_intent",
+            lashlang::json_schema_to_type_expr(contract.input_schema.canonical()),
+            lashlang::json_schema_to_type_expr(contract.output_schema.canonical()),
+        )
+        .expect("link process-parent law tool");
+    let linked = lashlang::LinkedModule::link(
+        module,
+        lashlang::LashlangHostEnvironment::new(
+            resources,
+            lashlang::LashlangAbilities::default().with_processes(),
+        ),
+    )
+    .expect("link segmented process-parent law");
+    lashlang::LashlangArtifactStore::put_module_artifact(
+        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &linked.artifact,
+    )
+    .await
+    .expect("store segmented process-parent artifact");
+    ProcessRegistration::new(
+        process_id,
+        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+            module_ref: linked.module_ref,
+            process_ref: linked
+                .artifact
+                .process_ref("main")
+                .expect("main process ref")
+                .clone(),
+            host_requirements_ref: linked.host_requirements_ref,
+            process_name: "main".to_string(),
+            args: serde_json::Map::new(),
+        }),
+        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
+    )
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
+    .with_execution_env_ref(Some(env_ref))
+}
+
+#[tokio::test]
+async fn process_parents_teardown_after_durable_end_across_segments_and_tool_call_route() {
+    let (registry, continuations) = process_stores();
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let plugin = process_parent_intent_plugin(Arc::clone(&provider_calls));
+    let probe_slot = lash_core::runtime::RuntimeTurnPhaseProbeSlot::default();
+    probe_slot.set_for_session(
+        "process-parent-law",
+        Arc::new(PanicOnceAfterDurableProcessTerminal {
+            crashes: AtomicUsize::new(0),
+        }),
+    );
+    let worker = process_parent_worker(Arc::clone(&registry), Arc::clone(&plugin), probe_slot);
+    let workflow = Arc::new(
+        LashProcessWorkflowImpl::new_for_test(
+            Arc::new(RestateCoreProcessRunner::new(worker.clone())),
+            Arc::clone(&registry),
+            Arc::clone(&continuations),
+        )
+        .with_segment_effect_budget_selector(|_| 1),
+    );
+    let env_ref = persist_recovery_env_ref().await;
+    let segmented =
+        process_parent_lashlang_registration("segmented-process-parent", env_ref.clone()).await;
+    registry
+        .register_process(segmented.clone())
+        .await
+        .expect("register segmented process parent");
+
+    let mut ordinal = 0_u64;
+    let mut input_handover = None;
+    let mut boundary_count = 0_usize;
+    let mut execution_id = None::<String>;
+    loop {
+        let context = Arc::new(ReplayableRecordingContext::default());
+        context.defer_process_workflows();
+        let context_evidence = Arc::clone(&context);
+        let controller = RestateRuntimeEffectController::with_options(
+            context,
+            RestateEffectControllerOptions::default().segment_effect_budget(1),
+        );
+        let workflow = Arc::clone(&workflow);
+        let registration = segmented.clone();
+        let handover = input_handover.take();
+        let retained = registry
+            .get_process("segmented-process-parent")
+            .await
+            .expect("read retained process execution")
+            .expect("segmented process exists");
+        let (current_execution_id, execution_authority) = segment_execution_authority(
+            "segmented-process-parent",
+            ordinal,
+            execution_id.as_deref(),
+            &format!("process-parent-law-invocation-{ordinal}"),
+            retained.first_started.as_deref(),
+        )
+        .expect("derive process-parent invocation authority");
+        execution_id = Some(current_execution_id);
+        let run = tokio::spawn(async move {
+            workflow
+                .run_registration(
+                    registration,
+                    ProcessExecutionContext::default()
+                        .with_execution_write_authority(execution_authority),
+                    controller
+                        .scoped_effect_controller(ExecutionScope::process(
+                            "segmented-process-parent",
+                        ))
+                        .expect("segmented process scope"),
+                    ordinal,
+                    handover,
+                    pending_process_cancel_signal(),
+                )
+                .await
+        })
+        .await;
+        match run {
+            Ok(Ok(lash_core::ProcessRunOutcome::SegmentBoundary(boundary))) => {
+                boundary_count += 1;
+                let durable_state: serde_json::Value =
+                    serde_json::from_slice(&boundary.engine_state)
+                        .expect("decode versioned Lashlang handover state");
+                let visible_processes = registry
+                    .list_processes(&lash_core::ProcessListFilter {
+                        status: lash_core::ProcessStatusFilter::Any,
+                        ..lash_core::ProcessListFilter::default()
+                    })
+                    .await
+                    .expect("inspect early intent children");
+                assert_eq!(durable_state["version"], serde_json::json!(2));
+                assert_eq!(
+                    durable_state["parent_end_actions"]
+                        .as_array()
+                        .expect("handover carries parent-end action array")
+                        .len(),
+                    1,
+                    "the early intent survives every segment boundary; provider_calls={}; records={:?}; processes={visible_processes:?}",
+                    provider_calls.load(Ordering::SeqCst),
+                    context_evidence
+                        .records
+                        .lock_recover()
+                        .values()
+                        .filter_map(
+                            |bytes| serde_json::from_slice::<RecordedRuntimeEffect>(bytes).ok()
+                        )
+                        .map(|recorded| recorded.outcome)
+                        .collect::<Vec<_>>(),
+                );
+                let next = ordinal + 1;
+                continuations
+                    .put_segment_handover(
+                        "segmented-process-parent",
+                        lash_core::PersistedSegmentHandover {
+                            segment_ordinal: next,
+                            program_hash: boundary
+                                .program_hash
+                                .clone()
+                                .expect("versioned Lashlang program hash"),
+                            handover: boundary,
+                        },
+                    )
+                    .await
+                    .expect("durably store process-parent handover");
+                let loaded = continuations
+                    .get_segment_handover("segmented-process-parent", next)
+                    .await
+                    .expect("reload process-parent handover")
+                    .expect("stored process-parent handover");
+                input_handover = Some(
+                    validate_segment_program_hash("segmented-process-parent", loaded)
+                        .expect("valid process-parent program identity"),
+                );
+                ordinal = next;
+            }
+            Err(join_error) if join_error.is_panic() => break,
+            other => panic!("unexpected segmented process-parent result: {other:?}"),
+        }
+    }
+    assert_eq!(
+        boundary_count, 2,
+        "the real Lashlang process spans three segments"
+    );
+    let terminal_parent = registry
+        .get_process("segmented-process-parent")
+        .await
+        .expect("read terminal segmented parent")
+        .expect("segmented parent exists");
+    assert_eq!(
+        terminal_parent.outcome,
+        Some(ProcessAwaitOutput::Success {
+            value: serde_json::json!("none"),
+            control: None,
+        }),
+        "the terminal is durable before the injected teardown crash"
+    );
+    let pending = registry
+        .get_pending_parent_end_plan("segmented-process-parent")
+        .await
+        .expect("load segmented parent-end plan")
+        .expect("the early-segment action survives in durable state");
+    let [segmented_action] = pending.actions.as_slice() else {
+        panic!("expected one literal early-segment action: {pending:?}");
+    };
+    assert_eq!(
+        segmented_action.parent_end.policy,
+        lash_core::ProcessParentEndPolicy::Cancel
+    );
+    assert_eq!(
+        lash_core::derive_tool_intent_identity(
+            &segmented_action.identity.session_id,
+            &segmented_action.identity.execution_scope_id,
+            Some(&segmented_action.identity.tool_call_id),
+            segmented_action.identity.intent_index as usize,
+        )
+        .expect("rederive retained segmented identity"),
+        segmented_action.identity,
+        "the retained action carries its full validated identity"
+    );
+    assert_eq!(
+        registry
+            .events_after(&segmented_action.parent_end.process_id, 0)
+            .await
+            .expect("events before segmented redrive")
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        0,
+        "the crash is after terminal commit and before teardown"
+    );
+
+    worker
+        .drive_pending_processes()
+        .await
+        .expect("redrive durable segmented parent-end plan");
+    assert!(
+        registry
+            .get_pending_parent_end_plan("segmented-process-parent")
+            .await
+            .expect("inspect completed segmented plan")
+            .is_none()
+    );
+    assert_eq!(
+        registry
+            .events_after(&segmented_action.parent_end.process_id, 0)
+            .await
+            .expect("events after segmented redrive")
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        1,
+        "redrive applies the early-segment Cancel exactly once"
+    );
+
+    let tool_parent = ProcessRegistration::new(
+        "tool-call-process-parent",
+        ProcessInput::ToolCall {
+            call: lash_core::PreparedToolCall::from_parts(
+                "tool-call-process-parent-call",
+                "tool:process_parent_intent",
+                "process_parent_intent",
+                serde_json::json!({"emit": true, "child": "tool-call"}),
+                None,
+                serde_json::Value::Null,
+            ),
+        },
+        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
+    )
+    .with_execution_env_ref(Some(env_ref));
+    registry
+        .register_process(tool_parent)
+        .await
+        .expect("register ToolCall process parent");
+    worker
+        .drive_pending_processes()
+        .await
+        .expect("drive ToolCall process parent");
+    let tool_terminal = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+        .await_terminal("tool-call-process-parent")
+        .await
+        .expect("await ToolCall parent terminal");
+    assert_eq!(
+        tool_terminal,
+        ProcessAwaitOutput::Success {
+            value: serde_json::json!({"child": "tool-call"}),
+            control: None,
+        }
+    );
+    let children = registry
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        })
+        .await
+        .expect("list process-parent children");
+    for child_name in ["segmented", "tool-call"] {
+        let child = children
+            .iter()
+            .find(|record| {
+                matches!(
+                    record.input.as_ref(),
+                    ProcessInput::External { metadata }
+                        if metadata["process_parent_child"] == child_name
+                )
+            })
+            .unwrap_or_else(|| panic!("missing {child_name} child in {children:?}"));
+        assert_eq!(
+            registry
+                .events_after(&child.id, 0)
+                .await
+                .expect("read child cancellation")
+                .iter()
+                .filter(|event| event.event_type == "process.cancel_requested")
+                .count(),
+            1,
+            "{child_name} child receives one literal Cancel"
+        );
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 3);
+}
+
 fn recovery_session_policy() -> lash_core::SessionPolicy {
     lash_core::SessionPolicy {
         model: lash_core::ModelSpec::builder("mock-model")
@@ -8607,6 +10762,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec![creator_scope.session_id.clone()],
+                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
@@ -8688,6 +10844,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_id: "recover-tool".to_string(),
                     reason: Some("post-rebuild cancel probe".to_string()),
+                    replay: None,
                 }),
             ),
             RuntimeEffectLocalExecutor::processes(Arc::clone(&registry_b), None),

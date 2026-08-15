@@ -4,6 +4,69 @@ struct ToolProviderSource {
     tools: RwLock<BTreeMap<ToolId, ToolManifest>>,
 }
 
+struct OrchestratingToolSource {
+    definition: crate::tool_provider::orchestration::OrchestratingToolDef,
+}
+
+impl OrchestratingToolSource {
+    fn new(definition: crate::tool_provider::orchestration::OrchestratingToolDef) -> Self {
+        Self { definition }
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolSourceExecutor for OrchestratingToolSource {
+    fn id(&self) -> &str {
+        "orchestrating"
+    }
+
+    fn source_key(&self) -> ToolSourceKey {
+        ToolSourceKey::Orchestrating(self.definition.manifest().id)
+    }
+
+    fn registration_kind(&self) -> ToolRegistrationKind {
+        ToolRegistrationKind::Orchestrating
+    }
+
+    fn advertised_tools(&self) -> Vec<ToolManifest> {
+        vec![self.definition.manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+        (self.definition.manifest().name == name).then(|| self.definition.contract())
+    }
+
+    async fn prepare_tool_call(
+        &self,
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolResult> {
+        self.definition.prepare_tool_call(call).await
+    }
+
+    async fn execute(
+        &self,
+        _tool: &str,
+        _args: &serde_json::Value,
+        _context: &ToolContext<'_>,
+    ) -> ToolResult {
+        ToolResult::err_fmt(
+            "orchestrating tools require direct OrchestrationContext dispatch",
+        )
+    }
+
+    async fn execute_orchestrating(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> ToolResult {
+        if self.definition.manifest().id != *tool_id {
+            return ToolResult::err_fmt(format_args!("Unknown orchestrating tool id: {tool_id}"));
+        }
+        self.definition.execute(args, context).await
+    }
+}
+
 impl ToolProviderSource {
     fn new(id: impl Into<String>, provider: Arc<dyn ToolProvider>) -> Self {
         Self {
@@ -210,6 +273,32 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
             .await
     }
 
+    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
+        self.provider_index_for_id(tool_id)
+            .is_some_and(|index| self.providers[index].supports_attempt_context(tool_id))
+    }
+
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
+        self.provider_index_for_id(tool_id)
+            .is_some_and(|index| self.providers[index].attempt_may_defer(tool_id))
+    }
+
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
+            return crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format_args!(
+                "Unknown tool id: {tool_id}"
+            )));
+        };
+        self.providers[provider_idx]
+            .execute_attempt_by_id(tool_id, args, context)
+            .await
+    }
+
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
@@ -221,6 +310,20 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         };
         self.providers[provider_idx]
             .execute_by_id(tool_id, args, context)
+            .await
+    }
+
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::InternalProcessContext<'_>,
+    ) -> ToolResult {
+        let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
+            return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
+        };
+        self.providers[provider_idx]
+            .execute_internal_by_id(tool_id, args, context)
             .await
     }
 }
@@ -286,6 +389,25 @@ impl ToolSourceExecutor for ToolProviderSource {
             .await
     }
 
+    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
+        self.provider.supports_attempt_context(tool_id)
+    }
+
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
+        self.provider.attempt_may_defer(tool_id)
+    }
+
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptResult {
+        self.provider
+            .execute_attempt_by_id(tool_id, args, context)
+            .await
+    }
+
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
@@ -296,13 +418,24 @@ impl ToolSourceExecutor for ToolProviderSource {
             .execute_by_id(tool_id, args, context)
             .await
     }
+
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::InternalProcessContext<'_>,
+    ) -> ToolResult {
+        self.provider
+            .execute_internal_by_id(tool_id, args, context)
+            .await
+    }
 }
 
 /// How a registry entry is connected to its tool source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ToolBinding {
     /// Resolvable through the registered source with this id.
-    Bound(String),
+    Bound { source_key: ToolSourceKey },
     /// Persisted in a session snapshot but not resolvable from any currently
     /// registered source. Remains a non-member; execution fails loudly;
     /// rebinds when a source resolves the same id (the live name may evolve).
@@ -310,9 +443,9 @@ enum ToolBinding {
 }
 
 impl ToolBinding {
-    fn source_id(&self) -> Option<&str> {
+    fn source_key(&self) -> Option<&ToolSourceKey> {
         match self {
-            Self::Bound(id) => Some(id),
+            Self::Bound { source_key } => Some(source_key),
             Self::Orphaned => None,
         }
     }

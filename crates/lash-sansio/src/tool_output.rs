@@ -30,6 +30,193 @@ pub struct ToolCallRecord {
     pub duration_ms: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolIntentKind {
+    StartProcess,
+    SignalProcess,
+    CancelProcess,
+    EmitProcessEvent,
+}
+
+impl ToolIntentKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::StartProcess => "start_process",
+            Self::SignalProcess => "signal_process",
+            Self::CancelProcess => "cancel_process",
+            Self::EmitProcessEvent => "emit_process_event",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessParentEndPolicy {
+    Abandon,
+    #[default]
+    Cancel,
+}
+
+/// Recorded teardown metadata for a successfully started child process.
+///
+/// The durable tool-batch outcome carries this value so parent-end handling
+/// can be reconstructed after a crash without consulting live side state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolIntentParentEnd {
+    pub process_id: String,
+    pub policy: ProcessParentEndPolicy,
+}
+
+/// Compact durable teardown action reconstructed from one recorded start intent.
+///
+/// Unlike [`ToolIntentExecutionOutcome`], this value omits the child start's
+/// result payload. Process lifecycle state only needs the stable identity and
+/// declared parent-end policy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolIntentParentEndAction {
+    pub identity: ToolIntentIdentity,
+    pub parent_end: ToolIntentParentEnd,
+}
+
+/// Durable result of applying one recorded start intent's parent-end policy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ToolIntentParentEndOutcome {
+    Abandoned {
+        identity: ToolIntentIdentity,
+        process_id: String,
+    },
+    Cancelled {
+        identity: ToolIntentIdentity,
+        process_id: String,
+    },
+    Refused {
+        identity: ToolIntentIdentity,
+        process_id: String,
+        code: String,
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolIntentIdentity {
+    pub session_id: String,
+    /// The enclosing execution-scope id: a turn id for turn scope and a
+    /// process id for process scope.
+    pub execution_scope_id: String,
+    pub tool_call_id: String,
+    pub intent_index: u32,
+    pub replay_key: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum ToolIntentRefusalReason {
+    UnsupportedProtocolVersion {
+        recorded: u16,
+    },
+    MissingToolCallId,
+    IntentIndexOverflow,
+    CountBudgetExceeded {
+        actual: usize,
+        maximum: usize,
+    },
+    CanonicalByteBudgetExceeded {
+        actual: usize,
+        maximum: usize,
+    },
+    PerKindBudgetExceeded {
+        kind: ToolIntentKind,
+        actual: usize,
+        maximum: usize,
+    },
+    SessionMismatch {
+        expected: String,
+        recorded: String,
+    },
+    CommandFailed {
+        code: String,
+        message: String,
+    },
+}
+
+impl ToolIntentRefusalReason {
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedProtocolVersion { .. } => "unsupported_protocol_version",
+            Self::MissingToolCallId => "missing_tool_call_id",
+            Self::IntentIndexOverflow => "intent_index_overflow",
+            Self::CountBudgetExceeded { .. } => "count_budget_exceeded",
+            Self::CanonicalByteBudgetExceeded { .. } => "canonical_byte_budget_exceeded",
+            Self::PerKindBudgetExceeded { .. } => "per_kind_budget_exceeded",
+            Self::SessionMismatch { .. } => "session_mismatch",
+            Self::CommandFailed { .. } => "command_failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ToolIntentExecutionOutcome {
+    Executed {
+        identity: ToolIntentIdentity,
+        kind: ToolIntentKind,
+        result: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_end: Option<ToolIntentParentEnd>,
+    },
+    Refused {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<ToolIntentIdentity>,
+        intent_index: u32,
+        kind: ToolIntentKind,
+        refusal: ToolIntentRefusalReason,
+    },
+    /// Batch-level protocol refusal used when the recorded batch contains no
+    /// declarations to which the refusal could honestly be attached.
+    ProtocolRefused { refusal: ToolIntentRefusalReason },
+}
+
+impl ToolIntentExecutionOutcome {
+    pub fn kind(&self) -> Option<ToolIntentKind> {
+        match self {
+            Self::Executed { kind, .. } | Self::Refused { kind, .. } => Some(*kind),
+            Self::ProtocolRefused { .. } => None,
+        }
+    }
+
+    pub fn model_addendum(&self) -> String {
+        match self {
+            Self::Executed {
+                identity,
+                kind,
+                result,
+                ..
+            } => format!(
+                "[tool intent {} #{} executed: {}]",
+                kind.as_str(),
+                identity.intent_index,
+                result
+            ),
+            Self::Refused {
+                intent_index,
+                kind,
+                refusal,
+                ..
+            } => format!(
+                "[tool intent {} #{} refused: {}]",
+                kind.as_str(),
+                intent_index,
+                refusal.code()
+            ),
+            Self::ProtocolRefused { refusal } => {
+                format!("[tool intent batch refused: {}]", refusal.code())
+            }
+        }
+    }
+}
+
 impl ToolCallOutput {
     pub fn success(value: impl Into<ToolValue>) -> Self {
         Self {

@@ -278,6 +278,12 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
                 graph_key,
                 parent_call_id,
             },
+            lash_core::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
+                Self::ToolIntentOutcome {
+                    call_id,
+                    outcome: outcome.into(),
+                }
+            }
             lash_core::TurnEvent::FinalValue { value } => Self::FinalValue { value },
             lash_core::TurnEvent::ToolValue { tool_name, value } => {
                 Self::ToolValue { tool_name, value }

@@ -29,6 +29,7 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     "lash.process-wake",
     "lash.runtime-usage-payload",
     "lash.tool-invocation-batch",
+    "lash.tool-intent",
     "lash.trigger-command",
     "lash.trigger-delivery-process",
     "lash.trigger-operation-address",

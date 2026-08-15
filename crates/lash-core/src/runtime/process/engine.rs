@@ -35,7 +35,46 @@ pub struct PersistedSegmentHandover {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProcessRunOutcome {
     Terminal(Box<ProcessAwaitOutput>),
+    TerminalWithParentEnd {
+        output: Box<ProcessAwaitOutput>,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    },
     SegmentBoundary(SegmentHandover),
+}
+
+impl ProcessRunOutcome {
+    /// Report whether a process-engine invocation reached a terminal value.
+    ///
+    /// This is an **integrator class 3: process-engine implementor** seam.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Terminal(_) | Self::TerminalWithParentEnd { .. })
+    }
+
+    /// Borrow the terminal output without consuming engine-owned parent-end actions.
+    ///
+    /// This is an **integrator class 3: process-engine implementor** seam.
+    pub fn terminal_output(&self) -> Option<&ProcessAwaitOutput> {
+        match self {
+            Self::Terminal(output) | Self::TerminalWithParentEnd { output, .. } => Some(output),
+            Self::SegmentBoundary(_) => None,
+        }
+    }
+
+    /// Consume a terminal engine result into output plus durable teardown actions.
+    ///
+    /// This is an **integrator class 3: process-engine implementor** seam.
+    pub fn into_terminal_parts(
+        self,
+    ) -> Option<(
+        Box<ProcessAwaitOutput>,
+        Vec<crate::ToolIntentParentEndAction>,
+    )> {
+        match self {
+            Self::Terminal(output) => Some((output, Vec::new())),
+            Self::TerminalWithParentEnd { output, actions } => Some((output, actions)),
+            Self::SegmentBoundary(_) => None,
+        }
+    }
 }
 
 /// Failure of the host/runtime infrastructure needed to execute a process.
@@ -80,25 +119,27 @@ impl From<ProcessAwaitOutput> for ProcessRunOutcome {
     }
 }
 
-pub type ProcessEngineShutdownFuture<'run> = Pin<Box<dyn Future<Output = ()> + Send + 'run>>;
+pub type ProcessEngineShutdownFuture<'run> =
+    Pin<Box<dyn Future<Output = Result<(), crate::PluginError>> + Send + 'run>>;
 
 pub struct ProcessEngineRunGuard<'run> {
-    shutdown: Option<Box<dyn FnOnce() -> ProcessEngineShutdownFuture<'run> + Send + 'run>>,
+    shutdown: Option<Box<dyn FnOnce(bool) -> ProcessEngineShutdownFuture<'run> + Send + 'run>>,
 }
 
 impl<'run> ProcessEngineRunGuard<'run> {
     pub(crate) fn new(
-        shutdown: impl FnOnce() -> ProcessEngineShutdownFuture<'run> + Send + 'run,
+        shutdown: impl FnOnce(bool) -> ProcessEngineShutdownFuture<'run> + Send + 'run,
     ) -> Self {
         Self {
             shutdown: Some(Box::new(shutdown)),
         }
     }
 
-    pub async fn shutdown(mut self) {
+    pub async fn shutdown(mut self, parent_ended: bool) -> Result<(), crate::PluginError> {
         if let Some(shutdown) = self.shutdown.take() {
-            shutdown().await;
+            shutdown(parent_ended).await?;
         }
+        Ok(())
     }
 }
 
@@ -128,8 +169,8 @@ impl<'run> ProcessEngineRuntimeContext<'run> {
         (self.context, self.guard)
     }
 
-    pub async fn shutdown(self) {
-        self.guard.shutdown().await;
+    pub async fn shutdown(self, parent_ended: bool) -> Result<(), crate::PluginError> {
+        self.guard.shutdown(parent_ended).await
     }
 }
 

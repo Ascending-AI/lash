@@ -22,7 +22,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
         // language-specific runtimes into the kernel.
         match input.as_ref() {
             crate::ProcessInput::ToolCall { call } => {
-                Ok(crate::ProcessRunOutcome::Terminal(Box::new(
+                let (output, actions) = Box::pin(
                     self.run_process_tool_call(ProcessToolCallRun {
                         registration,
                         registry: Arc::clone(&registry),
@@ -33,9 +33,17 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                             .expect("process worker installs execution write authority"),
                         scoped_effect_controller,
                         cancellation,
+                    }),
+                )
+                .await;
+                if actions.is_empty() {
+                    Ok(crate::ProcessRunOutcome::Terminal(Box::new(output)))
+                } else {
+                    Ok(crate::ProcessRunOutcome::TerminalWithParentEnd {
+                        output: Box::new(output),
+                        actions,
                     })
-                    .await,
-                )))
+                }
             }
             crate::ProcessInput::SessionTurn {
                 create_request,
@@ -80,6 +88,30 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
 }
 
 impl RuntimeSessionServices {
+    pub(crate) async fn finish_process_parent_end_actions(
+        &self,
+        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        actions: &[crate::ToolIntentParentEndAction],
+    ) -> Result<(), crate::PluginError> {
+        if actions.is_empty() {
+            return Ok(());
+        }
+        let run_context = ProcessRunContext::builder(self)
+            .tool_catalog(
+                self.current
+                    .plugins
+                    .resolved_tool_catalog(&self.current.session_id)?,
+            )
+            .scoped_effect_controller(scoped_effect_controller)
+            .build()?;
+        let dispatch = run_context.dispatch();
+        dispatch.recorded_intent_outcomes.restore(actions);
+        crate::tool_dispatch::execute_parent_end_actions(dispatch.as_ref()).await?;
+        drop(dispatch);
+        run_context.shutdown().await;
+        Ok(())
+    }
+
     fn process_engine_run_context<'run>(
         &self,
         registration: crate::ProcessRegistration,
@@ -119,9 +151,10 @@ impl RuntimeSessionServices {
                 .scoped_effect_controller(scoped_effect_controller)
                 .causal_invocation(execution_context_for_runtime.causal_invocation.clone())
                 .build()?;
+            let dispatch = run_context.dispatch();
             let mut context = crate::RuntimeExecutionContext::new(
                 services.current.session_id.clone(),
-                run_context.dispatch(),
+                Arc::clone(&dispatch),
                 Arc::clone(&services.current.host.core.durability.process_env_store),
                 Arc::clone(&services.current.host.core.durability.attachment_store),
                 Arc::new(crate::ChronologicalProjection::default()),
@@ -153,9 +186,15 @@ impl RuntimeSessionServices {
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);
             }
-            let guard = crate::ProcessEngineRunGuard::new(move || {
+            let guard = crate::ProcessEngineRunGuard::new(move |parent_ended| {
                 Box::pin(async move {
+                    debug_assert!(
+                        !parent_ended,
+                        "process teardown belongs after durable terminal completion"
+                    );
+                    drop(dispatch);
                     run_context.shutdown().await;
+                    Ok(())
                 })
             });
             Ok(crate::ProcessEngineRuntimeContext::new(context, guard))

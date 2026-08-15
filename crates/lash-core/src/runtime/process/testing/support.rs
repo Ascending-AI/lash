@@ -33,6 +33,7 @@ impl Default for TestLocalProcessRegistry {
             tombstones: Arc::new(Mutex::new(HashMap::new())),
             leases: Arc::new(Mutex::new(HashMap::new())),
             handovers: Arc::new(Mutex::new(HashMap::new())),
+            tool_intent_submissions: Arc::new(Mutex::new(HashMap::new())),
             execution_write_pause: Arc::new(std::sync::Mutex::new(None)),
             wake_mark_pause: Arc::new(std::sync::Mutex::new(None)),
             append_target_snapshot_pause: Arc::new(std::sync::Mutex::new(None)),

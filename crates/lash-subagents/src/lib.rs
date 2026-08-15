@@ -77,23 +77,39 @@ impl PluginFactory for SubagentsPluginFactory {
         let final_answer_format = self.final_answer_format.clone();
         let parent_subagent = ctx.subagent.clone();
 
-        let provider: Arc<dyn ToolProvider> = Arc::new(
-            rlm::RlmSubagentToolsProvider {
-                registry: Arc::clone(&registry),
-                session_spec: session_spec.clone(),
-                tool_access,
-                final_answer_format,
-                parent_subagent,
-                include_submit_error: ctx.subagent.is_some(),
-            }
-            .into_provider(),
-        );
+        let implementation = Arc::new(rlm::RlmSubagentToolsProvider {
+            registry: Arc::clone(&registry),
+            session_spec: session_spec.clone(),
+            tool_access,
+            final_answer_format,
+            parent_subagent,
+            include_submit_error: ctx.subagent.is_some(),
+        });
+        let orchestrating_tool = rlm::spawn_agent_orchestrating_tool(Arc::clone(&implementation));
+        let leaf_provider: Option<Arc<dyn ToolProvider>> =
+            implementation.include_submit_error.then(|| {
+                Arc::new(
+                    rlm::RlmSubagentToolsProvider {
+                        registry: Arc::clone(&implementation.registry),
+                        session_spec: implementation.session_spec.clone(),
+                        tool_access: implementation.tool_access.clone(),
+                        final_answer_format: implementation.final_answer_format.clone(),
+                        parent_subagent: implementation.parent_subagent.clone(),
+                        include_submit_error: true,
+                    }
+                    .into_leaf_provider(),
+                ) as Arc<dyn ToolProvider>
+            });
 
         let subagent_authority = ctx.subagent.clone();
         PluginSpecFactory::new(
             "subagents",
             Arc::new(move |_ctx| {
-                let mut spec = PluginSpec::new().with_tool_provider(Arc::clone(&provider));
+                let mut spec =
+                    PluginSpec::new().with_orchestrating_tool(orchestrating_tool.clone());
+                if let Some(provider) = leaf_provider.as_ref() {
+                    spec = spec.with_tool_provider(Arc::clone(provider));
+                }
                 if let Some(authority) = subagent_authority.clone() {
                     let note = rlm_support::subagent_capability_note(&authority);
                     spec = spec.with_prompt_contributor(Arc::new(move |_ctx| {

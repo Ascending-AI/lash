@@ -10,6 +10,21 @@ impl ToolRegistry {
         Ok(registry)
     }
 
+    /// Build a registry from one leaf provider plus completed first-party
+    /// orchestrating definitions. The two registration lanes must have
+    /// disjoint tool ids.
+    #[doc(hidden)]
+    pub fn from_tool_provider_with_orchestrating_tools(
+        provider: Arc<dyn ToolProvider>,
+        orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
+    ) -> Result<Self, ReconfigureError> {
+        Self::from_tool_registrations_with_hidden_tools(
+            vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), vec![provider])],
+            orchestrating_tools,
+            BTreeSet::new(),
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn from_tool_providers(
         providers: Vec<Arc<dyn ToolProvider>>,
@@ -17,15 +32,43 @@ impl ToolRegistry {
         Self::from_tool_providers_with_hidden_tools(providers, BTreeSet::new())
     }
 
+    #[cfg(test)]
     pub(crate) fn from_tool_providers_with_hidden_tools(
         providers: Vec<Arc<dyn ToolProvider>>,
         hidden_tool_names: BTreeSet<String>,
     ) -> Result<Self, ReconfigureError> {
+        Self::from_tool_provider_sources_with_hidden_tools(
+            vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), providers)],
+            hidden_tool_names,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_tool_provider_sources_with_hidden_tools(
+        sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
+        hidden_tool_names: BTreeSet<String>,
+    ) -> Result<Self, ReconfigureError> {
+        Self::from_tool_registrations_with_hidden_tools(
+            sources,
+            Vec::new(),
+            hidden_tool_names,
+        )
+    }
+
+    pub(crate) fn from_tool_registrations_with_hidden_tools(
+        sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
+        orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
+        hidden_tool_names: BTreeSet<String>,
+    ) -> Result<Self, ReconfigureError> {
         let registry = Self::empty_with_hidden_tools(hidden_tool_names);
-        registry.upsert_source(Arc::new(ToolProviderGroupSource::new(
-            PLUGIN_TOOL_SOURCE_ID,
-            providers,
-        )))?;
+        for (source_id, providers) in sources {
+            registry.upsert_source(Arc::new(ToolProviderGroupSource::new(
+                source_id, providers,
+            )))?;
+        }
+        for definition in orchestrating_tools {
+            registry.upsert_source(Arc::new(OrchestratingToolSource::new(definition)))?;
+        }
         Ok(registry)
     }
 
@@ -49,6 +92,16 @@ impl ToolRegistry {
         self.state
             .read_recover()
             .generation
+    }
+
+    pub(crate) fn is_orchestrating_tool(&self, tool_id: &ToolId) -> bool {
+        self.state
+            .read_recover()
+            .tools
+            .get(tool_id)
+            .is_some_and(|entry| {
+                entry.registration_kind() == ToolRegistrationKind::Orchestrating
+            })
     }
 
     pub(crate) fn export_state(&self) -> ToolState {
@@ -109,9 +162,11 @@ impl ToolRegistry {
     /// manifest, excluded from the catalog as a non-member, rebound when its
     /// source returns) instead of failing the whole restore. Tool id is the
     /// registry identity; the live manifest wins on rebind, with persisted Tool
-    /// Catalog membership preserved per id. Newly advertised ids are members by
-    /// default. Consequently an opt-out does not transfer when a provider
-    /// replaces a tool with a new id, even if it reuses the same name. Multiple
+    /// Catalog membership preserved per id. The live source also re-derives the
+    /// registration lane, so snapshots written before lane persistence remain
+    /// resumable. Newly advertised ids are members by default. Consequently an
+    /// opt-out does not transfer when a provider replaces a tool with a new id,
+    /// even if it reuses the same name. Multiple
     /// sources resolving the same id or advertised name still fail because
     /// execution authority and model-facing names must both be unambiguous.
     pub(crate) fn restore_state(
@@ -166,9 +221,10 @@ impl ToolRegistry {
     }
 
     pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
+        let source_key = ToolSourceKey::Leaf(source_id.to_string());
         {
             let mut sources = self.sources.write_recover();
-            if sources.remove(source_id).is_none() {
+            if sources.remove(&source_key).is_none() {
                 return Err(ReconfigureError::UnknownSource(source_id.to_string()));
             }
         }
@@ -177,7 +233,7 @@ impl ToolRegistry {
             .write_recover();
         state
             .tools
-            .retain(|_, entry| entry.binding.source_id() != Some(source_id));
+            .retain(|_, entry| entry.binding.source_key() != Some(&source_key));
         state.generation += 1;
         Ok(state.generation)
     }
@@ -194,28 +250,35 @@ impl ToolRegistry {
         source: Arc<dyn ToolSourceExecutor>,
         policy: SourceReconcilePolicy,
     ) -> Result<u64, ReconfigureError> {
-        let source_id = source.id().to_string();
+        let source_key = source.source_key();
         let mut sources = self
             .sources
             .read_recover()
             .iter()
             .map(|(id, source)| (id.clone(), Arc::clone(source)))
             .collect::<BTreeMap<_, _>>();
-        sources.insert(source_id.clone(), Arc::clone(&source));
+        if matches!(source_key, ToolSourceKey::Orchestrating(_))
+            && sources.contains_key(&source_key)
+        {
+            return Err(ReconfigureError::Validation(format!(
+                "duplicate orchestrating tool source `{source_key}`"
+            )));
+        }
+        sources.insert(source_key.clone(), Arc::clone(&source));
         let snapshot = self.export_state();
-        let preferred_source_id = (policy == SourceReconcilePolicy::OverlayReplacingConflicts)
-            .then_some(source_id.as_str());
+        let preferred_source_key = (policy == SourceReconcilePolicy::OverlayReplacingConflicts)
+            .then_some(&source_key);
         let reconciled = reconcile_tool_state_entries(
             snapshot.entries(),
             &sources,
             ReconcileMode::LiveSurface,
-            preferred_source_id,
+            preferred_source_key,
             &self.hidden_tool_names,
         )?;
 
         self.sources
             .write_recover()
-            .insert(source_id, source);
+            .insert(source_key, source);
         let mut state = self
             .state
             .write_recover();

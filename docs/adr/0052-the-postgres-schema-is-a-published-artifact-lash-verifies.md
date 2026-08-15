@@ -145,15 +145,33 @@ Two open options carry the policy:
   It is an API-level choice a host commits to in reviewed code, deliberately not
   an environment variable an operator can flip during an incident.
 
-`SchemaCheck` governs the catalog comparison and nothing else. The component
-version stamp is the reject-and-recreate boundary and is **unconditionally fatal**
-in every mode: if the valve could downgrade it, a host that adopted the valve for a
-structural false positive would later open silently against a pre-cutover database
-— process events with no completion-authority payload, manifest rows naming a blob
-layout that cannot be read — which is the corruption the boundary exists to
-prevent. The signing-secret row is likewise a data precondition outside the valve:
-without it there is no key to authenticate durable promises with, so there is
-nothing for open to return.
+`SchemaCheck` governs the catalog comparison and nothing else. A component-version
+mismatch is the reject-and-recreate boundary in every mode except for an exact,
+explicit migration from one published Lash-managed source shape. Such a migration
+runs only under `SchemaCheck::Enforce`. Its preflight proves both that none of the
+relations introduced by the target version resolve anywhere on the effective
+`search_path` and that the rest of the live catalog is exactly the published source
+shape within the structural verifier's scope. Their presence over the source-version
+stamp is version-ledger/schema divergence, not permission to continue a partial
+migration: Lash refuses with the recorded and expected versions, names the newer
+artifacts, and tells the operator to inspect and recreate. Other source drift gets a
+typed source-shape refusal. Once admitted, migration and creation DDL are pinned to
+the anchored installation namespace; the caller's search path is restored before
+final verification. Lash never uses `IF NOT EXISTS` to guess which intermediate
+shape is trustworthy. The laws
+`main_component_50_store_upgrades_cleanly_to_51`,
+`component_50_migration_stays_in_the_anchored_namespace`,
+`component_50_stamp_with_51_artifacts_is_refused_without_mutation`, and
+`drifted_component_50_source_is_refused_before_migration_ddl`, plus
+`warn_only_refuses_component_50_before_process_workers_can_open` pin the migration,
+namespace, divergence, source-shape, and valve boundaries. Other mismatches remain fatal; if
+the valve could downgrade them, a host that adopted it for a structural false
+positive would later open silently against a pre-cutover database — process events
+with no completion-authority payload, manifest rows naming a blob layout that
+cannot be read — which is the corruption the boundary exists to prevent. The
+signing-secret row is likewise a data precondition outside the valve: without it
+there is no key to authenticate durable promises with, so there is nothing for open
+to return.
 
 `PostgresStorage::verify_schema_for(&pool)` exposes the same check as a structured
 report without failing and without opening, so a host gates its own migration CI on
@@ -268,11 +286,13 @@ verify against; shape-checking there would be lash verifying itself.
   knobs, and finding counts per class — on every outcome it can reach, denial and
   admission alike, per the decision-evidence standard in
   `docs/agents/way-of-working.md`. That includes the early returns: the
-  lash-managed stale-version preflight, which denies before the structural read runs
-  at all, and both signing-secret refusals. The admission is recorded only after the
-  secret read succeeds, so a database with an unusable secret cannot log an admit and
-  then refuse the open — decision evidence that contradicts the outcome is worse than
-  none.
+  lash-managed version preflight, including migration-divergence and source-shape
+  denials before any migration DDL. Those events add the artifact names or rendered
+  source findings that caused the refusal. Both signing-secret refusals are covered
+  too. The admission is recorded
+  only after the secret read succeeds, so a database with an unusable secret cannot
+  log an admit and then refuse the open — decision evidence that contradicts the
+  outcome is worse than none.
 
 - A report's remedy is chosen per finding class, and a version finding dominates.
   Any report carrying one gets the reject-and-recreate instruction and deliberately

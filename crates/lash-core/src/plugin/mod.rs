@@ -192,6 +192,52 @@ mod tests {
         }
     }
 
+    struct DuplicateNameToolProvider;
+
+    #[async_trait::async_trait]
+    impl ToolProvider for DuplicateNameToolProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            vec![
+                ToolDefinition::raw(
+                    "tool:different_id",
+                    "mock_tool",
+                    "duplicate model-facing name",
+                    ToolDefinition::default_input_schema(),
+                    json!({}),
+                )
+                .manifest(),
+            ]
+        }
+
+        fn resolve_contract(&self, _name: &str) -> Option<Arc<crate::ToolContract>> {
+            None
+        }
+
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> ToolResult {
+            ToolResult::ok(json!("unreachable"))
+        }
+    }
+
+    #[test]
+    fn plugin_registrar_preserves_typed_duplicate_tool_name_refusal() {
+        let mut registrar = PluginRegistrar::new();
+        registrar.registering_plugin_id = Some("duplicate-law".to_string());
+        registrar
+            .tools()
+            .provider(Arc::new(MockToolProvider))
+            .expect("first provider registers");
+
+        let error = registrar
+            .tools()
+            .provider(Arc::new(DuplicateNameToolProvider))
+            .expect_err("the registrar refuses the duplicate before assembly");
+        assert!(matches!(
+            error,
+            PluginError::Registration(ref message)
+                if message == "duplicate plugin tool name `mock_tool`"
+        ));
+    }
+
     struct MockPluginFactory;
 
     impl PluginFactory for MockPluginFactory {

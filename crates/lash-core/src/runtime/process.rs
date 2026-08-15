@@ -64,10 +64,11 @@ pub use references::ProcessLiveReferenceSummary;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use registry::reconcile_pruned_trigger_deliveries_interleaved;
 pub use registry::{
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessContinuationStore, ProcessPruneReport, ProcessRegistry,
-    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, WAKE_ENQUEUING_STALE_AFTER_MS,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, reconcile_pruned_trigger_deliveries,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessContinuationStore, ProcessParentEndPlan,
+    ProcessPruneReport, ProcessRegistry, ProcessWorklistCursor, ProcessWorklistPage,
+    ProjectionWatermark, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, reconcile_pruned_trigger_deliveries,
 };
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 #[cfg(any(test, feature = "testing"))]

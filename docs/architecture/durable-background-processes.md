@@ -233,10 +233,12 @@ PostgreSQL tables. The operations runbook reset consequently clears
 
 Figments coordination is one Lash revision. SQLite durable-core schema 36 includes
 the keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover. PostgreSQL schema 50 includes those cutovers,
+immutable graph-generation cutover. PostgreSQL schema 51 includes those cutovers,
 the indexed recovery worklist, and the session-metadata payload cutover.
-Process-registry schema 23 and trigger schema 5 carry the v3 process-environment
-reference cutover; effect schema 9 carries the agent-frame-key cutover.
+Process-registry schema 24 adds atomic pending process-parent teardown to the v3
+process-environment reference cutover; trigger schema 5 carries its existing
+contract. Effect schema 10 carries both the agent-frame-key and recorded
+tool-intent cutovers.
 Development/test stores must be recreated.
 Process-event sequences remain small ordered values; downstream prompts,
 origins, and workflow projections do not receive timestamp-scale identifiers.
@@ -265,8 +267,8 @@ a sink must return fast and offload any I/O. Host retention is
 a host that has
 projected a process's outcome into its own store calls it on the maintenance
 cadence to replace eligible terminal rows with payload-free tombstones after
-the projection watermark advances — removing their events, wakes, observer edges, and leases —
-only once host policy has retained them beyond every still-replayable
+the projection watermark advances — removing their events, wakes, observer edges, leases, and
+settled parent-end plans — only once host policy has retained them beyond every still-replayable
 `await_terminal`. Lash exposes no finite maximum waiter lifetime to validate a
 cutoff against; a later await after pruning receives `ProcessNoLongerRetained`.
 The optional `ProcessListFilter` narrows which eligible rows one call reclaims,

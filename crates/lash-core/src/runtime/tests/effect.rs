@@ -3,18 +3,16 @@ use crate::facade_support::SessionGraphFacadeOps;
 use crate::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice};
 use crate::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_sansio::sync::MutexExt;
-
 mod controller_doubles;
 pub(in crate::runtime::tests) use controller_doubles::RejectingEffectController;
 use controller_doubles::{SerialOnlyEffectController, WrongOutcomeEffectController};
-
+mod fig1127;
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
     turn_id: Option<String>,
     replay_key: String,
 }
-
 #[derive(Clone, Default)]
 pub(super) struct RecordingEffectController {
     records: Arc<Mutex<Vec<EffectControllerRecord>>>,
@@ -83,7 +81,7 @@ impl RecordingEffectController {
         self.records.lock_recover().clone()
     }
 
-    fn envelopes(&self) -> Vec<String> {
+    pub(super) fn envelopes(&self) -> Vec<String> {
         self.envelopes.lock_recover().clone()
     }
 
@@ -307,10 +305,10 @@ impl RuntimeEffectController for RecordingEffectController {
                     ))
                     .await
             }
-            RuntimeEffectCommand::Process { .. } => Err(RuntimeEffectControllerError::foreign(
-                "process_unexpected",
-                "recording effect controller does not execute processes",
-            )),
+            RuntimeEffectCommand::Process { command } => {
+                let result = local_executor.into_process()?.execute(*command).await?;
+                Ok(RuntimeEffectOutcome::Process { result })
+            }
             RuntimeEffectCommand::Trigger { command } => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(
@@ -846,16 +844,17 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
 }
 
 #[tokio::test]
-async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_session_node() {
+async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appending_session_node()
+{
     #[derive(Clone, Default)]
-    struct CapturingToolReplayController {
+    struct CapturingRuntimeReplayController {
         llm_calls: Arc<Mutex<usize>>,
         tool_outcomes: Arc<Mutex<Vec<serde_json::Value>>>,
         process_starts: Arc<std::sync::atomic::AtomicUsize>,
         inline: InlineRuntimeEffectController,
     }
 
-    impl CapturingToolReplayController {
+    impl CapturingRuntimeReplayController {
         fn tool_outcomes(&self) -> Vec<serde_json::Value> {
             self.tool_outcomes.lock_recover().clone()
         }
@@ -866,9 +865,9 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
     }
 
     #[async_trait::async_trait]
-    impl crate::AwaitEventResolver for CapturingToolReplayController {
+    impl crate::AwaitEventResolver for CapturingRuntimeReplayController {
         fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-            crate::EffectReplayOwnership::Controller
+            crate::EffectReplayOwnership::Runtime
         }
 
         async fn await_event_key(
@@ -923,7 +922,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
     }
 
     #[async_trait::async_trait]
-    impl RuntimeEffectController for CapturingToolReplayController {
+    impl RuntimeEffectController for CapturingRuntimeReplayController {
         async fn execute_effect(
             &self,
             envelope: RuntimeEffectEnvelope,
@@ -1087,7 +1086,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
         }
     }
 
-    let controller = CapturingToolReplayController::default();
+    let controller = CapturingRuntimeReplayController::default();
     let mut config = runtime_host_config_with_inline_controller(Arc::new(controller.clone()));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),
@@ -2088,7 +2087,7 @@ struct EffectControllerTestProtocolFactory {
 
 impl crate::PluginFactory for EffectControllerTestProtocolFactory {
     fn id(&self) -> &'static str {
-        "protocol_standard"
+        "test_protocol"
     }
 
     fn build(

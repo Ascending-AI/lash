@@ -29,3 +29,4 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

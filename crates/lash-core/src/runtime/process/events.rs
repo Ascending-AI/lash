@@ -484,6 +484,7 @@ impl ProcessEventAppendRequest {
     pub fn with_replay_key(mut self, replay_key: impl Into<String>) -> Self {
         self.replay = Some(crate::RuntimeReplay {
             key: replay_key.into(),
+            attribution: None,
         });
         self
     }

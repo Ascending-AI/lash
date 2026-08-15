@@ -2,6 +2,7 @@ use super::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::sync::{Arc, Mutex};
 
 use lash_core::testing::conformance::{
     StoreContractHandles, StoreContractOp, StoreContractScenario, sample_store_contract_operations,
@@ -53,6 +54,7 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "trigger_occurrence_null_source",
     "process_signal_zero",
     "effect_record",
+    "tool_intent_batch",
     "await_resolve",
     "await_revoke_session",
 ];
@@ -67,6 +69,7 @@ enum SurfaceOperation {
     TriggerOccurrenceNullSource { key: u8 },
     ProcessSignalZero { negative: bool },
     EffectRecord { key: u8, duration_ms: u8 },
+    ToolIntentBatch,
     AwaitResolve { key: u8 },
     AwaitRevokeSession,
 }
@@ -103,6 +106,7 @@ impl SurfaceOperation {
             Self::TriggerOccurrenceNullSource { .. } => "trigger_occurrence_null_source",
             Self::ProcessSignalZero { .. } => "process_signal_zero",
             Self::EffectRecord { .. } => "effect_record",
+            Self::ToolIntentBatch => "tool_intent_batch",
             Self::AwaitResolve { .. } => "await_resolve",
             Self::AwaitRevokeSession => "await_revoke_session",
         }
@@ -173,8 +177,125 @@ struct SurfaceRunner {
     reader: SurfaceReader,
 }
 
+struct SurfaceIntentProvider;
+
+impl SurfaceIntentProvider {
+    fn definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::raw(
+            "tool:surface_intent_provider",
+            "surface_intent_provider",
+            "Return a literal result and two durable process intents.",
+            lash_core::ToolDefinition::default_input_schema(),
+            serde_json::json!({"type": "object"}),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for SurfaceIntentProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "surface_intent_provider").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        panic!("the cross-backend intent provider must use AttemptContext")
+    }
+
+    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == Self::definition().id()
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::AttemptToolCall<'_>,
+    ) -> lash_core::ToolAttemptResult {
+        assert_eq!(call.context.session_id(), SURFACE_SESSION);
+        assert_eq!(call.context.execution_scope_id(), SURFACE_TURN);
+        assert_eq!(call.context.tool_call_id(), Some("surface-intent-call"));
+        assert_eq!(call.context.attempt_number(), 1);
+        assert_eq!(call.context.max_attempts(), 1);
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({"ok": true})),
+            lash_core::ToolIntents::v1(
+                (0..2)
+                    .map(|index| {
+                        lash_core::ToolIntent::StartProcess(Box::new(
+                            lash_core::StartProcessIntent {
+                                session_id: SURFACE_SESSION.to_string(),
+                                request: lash_core::ProcessStartRequest::external(
+                                    format!("ignored-derived-intent-id-{index}"),
+                                    ProcessOriginator::host_scoped("surface-differential"),
+                                    serde_json::json!({
+                                        "source": "literal-intent-row",
+                                        "index": index,
+                                    }),
+                                ),
+                                on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
+                            },
+                        ))
+                    })
+                    .collect(),
+            ),
+        )
+    }
+}
+
+struct LiteralFrameController {
+    inner: lash_core::ScopedEffectController<'static>,
+    frames: Arc<Mutex<Vec<RuntimeEffectEnvelope>>>,
+}
+
+impl lash_core::AwaitEventResolver for LiteralFrameController {
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        self.inner.controller().replay_ownership()
+    }
+
+    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
+        self.inner.controller().journal_addressing()
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.inner
+            .controller()
+            .allows_process_lifetime_completion_keys()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for LiteralFrameController {
+    fn wants_segment_boundary(
+        &self,
+        progress: &lash_core::SegmentProgress,
+    ) -> Option<lash_core::BoundaryReason> {
+        self.inner.controller().wants_segment_boundary(progress)
+    }
+
+    fn supports_concurrent_effects(&self) -> bool {
+        self.inner.controller().supports_concurrent_effects()
+    }
+
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        self.frames
+            .lock()
+            .expect("literal frame recorder lock")
+            .push(envelope.clone());
+        self.inner
+            .controller()
+            .execute_effect(envelope, local_executor)
+            .await
+    }
+}
+
 fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
-    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 7);
+    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 8);
     let mut operations = vec![
         SurfaceOperation::TriggerRegister { key: 0 },
         SurfaceOperation::TriggerOccurrence { key: 0 },
@@ -182,6 +303,7 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
             key: 0,
             duration_ms: 1,
         },
+        SurfaceOperation::ToolIntentBatch,
         SurfaceOperation::AwaitResolve { key: 0 },
     ];
     for (index, operation) in contract.into_iter().enumerate() {
@@ -329,6 +451,488 @@ impl SurfaceRunner {
                     )
                     .await;
                 result.map_err(|error| error.to_string())?;
+                Ok(())
+            }
+            SurfaceOperation::ToolIntentBatch => {
+                let scope = ExecutionScope::turn(SURFACE_SESSION, SURFACE_TURN);
+                let inner = self
+                    .effect_host
+                    .scoped_static(scope.clone())
+                    .map_err(|error| error.to_string())?;
+                let inner = inner.ok_or_else(|| {
+                    format!("{} omitted a static differential controller", self.name)
+                })?;
+                let frames = Arc::new(Mutex::new(Vec::new()));
+                let controller = lash_core::ScopedEffectController::shared(
+                    Arc::new(LiteralFrameController {
+                        inner,
+                        frames: Arc::clone(&frames),
+                    }),
+                    scope,
+                )
+                .map_err(|error| error.to_string())?;
+                let processes = lash_core::testing::effect_backed_process_service(Arc::clone(
+                    &self.process_registry,
+                ));
+                let completed =
+                    lash_core::testing::conformance::coordinate_tool_provider_with_services(
+                        controller.clone(),
+                        Arc::clone(&processes),
+                        SURFACE_SESSION,
+                        SurfaceIntentProvider::definition(),
+                        Arc::new(SurfaceIntentProvider),
+                        lash_core::PreparedToolCall::from_parts(
+                            "surface-intent-call",
+                            lash_core::ToolId::from("tool:surface_intent_provider"),
+                            "surface_intent_provider",
+                            serde_json::json!({}),
+                            None,
+                            serde_json::Value::Null,
+                        ),
+                    )
+                    .await
+                    .map_err(|error| {
+                        format!("{} provider/coordinator row failed: {error}", self.name)
+                    })?;
+                let intent_outcomes = completed.intent_outcomes.clone();
+                let literal_intent_outcomes = vec![
+                    lash_core::ToolIntentExecutionOutcome::Executed {
+                        identity: lash_core::ToolIntentIdentity {
+                            session_id: "surface-session".to_string(),
+                            execution_scope_id: "surface-turn".to_string(),
+                            tool_call_id: "surface-intent-call".to_string(),
+                            intent_index: 0,
+                            replay_key: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                        },
+                        kind: lash_core::ToolIntentKind::StartProcess,
+                        result: serde_json::json!({
+                            "__handle__": "process",
+                            "id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "kind": "external",
+                            "status": "running"
+                        }),
+                        parent_end: Some(lash_core::ToolIntentParentEnd {
+                            process_id: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            policy: lash_core::ProcessParentEndPolicy::Cancel,
+                        }),
+                    },
+                    lash_core::ToolIntentExecutionOutcome::Executed {
+                        identity: lash_core::ToolIntentIdentity {
+                            session_id: "surface-session".to_string(),
+                            execution_scope_id: "surface-turn".to_string(),
+                            tool_call_id: "surface-intent-call".to_string(),
+                            intent_index: 1,
+                            replay_key: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                        },
+                        kind: lash_core::ToolIntentKind::StartProcess,
+                        result: serde_json::json!({
+                            "__handle__": "process",
+                            "id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                            "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                            "kind": "external",
+                            "status": "running"
+                        }),
+                        parent_end: Some(lash_core::ToolIntentParentEnd {
+                            process_id: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                            policy: lash_core::ProcessParentEndPolicy::Cancel,
+                        }),
+                    },
+                ];
+                if intent_outcomes != literal_intent_outcomes {
+                    return Err(format!(
+                        "{} intent row differed from its independent literal oracle: {intent_outcomes:?}",
+                        self.name
+                    ));
+                }
+                let actions = vec![
+                    lash_core::ToolIntentParentEndAction {
+                        identity: lash_core::ToolIntentIdentity {
+                            session_id: "surface-session".to_string(),
+                            execution_scope_id: "surface-turn".to_string(),
+                            tool_call_id: "surface-intent-call".to_string(),
+                            intent_index: 0,
+                            replay_key: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                        },
+                        parent_end: lash_core::ToolIntentParentEnd {
+                            process_id: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            policy: lash_core::ProcessParentEndPolicy::Cancel,
+                        },
+                    },
+                    lash_core::ToolIntentParentEndAction {
+                        identity: lash_core::ToolIntentIdentity {
+                            session_id: "surface-session".to_string(),
+                            execution_scope_id: "surface-turn".to_string(),
+                            tool_call_id: "surface-intent-call".to_string(),
+                            intent_index: 1,
+                            replay_key: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                        },
+                        parent_end: lash_core::ToolIntentParentEnd {
+                            process_id: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                            policy: lash_core::ProcessParentEndPolicy::Cancel,
+                        },
+                    },
+                ];
+
+                self.process_registry
+                    .register_process(lash_core::ProcessRegistration::new(
+                        "surface-intent-parent",
+                        ProcessInput::External {
+                            metadata: serde_json::json!({"role": "durable-parent"}),
+                        },
+                        lash_core::RecoveryDisposition::ExternallyOwned,
+                        lash_core::ProcessProvenance::new(ProcessOriginator::host_scoped(
+                            "surface-differential",
+                        )),
+                    ))
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.process_registry
+                    .complete_process_with_parent_end(
+                        "surface-intent-parent",
+                        lash_core::ProcessAwaitOutput::Success {
+                            value: serde_json::json!({"ended": true}),
+                            control: None,
+                        },
+                        lash_core::ProcessCompletionAuthority::external_owner(),
+                        actions.clone(),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let retained = self
+                    .process_registry
+                    .get_pending_parent_end_plan("surface-intent-parent")
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| format!("{} lost its post-terminal plan", self.name))?;
+                if retained.actions != actions {
+                    return Err(format!(
+                        "{} changed the retained parent-end plan",
+                        self.name
+                    ));
+                }
+                for action in &actions {
+                    if self
+                        .process_registry
+                        .events_after(&action.parent_end.process_id, 0)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .iter()
+                        .any(|event| event.event_type == "process.cancel_requested")
+                    {
+                        return Err(format!(
+                            "{} cancelled a child before the parent terminal was durable",
+                            self.name
+                        ));
+                    }
+                }
+
+                let mut observed_parent_end_outcomes = Vec::new();
+                for action in actions.iter().take(1).chain(actions.iter()) {
+                    let replay_key = format!("{}:parent-end", action.identity.replay_key);
+                    let mut parent = RuntimeInvocation::effect(
+                        RuntimeScope::new(SURFACE_SESSION),
+                        format!("tool-intent-parent-end:{}", action.identity.intent_index),
+                        RuntimeEffectKind::ToolParentEnd,
+                        replay_key.clone(),
+                    );
+                    parent.replay = Some(lash_core::RuntimeReplay {
+                        key: replay_key,
+                        attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+                            action.identity.clone(),
+                        )),
+                    });
+                    let outcome = processes
+                        .finish_recorded_intent_parent(
+                            SURFACE_SESSION,
+                            action.identity.clone(),
+                            action.parent_end.process_id.clone(),
+                            action.parent_end.policy,
+                            "differential parent ended".to_string(),
+                            lash_core::ProcessOpScope::new(controller.clone())
+                                .with_parent_invocation(Some(parent)),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    observed_parent_end_outcomes.push(outcome);
+                }
+                if observed_parent_end_outcomes
+                    != vec![
+                        lash_core::ToolIntentParentEndOutcome::Cancelled {
+                            identity: lash_core::ToolIntentIdentity {
+                                session_id: "surface-session".to_string(),
+                                execution_scope_id: "surface-turn".to_string(),
+                                tool_call_id: "surface-intent-call".to_string(),
+                                intent_index: 0,
+                                replay_key: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            },
+                            process_id: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                        },
+                        lash_core::ToolIntentParentEndOutcome::Cancelled {
+                            identity: lash_core::ToolIntentIdentity {
+                                session_id: "surface-session".to_string(),
+                                execution_scope_id: "surface-turn".to_string(),
+                                tool_call_id: "surface-intent-call".to_string(),
+                                intent_index: 0,
+                                replay_key: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            },
+                            process_id: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                        },
+                        lash_core::ToolIntentParentEndOutcome::Cancelled {
+                            identity: lash_core::ToolIntentIdentity {
+                                session_id: "surface-session".to_string(),
+                                execution_scope_id: "surface-turn".to_string(),
+                                tool_call_id: "surface-intent-call".to_string(),
+                                intent_index: 1,
+                                replay_key: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                            },
+                            process_id: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                        },
+                    ]
+                {
+                    return Err(format!(
+                        "{} returned non-literal parent-end outcomes: {observed_parent_end_outcomes:?}",
+                        self.name
+                    ));
+                }
+                let observed_parent_end_frames = frames
+                    .lock()
+                    .expect("literal frame recorder lock")
+                    .iter()
+                    .filter_map(|envelope| match &envelope.command {
+                        RuntimeEffectCommand::Process { command }
+                            if matches!(
+                                command.as_ref(),
+                                lash_core::ProcessCommand::ParentEnd { .. }
+                            ) =>
+                        {
+                            Some(serde_json::json!({
+                                "replay_key": envelope.invocation.replay_key(),
+                                "command": command,
+                            }))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let expected_parent_end_frames = vec![
+                    serde_json::json!({
+                        "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc:parent-end:process:parent-end:tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                        "command": {
+                            "op": "parent_end",
+                            "identity": {
+                                "session_id": "surface-session",
+                                "execution_scope_id": "surface-turn",
+                                "tool_call_id": "surface-intent-call",
+                                "intent_index": 0,
+                                "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
+                            },
+                            "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "policy": "cancel",
+                            "reason": "differential parent ended"
+                        }
+                    }),
+                    serde_json::json!({
+                        "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc:parent-end:process:parent-end:tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                        "command": {
+                            "op": "parent_end",
+                            "identity": {
+                                "session_id": "surface-session",
+                                "execution_scope_id": "surface-turn",
+                                "tool_call_id": "surface-intent-call",
+                                "intent_index": 0,
+                                "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
+                            },
+                            "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "policy": "cancel",
+                            "reason": "differential parent ended"
+                        }
+                    }),
+                    serde_json::json!({
+                        "replay_key": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0:parent-end:process:parent-end:tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                        "command": {
+                            "op": "parent_end",
+                            "identity": {
+                                "session_id": "surface-session",
+                                "execution_scope_id": "surface-turn",
+                                "tool_call_id": "surface-intent-call",
+                                "intent_index": 1,
+                                "replay_key": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0"
+                            },
+                            "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                            "policy": "cancel",
+                            "reason": "differential parent ended"
+                        }
+                    }),
+                ];
+                if observed_parent_end_frames != expected_parent_end_frames {
+                    return Err(format!(
+                        "{} parent-end command frames differed from the literal oracle: {observed_parent_end_frames:#?}",
+                        self.name
+                    ));
+                }
+                self.process_registry
+                    .complete_parent_end_plan("surface-intent-parent")
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let mut durable_children = Vec::new();
+                let mut durable_cancel_events = Vec::new();
+                for action in &actions {
+                    let record = self
+                        .process_registry
+                        .get_process(&action.parent_end.process_id)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .ok_or_else(|| format!("{} lost a literal intent child", self.name))?;
+                    durable_children.push(serde_json::json!({
+                        "id": record.id,
+                        "input": record.input,
+                        "status": record.status,
+                    }));
+                    let events = self
+                        .process_registry
+                        .events_after(&action.parent_end.process_id, 0)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let count = events
+                        .iter()
+                        .filter(|event| event.event_type == "process.cancel_requested")
+                        .count();
+                    if count != 1 {
+                        return Err(format!(
+                            "{} applied child cancellation {count} times after redrive",
+                            self.name
+                        ));
+                    }
+                    durable_cancel_events.extend(events.into_iter().filter_map(|event| {
+                        (event.event_type == "process.cancel_requested").then(|| {
+                            serde_json::json!({
+                                "process_id": event.process_id,
+                                "event_type": event.event_type,
+                                "payload": event.payload,
+                            })
+                        })
+                    }));
+                }
+                if durable_children
+                    != vec![
+                        serde_json::json!({
+                            "id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "input": {"type": "external", "metadata": {"source": "literal-intent-row", "index": 0}},
+                            "status": "running"
+                        }),
+                        serde_json::json!({
+                            "id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                            "input": {"type": "external", "metadata": {"source": "literal-intent-row", "index": 1}},
+                            "status": "running"
+                        }),
+                    ]
+                    || durable_cancel_events
+                        != vec![
+                            serde_json::json!({
+                                "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                                "event_type": "process.cancel_requested",
+                                "payload": {"reason": "differential parent ended"}
+                            }),
+                            serde_json::json!({
+                                "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                                "event_type": "process.cancel_requested",
+                                "payload": {"reason": "differential parent ended"}
+                            }),
+                        ]
+                {
+                    return Err(format!(
+                        "{} durable intent rows/events differed from literal oracles: children={durable_children:#?} events={durable_cancel_events:#?}",
+                        self.name
+                    ));
+                }
+                let observed = serde_json::to_value(RuntimeEffectOutcome::ToolBatch {
+                    launches: vec![lash_core::runtime::ToolCallLaunch::Done {
+                        result: Box::new(completed),
+                    }],
+                    triggers: Vec::new(),
+                })
+                .expect("serialize observed non-empty intent batch");
+                let literal_model_return = serde_json::json!({
+                    "type": "tool_batch",
+                    "launches": [{
+                        "status": "done",
+                        "result": {
+                            "call_id": "surface-intent-call",
+                            "tool_name": "surface_intent_provider",
+                            "args": {},
+                            "output": {"outcome": {"status": "success", "payload": {"ok": true}}},
+                            "model_return": {
+                                "call_id": "surface-intent-call",
+                                "tool_name": "surface_intent_provider",
+                                "parts": [
+                                    {"type": "text", "text": "{\"ok\":true}"},
+                                    {
+                                        "type": "text",
+                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc\",\"kind\":\"external\",\"process_id\":\"tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc\",\"status\":\"running\"}]"
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0\",\"kind\":\"external\",\"process_id\":\"tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0\",\"status\":\"running\"}]"
+                                    }
+                                ]
+                            },
+                            "duration_ms": 0,
+                            "intent_outcomes": [
+                                {
+                                    "status": "executed",
+                                    "identity": {
+                                        "session_id": "surface-session",
+                                        "execution_scope_id": "surface-turn",
+                                        "tool_call_id": "surface-intent-call",
+                                        "intent_index": 0,
+                                        "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
+                                    },
+                                    "kind": "start_process",
+                                    "result": {
+                                        "__handle__": "process",
+                                        "id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                                        "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                                        "kind": "external",
+                                        "status": "running"
+                                    },
+                                    "parent_end": {
+                                        "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                                        "policy": "cancel"
+                                    }
+                                },
+                                {
+                                    "status": "executed",
+                                    "identity": {
+                                        "session_id": "surface-session",
+                                        "execution_scope_id": "surface-turn",
+                                        "tool_call_id": "surface-intent-call",
+                                        "intent_index": 1,
+                                        "replay_key": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0"
+                                    },
+                                    "kind": "start_process",
+                                    "result": {
+                                        "__handle__": "process",
+                                        "id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                                        "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                                        "kind": "external",
+                                        "status": "running"
+                                    },
+                                    "parent_end": {
+                                        "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                                        "policy": "cancel"
+                                    }
+                                }
+                            ],
+                            "replay": null
+                        }
+                    }]
+                });
+                if observed != literal_model_return {
+                    return Err(format!(
+                        "{} non-empty intent batch differed from its literal per-tier oracle: {observed:#?}",
+                        self.name
+                    ));
+                }
                 Ok(())
             }
             SurfaceOperation::AwaitResolve { key } => {

@@ -26,6 +26,7 @@ pub struct ToolSessionAdmin<'run> {
     pub(super) sessions: Arc<dyn SessionStateService>,
     pub(super) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(super) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+    pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
 }
 
 impl<'run> ToolSessionAdmin<'run> {
@@ -79,6 +80,16 @@ impl<'run> ToolSessionAdmin<'run> {
         turn_id: &str,
         input: crate::TurnInput,
     ) -> Result<crate::AssembledTurn, PluginError> {
+        if self.parent_invocation.as_ref().is_some_and(|invocation| {
+            invocation.effect_kind() == Some(crate::RuntimeEffectKind::ToolAttempt)
+        }) && self.effect_controller.controller().journal_addressing()
+            == crate::EffectJournalAddressing::OrdinalAddressed
+        {
+            return Err(PluginError::Session(
+                "ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; return a typed tool intent for supported follow-on work or start the nested turn from a process step"
+                    .to_string(),
+            ));
+        }
         let scope = self.sessions.turn_scope(session_id, turn_id).await?;
         let scoped_effect_controller = self
             .effect_controller
@@ -105,5 +116,68 @@ impl<'run> ToolSessionAdmin<'run> {
         self.sessions
             .set_tool_membership(&self.session_id, names, present)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ControllerOwnedReplay;
+
+    impl crate::AwaitEventResolver for ControllerOwnedReplay {
+        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+            crate::EffectReplayOwnership::Controller
+        }
+
+        fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+            crate::EffectJournalAddressing::OrdinalAddressed
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::RuntimeEffectController for ControllerOwnedReplay {
+        async fn execute_effect(
+            &self,
+            _envelope: crate::RuntimeEffectEnvelope,
+            _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+            panic!("nested turn guard must reject before effect execution")
+        }
+    }
+
+    #[tokio::test]
+    async fn start_turn_is_rejected_inside_controller_owned_atomic_tool_attempt() {
+        let manager = Arc::new(crate::testing::MockSessionManager::default());
+        let sessions: Arc<dyn SessionStateService> = manager.clone();
+        let lifecycle: Arc<dyn SessionLifecycleService> = manager;
+        let admin = ToolSessionAdmin {
+            session_id: "session".to_string(),
+            sessions,
+            session_lifecycle: lifecycle,
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
+                ControllerOwnedReplay,
+            )),
+            parent_invocation: Some(crate::RuntimeInvocation::effect(
+                crate::RuntimeScope::new("session"),
+                "parent-tool-attempt",
+                crate::RuntimeEffectKind::ToolAttempt,
+                "parent-tool-attempt",
+            )),
+        };
+
+        let error = admin
+            .start_turn(
+                "child-session",
+                "child-turn",
+                crate::TurnInput::text("nested"),
+            )
+            .await
+            .expect_err("nested turn must be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; return a typed tool intent for supported follow-on work or start the nested turn from a process step"
+        );
     }
 }

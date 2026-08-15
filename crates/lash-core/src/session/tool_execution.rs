@@ -11,6 +11,7 @@ use crate::{
 };
 use lash_sansio::core_support::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 const TOOL_BATCH_FAMILY_VERSION: u8 = 1;
 
@@ -262,6 +263,7 @@ fn cancelled_completed_tool_call(
         },
         output,
         duration_ms: 0,
+        intent_outcomes: Vec::new(),
         replay,
     }
 }
@@ -386,6 +388,7 @@ impl RuntimeExecutionContext<'_> {
                         index,
                         parent_invocation.clone(),
                         child_execution_trace_hook,
+                        None,
                     )
                     .await;
                 launches.push(outcome.launch);
@@ -394,11 +397,14 @@ impl RuntimeExecutionContext<'_> {
             }
             return Ok(crate::ToolBatchEffectOutcome { launches, triggers });
         }
+        let intent_drain_gate =
+            std::sync::Arc::new(crate::tool_dispatch::BatchIntentDrainGate::default());
         let child_outcomes = schedule_tool_batch(indexed_tools, |(index, _)| *index, {
             let context = self.clone();
             let cancellation = cancellation.clone();
             let tool_cancel = tool_cancel.clone();
             let child_trace_hooks = std::sync::Arc::clone(&child_trace_hooks);
+            let intent_drain_gate = std::sync::Arc::clone(&intent_drain_gate);
             move |(index, child)| {
                 let context = context.clone().with_cancellation_token(tool_cancel.clone());
                 let cancellation = cancellation.clone();
@@ -407,12 +413,19 @@ impl RuntimeExecutionContext<'_> {
                 let cancelled_tool = child.call.clone();
                 let child_execution_trace_hook =
                     child_trace_hooks.get(&child.call.call_id).cloned();
+                let (intent_drain_slot, mut final_result_committed) =
+                    crate::tool_dispatch::IntentDrainSlot::new(
+                        std::sync::Arc::clone(&intent_drain_gate),
+                        index,
+                    );
+                let cancellation_slot = intent_drain_slot.clone();
                 async move {
                     let tool_call = context.execute_prepared_tool_batch_child(
                         child,
                         index,
                         parent_invocation,
                         child_execution_trace_hook,
+                        Some(intent_drain_slot),
                     );
                     tokio::pin!(tool_call);
                     tokio::select! {
@@ -424,17 +437,39 @@ impl RuntimeExecutionContext<'_> {
                                 .clock
                                 .sleep(std::time::Duration::from_millis(50));
                             tokio::pin!(grace);
+                            if *final_result_committed.borrow() {
+                                return tool_call.await;
+                            }
                             tokio::select! {
                                 biased;
                                 outcome = &mut tool_call => outcome,
-                                _ = &mut grace => CoordinatedToolLaunch {
-                                    launch: cancelled_runtime_tool_call_launch(
-                                        cancelled_tool.call_id,
-                                        cancelled_tool.tool_name,
-                                        cancelled_tool.args,
-                                        cancelled_tool.replay,
-                                    ),
-                                    triggers: Vec::new(),
+                                changed = final_result_committed.changed() => {
+                                    if changed.is_ok() && *final_result_committed.borrow() {
+                                        tool_call.await
+                                    } else {
+                                        cancellation_slot.finish().await;
+                                        CoordinatedToolLaunch {
+                                            launch: cancelled_runtime_tool_call_launch(
+                                                cancelled_tool.call_id,
+                                                cancelled_tool.tool_name,
+                                                cancelled_tool.args,
+                                                cancelled_tool.replay,
+                                            ),
+                                            triggers: Vec::new(),
+                                        }
+                                    }
+                                },
+                                _ = &mut grace => {
+                                    cancellation_slot.finish().await;
+                                    CoordinatedToolLaunch {
+                                        launch: cancelled_runtime_tool_call_launch(
+                                            cancelled_tool.call_id,
+                                            cancelled_tool.tool_name,
+                                            cancelled_tool.args,
+                                            cancelled_tool.replay,
+                                        ),
+                                        triggers: Vec::new(),
+                                    }
                                 },
                             }
                         }
@@ -467,6 +502,7 @@ impl RuntimeExecutionContext<'_> {
         index: usize,
         parent_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+        intent_drain_slot: Option<crate::tool_dispatch::IntentDrainSlot>,
     ) -> CoordinatedToolLaunch {
         let call_id = child.call.call_id.clone();
         let tool_name = child.call.tool_name.clone();
@@ -475,6 +511,39 @@ impl RuntimeExecutionContext<'_> {
         let activity_id = TurnActivityId::new(format!("tool:{call_id}"));
         self.emit_tool_call_started(&call_id, &tool_name, args.clone(), activity_id.clone())
             .await;
+
+        if child.execution_grant.is_none()
+            && self.dispatch.is_orchestrating_tool(&child.call.tool_id)
+        {
+            let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&self.dispatch))
+                .prepared_call(&child.call)
+                .cancellation_token(self.cancellation_token.clone())
+                .runtime_execution_context(
+                    self.clone()
+                        .with_parent_invocation(parent_invocation.clone()),
+                )
+                .parent_invocation(Some(parent_invocation))
+                .child_execution_trace_hook(child_execution_trace_hook)
+                .build();
+            let outcome = crate::tool_dispatch::execute_orchestrating_tool(
+                self.dispatch.as_ref(),
+                child.call,
+                tool_context,
+            )
+            .await;
+            if let Some(slot) = &intent_drain_slot {
+                slot.finish().await;
+            }
+            let completed = self
+                .complete_tool_call(index, call_id, replay, outcome, activity_id)
+                .await;
+            return CoordinatedToolLaunch {
+                launch: crate::runtime::ToolCallLaunch::Done {
+                    result: Box::new(completed.completed),
+                },
+                triggers: Vec::new(),
+            };
+        }
 
         let retry_policy = crate::tool_dispatch::resolve_callable_manifest_by_id(
             self.dispatch.as_ref(),
@@ -488,6 +557,7 @@ impl RuntimeExecutionContext<'_> {
                 .map(|grant| grant.manifest.retry_policy)
         })
         .unwrap_or(crate::ToolRetryPolicy::Never);
+        let intent_trace_hook = child_execution_trace_hook.clone();
         let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
             child_execution_trace_hook
                 .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
@@ -502,7 +572,15 @@ impl RuntimeExecutionContext<'_> {
                 replay_suffix: child.replay_suffix.clone(),
             },
             self.cancellation_token.clone(),
-            || crate::RuntimeEffectLocalExecutor::tool_batch(self.clone(), trace_hooks.clone()),
+            intent_drain_slot,
+            intent_trace_hook,
+            |completion_key| {
+                crate::RuntimeEffectLocalExecutor::tool_batch(
+                    self.clone(),
+                    trace_hooks.clone(),
+                    completion_key,
+                )
+            },
         )
         .await;
         let outcome = match coordinated.launch {
@@ -567,6 +645,7 @@ impl RuntimeExecutionContext<'_> {
         prepare_tool_call_with_context(self.dispatch.as_ref(), pending, call_id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn execute_prepared_tool_attempt_effect(
         &self,
         prepared: crate::PreparedToolCall,
@@ -575,6 +654,7 @@ impl RuntimeExecutionContext<'_> {
         max_attempts: u32,
         attempt_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+        completion_key: Option<crate::AwaitEventKey>,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut attempt_dispatch = (*self.dispatch).clone();
         attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
@@ -607,6 +687,7 @@ impl RuntimeExecutionContext<'_> {
             );
         }
         let tool_context = tool_context.build();
+        tool_context.install_prederived_completion_key(completion_key);
         Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
             attempt_dispatch.as_ref(),
             prepared,
@@ -626,6 +707,9 @@ impl RuntimeExecutionContext<'_> {
         outcome: ToolDispatchOutcome,
         tool_correlation_id: TurnActivityId,
     ) -> CompletedProtocolToolCall {
+        self.dispatch
+            .recorded_intent_outcomes
+            .record(&outcome.intent_outcomes);
         let attempts = outcome.attempts.clone();
         let output = outcome.record.output.clone();
         let projection_output = output.clone();
@@ -643,7 +727,7 @@ impl RuntimeExecutionContext<'_> {
             duration_ms: projection_duration_ms,
             call_id: projection_call_id,
         };
-        let model_return = match plugins.project_tool_result(projection_context).await {
+        let mut model_return = match plugins.project_tool_result(projection_context).await {
             Ok(projected) => projected,
             Err(err) => ModelToolReturn::text(
                 call_id.clone(),
@@ -651,6 +735,19 @@ impl RuntimeExecutionContext<'_> {
                 err.to_string(),
             ),
         };
+        for intent_outcome in &outcome.intent_outcomes {
+            model_return.parts.push(crate::ModelToolReturnPart::text(
+                intent_outcome.model_addendum(),
+            ));
+            self.emit_turn_activity(
+                tool_correlation_id.clone(),
+                TurnEvent::ToolIntentOutcome {
+                    call_id: call_id.clone(),
+                    outcome: intent_outcome.clone(),
+                },
+            )
+            .await;
+        }
 
         let record = ToolCallRecord {
             call_id: Some(call_id.clone()),
@@ -681,6 +778,7 @@ impl RuntimeExecutionContext<'_> {
                 output,
                 model_return,
                 duration_ms: outcome.record.duration_ms,
+                intent_outcomes: outcome.intent_outcomes,
                 replay,
             },
             record,
@@ -728,7 +826,12 @@ impl RuntimeExecutionContext<'_> {
             &record,
             None,
         ));
-        ToolDispatchOutcome { record, attempts }
+        ToolDispatchOutcome {
+            record,
+            attempts,
+            intents: crate::ToolIntents::default(),
+            intent_outcomes: Vec::new(),
+        }
     }
 
     async fn await_pending_tool_dispatch_outcome(
@@ -827,7 +930,12 @@ impl RuntimeExecutionContext<'_> {
                     &record,
                     None,
                 ));
-                return ToolDispatchOutcome { record, attempts };
+                return ToolDispatchOutcome {
+                    record,
+                    attempts,
+                    intents: crate::ToolIntents::default(),
+                    intent_outcomes: Vec::new(),
+                };
             }
         };
         self.pending_completion_dispatch_outcome(
@@ -925,6 +1033,8 @@ impl RuntimeExecutionContext<'_> {
                             duration_ms: 0,
                         },
                         attempts: Vec::new(),
+                        intents: crate::ToolIntents::default(),
+                        intent_outcomes: Vec::new(),
                     };
                     let completed = self
                         .complete_tool_call(
@@ -997,8 +1107,11 @@ impl RuntimeExecutionContext<'_> {
                 invocation.clone(),
                 crate::RuntimeEffectCommand::ToolBatch { batch },
             );
-            let local_executor =
-                crate::RuntimeEffectLocalExecutor::tool_batch(self.clone(), child_trace_hooks);
+            let local_executor = crate::RuntimeEffectLocalExecutor::tool_batch(
+                self.clone(),
+                child_trace_hooks,
+                None,
+            );
             let raw_outcome = self
                 .dispatch
                 .effect_controller
@@ -1021,6 +1134,9 @@ impl RuntimeExecutionContext<'_> {
                             .collect();
                     }
                 };
+            self.dispatch
+                .recorded_intent_outcomes
+                .record_launches(&outcome.launches);
             if outcome.launches.len() != prepared_entries.len() {
                 let message = format!(
                     "tool batch returned {} launches for {} prepared calls",
@@ -1190,35 +1306,67 @@ impl RuntimeExecutionContext<'_> {
         let launch =
             match prepare_tool_call_with_context(&dispatch, pending, Some(call_id.clone())).await {
                 ToolPreparationOutcome::Prepared(prepared) => {
-                    let retry_policy = crate::tool_dispatch::resolve_callable_manifest_by_id(
-                        &dispatch,
-                        &prepared.tool_id,
-                    )
-                    .map(|manifest| manifest.retry_policy)
-                    .unwrap_or(crate::ToolRetryPolicy::Never);
-                    let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
-                        child_execution_trace_hook
-                            .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
-                            .unwrap_or_default();
-                    let coordinated = coordinate_tool_invocation(
-                        &dispatch,
-                        prepared,
-                        None,
-                        retry_policy,
-                        ToolAttemptEffectIdentity::Scalar {
-                            parent: parent_invocation.clone(),
-                        },
-                        self.cancellation_token.clone(),
-                        || {
-                            crate::RuntimeEffectLocalExecutor::tool_batch(
-                                self.clone(),
-                                trace_hooks.clone(),
+                    if self.dispatch.is_orchestrating_tool(&prepared.tool_id) {
+                        let tool_context =
+                            crate::ToolContext::from_dispatch(Arc::new(dispatch.clone()))
+                                .prepared_call(&prepared)
+                                .cancellation_token(self.cancellation_token.clone())
+                                .runtime_execution_context(self.clone().with_parent_invocation(
+                                    parent_invocation.clone().unwrap_or_else(|| {
+                                        crate::RuntimeInvocation::effect(
+                                            crate::RuntimeScope::new(&dispatch.session_id),
+                                            format!("orchestration:{call_id}"),
+                                            crate::RuntimeEffectKind::Direct,
+                                            format!("orchestration:{call_id}"),
+                                        )
+                                    }),
+                                ))
+                                .parent_invocation(parent_invocation.clone())
+                                .child_execution_trace_hook(child_execution_trace_hook.clone())
+                                .build();
+                        ToolCallLaunch::Done(Box::new(
+                            crate::tool_dispatch::execute_orchestrating_tool(
+                                &dispatch,
+                                prepared,
+                                tool_context,
                             )
-                        },
-                    )
-                    .await;
-                    self.restore_tool_trigger_outcomes(coordinated.triggers);
-                    coordinated.launch
+                            .await,
+                        ))
+                    } else {
+                        let retry_policy = crate::tool_dispatch::resolve_callable_manifest_by_id(
+                            &dispatch,
+                            &prepared.tool_id,
+                        )
+                        .map(|manifest| manifest.retry_policy)
+                        .unwrap_or(crate::ToolRetryPolicy::Never);
+                        let intent_trace_hook = child_execution_trace_hook.clone();
+                        let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
+                            child_execution_trace_hook
+                                .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
+                                .unwrap_or_default();
+                        let coordinated = coordinate_tool_invocation(
+                            &dispatch,
+                            prepared,
+                            None,
+                            retry_policy,
+                            ToolAttemptEffectIdentity::Scalar {
+                                parent: parent_invocation.clone(),
+                            },
+                            self.cancellation_token.clone(),
+                            None,
+                            intent_trace_hook,
+                            |completion_key| {
+                                crate::RuntimeEffectLocalExecutor::tool_batch(
+                                    self.clone(),
+                                    trace_hooks.clone(),
+                                    completion_key,
+                                )
+                            },
+                        )
+                        .await;
+                        self.restore_tool_trigger_outcomes(coordinated.triggers);
+                        coordinated.launch
+                    }
                 }
                 ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(outcome),
             };
@@ -1270,6 +1418,8 @@ impl RuntimeExecutionContext<'_> {
                     duration_ms: 0,
                 },
                 attempts: Vec::new(),
+                intents: crate::ToolIntents::default(),
+                intent_outcomes: Vec::new(),
             };
             let activity_id = TurnActivityId::new(format!("tool:{call_id}"));
             return self
@@ -1390,6 +1540,7 @@ impl RuntimeExecutionContext<'_> {
         .await
         {
             ToolPreparationOutcome::Prepared(prepared) => {
+                let intent_trace_hook = child_execution_trace_hook.clone();
                 let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
                     child_execution_trace_hook
                         .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
@@ -1403,10 +1554,13 @@ impl RuntimeExecutionContext<'_> {
                         parent: parent_invocation.clone(),
                     },
                     self.cancellation_token.clone(),
-                    || {
+                    None,
+                    intent_trace_hook,
+                    |completion_key| {
                         crate::RuntimeEffectLocalExecutor::tool_batch(
                             self.clone(),
                             trace_hooks.clone(),
+                            completion_key,
                         )
                     },
                 )

@@ -922,7 +922,7 @@ impl HostBridge<'_> {
                     args,
                     call_site,
                 } = operation;
-                self.resource_operation(operation, receiver, args, call_site)
+                Box::pin(self.resource_operation(operation, receiver, args, call_site))
                     .await
                     .map(AbilityResult::Value)
             }),

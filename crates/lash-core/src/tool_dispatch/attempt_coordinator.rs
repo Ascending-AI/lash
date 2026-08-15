@@ -140,6 +140,75 @@ pub(crate) struct CoordinatedToolInvocation {
     pub triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
+#[derive(Default)]
+pub(crate) struct BatchIntentDrainGate {
+    next: tokio::sync::Mutex<usize>,
+    changed: tokio::sync::Notify,
+}
+
+impl BatchIntentDrainGate {
+    async fn wait_for(&self, index: usize) {
+        loop {
+            let changed = self.changed.notified();
+            if *self.next.lock().await == index {
+                return;
+            }
+            changed.await;
+        }
+    }
+
+    async fn advance(&self, index: usize) {
+        let mut next = self.next.lock().await;
+        debug_assert_eq!(*next, index, "intent drains advance in source order");
+        *next = next.saturating_add(1);
+        drop(next);
+        self.changed.notify_waiters();
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct IntentDrainSlot {
+    gate: std::sync::Arc<BatchIntentDrainGate>,
+    index: usize,
+    final_result_committed: tokio::sync::watch::Sender<bool>,
+}
+
+impl IntentDrainSlot {
+    pub(crate) fn new(
+        gate: std::sync::Arc<BatchIntentDrainGate>,
+        index: usize,
+    ) -> (Self, tokio::sync::watch::Receiver<bool>) {
+        let (final_result_committed, receiver) = tokio::sync::watch::channel(false);
+        (
+            Self {
+                gate,
+                index,
+                final_result_committed,
+            },
+            receiver,
+        )
+    }
+
+    fn mark_final_result_committed(&self) {
+        self.final_result_committed.send_replace(true);
+    }
+
+    pub(crate) async fn finish(&self) {
+        self.gate.wait_for(self.index).await;
+        self.gate.advance(self.index).await;
+    }
+
+    async fn begin_final_drain(&self) {
+        self.mark_final_result_committed();
+        self.gate.wait_for(self.index).await;
+    }
+
+    async fn complete_final_drain(&self) {
+        self.gate.advance(self.index).await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn coordinate_tool_invocation<'run>(
     context: &ToolDispatchContext<'run>,
     call: PreparedToolCall,
@@ -147,7 +216,9 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
     retry_policy: ToolRetryPolicy,
     identity: ToolAttemptEffectIdentity,
     cancellation: Option<tokio_util::sync::CancellationToken>,
-    mut local_executor: impl FnMut() -> RuntimeEffectLocalExecutor<'run>,
+    intent_drain_slot: Option<IntentDrainSlot>,
+    child_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+    mut local_executor: impl FnMut(Option<crate::AwaitEventKey>) -> RuntimeEffectLocalExecutor<'run>,
 ) -> CoordinatedToolInvocation {
     let started_at = context.clock.now();
     let max_attempts = retry_policy.max_attempts().max(1);
@@ -155,6 +226,41 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
     let mut attempts = Vec::new();
 
     for attempt in 1..=max_attempts {
+        let completion_key = if context.tools.attempt_may_defer(&call.tool_id)
+            && context
+                .effect_controller
+                .controller()
+                .allows_process_lifetime_completion_keys()
+        {
+            match context
+                .effect_controller
+                .controller()
+                .await_event_key(
+                    context.effect_controller.scoped().execution_scope(),
+                    crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
+                )
+                .await
+            {
+                Ok(key) => Some(key),
+                Err(err) => {
+                    if let Some(slot) = &intent_drain_slot {
+                        slot.finish().await;
+                    }
+                    return CoordinatedToolInvocation {
+                        launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
+                            &call,
+                            "tool_completion_key_prederive_failed",
+                            err.to_string(),
+                            identity.duration_ms(context, started_at, 0),
+                            attempts,
+                        ))),
+                        triggers,
+                    };
+                }
+            }
+        } else {
+            None
+        };
         let invocation = identity.attempt_invocation(context, &call, attempt);
         let outcome = context
             .effect_controller
@@ -169,13 +275,16 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         max_attempts,
                     },
                 ),
-                local_executor(),
+                local_executor(completion_key),
             )
             .await
             .and_then(crate::RuntimeEffectOutcome::into_tool_attempt_effect);
         let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(err) => {
+                if let Some(slot) = &intent_drain_slot {
+                    slot.finish().await;
+                }
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
                         &call,
@@ -188,7 +297,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                 };
             }
         };
-        if let crate::ToolAttemptLaunch::Done { record } = &outcome.launch
+        if let crate::ToolAttemptLaunch::Done { record, .. } = &outcome.launch
             && let crate::ToolCallOutcome::Failure(failure) = &record.output.outcome
             && failure.code == "tool_panicked"
         {
@@ -201,6 +310,9 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                 pending,
                 duration_ms,
             } => {
+                if let Some(slot) = &intent_drain_slot {
+                    slot.finish().await;
+                }
                 let duration_ms = identity.duration_ms(context, started_at, duration_ms);
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
@@ -214,7 +326,15 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     triggers,
                 };
             }
-            crate::ToolAttemptLaunch::Done { mut record } => {
+            crate::ToolAttemptLaunch::Done {
+                mut record,
+                intents,
+            } => {
+                // Admission uses the identity committed by the attempt. The
+                // projection below still normalizes the host-facing record,
+                // but must not repair a malformed durable attempt before the
+                // intent executor has had a chance to refuse it.
+                let recorded_call_id = record.call_id.clone();
                 record.call_id = Some(call.call_id.clone());
                 let retry_after = retry_after_ms(
                     &ToolResult::from_output(record.output.clone()),
@@ -228,10 +348,27 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                 ));
                 record.duration_ms = identity.duration_ms(context, started_at, record.duration_ms);
                 let Some(retry_after) = retry_after else {
+                    if let Some(slot) = &intent_drain_slot {
+                        slot.begin_final_drain().await;
+                    }
+                    let intent_outcomes = super::execute_final_tool_intents(
+                        context,
+                        recorded_call_id.as_deref(),
+                        &intents,
+                        child_trace_hook.as_ref(),
+                    )
+                    .await;
+                    project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
+                    context.recorded_intent_outcomes.record(&intent_outcomes);
+                    if let Some(slot) = &intent_drain_slot {
+                        slot.complete_final_drain().await;
+                    }
                     return CoordinatedToolInvocation {
                         launch: ToolCallLaunch::Done(Box::new(ToolDispatchOutcome {
                             record: *record,
                             attempts,
+                            intents,
+                            intent_outcomes,
                         })),
                         triggers,
                     };
@@ -246,10 +383,27 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                             "retry exhaustion produced a pending output",
                         ))
                     });
+                    if let Some(slot) = &intent_drain_slot {
+                        slot.begin_final_drain().await;
+                    }
+                    let intent_outcomes = super::execute_final_tool_intents(
+                        context,
+                        recorded_call_id.as_deref(),
+                        &intents,
+                        child_trace_hook.as_ref(),
+                    )
+                    .await;
+                    project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
+                    context.recorded_intent_outcomes.record(&intent_outcomes);
+                    if let Some(slot) = &intent_drain_slot {
+                        slot.complete_final_drain().await;
+                    }
                     return CoordinatedToolInvocation {
                         launch: ToolCallLaunch::Done(Box::new(ToolDispatchOutcome {
                             record: *record,
                             attempts,
+                            intents,
+                            intent_outcomes,
                         })),
                         triggers,
                     };
@@ -263,6 +417,9 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     )
                     .await
                 {
+                    if let Some(slot) = &intent_drain_slot {
+                        slot.finish().await;
+                    }
                     return CoordinatedToolInvocation {
                         launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
                             &call,
@@ -281,6 +438,9 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
         }
     }
 
+    if let Some(slot) = &intent_drain_slot {
+        slot.finish().await;
+    }
     CoordinatedToolInvocation {
         launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
             &call,
@@ -291,6 +451,60 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
         ))),
         triggers,
     }
+}
+
+fn project_recorded_intent_outcomes(
+    output: &mut crate::ToolCallOutput,
+    outcomes: &[crate::ToolIntentExecutionOutcome],
+) {
+    // Only a refusal produced while executing a declared intent can supersede
+    // the provider's optimistic output. Batch-admission refusals describe the
+    // intent protocol itself and stay in the typed intent-outcome stream.
+    if let Some(crate::ToolIntentExecutionOutcome::Refused {
+        refusal: crate::ToolIntentRefusalReason::CommandFailed { code, message },
+        ..
+    }) = outcomes.iter().find(|outcome| {
+        matches!(
+            outcome,
+            crate::ToolIntentExecutionOutcome::Refused {
+                refusal: crate::ToolIntentRefusalReason::CommandFailed { .. },
+                ..
+            }
+        )
+    }) {
+        // ADR 0042 deliberately seals the ToolAttempt terminal before draining
+        // intents. Its optimistic provider value is therefore immutable; the
+        // child process-command journal row is the authoritative refusal, and
+        // this turn projection plus `intent_outcomes` expose that evidence.
+        // Rewriting the completed parent row here would break journal-first
+        // settlement and append-only replay.
+        *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Unavailable,
+            code.clone(),
+            message.clone(),
+        ));
+        return;
+    }
+
+    let Some(sequence) = outcomes.iter().find_map(|outcome| match outcome {
+        crate::ToolIntentExecutionOutcome::Executed {
+            kind: crate::ToolIntentKind::SignalProcess,
+            result,
+            ..
+        } => result.get("sequence").and_then(serde_json::Value::as_u64),
+        _ => None,
+    }) else {
+        return;
+    };
+    let crate::ToolCallOutcome::Success(value) = &mut output.outcome else {
+        return;
+    };
+    let mut projected = value.to_json_value();
+    let Some(object) = projected.as_object_mut() else {
+        return;
+    };
+    object.insert("sequence".to_string(), serde_json::json!(sequence));
+    *value = crate::ToolValue::from(projected);
 }
 
 fn runtime_failure_outcome(
@@ -313,6 +527,8 @@ fn runtime_failure_outcome(
             duration_ms,
         },
         attempts,
+        intents: crate::ToolIntents::default(),
+        intent_outcomes: Vec::new(),
     }
 }
 
@@ -345,5 +561,56 @@ async fn sleep_before_retry(
             crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
             format!("expected sleep outcome, got {}", other.kind().as_str()),
         )),
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+
+    fn refusal(reason: crate::ToolIntentRefusalReason) -> crate::ToolIntentExecutionOutcome {
+        crate::ToolIntentExecutionOutcome::Refused {
+            identity: None,
+            intent_index: 0,
+            kind: crate::ToolIntentKind::SignalProcess,
+            refusal: reason,
+        }
+    }
+
+    #[test]
+    fn command_refusal_projects_its_typed_code_and_message() {
+        let mut output = crate::ToolCallOutput::success(serde_json::json!("optimistic"));
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[refusal(crate::ToolIntentRefusalReason::CommandFailed {
+                code: "process_not_visible".to_string(),
+                message: "process is outside the invoking session".to_string(),
+            })],
+        );
+
+        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("intent command refusal must supersede optimistic success")
+        };
+        assert_eq!(failure.code, "process_not_visible");
+        assert_eq!(failure.message, "process is outside the invoking session");
+    }
+
+    #[test]
+    fn protocol_admission_refusal_does_not_rewrite_provider_output() {
+        let mut output = crate::ToolCallOutput::success(serde_json::json!("provider-terminal"));
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[refusal(
+                crate::ToolIntentRefusalReason::CountBudgetExceeded {
+                    actual: 33,
+                    maximum: 32,
+                },
+            )],
+        );
+
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!("provider-terminal")
+        );
     }
 }

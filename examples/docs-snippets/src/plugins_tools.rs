@@ -5,6 +5,19 @@ use std::sync::Arc;
 use lash::plugins::PluginFactory;
 use lash::tools::{ToolCall, ToolResult};
 
+// docs:start:enable-native-batch
+fn enable_native_batch(builder: lash::LashCoreBuilder) -> lash::LashCoreBuilder {
+    use lash::plugins::{PluginSpec, StaticPluginFactory};
+
+    let spec = PluginSpec::new()
+        .with_orchestrating_tool(lash_protocol_standard::standard_batch_orchestrating_tool());
+    builder.plugin(Arc::new(StaticPluginFactory::new(
+        "my-protocol-native-batch",
+        spec,
+    )))
+}
+// docs:end:enable-native-batch
+
 // docs:start:direct-completion-tool
 use lash::direct::{DirectOutputSpec, DirectRequest};
 
@@ -650,5 +663,62 @@ mod asserted_examples {
         assert_eq!(io.code, "read_failed");
         assert_eq!(io.retry, lash::tools::ToolRetryDisposition::Never);
         assert_eq!(serde_json::to_value(ToolFailureClass::Io).unwrap(), "io");
+    }
+
+    struct LeafBatchCollisionTool;
+
+    #[async_trait::async_trait]
+    impl lash::tools::ToolProvider for LeafBatchCollisionTool {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            vec![
+                ToolDefinition::raw(
+                    "tool:batch",
+                    "batch",
+                    "A leaf provider colliding with an orchestrating registration.",
+                    serde_json::json!({ "type": "object" }),
+                    serde_json::json!({}),
+                )
+                .manifest(),
+            ]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<std::sync::Arc<ToolContract>> {
+            (name == "batch").then(|| {
+                std::sync::Arc::new(
+                    ToolDefinition::raw(
+                        "tool:batch",
+                        "batch",
+                        "A leaf provider colliding with an orchestrating registration.",
+                        serde_json::json!({ "type": "object" }),
+                        serde_json::json!({}),
+                    )
+                    .contract(),
+                )
+            })
+        }
+
+        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+            lash_core::ToolResult::ok(serde_json::json!({ "unreachable": true }))
+        }
+    }
+
+    #[test]
+    fn leaf_and_orchestrating_tool_ids_cannot_collide() {
+        let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools(
+            std::sync::Arc::new(LeafBatchCollisionTool),
+            vec![lash_protocol_standard::standard_batch_orchestrating_tool()],
+        ) {
+            Ok(_) => panic!("leaf and orchestrating registrations must have disjoint ids"),
+            Err(error) => error,
+        };
+        let lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision {
+            tool_id,
+            leaf_source_id,
+        } = error
+        else {
+            panic!("a cross-lane id collision must produce the typed rejection");
+        };
+        assert_eq!(tool_id.as_str(), "tool:batch");
+        assert_eq!(leaf_source_id, "plugins");
     }
 }

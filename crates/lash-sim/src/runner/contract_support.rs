@@ -479,6 +479,10 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
             .then(|| Arc::new(contract_durable_input_definition().contract()))
     }
 
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == contract_durable_input_definition().id()
+    }
+
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
         if call.name != "mock_input_request" {
             return lash_core::ToolResult::err_fmt(format!(

@@ -1631,6 +1631,17 @@ fn replay_conformance_tool_attempt_outcome(
                 })),
                 duration_ms: 0,
             }),
+            intents: crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
+                crate::StartProcessIntent {
+                    session_id: "replay-session".to_string(),
+                    request: crate::ProcessStartRequest::external(
+                        format!("{call_id}:intent-child"),
+                        crate::ProcessOriginator::host_scoped("effect-host-conformance"),
+                        serde_json::json!({"tool": tool_name}),
+                    ),
+                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
+                },
+            ))]),
         }),
         triggers: Vec::new(),
     }
@@ -1675,7 +1686,7 @@ fn assert_replay_conformance_tool_attempt_marker(
     let RuntimeEffectOutcome::ToolAttempt { launch, .. } = outcome else {
         panic!("expected tool-attempt effect outcome");
     };
-    let crate::ToolAttemptLaunch::Done { record } = *launch else {
+    let crate::ToolAttemptLaunch::Done { record, .. } = *launch else {
         panic!("expected completed tool-attempt launch");
     };
     assert_eq!(record.call_id.as_deref(), Some(expected_call_id));

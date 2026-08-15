@@ -8,8 +8,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::{
     PreparedToolCall, SessionToolAccess, SubagentSessionContext, ToolArgumentProjectionPolicy,
-    ToolCall, ToolContext, ToolDefinition, ToolPrepareContext, ToolResult,
-    facade_support::SessionSpec, sansio::PendingToolCall,
+    ToolCall, ToolDefinition, ToolPrepareContext, ToolResult, facade_support::SessionSpec,
+    sansio::PendingToolCall,
 };
 use lash_lashlang_runtime::ToolDefinitionLashlangExt;
 use lash_tool_support::{StaticToolExecute, StaticToolProvider};
@@ -41,24 +41,14 @@ impl RlmSubagentToolsProvider {
     /// crate) is what re-supplies the live parent provider, gives the child
     /// durability, and makes it recoverable — the same generic path every other
     /// background session turn takes.
-    async fn spawn_agent(&self, _args: &Value, context: &ToolContext<'_>) -> Result<Value, String> {
+    async fn execute_orchestration(
+        &self,
+        _args: &Value,
+        context: &lash_core::facade_support::OrchestrationContext<'_>,
+    ) -> Result<Value, String> {
         let prepared: PreparedSpawnAgent = context
             .decode_prepared_payload()
             .map_err(|err| format!("spawn_agent was not prepared correctly: {err}"))?;
-
-        if context
-            .sessions()
-            .tool_catalog()
-            .await
-            .ok()
-            .is_some_and(|catalog| {
-                catalog.iter().all(|tool| {
-                    tool.get("name").and_then(serde_json::Value::as_str) != Some("spawn_agent")
-                })
-            })
-        {
-            return Err("subagent spawning is unavailable in this session".to_string());
-        }
 
         let request = lash_core::ProcessStartRequest::new(
             prepared.process_id.clone(),
@@ -77,14 +67,12 @@ impl RlmSubagentToolsProvider {
             lash_core::ProcessIdentity::new("subagent").with_label(Some("spawn".to_string())),
         );
         context
-            .processes()
-            .start(request)
+            .start_process(request)
             .await
             .map_err(|err| format!("failed to start subagent process: {err}"))?;
         context
             .emit_child_process_started(prepared.process_id.clone(), Some("subagent".to_string()));
         let output = context
-            .processes()
             .await_process(&prepared.process_id)
             .await
             .map_err(|err| format!("subagent failed while executing its task: {err}"))?;
@@ -115,6 +103,7 @@ impl RlmSubagentToolsProvider {
             .session_snapshot()
             .await
             .map_err(|err| ToolResult::err(serde_json::json!(err.to_string())))?;
+        let child_session_id = format!("session:subagent:{}", call.call_id);
         let create_request = Box::new(
             build_spawn_create_request(SpawnCreateRequestInput {
                 registry: &self.registry,
@@ -134,7 +123,8 @@ impl RlmSubagentToolsProvider {
                         call_id: call_id.to_string(),
                     }),
             })
-            .map_err(|err| ToolResult::err(serde_json::json!(err)))?,
+            .map_err(|err| ToolResult::err(serde_json::json!(err)))?
+            .with_session_id(child_session_id),
         );
         let turn_input = turn_input_for_task(render_task_prompt(&task, output_schema.as_ref()));
         // Mint the child's process identity here, in the prepared (journaled)
@@ -156,6 +146,53 @@ impl RlmSubagentToolsProvider {
             call.replay,
             payload,
         ))
+    }
+}
+
+struct SpawnAgentOrchestratingTool {
+    provider: Arc<RlmSubagentToolsProvider>,
+    definition: ToolDefinition,
+}
+
+pub(crate) fn spawn_agent_orchestrating_tool(
+    provider: Arc<RlmSubagentToolsProvider>,
+) -> lash_core::facade_support::OrchestratingToolDef {
+    let definition = spawn_agent_tool_definition(&provider.registry.names());
+    let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
+        Arc::new(SpawnAgentOrchestratingTool {
+            provider,
+            definition,
+        });
+    // SAFETY: this crate owns the spawn-agent tool contract and body.
+    unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
+}
+
+#[async_trait]
+impl lash_core::facade_support::OrchestratingToolImplementation for SpawnAgentOrchestratingTool {
+    fn manifest(&self) -> lash_core::ToolManifest {
+        self.definition.manifest()
+    }
+
+    fn contract(&self) -> Arc<lash_core::ToolContract> {
+        Arc::new(self.definition.contract())
+    }
+
+    async fn prepare_tool_call(
+        &self,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolResult> {
+        let args = call.pending.args.clone();
+        self.provider
+            .prepare_spawn_agent(&args, call.context, call.tool_id, call.pending)
+            .await
+    }
+
+    async fn execute(
+        &self,
+        args: &Value,
+        context: &lash_core::facade_support::OrchestrationContext<'_>,
+    ) -> ToolResult {
+        finalise_tool_result(self.provider.execute_orchestration(args, context).await)
     }
 }
 
@@ -201,20 +238,13 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
         &self,
         tool_id: &lash_core::ToolId,
         pending: PendingToolCall,
-        context: &ToolPrepareContext,
+        _context: &ToolPrepareContext,
     ) -> Result<PreparedToolCall, ToolResult> {
-        if pending.tool_name == "spawn_agent" {
-            let args = pending.args.clone();
-            self.prepare_spawn_agent(&args, context, tool_id.clone(), pending)
-                .await
-        } else {
-            Ok(PreparedToolCall::identity(tool_id.clone(), pending))
-        }
+        Ok(PreparedToolCall::identity(tool_id.clone(), pending))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         let result = match call.name {
-            "spawn_agent" => self.spawn_agent(call.args, call.context).await,
             "submit_error" => return rlm_support::submit_error_tool_result(call.args),
             other => Err(format!("Unknown tool: {other}")),
         };
@@ -223,16 +253,15 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
 }
 
 impl RlmSubagentToolsProvider {
-    /// Build the cached subagent tool provider. The served definitions are
-    /// fixed once the provider is constructed (they depend only on the
-    /// registered capability names and whether `submit_error` is exposed).
-    pub(crate) fn into_provider(self) -> StaticToolProvider<Self> {
-        let definitions = self.tool_definitions();
+    /// Build the leaf-only provider for `submit_error`. `spawn_agent` is
+    /// registered separately in the orchestrating lane.
+    pub(crate) fn into_leaf_provider(self) -> StaticToolProvider<Self> {
+        let definitions = self.leaf_tool_definitions();
         StaticToolProvider::new(definitions, self)
     }
 
-    fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        let mut definitions = rlm_subagent_tool_definitions(&self.registry.names());
+    fn leaf_tool_definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions = Vec::new();
         if self.include_submit_error {
             definitions.push(rlm_support::submit_error_tool_definition());
         }
@@ -240,6 +269,7 @@ impl RlmSubagentToolsProvider {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn rlm_subagent_tool_definitions(capability_names: &[String]) -> Vec<ToolDefinition> {
     vec![spawn_agent_tool_definition(capability_names)]
 }

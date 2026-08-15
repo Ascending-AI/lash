@@ -192,14 +192,59 @@ impl<R> LashProcessWorkflowImpl<R>
 where
     R: RestateProcessRunner,
 {
+    async fn finish_terminal_with_parent_end(
+        &self,
+        process_id: &str,
+        output: Box<ProcessAwaitOutput>,
+        actions: Vec<lash_core::ToolIntentParentEndAction>,
+        parent_end_controller: ScopedEffectController<'_>,
+    ) -> Result<lash_core::ProcessRunOutcome, HandlerError> {
+        let stored = self
+            .complete_with_stored_outcome_and_parent_end(
+                process_id,
+                (*output).clone(),
+                actions.clone(),
+            )
+            .await
+            .map_err(retryable_registry_error)?;
+        if !actions.is_empty() {
+            self.runner
+                .finish_process_parent_end(
+                    lash_core::ProcessParentEndPlan {
+                        process_id: process_id.to_string(),
+                        actions,
+                    },
+                    parent_end_controller,
+                )
+                .await
+                .map_err(retryable_registry_error)?;
+        }
+        Ok(lash_core::ProcessRunOutcome::Terminal(Box::new(stored)))
+    }
+
     pub(crate) async fn complete_with_stored_outcome(
         &self,
         process_id: &str,
         proposed: ProcessAwaitOutput,
     ) -> Result<ProcessAwaitOutput, PluginError> {
+        self.complete_with_stored_outcome_and_parent_end(process_id, proposed, Vec::new())
+            .await
+    }
+
+    pub(crate) async fn complete_with_stored_outcome_and_parent_end(
+        &self,
+        process_id: &str,
+        proposed: ProcessAwaitOutput,
+        actions: Vec<lash_core::ToolIntentParentEndAction>,
+    ) -> Result<ProcessAwaitOutput, PluginError> {
         let completion = self
             .registry
-            .complete_process(process_id, proposed, workflow_key_authority(process_id))
+            .complete_process_with_parent_end(
+                process_id,
+                proposed,
+                workflow_key_authority(process_id),
+                actions,
+            )
             .await?;
         let record = match completion {
             lash_core::ProcessCompletionOutcome::Committed(record) => record,
@@ -232,6 +277,7 @@ where
             ))));
         }
         let cancellation = tokio_util::sync::CancellationToken::new();
+        let parent_end_controller = scoped_effect_controller.clone();
         let runner = self.runner.run_process_segment(
             registration,
             execution_context,
@@ -260,11 +306,22 @@ where
         };
         match outcome {
             Ok(lash_core::ProcessRunOutcome::Terminal(output)) => {
-                let stored = self
-                    .complete_with_stored_outcome(&process_id, (*output).clone())
-                    .await
-                    .map_err(retryable_registry_error)?;
-                Ok(lash_core::ProcessRunOutcome::Terminal(Box::new(stored)))
+                self.finish_terminal_with_parent_end(
+                    &process_id,
+                    output,
+                    Vec::new(),
+                    parent_end_controller,
+                )
+                .await
+            }
+            Ok(lash_core::ProcessRunOutcome::TerminalWithParentEnd { output, actions }) => {
+                self.finish_terminal_with_parent_end(
+                    &process_id,
+                    output,
+                    actions,
+                    parent_end_controller,
+                )
+                .await
             }
             Ok(boundary @ lash_core::ProcessRunOutcome::SegmentBoundary(_)) => Ok(boundary),
             Err(PluginError::ProcessAlreadyStarted { by, .. }) => {
@@ -598,7 +655,8 @@ where
             RestateProcessCancelSignal::SegmentFinished,
         )?;
         match outcome {
-            lash_core::ProcessRunOutcome::Terminal(output) => {
+            lash_core::ProcessRunOutcome::Terminal(output)
+            | lash_core::ProcessRunOutcome::TerminalWithParentEnd { output, .. } => {
                 let output = *output;
                 if terminal_completion_workflow_key(&process_id, input.segment_ordinal).is_none() {
                     resolve_process_terminal_promise(controller.context(), &process_id, &output)?;

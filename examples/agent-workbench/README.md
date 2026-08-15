@@ -305,6 +305,20 @@ recorded. Recovery must never re-execute an uncertain tool merely to rebuild UI
 state; rebuild from durable snapshots, and make externally visible tool effects
 idempotent or split them into explicit durable process steps.
 
+The workbench is an ordinal-addressed Restate host. Leaf providers use sealed
+`AttemptContext` and return versioned
+`ToolIntents`; Lash records the final attempt before realizing each declaration
+as one journal-first command. `shell.start`/detach, signalling, cancellation,
+and typed process-event emission can therefore migrate to declarations without
+nested Restate ordinals. A detached start records `on_parent_end: Abandon`;
+owned children use the default `Cancel`. Lash processes are cooperative and
+Lash deliberately has no hard-kill primitive; engines own kill semantics, so
+v1 records the deviation from Temporal's three-way Parent Close Policy as the
+two-policy set `{Abandon, Cancel}`. A future hard-kill policy must ship together
+with a real process primitive under reject-and-recreate versioning. Command-time
+failures and replay outcomes are durable evidence and do not depend on live
+visibility during redrive.
+
 The chat composer can upload one PNG (up to 1 MiB) through
 `POST /api/attachments`, then includes the returned content-addressed id as
 `attachment_id` in `POST /api/turn`. The Restate workflow resolves the durable file-store

@@ -1,5 +1,41 @@
 use super::*;
 
+pub(super) async fn recent_events(
+    registry: &SqliteProcessRegistry,
+    process_id: &str,
+    limit: usize,
+) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
+    let process_id = process_id.to_string();
+    registry
+        .conn
+        .call(move |conn| {
+            Ok((|| {
+                SqliteProcessRegistry::require_process_conn(conn, &process_id)?;
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT event_json FROM process_events
+                         WHERE process_id = ?1 ORDER BY sequence DESC LIMIT ?2",
+                    )
+                    .map_err(process_sqlite_error)?;
+                let rows = stmt
+                    .query_map(params![process_id, limit as i64], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .map_err(process_sqlite_error)?;
+                let mut events = rows
+                    .map(|row| {
+                        serde_json::from_str(&row.map_err(process_sqlite_error)?)
+                            .map_err(process_decode_error)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                events.reverse();
+                Ok(events)
+            })())
+        })
+        .await
+        .map_err(process_sqlite_error)?
+}
+
 pub(super) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }

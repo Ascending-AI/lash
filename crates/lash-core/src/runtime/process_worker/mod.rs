@@ -12,6 +12,7 @@ use self::recovery::{
 use self::registration::registration_from_record;
 
 mod drain;
+mod parent_end;
 mod permit;
 mod recovery;
 mod registration;
@@ -621,6 +622,7 @@ impl DurableProcessWorker {
     /// detected after claiming and skipped, so re-running a recovery sweep does
     /// not double-execute completed work.
     pub async fn drive_pending_processes(&self) -> Result<(), PluginError> {
+        self.drive_pending_parent_end_actions().await?;
         self.reconcile_trigger_deliveries().await?;
         let available = std::num::NonZeroUsize::new(
             self.execution_scheduler
@@ -1213,10 +1215,13 @@ impl DurableProcessWorker {
                 // Ran to a terminal outcome (success or a process-level failure) while
                 // holding the lease: this owner is the single writer of the terminal.
                 Ok(crate::ProcessRunOutcome::Terminal(output)) => {
-                    Self::observe_recovery_completion(
-                        self.complete_and_release(&lease, &process_id, *output)
-                            .await,
-                    );
+                    self.finish_terminal_run(&lease, &process_id, output, Vec::new())
+                        .await;
+                    return;
+                }
+                Ok(crate::ProcessRunOutcome::TerminalWithParentEnd { output, actions }) => {
+                    self.finish_terminal_run(&lease, &process_id, output, actions)
+                        .await;
                     return;
                 }
                 Ok(crate::ProcessRunOutcome::SegmentBoundary(next)) => {

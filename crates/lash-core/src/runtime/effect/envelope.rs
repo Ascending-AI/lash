@@ -50,6 +50,7 @@ pub enum RuntimeEffectKind {
     Direct,
     ToolAttempt,
     ToolBatch,
+    ToolParentEnd,
     Trigger,
     Process,
     ExecCode,
@@ -69,6 +70,7 @@ impl RuntimeEffectKind {
             Self::Direct => "direct",
             Self::ToolAttempt => "tool_attempt",
             Self::ToolBatch => "tool_batch",
+            Self::ToolParentEnd => "tool_parent_end",
             Self::Trigger => "trigger",
             Self::Process => "process",
             Self::ExecCode => "exec_code",
@@ -110,6 +112,7 @@ impl RuntimeInvocation {
             caused_by: None,
             replay: Some(RuntimeReplay {
                 key: replay_key.into(),
+                attribution: None,
             }),
         }
     }
@@ -224,6 +227,16 @@ impl RuntimeScope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeReplay {
     pub key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<RuntimeReplayAttribution>,
+}
+
+/// Structural attribution for a durable replay entry. Consumers must use this
+/// tag rather than infer ownership from replay-key spelling.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "identity", rename_all = "snake_case")]
+pub enum RuntimeReplayAttribution {
+    ToolIntent(crate::ToolIntentIdentity),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -481,6 +494,10 @@ pub enum ProcessCommand {
         registration: ProcessRegistration,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         observers: Vec<String>,
+        /// Captured environment carried inside the journal admission and
+        /// persisted by the local executor before process registration.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_spec: Option<crate::ProcessExecutionEnvSpec>,
         #[serde(
             default,
             skip_serializing_if = "boxed_process_execution_context_is_empty"
@@ -506,11 +523,23 @@ pub enum ProcessCommand {
     Cancel {
         process_id: String,
         reason: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replay: Option<crate::RuntimeReplay>,
+    },
+    ParentEnd {
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
     },
     Signal {
         process_id: String,
         signal_name: String,
         signal_id: String,
+        request: crate::ProcessEventAppendRequest,
+    },
+    EmitEvent {
+        process_id: String,
         request: crate::ProcessEventAppendRequest,
     },
 }
@@ -563,6 +592,9 @@ impl ProcessCommand {
             Self::DeleteSession { session_id } => format!("process:delete-session:{session_id}"),
             Self::Await { process_id } => format!("process:await:{process_id}"),
             Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
+            Self::ParentEnd { identity, .. } => {
+                format!("process:parent-end:{}", identity.replay_key)
+            }
             Self::Signal {
                 process_id,
                 signal_name,
@@ -571,6 +603,17 @@ impl ProcessCommand {
             } => {
                 format!("process:signal:{process_id}:signal.{signal_name}:{signal_id}")
             }
+            Self::EmitEvent {
+                process_id,
+                request,
+            } => format!(
+                "process:emit-event:{process_id}:{}",
+                request
+                    .replay
+                    .as_ref()
+                    .map(|replay| replay.key.as_str())
+                    .unwrap_or("missing-replay-key")
+            ),
         }
     }
 }
@@ -600,10 +643,18 @@ pub enum ProcessEffectOutcome {
     Cancel {
         record: Box<ProcessRecord>,
     },
+    ParentEnd {
+        outcome: Box<crate::ToolIntentParentEndOutcome>,
+    },
     Signal {
         // Boxed for the same reason as the record variants: a fat event should
         // not size the outcome enum inline through the recursive executor.
         event: Box<crate::ProcessEvent>,
+    },
+    EmitEvent {
+        event: Box<crate::ProcessEvent>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wake_delivery: Option<Box<crate::ProcessWakeDelivery>>,
     },
 }
 
@@ -644,6 +695,7 @@ pub enum ToolCallLaunch {
 pub enum ToolAttemptLaunch {
     Done {
         record: Box<crate::ToolCallRecord>,
+        intents: crate::ToolIntents,
     },
     Pending {
         // See `ToolCallLaunch::Pending`.
@@ -1119,7 +1171,13 @@ mod rejection_tests {
 
     #[test]
     fn rejects_missing_or_empty_replay_key() {
-        for replay in [None, Some(RuntimeReplay { key: String::new() })] {
+        for replay in [
+            None,
+            Some(RuntimeReplay {
+                key: String::new(),
+                attribution: None,
+            }),
+        ] {
             let mut value = invocation(RuntimeEffectKind::Sleep);
             value.replay = replay;
             assert_rejected(

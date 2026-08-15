@@ -210,6 +210,10 @@ pub(crate) fn prunable_terminal_process_ids_conn(
                    WHERE delivery.process_id = processes.process_id
                      AND delivery.state IN ('pending', 'enqueuing')
                )
+               AND NOT EXISTS (
+                   SELECT 1 FROM process_parent_end_plans AS plan
+                   WHERE plan.process_id = processes.process_id
+               )
              ORDER BY process_id ASC",
         )
         .map_err(process_sqlite_error)?;

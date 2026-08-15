@@ -486,6 +486,25 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS process_parent_end_plans (
+    process_id       TEXT PRIMARY KEY,
+    actions_json     TEXT NOT NULL,
+    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tool_intent_submissions (
+    replay_key          TEXT PRIMARY KEY,
+    session_id          TEXT NOT NULL,
+    execution_scope_id  TEXT NOT NULL,
+    tool_call_id        TEXT NOT NULL,
+    intent_index        INTEGER NOT NULL,
+    kind                TEXT NOT NULL,
+    payload_hash        TEXT NOT NULL,
+    submission_json     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
+    ON tool_intent_submissions(session_id, execution_scope_id, intent_index);
+
 ";
 
 // Bumped to 10: ADR 0020 added a per-store process-row `change_seq` plus the
@@ -521,7 +540,8 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // Version 22 stores v3 process-environment refs whose content-addressed policy
 // payload includes the required per-turn budget.
 // Version 23 indexes the bounded non-terminal recovery worklist by process id.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 23;
+// Version 24 durably retains pending process-parent teardown beside terminal completion.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 24;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -656,7 +676,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // replay names.
 // Version 9 rejects completed tool-attempt outcomes whose frame-switch control
 // still carries the pre-cutover `frame_id` field.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 9;
+// Version 10 adds the versioned tool-intent carrier to recorded tool-attempt
+// outcomes and the typed execution outcomes to completed tool batches.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 10;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

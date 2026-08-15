@@ -153,6 +153,7 @@ async fn drive_scalar_lashlang_tool_attempt(
                     Ok(RuntimeEffectOutcome::ToolAttempt {
                         launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                             record: Box::new(completed_tool_record(call_id, tool_name)),
+                            intents: lash_core::ToolIntents::default(),
                         }),
                         triggers: Vec::new(),
                     })
@@ -167,7 +168,7 @@ async fn drive_scalar_lashlang_tool_attempt(
     };
     assert!(matches!(
         *launch,
-        lash_core::ToolAttemptLaunch::Done { ref record }
+        lash_core::ToolAttemptLaunch::Done { ref record, .. }
             if record.call_id.as_deref() == Some(call_id) && record.tool == tool_name
     ));
     assert_eq!(

@@ -53,6 +53,10 @@ impl AwaitEventResolver for InlineEffectHost {
         self.controller.durable_workflow_controller()
     }
 
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        self.controller.journal_addressing()
+    }
+
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         self.controller.allows_process_lifetime_completion_keys()
             || self
@@ -161,6 +165,10 @@ impl AwaitEventResolver for InlineHostScopedController {
 
     fn durable_workflow_controller(&self) -> bool {
         self.controller.durable_workflow_controller()
+    }
+
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        self.controller.journal_addressing()
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {

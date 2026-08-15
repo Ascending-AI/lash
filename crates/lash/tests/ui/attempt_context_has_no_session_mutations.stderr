@@ -1,0 +1,23 @@
+error[E0599]: no method named `create_session` found for struct `AttemptSessionReads` in the current scope
+ --> tests/ui/attempt_context_has_no_session_mutations.rs:2:32
+  |
+2 |     let _ = context.sessions().create_session(()).await;
+  |                                ^^^^^^^^^^^^^^ method not found in `AttemptSessionReads`
+
+error[E0599]: no method named `close_session` found for struct `AttemptSessionReads` in the current scope
+ --> tests/ui/attempt_context_has_no_session_mutations.rs:3:32
+  |
+3 |     let _ = context.sessions().close_session("child").await;
+  |                                ^^^^^^^^^^^^^ method not found in `AttemptSessionReads`
+
+error[E0599]: no method named `start_turn` found for struct `AttemptSessionReads` in the current scope
+ --> tests/ui/attempt_context_has_no_session_mutations.rs:4:32
+  |
+4 |     let _ = context.sessions().start_turn("child", "turn", ()).await;
+  |                                ^^^^^^^^^^ method not found in `AttemptSessionReads`
+
+error[E0599]: no method named `set_tool_membership` found for struct `AttemptSessionReads` in the current scope
+ --> tests/ui/attempt_context_has_no_session_mutations.rs:5:32
+  |
+5 |     let _ = context.sessions().set_tool_membership(&[], true).await;
+  |                                ^^^^^^^^^^^^^^^^^^^ method not found in `AttemptSessionReads`

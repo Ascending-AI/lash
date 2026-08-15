@@ -27,6 +27,7 @@ pub(super) fn map_effect_task_join(
                     )),
                     duration_ms: 0,
                 }),
+                intents: crate::ToolIntents::default(),
             }),
             triggers: Vec::new(),
         }),

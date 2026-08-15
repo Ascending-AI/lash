@@ -115,6 +115,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
             plugins: Arc::clone(&self.services.current.plugins),
             tools: self.services.current.plugins.tools(),
+            tool_registry: Some(self.services.current.plugins.tool_registry()),
             tool_catalog,
             sessions: services.state_service(),
             session_lifecycle: services.lifecycle_service(),
@@ -130,6 +131,8 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::clone(
                 &self.services.current.host.core.durability.attachment_store,
             ),

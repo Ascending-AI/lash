@@ -29,6 +29,9 @@ use lash_sqlite_store::{
 };
 use tempfile::TempDir;
 
+#[path = "conformance/pre_frame_key.rs"]
+mod pre_frame_key;
+
 struct SqliteLineageConformanceInjector {
     path: PathBuf,
     _dir: TempDir,
@@ -958,7 +961,7 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 23"));
+    assert!(message.contains("supports schema version 24"));
     assert!(message.contains("delete the process registry database and start fresh"));
 }
 
@@ -1135,11 +1138,11 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
 }
 
 #[tokio::test]
-async fn sqlite_effect_controller_rejects_pre_retirement_journal_schema_before_serving() {
+async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_serving() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("pre-canonical-envelope-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open legacy effect db");
-    conn.pragma_update(None, "user_version", 4)
+    conn.pragma_update(None, "user_version", 8)
         .expect("stamp legacy effect schema");
     drop(conn);
 
@@ -1147,131 +1150,15 @@ async fn sqlite_effect_controller_rejects_pre_retirement_journal_schema_before_s
         match SqliteRuntimeEffectController::open(&path, durable_turn_scope("session", "turn"))
             .await
         {
-            Ok(_) => panic!("pre-retirement effect stores must be recreated"),
+            Ok(_) => panic!("pre-intent effect stores must be recreated"),
             Err(error) => error,
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 9"));
+    assert!(message.contains("supports schema version 10"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
     ));
-}
-
-fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffectOutcome) {
-    let call_id = "continue-as-call";
-    let envelope = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn("cutover-session", "cutover-turn", 3, 1),
-            "continue-as-attempt",
-            RuntimeEffectKind::ToolAttempt,
-            "continue-as-attempt-replay",
-        ),
-        RuntimeEffectCommand::ToolAttempt {
-            call: lash_core::PreparedToolCall::from_parts(
-                call_id,
-                lash_core::ToolId::from("tool:continue_as"),
-                "continue_as",
-                serde_json::json!({ "task": "continue after redrive" }),
-                None,
-                serde_json::Value::Null,
-            ),
-            execution_grant: None,
-            attempt: 1,
-            max_attempts: 1,
-        },
-    );
-    let outcome = RuntimeEffectOutcome::ToolAttempt {
-        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
-            record: Box::new(lash_core::ToolCallRecord {
-                call_id: Some(call_id.to_string()),
-                tool: "continue_as".to_string(),
-                args: serde_json::json!({ "task": "continue after redrive" }),
-                output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true }))
-                    .with_control(lash_core::ToolControl::SwitchAgentFrame {
-                        frame_key: lash_core::FrameKey::from_call_site(
-                            "cutover-session",
-                            "cutover-frame",
-                            call_id,
-                        ),
-                        initial_nodes: Vec::new(),
-                        task: Some("continue after redrive".to_string()),
-                    }),
-                duration_ms: 4,
-            }),
-        }),
-        triggers: Vec::new(),
-    };
-    (envelope, outcome)
-}
-
-fn rewrite_completed_continue_as_outcome_to_frame_id(outcome_json: &str) -> String {
-    let mut value: serde_json::Value =
-        serde_json::from_str(outcome_json).expect("decode completed continue_as outcome");
-    let control = value
-        .pointer_mut("/launch/record/output/control")
-        .and_then(serde_json::Value::as_object_mut)
-        .expect("completed continue_as control");
-    let frame_key = control
-        .remove("frame_key")
-        .expect("current fixture carries frame_key");
-    control.insert("frame_id".to_string(), frame_key);
-    serde_json::to_string(&value).expect("encode pre-cutover continue_as outcome")
-}
-
-#[tokio::test]
-async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-frame-key-continue-as.db");
-    let (envelope, outcome) = completed_continue_as_effect_fixture();
-    let controller = SqliteRuntimeEffectController::open(
-        &path,
-        durable_turn_scope("cutover-session", "cutover-turn"),
-    )
-    .await
-    .expect("create current effect store");
-    controller
-        .execute_effect(
-            envelope,
-            RuntimeEffectLocalExecutor::testing(move |_| async move { Ok(outcome) }),
-        )
-        .await
-        .expect("journal completed continue_as");
-    drop(controller);
-
-    let conn = rusqlite::Connection::open(&path).expect("open raw effect store");
-    let outcome_json: String = conn
-        .query_row(
-            "SELECT outcome_json FROM runtime_effect_replay WHERE replay_key = ?1",
-            rusqlite::params!["continue-as-attempt-replay"],
-            |row| row.get(0),
-        )
-        .expect("read completed continue_as outcome");
-    let legacy_outcome = rewrite_completed_continue_as_outcome_to_frame_id(&outcome_json);
-    assert!(legacy_outcome.contains("\"frame_id\""));
-    assert!(!legacy_outcome.contains("\"frame_key\""));
-    conn.execute(
-        "UPDATE runtime_effect_replay SET outcome_json = ?1 WHERE replay_key = ?2",
-        rusqlite::params![legacy_outcome, "continue-as-attempt-replay"],
-    )
-    .expect("install completed pre-cutover continue_as outcome");
-    conn.pragma_update(None, "user_version", 8)
-        .expect("stamp pre-frame-key effect schema");
-    drop(conn);
-
-    let error = match SqliteRuntimeEffectController::open(
-        &path,
-        durable_turn_scope("cutover-session", "cutover-turn"),
-    )
-    .await
-    {
-        Ok(_) => panic!("pre-frame-key journal must be refused at open"),
-        Err(error) => error,
-    };
-    assert_eq!(
-        error.to_string(),
-        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 9, but the database reports version 8. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions.\")"
-    );
 }
 
 #[tokio::test]
@@ -1648,6 +1535,30 @@ async fn sqlite_effect_host_satisfies_scope_conformance() {
             SqliteEffectHost::open(&path).await.expect("effect host")
         })) as Arc<dyn EffectHost>
     })
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_public_signal_intent_wakes_a_parked_process() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let effect_host = Arc::new(
+        SqliteEffectHost::open(&dir.path().join("signal-intent-effects.db"))
+            .await
+            .expect("open SQLite signal-intent effect host"),
+    ) as Arc<dyn EffectHost>;
+    let registry = Arc::new(
+        SqliteProcessRegistry::open(
+            &dir.path().join("signal-intent-processes.db"),
+            dir.path().join("signal-intent-sessions"),
+        )
+        .await
+        .expect("open SQLite signal-intent process registry"),
+    ) as Arc<dyn ProcessRegistry>;
+    lash_core::testing::conformance::public_signal_intent_wakes_parked_process(
+        "sqlite-public-signal-intent",
+        effect_host,
+        registry,
+    )
     .await;
 }
 
@@ -2202,6 +2113,94 @@ async fn sqlite_effect_controller_replays_without_local_executor() {
         .await
         .expect("replayed effect");
     assert_exec_marker(replayed, "recorded");
+}
+
+#[tokio::test]
+async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
+    let dir = tempfile::tempdir().expect("intent replay tempdir");
+    let path = dir.path().join("recorded-intent-effect.db");
+    let scope = durable_turn_scope("sqlite-intent-session", "sqlite-intent-turn");
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            RuntimeScope::for_turn("sqlite-intent-session", "sqlite-intent-turn", 0, 0),
+            "sqlite-recorded-intent-attempt",
+            RuntimeEffectKind::ToolAttempt,
+            "sqlite-recorded-intent-attempt",
+        ),
+        RuntimeEffectCommand::ToolAttempt {
+            call: lash_core::PreparedToolCall::from_parts(
+                "sqlite-intent-call",
+                "tool:sqlite_intent_leaf",
+                "sqlite_intent_leaf",
+                serde_json::json!({"value": "record"}),
+                None,
+                serde_json::Value::Null,
+            ),
+            execution_grant: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    );
+    let expected = RuntimeEffectOutcome::ToolAttempt {
+        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
+            record: Box::new(lash_core::ToolCallRecord {
+                call_id: Some("sqlite-intent-call".to_string()),
+                tool: "sqlite_intent_leaf".to_string(),
+                args: serde_json::json!({"value": "record"}),
+                output: lash_core::ToolCallOutput::success(serde_json::json!({
+                    "provider": "done"
+                })),
+                duration_ms: 7,
+            }),
+            intents: lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::EmitProcessEvent(
+                lash_core::EmitProcessEventIntent {
+                    session_id: "sqlite-intent-session".to_string(),
+                    process_id: "sqlite-intent-target".to_string(),
+                    event_type: "sqlite.intent.recorded".to_string(),
+                    payload: serde_json::json!({"literal": true}),
+                },
+            )]),
+        }),
+        triggers: Vec::new(),
+    };
+    let expected_bytes = serde_json::to_vec(&expected).expect("serialize literal intent outcome");
+    let first_controller = SqliteRuntimeEffectController::open(&path, scope.clone())
+        .await
+        .expect("open first SQLite intent controller");
+    let first = first_controller
+        .execute_effect(
+            envelope.clone(),
+            RuntimeEffectLocalExecutor::testing({
+                let expected = expected.clone();
+                move |_| async move { Ok(expected) }
+            }),
+        )
+        .await
+        .expect("record non-empty intent carrier");
+    assert_eq!(
+        serde_json::to_vec(&first).expect("serialize first SQLite intent outcome"),
+        expected_bytes
+    );
+    drop(first_controller);
+
+    let replay_controller = SqliteRuntimeEffectController::open(&path, scope)
+        .await
+        .expect("reopen SQLite intent controller");
+    replay_controller.start_replay();
+    let replayed = replay_controller
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                panic!("SQLite replay must not rerun the recorded attempt body")
+            }),
+        )
+        .await
+        .expect("replay non-empty intent carrier");
+    assert_eq!(
+        serde_json::to_vec(&replayed).expect("serialize replayed SQLite intent outcome"),
+        expected_bytes,
+        "SQLite replays the literal non-empty intent carrier byte-for-byte"
+    );
 }
 
 #[tokio::test]

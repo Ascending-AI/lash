@@ -39,6 +39,7 @@ mod test_watchdog;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod tool_dispatch;
+mod tool_intent;
 mod tool_provider;
 pub mod tool_registry;
 mod tool_result;
@@ -81,6 +82,9 @@ pub mod facade_support {
     pub use crate::runtime::turn_loop::{
         SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainError,
         SelectedQueuedWorkDrainOutcome, SelectedQueuedWorkDrainRefusalCause,
+    };
+    pub use crate::tool_provider::orchestration::{
+        OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
     };
     /// Build the core-level tool-registry projection through the same plugin
     /// composition path used for runtime sessions.
@@ -338,7 +342,6 @@ pub mod facade_support {
     pub use crate::store::SessionHead;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
-    pub use crate::tool_provider::ToolSessionProcessAdmin;
     pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
     pub use crate::tool_registry::ReconfigureError;
@@ -439,6 +442,20 @@ pub enum EffectReplayOwnership {
     Controller,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// How an effect controller addresses entries in its durable journal.
+///
+/// This capability is intentionally separate from [`EffectReplayOwnership`]:
+/// both key-addressed and ordinal-addressed controllers own replay, but only an
+/// ordinal-addressed recorded body can shift later commands when it emits a
+/// nested command. Runtime-owned controllers have no durable effect journal.
+pub enum EffectJournalAddressing {
+    #[default]
+    Runtime,
+    KeyAddressed,
+    OrdinalAddressed,
+}
+
 // Re-exports
 pub use attachments::{
     AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
@@ -462,7 +479,9 @@ pub use lash_sansio::{
     TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
     ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
-    ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolManifest, ToolOutputContract,
+    ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome,
+    ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd, ToolIntentParentEndAction,
+    ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolManifest, ToolOutputContract,
     ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
 };
 pub(crate) use lash_sansio::{
@@ -836,12 +855,12 @@ pub use runtime::{
     ProcessExternalRef, ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInfraError,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
     ProcessListFilter, ProcessListMode, ProcessLiveReferenceSummary, ProcessObserverBy,
-    ProcessOpScope, ProcessOriginator, ProcessOutcome, ProcessProvenance, ProcessPruneReport,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
-    ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSpec,
-    ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
+    ProcessOpScope, ProcessOriginator, ProcessOutcome, ProcessParentEndPlan, ProcessProvenance,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome,
+    ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTerminalSpec, ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery,
+    ProcessWakeSpec, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
     ProtocolTurnExtensionHandle, QueuedWorkAuthority, QueuedWorkBatchingConfig,
     QueuedWorkClaimPolicy, QueuedWorkKind, RecoveryDisposition, Resolution, ResolveOutcome,
@@ -861,7 +880,7 @@ pub(crate) use runtime::{
     LlmAttachmentSpec, ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData,
-    QueuedWorkItem, QueuedWorkPayload, RuntimeReplay, RuntimeSubject, load_process_execution_env,
+    QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, load_process_execution_env,
     materialize_process_event_semantics, persist_process_execution_env,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
     process_event_invocation, process_registration_fingerprint, process_wake_batch_draft,
@@ -881,11 +900,11 @@ pub use store::{TurnId, WorkClaim, WorkCompletion};
 
 pub use runtime::{
     CheckpointClaimSet, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
-    ProcessEventSemanticsSpec, RuntimeCheckpointComponents, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeScope, RuntimeSessionState,
-    ToolAttemptLaunch,
+    ProcessEventSemanticsSpec, ProcessOutcomeObserver, RuntimeCheckpointComponents,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
+    RuntimeScope, RuntimeSessionState, ToolAttemptLaunch,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 
@@ -919,9 +938,18 @@ pub(crate) use store::{
     GraphAppend, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
     SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
+pub use tool_intent::{
+    CancelProcessIntent, EmitProcessEventIntent, ProcessParentEndPolicy, SignalProcessIntent,
+    StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
+    TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptResult, ToolIntent,
+    ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents, ToolResultDone,
+    derive_tool_intent_identity,
+};
 pub use tool_provider::{
-    PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext,
-    ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall,
+    InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, PreparedToolBatch,
+    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,
+    ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 
 #[cfg(test)]

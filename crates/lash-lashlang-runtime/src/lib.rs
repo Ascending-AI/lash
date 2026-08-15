@@ -372,8 +372,12 @@ pub fn lashlang_resources_from_tool_catalog(
     catalog: &lash_core::ToolCatalog,
 ) -> Result<LashlangHostCatalog, LashlangRuntimeError> {
     let mut host_catalog = LashlangHostCatalog::new();
-    // Every catalog member is callable; membership is the execution gate.
+    // Every externally activated catalog member is callable. Internal members
+    // remain registry-resolvable for runtime-owned process bodies only.
     for entry in catalog.tools.iter() {
+        if entry.manifest.activation == lash_core::ToolActivation::Internal {
+            continue;
+        }
         let lashlang_binding = required_tool_lashlang_executable(&entry.manifest)?;
         let operation_binding = catalog
             .resolve_contract(&entry.manifest.name)
@@ -886,7 +890,12 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         context: lash_core::ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
     ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        process::run_lashlang_process(self.clone(), context, payload).await
+        Box::pin(process::run_lashlang_process(
+            self.clone(),
+            context,
+            payload,
+        ))
+        .await
     }
 
     fn identity(&self, payload: &serde_json::Value) -> lash_core::ProcessIdentity {

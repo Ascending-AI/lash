@@ -6,8 +6,11 @@ const POSTGRES_SCHEMA_SHAPE: &str = include_str!("../../lash-postgres-store/sche
 // Tables whose durable column shape changed in this cutover. Registering them
 // here makes cross-backend column parity executable instead of relying only on
 // each backend's fresh-schema tests.
-const SHAPE_CHANGED_TABLES: &[(&str, &str)] =
-    &[("queued_work_batches", "lash_queued_work_batches")];
+const SHAPE_CHANGED_TABLES: &[(&str, &str)] = &[
+    ("process_parent_end_plans", "lash_process_parent_end_plans"),
+    ("tool_intent_submissions", "lash_tool_intent_submissions"),
+    ("queued_work_batches", "lash_queued_work_batches"),
+];
 
 fn consume_keyword<'a>(source: &'a str, keyword: &str) -> Option<&'a str> {
     let source = source.trim_start();
@@ -121,12 +124,12 @@ fn sqlite_and_postgres_table_sets_are_congruent() {
 
     assert_eq!(
         sqlite.len(),
-        36,
+        38,
         "SQLite schema table count changed; update the explicit cross-backend mapping"
     );
     assert_eq!(
         postgres_raw.len(),
-        37,
+        39,
         "Postgres schema table count changed; update the explicit cross-backend mapping"
     );
     assert!(

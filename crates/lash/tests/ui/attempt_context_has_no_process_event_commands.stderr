@@ -1,0 +1,23 @@
+error[E0599]: no method named `process_events` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/attempt_context_has_no_process_event_commands.rs:2:21
+  |
+2 |     let _ = context.process_events().emit("event", ()).await;
+  |                     ^^^^^^^^^^^^^^
+  |
+help: there is a method `processes` with a similar name
+  |
+2 -     let _ = context.process_events().emit("event", ()).await;
+2 +     let _ = context.processes().emit("event", ()).await;
+  |
+
+error[E0599]: no method named `process_events` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/attempt_context_has_no_process_event_commands.rs:3:21
+  |
+3 |     let _ = context.process_events().wait_event_after("event", 0).await;
+  |                     ^^^^^^^^^^^^^^
+  |
+help: there is a method `processes` with a similar name
+  |
+3 -     let _ = context.process_events().wait_event_after("event", 0).await;
+3 +     let _ = context.processes().wait_event_after("event", 0).await;
+  |

@@ -93,6 +93,8 @@ impl RuntimeTurnDriver<'_> {
                     ),
                 ));
             }
+            self.recorded_intent_outcomes
+                .record_launches(&outcome.launches);
             for ((source_index, prepared), launch) in
                 prepared_entries.into_iter().zip(outcome.launches)
             {
@@ -209,13 +211,12 @@ impl RuntimeTurnDriver<'_> {
                 ));
             }
         };
-        let outcome = context
-            .execute_prepared_tool_batch_launches(
-                batch,
-                invocation,
-                std::collections::HashMap::new(),
-            )
-            .await?;
+        let outcome = Box::pin(context.execute_prepared_tool_batch_launches(
+            batch,
+            invocation,
+            std::collections::HashMap::new(),
+        ))
+        .await?;
         drop(context);
         drop(tool_event_tx);
         drop(turn_event_tx);

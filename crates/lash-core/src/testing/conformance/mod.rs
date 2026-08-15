@@ -20,6 +20,8 @@
 //! `#[tokio::test]`. Embedders with custom backends can run them via
 //! `lash::testing::conformance`.
 
+pub use super::coordinate_tool_provider_with_services;
+
 mod artifact_store;
 mod attachment_owner;
 mod attachment_store;
@@ -46,6 +48,7 @@ mod session_graph_state_machine;
 mod session_store_factory;
 mod store_contract_state_machine;
 mod store_recovery;
+mod tool_intent_runtime;
 mod trigger_store;
 mod turn_control;
 mod turn_crash_matrix;
@@ -74,6 +77,7 @@ pub use session_graph_state_machine::*;
 pub use session_store_factory::*;
 pub use store_contract_state_machine::*;
 pub use store_recovery::*;
+pub use tool_intent_runtime::*;
 pub use trigger_store::*;
 pub use turn_control::*;
 pub use turn_crash_matrix::*;

@@ -565,12 +565,12 @@ impl crate::ToolProvider for NestedProcessWaitTool {
             RecoveryDisposition::Rerunnable,
             crate::ProcessOriginator::host(),
         );
-        if let Err(err) = call.context.processes().start(request).await {
+        if let Err(err) = call.context.process_admin().start(request).await {
             return crate::ToolResult::err_fmt(format_args!(
                 "failed to start nested process: {err}"
             ));
         }
-        match call.context.processes().await_process(process_id).await {
+        match call.context.process_admin().await_process(process_id).await {
             Ok(ProcessAwaitOutput::Success { .. }) => {
                 crate::ToolResult::ok(serde_json::json!({ "nested": "done" }))
             }
@@ -666,7 +666,10 @@ impl crate::ProcessEngine for ProductionChainEngine {
                 .await
                 .expect("drive production roots");
             drop(runtime);
-            runtime_guard.shutdown().await;
+            runtime_guard
+                .shutdown(false)
+                .await
+                .expect("finish launcher runtime context");
             return Ok(Self::success(process_id));
         }
 
@@ -756,7 +759,10 @@ impl crate::ProcessEngine for ProductionChainEngine {
             self.begin_work();
         }
         drop(runtime);
-        runtime_guard.shutdown().await;
+        runtime_guard
+            .shutdown(false)
+            .await
+            .expect("finish process runtime context");
         self.end_work();
         Ok(Self::success(process_id))
     }

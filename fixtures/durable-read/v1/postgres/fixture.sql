@@ -3,8 +3,8 @@
 --
 
 
--- Dumped from database version 16.14
--- Dumped by pg_dump version 16.14
+-- Dumped from database version 16.14 (Debian 16.14-1.pgdg13+1)
+-- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -262,6 +262,16 @@ CREATE TABLE lash_durable_read_fixture.lash_process_leases (
 CREATE TABLE lash_durable_read_fixture.lash_process_observers (
     session_id text NOT NULL,
     process_id text NOT NULL
+);
+
+
+--
+-- Name: lash_process_parent_end_plans; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_process_parent_end_plans (
+    process_id text NOT NULL,
+    actions_json text NOT NULL
 );
 
 
@@ -526,6 +536,22 @@ CREATE TABLE lash_durable_read_fixture.lash_sessions (
 
 
 --
+-- Name: lash_tool_intent_submissions; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_tool_intent_submissions (
+    replay_key text NOT NULL,
+    session_id text NOT NULL,
+    execution_scope_id text NOT NULL,
+    tool_call_id text NOT NULL,
+    intent_index bigint NOT NULL,
+    kind text NOT NULL,
+    payload_hash text NOT NULL,
+    submission_json text NOT NULL
+);
+
+
+--
 -- Name: lash_trigger_deliveries; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -784,6 +810,12 @@ INSERT INTO lash_durable_read_fixture.lash_process_observers VALUES ('durable-re
 
 
 --
+-- Data for Name: lash_process_parent_end_plans; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_process_segment_handovers; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -801,7 +833,7 @@ INSERT INTO lash_durable_read_fixture.lash_process_tombstones VALUES ('durable-r
 -- Data for Name: lash_process_wake_deliveries; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_process_wake_deliveries VALUES ('wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228', 'durable-read-wake-process', 'durable-read-fixture', 1, 'pending', NULL, 0, NULL, 1700000000000, 1700604800000, NULL, '{"wake_id":"wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228","target_session_id":"durable-read-fixture","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake","event_invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake"},"caused_by":{"type":"process","process_id":"durable-read-wake-process"}},"authority":{"principal":"host"},"input":"durable read wake","created_at_ms":1700000000000}');
+INSERT INTO lash_durable_read_fixture.lash_process_wake_deliveries VALUES ('wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228', 'durable-read-wake-process', 'durable-read-fixture', 1, 'pending', NULL, 0, NULL, 1700000000000, 1700604800000, NULL, '{"version":1,"wake_id":"wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228","target_session_id":"durable-read-fixture","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake","event_invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake"},"caused_by":{"type":"process","process_id":"durable-read-wake-process"}},"authority":{"principal":"host"},"input":"durable read wake","created_at_ms":1700000000000}');
 
 
 --
@@ -846,7 +878,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 50);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 51);
 
 
 --
@@ -886,6 +918,12 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 --
 
 INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"schema_version":3,"session_id":"durable-read-fixture","config":{"provider_id":"","model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"turn_budget":"unbounded"},"current_frame_node_id":"frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f"}', '5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9');
+
+
+--
+-- Data for Name: lash_tool_intent_submissions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
 
 
 --
@@ -1110,6 +1148,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_observers
 
 
 --
+-- Name: lash_process_parent_end_plans lash_process_parent_end_plans_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_parent_end_plans
+    ADD CONSTRAINT lash_process_parent_end_plans_pkey PRIMARY KEY (process_id);
+
+
+--
 -- Name: lash_process_segment_handovers lash_process_segment_handovers_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1243,6 +1289,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_sessions
     ADD CONSTRAINT lash_sessions_pkey PRIMARY KEY (session_id);
+
+
+--
+-- Name: lash_tool_intent_submissions lash_tool_intent_submissions_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_tool_intent_submissions
+    ADD CONSTRAINT lash_tool_intent_submissions_pkey PRIMARY KEY (replay_key);
 
 
 --
@@ -1487,6 +1541,13 @@ CREATE INDEX idx_lash_sessions_leaf ON lash_durable_read_fixture.lash_sessions U
 
 
 --
+-- Name: idx_lash_tool_intent_submissions_scope; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_tool_intent_submissions_scope ON lash_durable_read_fixture.lash_tool_intent_submissions USING btree (session_id, execution_scope_id, intent_index);
+
+
+--
 -- Name: idx_lash_trigger_deliveries_process; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1557,6 +1618,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_leases
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_observers
     ADD CONSTRAINT lash_process_observers_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_processes(process_id) ON DELETE CASCADE;
+
+
+--
+-- Name: lash_process_parent_end_plans lash_process_parent_end_plans_process_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_parent_end_plans
+    ADD CONSTRAINT lash_process_parent_end_plans_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_processes(process_id) ON DELETE CASCADE;
 
 
 --

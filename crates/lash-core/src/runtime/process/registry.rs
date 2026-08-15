@@ -84,6 +84,16 @@ pub struct ProcessWorklistPage {
     pub continuation: Option<ProcessWorklistCursor>,
 }
 
+/// Durable teardown work committed atomically with one parent's terminal outcome.
+/// **Integrator class 3: store and process-engine implementors.**
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProcessParentEndPlan {
+    /// Terminal parent whose completion made the plan executable.
+    pub process_id: String,
+    /// Ordered, replay-keyed actions retained for crash redrive.
+    pub actions: Vec<crate::ToolIntentParentEndAction>,
+}
+
 pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
 pub const WAKE_ENQUEUING_STALE_AFTER_MS: u64 = 30_000;
 
@@ -669,6 +679,24 @@ pub trait ProcessRegistry: Send + Sync {
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
+    /// Complete without a Lash lease and atomically retain parent-end work.
+    async fn complete_process_with_parent_end(
+        &self,
+        process_id: &str,
+        await_output: ProcessAwaitOutput,
+        authority: ProcessCompletionAuthority,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        if !actions.is_empty() {
+            return Err(PluginError::Session(format!(
+                "process registry cannot durably retain {} parent-end actions for `{process_id}`",
+                actions.len()
+            )));
+        }
+        self.complete_process(process_id, await_output, authority)
+            .await
+    }
+
     /// Atomically append the terminal output while the supplied process lease
     /// is still current, then release that lease in the same transaction.
     ///
@@ -682,6 +710,74 @@ pub trait ProcessRegistry: Send + Sync {
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
+
+    /// Lease-fenced terminal completion with an atomically retained parent-end plan.
+    async fn complete_process_with_lease_and_parent_end(
+        &self,
+        lease: &ProcessLease,
+        await_output: ProcessAwaitOutput,
+        actions: Vec<crate::ToolIntentParentEndAction>,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        if !actions.is_empty() {
+            return Err(PluginError::Session(format!(
+                "process registry cannot durably retain {} parent-end actions for `{}`",
+                actions.len(),
+                lease.process_id
+            )));
+        }
+        self.complete_process_with_lease(lease, await_output).await
+    }
+
+    /// Return a bounded stable set of terminal parents whose teardown remains pending.
+    async fn list_pending_parent_end_plans(
+        &self,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<ProcessParentEndPlan>, PluginError>;
+
+    /// Load the durable post-terminal teardown plan for one process, if any.
+    async fn get_pending_parent_end_plan(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<ProcessParentEndPlan>, PluginError>;
+
+    /// Clear one plan after all replay-keyed commands settle. Repetition is idempotent.
+    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError>;
+
+    /// Atomically bind a runtime-owned intent identity to its first payload.
+    ///
+    /// This is an **integrator class 3: store implementor** seam. The returned
+    /// existing row must be the authoritative first writer across processes
+    /// and facade handles.
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError>;
+
+    /// Persist the first realized outcome for an admitted intent identity.
+    ///
+    /// This is an **integrator class 3: store implementor** seam. Repetition is
+    /// idempotent and may not replace an already recorded outcome.
+    async fn complete_tool_intent_submission(
+        &self,
+        replay_key: &str,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError>;
+
+    /// Load unsettled ingress parent-end actions for one owning scope.
+    ///
+    /// This is an **integrator class 3: store implementor** seam used by hosts
+    /// to reconstruct teardown after a crash.
+    async fn pending_tool_intent_parent_end(
+        &self,
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError>;
+
+    /// Mark one durable ingress parent-end action settled.
+    ///
+    /// This is an **integrator class 3: store implementor** seam. Repetition is
+    /// idempotent so a crash after replay-keyed teardown can redrive safely.
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError>;
 
     /// Record the durable, lease-fenced "execution started" fact (ADR 0019).
     ///
