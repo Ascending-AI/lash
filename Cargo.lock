@@ -84,6 +84,7 @@ dependencies = [
  "lash-standard-plugins",
  "lash-subagents",
  "lash-tools",
+ "lash-typescript",
  "lashlang",
  "percent-encoding",
  "reqwest 0.13.4",

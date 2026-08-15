@@ -29,6 +29,247 @@ async fn run_turn_through_the_workbench_open_path(
         .expect("run the turn");
 }
 
+/// The host's half of ADR 0060, as a marker list.
+///
+/// The substrate's walker (`dialect::prompt_walker_tests`) can only see the
+/// fragments the RLM crate contributes. A host adds its own: the Workbench
+/// injects three worked code tutorials into every system prompt, and they were
+/// written when Lashlang was the only dialect. Nothing downstream of the
+/// substrate would ever have caught that — the served prompt is the only place
+/// the two halves meet, so the assertion lives on the served prompt.
+const HOST_FOREIGN_MARKERS: &[&str] = &[
+    "<lashlang>",
+    "</lashlang>",
+    "lashlang block",
+    "lashlang blocks",
+    "lashlang process",
+    "bound in lashlang",
+    "re-print",
+    "finish <value>",
+];
+
+/// `lashlang_step` is the one identifier that legitimately crosses dialects:
+/// it is the `history` payload discriminant and the durable event-id prefix.
+/// ADR 0060 carries the whole carve-out list.
+fn strip_substrate_carve_outs(text: &str) -> String {
+    text.replace("lashlang_step", "«substrate carve-out»")
+}
+
+fn assert_no_lashlang_words(prompts: &[String]) {
+    let mut violations = Vec::new();
+    for prompt in prompts {
+        let haystack = strip_substrate_carve_outs(prompt).to_lowercase();
+        for marker in HOST_FOREIGN_MARKERS {
+            if haystack.contains(marker) {
+                violations.push((*marker).to_string());
+            }
+        }
+    }
+    violations.sort();
+    violations.dedup();
+    assert!(
+        violations.is_empty(),
+        "a TypeScript session was served Lashlang words: {violations:?}"
+    );
+}
+
+fn transcript_code_languages(snapshot: &StateReadSnapshot) -> Vec<String> {
+    snapshot
+        .transcript
+        .iter()
+        .filter_map(|row| match row {
+            TranscriptRow::CodeBlock { language, .. } => Some(language.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Lashlang direction of the same rule.
+const HOST_FOREIGN_MARKERS_LASHLANG: &[&str] = &[
+    "<typescript>",
+    "</typescript>",
+    "console.log(",
+    "definePro",
+    "registerTrigger",
+];
+
+fn foreign_markers_for(dialect: lash::rlm::RlmDialect) -> &'static [&'static str] {
+    match dialect {
+        lash::rlm::RlmDialect::Typescript => HOST_FOREIGN_MARKERS,
+        _ => HOST_FOREIGN_MARKERS_LASHLANG,
+    }
+}
+
+fn foreign_words_in(text: &str, markers: &[&str]) -> Vec<String> {
+    let haystack = strip_substrate_carve_outs(text).to_lowercase();
+    markers
+        .iter()
+        .filter(|marker| haystack.contains(&marker.to_lowercase()))
+        .map(|marker| (*marker).to_string())
+        .collect()
+}
+
+/// The host's counterpart to the substrate's prompt walker (ADR 0060).
+///
+/// The Workbench injects three worked programs into every system prompt. They
+/// were written when Lashlang was the only dialect and were injected
+/// unconditionally, so a TypeScript session read `## TypeScript execution` and
+/// then three complete `<lashlang>` programs to copy — the substrate's own
+/// walker cannot see a word of this, because none of it is substrate copy.
+#[test]
+fn the_workbench_tutorials_are_written_in_the_session_dialect() {
+    let mut violations = Vec::new();
+    for dialect in [
+        lash::rlm::RlmDialect::Lashlang,
+        lash::rlm::RlmDialect::Typescript,
+    ] {
+        let prompt = workbench_prompt(dialect);
+        for word in foreign_words_in(prompt, foreign_markers_for(dialect)) {
+            violations.push(format!("{} prompt carries `{word}`", dialect.language_id()));
+        }
+        // Non-vacuity: each prompt must actually contain worked programs in its
+        // own dialect, or an empty constant would pass every marker check.
+        let own_tag = match dialect {
+            lash::rlm::RlmDialect::Typescript => "<typescript>",
+            _ => "<lashlang>",
+        };
+        assert!(
+            prompt.matches(own_tag).count() >= 3,
+            "the {} prompt must carry its own worked programs",
+            dialect.language_id()
+        );
+    }
+    assert!(
+        violations.is_empty(),
+        "the workbench tutorials mix dialects: {violations:#?}"
+    );
+
+    // And the marker lists must be able to fire, or the assertion above is
+    // decoration: each prompt read against the *other* dialect's list trips.
+    assert!(!foreign_words_in(
+        workbench_prompt(lash::rlm::RlmDialect::Lashlang),
+        HOST_FOREIGN_MARKERS
+    )
+    .is_empty());
+    assert!(!foreign_words_in(
+        workbench_prompt(lash::rlm::RlmDialect::Typescript),
+        HOST_FOREIGN_MARKERS_LASHLANG
+    )
+    .is_empty());
+}
+
+/// Every `<typescript>` program in the prompt, in prompt order.
+fn typescript_prompt_programs() -> Vec<String> {
+    let prompt = workbench_prompt(lash::rlm::RlmDialect::Typescript);
+    let mut programs = Vec::new();
+    let mut rest = prompt;
+    while let Some(open) = rest.find("<typescript>") {
+        let body = &rest[open + "<typescript>".len()..];
+        let close = body
+            .find("</typescript>")
+            .expect("every opened cell closes in the prompt");
+        programs.push(body[..close].to_string());
+        rest = &body[close..];
+    }
+    programs
+}
+
+/// The host surface the tutorials call, as the linker sees it.
+///
+/// The trigger sources and their event types come from the Workbench's own
+/// declaration (`workbench_lashlang_resources`), so a change there is a change
+/// here. The tool modules are stated at the paths the real bindings produce —
+/// `with_lashlang_binding` writes the same binding under both dialect keys, so
+/// a TypeScript call path is the Lashlang one.
+fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
+    let mut resources = workbench_lashlang_resources();
+    lashlang::add_trigger_resource_operations(&mut resources);
+    let modules: [(&[&str], &str, &[&str]); 4] = [
+        (&["agents"], "Agents", &["spawn"]),
+        (&["web"], "Web", &["search", "fetch"]),
+        (&["inbox", "work"], "Inbox", &["list", "send", "delete"]),
+        (&["inbox", "personal"], "Inbox", &["list", "send", "delete"]),
+    ];
+    for (path, resource_type, operations) in modules {
+        for operation in operations {
+            resources
+                .add_module_operation_binding(
+                    path.iter().copied(),
+                    resource_type,
+                    *operation,
+                    format!("tool:{}/{operation}", path.join("/")),
+                    lashlang::ResourceOperationBinding {
+                        input_ty: lashlang::TypeExpr::Any,
+                        output_ty: lashlang::TypeExpr::Any,
+                        output_from_input: None,
+                    },
+                )
+                .expect("workbench tutorial tool binding");
+        }
+    }
+    lashlang::LashlangHostEnvironment::new(resources, workbench_lashlang_abilities())
+}
+
+/// Prompt copy that teaches code the dialect refuses is worse than no copy.
+///
+/// Every program the TypeScript prompt shows is linked against the Workbench's
+/// own declared surface. This is the check that keeps the twin honest: the
+/// Lashlang tutorials it was translated from use `await handle` result
+/// wrappers, `format`/`join`/`len`, module authorities as process parameters,
+/// and record-joined handles, and each of those has a different answer here.
+#[test]
+fn the_workbench_typescript_tutorials_link() {
+    let environment = workbench_link_environment();
+    let programs = typescript_prompt_programs();
+    assert_eq!(
+        programs.len(),
+        3,
+        "the TypeScript prompt must carry all three tutorials"
+    );
+    let mut hits = Vec::new();
+    for (index, program) in programs.iter().enumerate() {
+        if let Err(error) = lash_typescript::link(program, &environment) {
+            hits.push(format!("tutorial {}: {error}", index + 1));
+        }
+    }
+    assert!(hits.is_empty(), "prompt programs that do not link: {hits:#?}");
+
+    // The linker must be able to reject, or an empty hit list proves nothing.
+    assert!(
+        lash_typescript::link(
+            "const source = { a: 1 };\nconst { a } = source;\nfinish(a);",
+            &environment
+        )
+        .is_err(),
+        "the control must be refused"
+    );
+}
+
+/// The tutorials follow the dialect the turn resolved, not this process's
+/// configuration: a store that outlived a config change runs its recorded
+/// dialect, and copy keyed on configuration teaches the other one.
+#[test]
+fn the_tutorials_follow_the_turns_resolved_options() {
+    let typescript = lash_core::ProtocolTurnOptions::typed(
+        lash_rlm_types::RlmCreateExtras {
+            dialect: Some(lash::rlm::RlmDialect::Typescript),
+            ..Default::default()
+        },
+    )
+    .expect("typed options");
+    assert_eq!(
+        tutorial_dialect(&typescript),
+        lash::rlm::RlmDialect::Typescript
+    );
+    assert!(workbench_prompt(tutorial_dialect(&typescript)).contains("<typescript>"));
+
+    // Absent options are how every pre-dialect session reads.
+    assert_eq!(
+        tutorial_dialect(&lash_core::ProtocolTurnOptions::default()),
+        lash::rlm::RlmDialect::Lashlang
+    );
+}
+
 // The workbench's TypeScript branch, driven end to end.
 //
 // Every other fixture here builds a Lashlang `AppState`, so nothing reached the
@@ -93,6 +334,12 @@ async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect(
         "every served prompt must be the TypeScript one: {prompts:#?}"
     );
 
+    // Nothing in the served prompt may be written in the other dialect. The
+    // substrate's own walker covers the fragments the RLM crate contributes;
+    // this covers the host's, which is where the Workbench's three worked
+    // tutorials are injected.
+    assert_no_lashlang_words(&prompts);
+
     // The durable half. A prompt can be right for one turn and still leave the
     // session recorded as Lashlang, which is the shape that shipped.
     let session = state
@@ -105,6 +352,26 @@ async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect(
         session.read_view().protocol_turn_options().payload["dialect"],
         serde_json::json!("typescript"),
         "the served session must have recorded its dialect durably"
+    );
+    drop(session);
+
+    // The rendered half: `/api/state` labels the executed code with the dialect
+    // the session recorded. A host that labelled from its own configuration
+    // would be right here and wrong in the one case the label exists for — a
+    // store that outlived a config change — so the label is read back from the
+    // same projection the UI renders.
+    let Json(projected) = app_state(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(session_id.clone()),
+        }),
+    )
+    .await
+    .expect("project the served session");
+    assert_eq!(
+        transcript_code_languages(&projected),
+        vec!["typescript".to_string()],
+        "the rendered transcript must label the executed cell with the recorded dialect"
     );
 }
 
@@ -162,5 +429,22 @@ async fn a_lashlang_workbench_still_serves_lashlang_turns() {
     assert_eq!(
         session.read_view().protocol_turn_options().payload["dialect"],
         serde_json::json!("lashlang"),
+    );
+    drop(session);
+
+    // The label's control: the same projection on the default dialect must say
+    // `lashlang`, or the TypeScript assertion above proves only that the field
+    // is constant.
+    let Json(projected) = app_state(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(session_id.clone()),
+        }),
+    )
+    .await
+    .expect("project the served session");
+    assert_eq!(
+        transcript_code_languages(&projected),
+        vec!["lashlang".to_string()],
     );
 }

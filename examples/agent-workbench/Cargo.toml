@@ -59,6 +59,7 @@ lash = { workspace = true, features = ["rlm", "testing"] }
 lash-core = { workspace = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-sim = { path = "../../crates/lash-sim" }
+lash-typescript = { workspace = true }
 sqlx = { workspace = true }
 tempfile = { workspace = true }
 
