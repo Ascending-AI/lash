@@ -138,6 +138,8 @@ fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
+        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
+        tool_registry: None,
     };
     crate::RuntimeExecutionContext::new(
         "session".to_string(),

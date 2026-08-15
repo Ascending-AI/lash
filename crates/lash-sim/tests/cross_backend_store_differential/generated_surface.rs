@@ -850,6 +850,7 @@ impl SurfaceRunner {
                         result: Box::new(completed),
                     }],
                     triggers: Vec::new(),
+                    settlement_order: vec![0],
                 })
                 .expect("serialize observed non-empty intent batch");
                 let literal_model_return = serde_json::json!({
@@ -925,7 +926,8 @@ impl SurfaceRunner {
                             ],
                             "replay": null
                         }
-                    }]
+                    }],
+                    "settlement_order": [0]
                 });
                 if observed != literal_model_return {
                     return Err(format!(

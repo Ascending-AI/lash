@@ -1845,6 +1845,75 @@ mod tests {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessService for TypeScriptSignalProcessService {
+        // The recorded-intent routes belong to atomic tool attempts, which this
+        // signal fixture never opens. Refuse them rather than pretend, so a test
+        // that starts using them fails loudly instead of silently taking a
+        // non-atomic path.
+        async fn start_from_recorded_intent(
+            &self,
+            _session_id: &str,
+            _request: lash_core::ProcessStartRequest,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessHandleSummary, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "recorded process starts are unavailable in this test".to_string(),
+            ))
+        }
+
+        async fn cancel_recorded_intent(
+            &self,
+            _session_id: &str,
+            _process_id: &str,
+            _reason: Option<String>,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "recorded process cancellation is unavailable in this test".to_string(),
+            ))
+        }
+
+        async fn finish_recorded_intent_parent(
+            &self,
+            _session_id: &str,
+            _identity: lash_core::ToolIntentIdentity,
+            _process_id: String,
+            _policy: lash_core::ProcessParentEndPolicy,
+            _reason: String,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ToolIntentParentEndOutcome, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "recorded parent end is unavailable in this test".to_string(),
+            ))
+        }
+
+        async fn signal_recorded_intent(
+            &self,
+            _session_id: &str,
+            _process_id: &str,
+            _signal: String,
+            _call_id: String,
+            _payload: serde_json::Value,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessEvent, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "recorded process signals are unavailable in this test".to_string(),
+            ))
+        }
+
+        async fn emit_event_recorded_intent(
+            &self,
+            _session_id: &str,
+            _process_id: &str,
+            _event: String,
+            _call_id: String,
+            _payload: serde_json::Value,
+            _scope: lash_core::ProcessOpScope<'_>,
+        ) -> Result<lash_core::ProcessEvent, lash_core::PluginError> {
+            Err(lash_core::PluginError::Session(
+                "recorded process events are unavailable in this test".to_string(),
+            ))
+        }
+
         async fn start(
             &self,
             _session_id: &str,

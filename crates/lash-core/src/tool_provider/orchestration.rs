@@ -107,10 +107,15 @@ impl<'run> OrchestrationContext<'run> {
                 })
                 .collect();
         };
+        // The batch carries its settlement order for callers that model
+        // per-leaf completion (the language runtimes' Promise.all). This front
+        // door hands providers replies in input order, so it takes the replies
+        // and leaves the order to the runtime seam that needs it.
         runtime
             .with_batch_parent_call_id(self.context.tool_call_id.clone())
             .call_tool_batch(calls)
             .await
+            .replies
     }
 }
 
