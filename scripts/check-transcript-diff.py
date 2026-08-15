@@ -9,6 +9,9 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from itertools import zip_longest
 from typing import NamedTuple
 
@@ -200,13 +203,108 @@ def requested_options(argv: list[str]) -> Options:
     )
 
 
-def has_transcript_justification() -> bool:
+JUSTIFICATION = re.compile(r"(?m)^\s*Transcript:\s+\S")
+GITHUB_API = "https://api.github.com"
+
+
+def body_is_justified(body: str | None) -> bool:
+    return bool(body) and bool(JUSTIFICATION.search(body))
+
+
+def event_pull_request_body() -> str | None:
+    """The PR body carried in the triggering event payload, if it carries one.
+
+    Only `pull_request` events do. A `workflow_dispatch` payload has no
+    `pull_request` key at all, which is why this returns `None` rather than an
+    empty string: "no body here" and "a body that says nothing" are different
+    answers, and only the first one should send us looking elsewhere.
+    """
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if not event_path:
-        return False
-    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
-    body = event.get("pull_request", {}).get("body") or ""
-    return bool(re.search(r"(?m)^\s*Transcript:\s+\S", body))
+        return None
+    try:
+        event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    pull_request = event.get("pull_request")
+    if not isinstance(pull_request, dict):
+        return None
+    return pull_request.get("body") or ""
+
+
+def current_branch() -> str | None:
+    branch = os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME")
+    if branch:
+        return branch
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    branch = result.stdout.strip()
+    return branch or None
+
+
+def queried_pull_request_body() -> str | None:
+    """The open PR for this branch, asked for directly.
+
+    A manually dispatched run is the sanctioned recovery when GitHub stops
+    delivering a branch's events, and it arrives with no PR in its payload. The
+    justification still exists — it is in the PR body — so the gate asks for it
+    rather than failing a run for the shape of its trigger. Returns `None` when
+    the question cannot be asked at all, which is distinct from asking and
+    finding nothing.
+    """
+    token = os.environ.get("GITHUB_TOKEN")
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    branch = current_branch()
+    if not (token and repository and branch):
+        return None
+    owner = repository.split("/")[0]
+    head = urllib.parse.quote(f"{owner}:{branch}", safe="")
+    request = urllib.request.Request(
+        f"{GITHUB_API}/repos/{repository}/pulls?state=open&head={head}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "lash-transcript-gate",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError) as error:
+        print(
+            f"note: could not query the pull request for `{branch}`: {error}",
+            file=sys.stderr,
+        )
+        return None
+    if not isinstance(payload, list):
+        return None
+    for pull_request in payload:
+        if isinstance(pull_request, dict):
+            return pull_request.get("body") or ""
+    return None
+
+
+def has_transcript_justification() -> bool:
+    """Whether the PR for this change carries a `Transcript:` sentence.
+
+    The event payload is consulted first because it needs no network. When it
+    does not settle the question — no payload body, or a body written before
+    the sentence was added — the live PR is asked. Both sources are the same
+    PR body, so this never accepts a justification the PR does not actually
+    make; it only stops a stale or absent payload from standing in for one.
+    Failing closed is the answer when neither source produces a justification.
+    """
+    if body_is_justified(event_pull_request_body()):
+        return True
+    return body_is_justified(queried_pull_request_body())
 
 
 def main(argv: list[str]) -> int:

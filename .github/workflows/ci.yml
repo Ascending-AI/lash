@@ -230,6 +230,14 @@ jobs:
   lint:
     name: Lint
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    # The transcript gate reads the `Transcript:` justification from the PR
+    # body. A manually dispatched run — the recovery path when GitHub stops
+    # delivering a branch's events — has no pull request in its payload, so the
+    # gate asks the API for it instead. Job-level and read-only: no other job
+    # needs it.
+    permissions:
+      contents: read
+      pull-requests: read
 
     steps:
       - name: Check out repository
@@ -321,6 +329,10 @@ jobs:
         run: python3 scripts/check-restate-handler-panics.py
 
       - name: Enforce durable transcript justification
+        env:
+          # Needed only by the dispatch path, where the justification has to be
+          # read from the pull request rather than the event payload.
+          GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/check-transcript-diff.py --enforce
 
       - name: Check durable-read fixture schema declaration
