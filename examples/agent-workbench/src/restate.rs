@@ -683,7 +683,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
     reason: &str,
 ) -> Result<(), AppError> {
     let session = state
-        .open_session(&session_id)
+        .open_session(session_id)
         .await
         .map_err(AppError::session_open)?;
     let registrations = session
@@ -1114,7 +1114,7 @@ pub(crate) async fn settle_workbench_turn(
     turn_id: &str,
 ) -> Result<(), AppError> {
     let session = state
-        .open_session(&session_id)
+        .open_session(session_id)
         .await
         .map_err(AppError::runtime)?;
     let targets = session
