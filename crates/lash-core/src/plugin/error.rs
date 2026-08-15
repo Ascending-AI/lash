@@ -17,6 +17,16 @@ pub enum PluginError {
         /// Earlier plugin that attempted another replacement during reinspection.
         repeated_plugin_id: String,
     },
+    /// A bounded after-tool-call reinspection attempted to replace the result again.
+    #[error(
+        "after_tool_call replacement from `{replacing_plugin_id}` was replaced again by `{repeated_plugin_id}` during bounded reinspection"
+    )]
+    AfterToolCallReplacementConflict {
+        /// Plugin whose replacement caused earlier hooks to be reinspected.
+        replacing_plugin_id: String,
+        /// Earlier plugin that attempted another replacement during reinspection.
+        repeated_plugin_id: String,
+    },
     #[error("plugin session error: {0}")]
     Session(String),
     #[error(transparent)]

@@ -85,9 +85,11 @@ pub(crate) fn plugin_runtime_session_events(
 /// short-circuit, which beats a successful short-circuit. Equal-strength conflicts use plugin ID
 /// as a stable tie-breaker, and a single plugin's first-emitted equal-strength terminal wins. The
 /// runtime emits inter-plugin terminal conflicts on the session trace seam and also attempts a
-/// plugin-attributed runtime event without blocking dispatch. At the after-tool seam every hook
-/// sees the original result exactly once. The same terminal strength ordering applies, while
-/// equal-strength result replacements are first-emitted-wins and do not trigger reinspection.
+/// plugin-attributed runtime event without blocking dispatch. At the after-tool seam successful
+/// result replacements are likewise reinspected once by earlier hooks. That pass honors only
+/// denials and aborts, never repeats side effects, and rejects another successful replacement with
+/// [`PluginError::AfterToolCallReplacementConflict`]. The same terminal strength ordering applies,
+/// and equal-strength result replacements remain first-emitted-wins after clean reinspection.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 // justification: directives are transient public plugin values and the common short-circuit output avoids another allocation.

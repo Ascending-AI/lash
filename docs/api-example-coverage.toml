@@ -19492,6 +19492,36 @@ usage = "examples/agent-service/src/demo_plugin.rs:7#plugins::{PluginError, Plug
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::plugins::PluginError::AfterToolCallReplacementConflict"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::AfterToolCallReplacementConflict"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins.rs:187#let rendered = error.to_string();"
+assertion = "examples/docs-snippets/src/plugins.rs:198#assert!(rendered.contains(\"injector\") && rendered.contains(\"output_policy\"));"
+
+[[api]]
+symbol = "lash::plugins::PluginError::AfterToolCallReplacementConflict::repeated_plugin_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::AfterToolCallReplacementConflict::repeated_plugin_id"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins.rs:197#assert_eq!(repeated_plugin_id, \"output_policy\");"
+assertion = "examples/docs-snippets/src/plugins.rs:197#assert_eq!(repeated_plugin_id, \"output_policy\");"
+
+[[api]]
+symbol = "lash::plugins::PluginError::AfterToolCallReplacementConflict::replacing_plugin_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::AfterToolCallReplacementConflict::replacing_plugin_id"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins.rs:196#assert_eq!(replacing_plugin_id, \"injector\");"
+assertion = "examples/docs-snippets/src/plugins.rs:196#assert_eq!(replacing_plugin_id, \"injector\");"
+
+[[api]]
 symbol = "lash::plugins::PluginError::AppendOperationIdentityConflict"
 kind = "variant"
 availability = "default+all-features"

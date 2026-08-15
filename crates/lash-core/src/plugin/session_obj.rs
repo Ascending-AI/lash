@@ -363,16 +363,61 @@ impl PluginSession {
 
     pub async fn after_tool_call(
         &self,
-        ctx: ToolResultHookContext,
+        mut ctx: ToolResultHookContext,
     ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
-        collect_owned_async(
-            &self.contributions.after_tool_call_hooks,
-            ctx,
-            "after_tool_call",
-            None,
-            |hook, ctx| hook(ctx),
-        )
-        .await
+        let mut out = Vec::new();
+        let mut effective_replacement: Option<ToolResult> = None;
+        for (index, registered) in self.contributions.after_tool_call_hooks.iter().enumerate() {
+            let directives = (registered.hook)(ctx.clone()).await?;
+            for directive in directives {
+                let replacement = match &directive {
+                    PluginDirective::ShortCircuitTool { output } if output.is_success() => {
+                        Some(ToolResult::from_output(output.clone()))
+                    }
+                    _ => None,
+                };
+                out.push(PluginOwned {
+                    plugin_id: registered.plugin_id.clone(),
+                    value: directive,
+                });
+                if let Some(replacement) = replacement {
+                    ctx.result = replacement.clone();
+                    for earlier in &self.contributions.after_tool_call_hooks[..index] {
+                        let repeated = (earlier.hook)(ctx.clone()).await?;
+                        for directive in repeated {
+                            if matches!(
+                                &directive,
+                                PluginDirective::ShortCircuitTool { output } if output.is_success()
+                            ) {
+                                return Err(PluginError::AfterToolCallReplacementConflict {
+                                    replacing_plugin_id: registered.plugin_id.clone(),
+                                    repeated_plugin_id: earlier.plugin_id.clone(),
+                                });
+                            }
+                            let is_terminal_restriction = matches!(
+                                &directive,
+                                PluginDirective::AbortTurn { .. }
+                            ) || matches!(
+                                &directive,
+                                PluginDirective::ShortCircuitTool { output } if !output.is_success()
+                            );
+                            if is_terminal_restriction {
+                                out.push(PluginOwned {
+                                    plugin_id: earlier.plugin_id.clone(),
+                                    value: directive,
+                                });
+                            }
+                        }
+                    }
+                    if let Some(effective_replacement) = &effective_replacement {
+                        ctx.result = effective_replacement.clone();
+                    } else {
+                        effective_replacement = Some(replacement);
+                    }
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub async fn after_turn(

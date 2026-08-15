@@ -24,12 +24,13 @@ pub type BeforeTurnHook =
 /// error.
 pub type BeforeToolCallHook =
     Arc<dyn Fn(ToolCallHookContext) -> PluginFuture<Vec<PluginDirective>> + Send + Sync>;
-/// Inspects the original tool result after execution and returns directives for the runtime.
+/// Inspects a tool result after execution and returns directives for the runtime.
 ///
-/// Every registered hook sees the same original result exactly once. Terminal directives compose
-/// by restrictiveness: abort beats a denied or cancelled replacement, which beats a successful
-/// replacement. Equal-strength result replacements are first-emitted-wins; Lash does not re-run
-/// hooks after applying one plugin's replacement.
+/// A hook may be invoked more than once for one call when a later hook successfully replaces the
+/// result. Earlier hooks then reinspect that candidate once before the chain continues with the
+/// effective first-emitted replacement. Reinspection honors only restrictive terminal directives
+/// (`AbortTurn` and denied or cancelled `ShortCircuitTool`); side effects are not applied again. A
+/// successful replacement emitted during reinspection is rejected as a typed composition error.
 pub type AfterToolCallHook =
     Arc<dyn Fn(ToolResultHookContext) -> PluginFuture<Vec<PluginDirective>> + Send + Sync>;
 pub type ToolResultProjector =
