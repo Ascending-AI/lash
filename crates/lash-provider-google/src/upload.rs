@@ -273,6 +273,7 @@ mod error_detail_tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use lash_core::provider::{DefaultProviderFailureClassifier, ProviderFailureClassifier};
     use lash_llm_transport::{LlmHttpBody, LlmHttpResponse};
     use lash_sansio::sync::MutexExt;
 
@@ -351,5 +352,21 @@ mod error_detail_tests {
         ])
         .await;
         assert!(error.message.contains("upload finalize detail"));
+    }
+
+    #[tokio::test]
+    async fn upload_413_request_too_large_keeps_structured_classification() {
+        let error = upload_with(vec![response(
+            413,
+            Vec::new(),
+            r#"{"error":{"message":"Request too large: attachment exceeds upload limit"}}"#,
+        )])
+        .await;
+
+        let failure = DefaultProviderFailureClassifier.classify(error);
+
+        assert_eq!(failure.kind, ProviderFailureKind::Validation);
+        assert!(failure.retryable);
+        assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
     }
 }

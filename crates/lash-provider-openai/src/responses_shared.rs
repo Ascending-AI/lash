@@ -25,7 +25,7 @@ use base64::Engine;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
-use crate::schema::responses_error_is_retryable;
+use crate::schema::{classify_openai_error, responses_error_is_retryable};
 use crate::support::{OPENAI_FILE_MIMES, OPENAI_IMAGE_MIMES};
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
 use lash_core::llm::types::{

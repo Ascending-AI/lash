@@ -1944,7 +1944,7 @@ fn default_failure_classifier_keeps_rate_throttling_retryable() {
 }
 
 #[test]
-fn default_failure_classifier_marks_context_overflow() {
+fn default_failure_classifier_uses_context_overflow_text_for_unclassified_failures() {
     let classifier = DefaultProviderFailureClassifier;
     for message in [
         "Anthropic request failed: prompt is too long",
@@ -1969,13 +1969,50 @@ fn default_failure_classifier_marks_context_overflow() {
         "Mistral: Prompt contains too many tokens; too large for model with 128000 maximum context length",
         "z.ai: model_context_window_exceeded",
     ] {
-        let failure = classifier.classify(ProviderFailure::new(message).with_status(400));
+        let failure = classifier.classify(ProviderFailure::new(message));
+        assert_eq!(failure.kind, ProviderFailureKind::Validation);
         assert_eq!(
             failure.terminal_reason,
             crate::LlmTerminalReason::ContextOverflow
         );
         assert!(!failure.retryable);
     }
+}
+
+#[test]
+fn default_failure_classifier_fails_open_when_unclassified_text_is_uncertain() {
+    let failure = DefaultProviderFailureClassifier.classify(
+        ProviderFailure::new("upstream request failed")
+            .with_raw(r#"{"error":{"message":"ambiguous provider failure"}}"#),
+    );
+
+    assert_eq!(failure.kind, ProviderFailureKind::Unknown);
+    assert!(failure.retryable);
+    assert_eq!(
+        failure.terminal_reason,
+        crate::LlmTerminalReason::ProviderError
+    );
+}
+
+#[test]
+fn default_failure_classifier_does_not_override_structured_user_echo() {
+    let failure = DefaultProviderFailureClassifier.classify(
+        ProviderFailure::new("request rejected")
+            .with_kind(ProviderFailureKind::Validation)
+            .with_code("invalid_request_error")
+            .with_raw(
+                r#"{"error":{"message":"The user wrote: context length is a useful phrase"}}"#,
+            )
+            .retryable(true),
+    );
+
+    assert_eq!(failure.kind, ProviderFailureKind::Validation);
+    assert!(failure.retryable);
+    assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
+    assert_eq!(
+        failure.terminal_reason,
+        crate::LlmTerminalReason::ProviderError
+    );
 }
 
 #[test]

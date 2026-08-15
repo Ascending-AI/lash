@@ -20,7 +20,7 @@ pub(crate) use lash_core::{
 // assertions (the request/response shapes that exercise the shared Responses
 // input builder), so gate the re-export to test builds to keep the non-test
 // lib free of unused-import warnings.
-pub(crate) use crate::schema::responses_error_is_retryable;
+pub(crate) use crate::schema::{classify_openai_error, responses_error_is_retryable};
 #[cfg(test)]
 pub(crate) use lash_core::llm::types::{LlmRequestScope, ResponseTextMeta};
 pub(crate) use lash_core::provider::{

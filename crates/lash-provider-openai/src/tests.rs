@@ -14,6 +14,7 @@ use std::sync::Arc;
 mod attachment_tests;
 #[cfg(feature = "testing")]
 mod conformance;
+mod error_classification_tests;
 mod generation_tests;
 mod output_started_tests;
 mod replay_provenance_tests;

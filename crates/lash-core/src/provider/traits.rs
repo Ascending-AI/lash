@@ -88,17 +88,28 @@ pub struct DefaultProviderFailureClassifier;
 
 impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
     fn classify(&self, mut failure: ProviderFailure) -> ProviderFailure {
+        // A driver-owned kind, typed code, or terminal verdict is conclusive.
+        // Numeric HTTP codes are generic envelopes until the status mapping
+        // below classifies them.
+        let mut structurally_classified = failure.kind != ProviderFailureKind::Unknown
+            || failure.terminal_reason != LlmTerminalReason::ProviderError
+            || failure
+                .code
+                .as_deref()
+                .is_some_and(|code| code.parse::<u16>().is_err());
         if let Some(status) = failure.status.or_else(|| {
             failure
                 .code
                 .as_deref()
                 .and_then(|code| code.parse::<u16>().ok())
         }) {
+            structurally_classified = true;
             failure.status = Some(status);
             if failure.kind == ProviderFailureKind::Unknown {
                 failure.kind = ProviderFailureKind::Http;
             }
-            failure.retryable = matches!(status, 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504);
+            failure.retryable =
+                matches!(status, 408 | 409 | 413 | 425 | 429 | 500 | 502 | 503 | 504);
             if status == 429 {
                 // Provider-side throttling. `Quota` + `retryable: true` is the
                 // combination `ProviderHandle`'s retry ladder defers to as a
@@ -114,6 +125,7 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
             failure.kind,
             ProviderFailureKind::Transport | ProviderFailureKind::Timeout
         ) {
+            structurally_classified = true;
             failure.retryable = true;
         }
 
@@ -128,7 +140,10 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
                 .unwrap_or_default()
         )
         .to_ascii_lowercase();
-        if is_context_overflow_text(&haystack) {
+        // Raw-text overflow matching is a compatibility fallback only. It may
+        // classify an otherwise unknown failure, but it must never reinterpret
+        // structured provider evidence.
+        if !structurally_classified && is_context_overflow_text(&haystack) {
             failure.kind = ProviderFailureKind::Validation;
             failure.retryable = false;
             failure.terminal_reason = LlmTerminalReason::ContextOverflow;
@@ -167,6 +182,13 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
         {
             failure.kind = ProviderFailureKind::Unsupported;
             failure.retryable = false;
+        }
+        if !structurally_classified
+            && failure.kind == ProviderFailureKind::Unknown
+            && failure.terminal_reason == LlmTerminalReason::ProviderError
+        {
+            // Ambiguous text is not enough evidence to terminate the turn.
+            failure.retryable = true;
         }
         failure
     }

@@ -3,7 +3,7 @@ use lash_core::llm::types::{LlmOutputPart, LlmUsage};
 use serde_json::Value;
 
 use crate::responses_shared::ResponsesStreamState;
-use crate::schema::responses_error_is_retryable;
+use crate::schema::{classify_openai_error, responses_error_is_retryable};
 
 pub(super) fn response_failed_error(provider: &str, event: &Value) -> LlmTransportError {
     let error = event
@@ -16,10 +16,11 @@ pub(super) fn response_failed_error(provider: &str, event: &Value) -> LlmTranspo
         .map(str::to_string)
         .unwrap_or_else(|| format!("{provider} response failed"));
     let retryable = error.is_some_and(responses_error_is_retryable);
-    LlmTransportError::new(message)
+    let failure = LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Stream)
         .retryable(retryable)
-        .with_raw(event.to_string())
+        .with_raw(event.to_string());
+    classify_openai_error(event, failure)
 }
 
 fn has_nonempty_string(value: &Value, fields: &[&str]) -> bool {

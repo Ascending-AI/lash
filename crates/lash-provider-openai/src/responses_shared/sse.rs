@@ -32,9 +32,10 @@ pub fn process_sse_event(
                     .and_then(|v| v.as_str())
             })
             .unwrap_or("OpenAI-compatible stream error");
-        return Err(LlmTransportError::new(message)
+        let failure = LlmTransportError::new(message)
             .retryable(retryable)
-            .with_raw(event.to_string()));
+            .with_raw(event.to_string());
+        return Err(classify_openai_error(&event, failure));
     }
 
     let output_index = event
