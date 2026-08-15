@@ -1983,41 +1983,29 @@ mod tests {
 
         async fn signal(
             &self,
-            _session_id: &str,
+            session_id: &str,
             process_id: &str,
             signal_name: String,
             signal_id: String,
             payload: Value,
-            _scope: lash_core::ProcessOpScope<'_>,
+            scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessEvent, lash_core::PluginError> {
-            let event_type = lash_core::facade_support::process_signal_event_type(&signal_name)?;
-            let command = lash_core::ProcessCommand::Signal {
-                process_id: process_id.to_string(),
-                signal_name: signal_name.clone(),
-                signal_id: signal_id.clone(),
-                request: lash_core::ProcessEventAppendRequest::new(event_type, payload)
-                    .with_replay_key(format!("typescript:signal:{process_id}:{signal_id}")),
-            };
-            let effect_id = command.effect_id();
-            let outcome = self
-                .controller
-                .execute_effect(
-                    lash_core::RuntimeEffectEnvelope::new(
-                        lash_core::RuntimeInvocation::effect(
-                            lash_core::RuntimeScope::new("typescript-signal-test"),
-                            effect_id.clone(),
-                            lash_core::RuntimeEffectKind::Process,
-                            effect_id,
-                        ),
-                        lash_core::RuntimeEffectCommand::process(command),
-                    ),
-                    lash_core::RuntimeEffectLocalExecutor::processes(self.registry.clone(), None),
+            // The signal itself goes through the shared effect-backed service,
+            // which wires the process effect controller the durable signal
+            // route requires. What this fixture adds is the waiter side: the
+            // await key the TypeScript program is parked on has to resolve
+            // with the delivered payload.
+            let event = lash_core::testing::effect_backed_process_service(self.registry.clone())
+                .signal(
+                    session_id,
+                    process_id,
+                    signal_name.clone(),
+                    signal_id,
+                    payload,
+                    scope,
                 )
-                .await?
-                .into_process()?;
-            let lash_core::ProcessEffectOutcome::Signal { event } = outcome else {
-                unreachable!("signal command returns signal outcome");
-            };
+                .await?;
+            let event = Box::new(event);
             let ordinal = lash_core::ProcessRegistry::count_events_through(
                 self.registry.as_ref(),
                 process_id,
@@ -2037,12 +2025,21 @@ mod tests {
                 )
                 .await
                 .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            // The durable signal route resolves the waiter itself, so this
+            // fixture asserts the delivery rather than performing it: a second
+            // resolution must report the terminal the program will observe.
             let resolved = self
                 .controller
                 .resolve_await_event(&key, lash_core::Resolution::Ok(event.payload.clone()))
                 .await
                 .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-            assert_eq!(resolved, lash_core::ResolveOutcome::Accepted);
+            assert_eq!(
+                resolved,
+                lash_core::ResolveOutcome::AlreadyResolved {
+                    terminal: lash_core::Resolution::Ok(event.payload.clone()),
+                },
+                "the durable signal route must have delivered the payload to the waiter"
+            );
             Ok(*event)
         }
 
