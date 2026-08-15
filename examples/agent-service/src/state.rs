@@ -308,16 +308,14 @@ fn is_dialect_pin_conflict(error: &lash::EmbedError) -> bool {
 /// Read once at startup so the value is injected into the state rather than
 /// consulted on every session open.
 pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
-    match std::env::var("LASH_RUNBOOK_DIALECT")
-        .unwrap_or_else(|_| "lashlang".to_string())
-        .as_str()
-    {
-        "lashlang" => Ok(lash::rlm::RlmDialect::Lashlang),
-        "typescript" => Ok(lash::rlm::RlmDialect::Typescript),
-        other => Err(format!(
-            "LASH_RUNBOOK_DIALECT must be a registered RLM language id (`lashlang` or `typescript`), got `{other}`"
-        )),
-    }
+    let configured = std::env::var("LASH_RUNBOOK_DIALECT")
+        .unwrap_or_else(|_| lash::rlm::RlmDialect::default().language_id().to_string());
+    lash::rlm::RlmDialect::from_language_id(&configured).ok_or_else(|| {
+        format!(
+            "LASH_RUNBOOK_DIALECT must be a registered RLM language id ({}), got `{configured}`",
+            lash::rlm::RlmDialect::registered_language_ids()
+        )
+    })
 }
 
 /// The dialect a turn actually resolved, for prompt copy that has to be written

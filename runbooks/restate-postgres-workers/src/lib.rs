@@ -1503,16 +1503,15 @@ pub fn current_epoch_ms() -> u64 {
 /// failing. `runbooks/RULES.md` requires the host to pass this value on every
 /// session open, and these harnesses are hosts.
 pub fn runbook_rlm_dialect() -> Result<lash::rlm::RlmDialect> {
-    match std::env::var("LASH_RUNBOOK_DIALECT")
-        .unwrap_or_else(|_| "lashlang".to_string())
-        .as_str()
-    {
-        "lashlang" => Ok(lash::rlm::RlmDialect::Lashlang),
-        "typescript" => Ok(lash::rlm::RlmDialect::Typescript),
-        other => bail!(
-            "LASH_RUNBOOK_DIALECT must be a registered RLM language id (`lashlang` or `typescript`), got `{other}`"
-        ),
-    }
+    let configured = std::env::var("LASH_RUNBOOK_DIALECT")
+        .unwrap_or_else(|_| lash::rlm::RlmDialect::default().language_id().to_string());
+    let Some(dialect) = lash::rlm::RlmDialect::from_language_id(&configured) else {
+        bail!(
+            "LASH_RUNBOOK_DIALECT must be a registered RLM language id ({}), got `{configured}`",
+            lash::rlm::RlmDialect::registered_language_ids()
+        );
+    };
+    Ok(dialect)
 }
 
 /// One scripted cell that finishes with `value`, spelled for `dialect`.
