@@ -35,12 +35,20 @@ judged. **Manual judged** is the semantic browser or static-page runbook layer.
 
 ## Dialect parity is mandatory
 
-Every judged scenario is a two-row acceptance matrix: run it once with the session pinned
-to `lashlang` and once with the session pinned to `typescript`. This includes scenarios
-whose primary mechanism is dialect-independent. Use a fresh session id, data directory,
-ports, trace offset, and artifact directory for each row; never reuse one dialect's
-evidence for the other. The machine-readable inventory is
+Every judged scenario **that runs an RLM session** is a two-row acceptance matrix: run it
+once with the session pinned to `lashlang` and once with the session pinned to
+`typescript`. This includes scenarios whose primary mechanism is dialect-independent. Use a
+fresh session id, data directory, ports, trace offset, and artifact directory for each row;
+never reuse one dialect's evidence for the other. The machine-readable inventory is
 [`parity-matrix.toml`](parity-matrix.toml).
+
+The exception is named there rather than argued per scenario: a **standard-mode** host
+(`LashCore::standard_builder`, a native tool loop) has no RLM session, so it has no dialect
+to pin and no honest twin. A second row would buy an identical judged run, an identical
+bill, and a `dialect` label describing a session that does not exist. Those scenarios sit
+in `standard_mode_only` and emit one row each, labelled `standard` — the mode, not a
+language. Adding a scenario to that list is a claim about the host's builder, and the claim
+is checkable in the host's source.
 
 Set `LASH_RUNBOOK_DIALECT` to the row's language id and make the host pass that value in
 the RLM session-creation contract. Absence is allowed only for a Lashlang row and must be
@@ -78,7 +86,16 @@ repository's two-heavy-job limit and each runbook's port/container isolation rul
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
 or mutates the app it scores. RLM model-calling steps use `gpt-5.6-sol` or newer; record
 the actual execution model and judge model on every row, including any substitution.
-`python3 scripts/judged_runbook_matrix.py --shard I/N` emits a stable JSON work shard.
+`python3 scripts/judged_runbook_matrix.py --shard I/N` emits a stable JSON work shard. The
+matrix currently expands to **63 rows**: 30 RLM scenarios in two dialects, two
+standard-mode rows, and one TypeScript-only composite. The arithmetic is asserted by
+`scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave this number
+stale without turning CI red.
+
+Score a `cargo test`/`cargo nextest` run by its **passed count**, never by its exit code. A
+filter that matches nothing exits `0` and prints `0 passed; N filtered out`, which reads as
+a green gate and is evidence of nothing. Two shards of an earlier round were reported green
+on exactly that.
 
 ## What you're testing
 

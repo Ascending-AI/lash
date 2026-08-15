@@ -43,6 +43,16 @@ def rows(config: dict[str, object]) -> list[dict[str, str]]:
         }
         for scenario in config["typescript_only"]
     )
+    # Standard-mode hosts have no RLM session, so they have no dialect to pin
+    # and no honest twin: one row each, labelled with the mode.
+    result.extend(
+        {
+            "scenario": scenario,
+            "dialect": "standard",
+            "runbook": f"runbooks/{scenario}/runbook.md",
+        }
+        for scenario in config["standard_mode_only"]
+    )
     return result
 
 

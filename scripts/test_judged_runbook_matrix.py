@@ -19,7 +19,11 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         rows = MATRIX.rows(config)
         ordinary = set(config["scenarios"])
         actual = {(row["scenario"], row["dialect"]) for row in rows}
-        excluded = set(config["typescript_only"]) | set(config["deterministic_only"])
+        excluded = (
+            set(config["typescript_only"])
+            | set(config["deterministic_only"])
+            | set(config["standard_mode_only"])
+        )
         discovered = {
             path.parent.name
             for path in (ROOT / "runbooks").glob("*/runbook.md")
@@ -35,7 +39,12 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # shard set silently grows, and every extra row is a paid judged run.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
-        for key in ("scenarios", "typescript_only", "deterministic_only"):
+        for key in (
+            "scenarios",
+            "typescript_only",
+            "deterministic_only",
+            "standard_mode_only",
+        ):
             listed = config.get(key, [])
             duplicates = sorted(
                 {name for name in listed if listed.count(name) > 1}
@@ -46,10 +55,41 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         repeated = sorted({key for key in keys if keys.count(key) > 1})
         self.assertEqual(repeated, [], f"the matrix emits {repeated} more than once")
 
+    def test_standard_mode_hosts_get_exactly_one_dialect_neutral_row(self) -> None:
+        # A standard-mode host runs `LashCore::standard_builder`: a native tool
+        # loop with no RLM session, so it has no dialect to pin. A second row
+        # would buy an identical judged run and label it with a language the
+        # session never had.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        rows = MATRIX.rows(config)
+        for scenario in config["standard_mode_only"]:
+            emitted = [row for row in rows if row["scenario"] == scenario]
+            self.assertEqual(
+                [row["dialect"] for row in emitted],
+                ["standard"],
+                f"`{scenario}` must emit exactly one dialect-neutral row",
+            )
+            self.assertNotIn(scenario, config["scenarios"])
+
+    def test_the_row_total_is_the_stated_arithmetic(self) -> None:
+        # The count is cited in the report, the runbook rules and the shard
+        # plan. Deriving it here means a reclassification cannot silently leave
+        # those citations stale.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        expected = (
+            len(config["scenarios"]) * len(config["dialects"])
+            + len(config["typescript_only"])
+            + len(config["standard_mode_only"])
+        )
+        self.assertEqual(len(MATRIX.rows(config)), expected)
+        self.assertEqual(expected, 63)
+
     def test_shards_are_disjoint_and_complete(self) -> None:
         # Drives the script's own selection, so a regression in the shard
         # arithmetic turns this red. Re-implementing the split here tested
-        # Python, not the script: an off-by-one that dropped one row of 65 kept
+        # Python, not the script: an off-by-one that dropped one row of the total kept
         # this green.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)

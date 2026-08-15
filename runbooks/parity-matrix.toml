@@ -15,8 +15,6 @@ scenarios = [
   "request-abandon",
   "rlm-cell-boundary",
   "session-lease-triage",
-  "slack-clone-bot",
-  "slack-clone-mcp-client-depth",
   "tictactoe-full-game",
   "version-bump-recreation",
   "workbench-attachments",
@@ -46,6 +44,14 @@ scenarios = [
 # twin. The runbook keeps them together because the final phase composes all
 # three into the required durable restart turn.
 typescript_only = ["typescript-codemode-parity"]
+
+# Standard-mode reference hosts: `LashCore::standard_builder`, a native tool
+# loop, no RLM session and therefore no dialect to pin. Running them twice would
+# buy two identical judged runs and two identical bills, and the second row's
+# `dialect` label would be a claim about a session that does not exist. They get
+# one dialect-neutral row each, emitted with `dialect = "standard"` — the mode,
+# not a language — which is also their artifact directory.
+standard_mode_only = ["slack-clone-bot", "slack-clone-mcp-client-depth"]
 
 # Deterministic, hermetic harnesses that CI executes rather than judges. They
 # make no model call, so they have no dialect to pin and no judged row to pair;
