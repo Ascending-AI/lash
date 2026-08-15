@@ -20,7 +20,7 @@ Implementation commits:
 - `78f7e9cef` — latency-ordered settlement pinned for deferred batch leaves
 - `fa2ab715c` — the fixed map and padding cases fed to the oracle
 - `010663589` / `92bed819b` — the round-3 findings, red then green
-- `9016fdd3d` / (this head) — the astral empty-search divergence, red then green
+- `9016fdd3d` / `1dfa3686d` — the astral empty-search divergence, red then green
 
 Every SHA above is an ancestor of the head. An earlier revision of this ledger
 named pre-rebase commits that no longer describe this history.
