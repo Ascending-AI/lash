@@ -16,7 +16,7 @@ pub(crate) fn default_board() -> BoardState {
 
 /// The board context, written in the dialect this turn resolved.
 ///
-/// ADR 0060: host prompt copy follows the session's own dialect. The finish
+/// ADR 0063: host prompt copy follows the session's own dialect. The finish
 /// form and the noun for a unit of code are the two words in here that a
 /// TypeScript reader has never seen; `board.play(...)` is the same call path in
 /// both, because one tool binding serves both dialects.
@@ -177,7 +177,7 @@ fn winner(cells: &[Option<String>]) -> Option<&'static str> {
 mod dialect_tests {
     use super::*;
 
-    /// ADR 0060, host side: the board context names a finish form and a unit of
+    /// ADR 0063, host side: the board context names a finish form and a unit of
     /// code, and both are dialect words. The pair is asserted in both
     /// directions so neither can silently become the other's.
     #[test]

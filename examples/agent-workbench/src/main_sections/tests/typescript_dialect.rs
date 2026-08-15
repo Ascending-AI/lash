@@ -29,7 +29,7 @@ async fn run_turn_through_the_workbench_open_path(
         .expect("run the turn");
 }
 
-/// The host's half of ADR 0060, as a marker list.
+/// The host's half of ADR 0063, as a marker list.
 ///
 /// The substrate's walker (`dialect::prompt_walker_tests`) can only see the
 /// fragments the RLM crate contributes. A host adds its own: the Workbench
@@ -50,7 +50,7 @@ const HOST_FOREIGN_MARKERS: &[&str] = &[
 
 /// `lashlang_step` is the one identifier that legitimately crosses dialects:
 /// it is the `history` payload discriminant and the durable event-id prefix.
-/// ADR 0060 carries the whole carve-out list.
+/// ADR 0063 carries the whole carve-out list.
 fn strip_substrate_carve_outs(text: &str) -> String {
     text.replace("lashlang_step", "«substrate carve-out»")
 }
@@ -123,7 +123,7 @@ fn foreign_words_in(text: &str, markers: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// The host's counterpart to the substrate's prompt walker (ADR 0060).
+/// The host's counterpart to the substrate's prompt walker (ADR 0063).
 ///
 /// The Workbench injects three worked programs into every system prompt. They
 /// were written when Lashlang was the only dialect and were injected

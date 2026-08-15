@@ -351,7 +351,7 @@ impl ProtocolTurnExtension for RlmProjectionExtension {
     /// second dialect made the two copies *differ*, so the dedup stopped
     /// applying and a TypeScript session received both — its own block, and
     /// underneath it "Access them directly in `<lashlang>` blocks", the
-    /// sentence ADR 0060 exists to eliminate.
+    /// sentence ADR 0063 exists to eliminate.
     ///
     /// The handle keeps its real job, which is validation:
     /// `validate_turn_extension` rejects reserved binding names and refuses

@@ -104,7 +104,7 @@ impl SessionPlugin for WorkbenchSessionPlugin {
         reg.prompt().contribute(Arc::new(move |ctx| {
             let mail_world = mail_world.clone();
             let deferred_preview = deferred_preview.clone();
-            // ADR 0060: the host's worked examples are written in the dialect
+            // ADR 0063: the host's worked examples are written in the dialect
             // the executor is actually serving this turn, read from its own
             // execution section rather than from this process's configuration.
             let prompt = workbench_prompt(tutorial_dialect(&ctx.protocol_turn_options));

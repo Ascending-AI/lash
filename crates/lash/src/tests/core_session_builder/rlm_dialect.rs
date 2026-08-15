@@ -196,3 +196,102 @@ async fn unknown_rlm_dialect_fails_during_session_creation() -> Result<()> {
     assert!(error.to_string().contains("python"));
     Ok(())
 }
+
+/// The read-only-variables block reaches a served prompt **once**, spelled in
+/// the session's own dialect.
+///
+/// `TurnInput::rlm_project` attaches the same bindings on two seams: the
+/// protocol's plugin input, whose prompt hook renders the block with the
+/// session's vocabulary, and a `ProtocolTurnExtension` handle carried for
+/// validation. `lash-core` used to render that handle's own
+/// `prompt_contributions()` into the same prompt, and `PromptLayer` does not
+/// dedup — so the block landed twice, and the second copy was always Lashlang,
+/// because the handle is built by a host before any session has resolved a
+/// dialect. A TypeScript session read "Access them directly in `<lashlang>`
+/// blocks" underneath a correct copy of the same block.
+///
+/// Both halves are asserted because they fail independently: the count, and the
+/// spelling, in both dialects.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect() -> Result<()> {
+    use lash_protocol_rlm::{RlmProjectedBindings, RlmTurnInputExt};
+
+    for (dialect, own_tag, foreign_tag) in [
+        (
+            lash_rlm_types::RlmDialect::Lashlang,
+            "<lashlang>",
+            "<typescript>",
+        ),
+        (
+            lash_rlm_types::RlmDialect::Typescript,
+            "<typescript>",
+            "<lashlang>",
+        ),
+    ] {
+        let served: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let provider = {
+            let served = Arc::clone(&served);
+            crate::testing::TestProvider::builder()
+                .kind("projected-prompt")
+                .complete(move |request: crate::provider::LlmRequest| {
+                    let served = Arc::clone(&served);
+                    async move {
+                        served.lock_recover().push(format!("{request:?}"));
+                        Ok(LlmResponse {
+                            full_text: "done".to_string(),
+                            parts: vec![LlmOutputPart::Text {
+                                text: "done".to_string(),
+                                response_meta: None,
+                            }],
+                            ..LlmResponse::default()
+                        })
+                    }
+                })
+                .build()
+                .into_handle()
+        };
+        let core = explicit_ephemeral_facets(rlm_core_builder())
+            .provider(provider)
+            .model(mock_model_spec())
+            .build(crate::testing::runtime_lease_owner())?;
+        let session = {
+            use crate::rlm::RlmSessionBuilderExt as _;
+            core.session(format!("projected-{}", dialect.language_id()))
+                .rlm_dialect(dialect)?
+                .open()
+                .await?
+        };
+
+        let input = TurnInput::text("read the projected binding")
+            .rlm_project(
+                RlmProjectedBindings::new()
+                    .bind_json("current_file", serde_json::json!("src/lib.rs"))
+                    .expect("bind"),
+            )
+            .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
+        session.turn(input).run().await?;
+
+        let prompts = served.lock_recover().clone();
+        let prompt = prompts.first().expect("the turn reached the provider").clone();
+        assert_eq!(
+            prompt
+                .matches("These read-only values are already in scope")
+                .count(),
+            1,
+            "the read-only block must be assembled once, not once per storage route ({})",
+            dialect.language_id()
+        );
+        assert!(
+            prompt.contains(&format!("Access them directly in `{own_tag}`")),
+            "{} must be pointed at its own cells",
+            dialect.language_id()
+        );
+        assert!(
+            !prompt.contains(&format!("Access them directly in `{foreign_tag}`")),
+            "{} must not be pointed at the other dialect's cells",
+            dialect.language_id()
+        );
+    }
+    Ok(())
+}

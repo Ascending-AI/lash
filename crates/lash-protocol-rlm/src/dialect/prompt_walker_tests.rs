@@ -95,7 +95,7 @@ fn foreign_markers(language_id: &str) -> Vec<&'static str> {
 }
 
 /// Substrate identifiers that may appear in a prompt written in the other
-/// dialect's spelling. ADR 0060 holds the rule and the whole list; this is the
+/// dialect's spelling. ADR 0063 holds the rule and the whole list; this is the
 /// executable half of it.
 ///
 /// Exactly one qualifies, and it is a payload discriminant rather than prose:
@@ -112,7 +112,7 @@ fn foreign_markers(language_id: &str) -> Vec<&'static str> {
 /// The other durable cross-dialect identifier, the `__typescript_runtime`
 /// module the TypeScript lowerer resolves `Date.now()`/`Math.random()` through,
 /// is deliberately **not** here: nothing about it has to reach a model, so ADR
-/// 0060 hides it from the prompt instead of carving it out.
+/// 0063 hides it from the prompt instead of carving it out.
 /// The second carve-out is a durable process identity. A TypeScript session's
 /// processes are compiled against the Lashlang VM substrate and their ids are
 /// `process:lashlang:sha256:…` — journal identity, visible to a host through
@@ -214,7 +214,7 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
     // into the same prompt with no dedup. A walker that only exercised the
     // first route would keep passing while the second handed a TypeScript
     // session "Access them directly in `<lashlang>` blocks" — which is the
-    // sentence ADR 0060's Context quotes as the defect it exists to remove.
+    // sentence ADR 0063's Context quotes as the defect it exists to remove.
     let projected = crate::projection::RlmProjectedBindings::new()
         .bind_json("current_file", serde_json::json!("src/lib.rs"))
         .expect("seed one projected binding");

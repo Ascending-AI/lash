@@ -102,7 +102,7 @@ impl AppState {
 
     /// The settings panel for one session, labelled with the dialect that
     /// session *recorded* rather than the one this process is configured with —
-    /// the two differ exactly when the label matters (FIG-1306, ADR 0060).
+    /// the two differ exactly when the label matters (FIG-1306, ADR 0063).
     fn settings_for_session(
         &self,
         session_id: String,

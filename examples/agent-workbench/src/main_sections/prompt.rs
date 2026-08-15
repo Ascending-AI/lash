@@ -1,6 +1,6 @@
 // The Workbench's own share of the system prompt.
 //
-// ADR 0060 binds the substrate: every fragment of an assembled RLM prompt is
+// ADR 0063 binds the substrate: every fragment of an assembled RLM prompt is
 // written in the session's own dialect. A host that injects worked code
 // examples owns the same rule for its own copy, and this file is where the
 // Workbench holds up its end. The three tutorials below were written when

@@ -1529,7 +1529,7 @@ mod dialect_tests {
     use super::*;
 
     /// Both spellings are real cells of their own dialect, and neither carries
-    /// the other's words (ADR 0060).
+    /// the other's words (ADR 0063).
     #[test]
     fn a_scripted_finish_is_a_cell_of_its_own_dialect() {
         let lashlang = scripted_finish_cell(lash::rlm::RlmDialect::Lashlang, "\"ok\"");

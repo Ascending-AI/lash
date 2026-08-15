@@ -28,7 +28,7 @@ dialect that can hold state across a turn and one that can only run
 self-contained one-shot cells, and it is now covered by deterministic
 dual-dialect fixtures driven through the production turn path.
 
-This round is written up first in the review ledger and ratified as ADR 0060. A
+This round is written up first in the review ledger and ratified as ADR 0063. A
 context-clean fresh-eyes verification returned FIT-WITH-FIXES; its findings —
 one live prompt leak the walker could not see, one false attribution in this
 ledger, and six narrow gaps — are closed in the closure round below.
@@ -399,7 +399,7 @@ Every hash below is reachable from the branch head.
 | `0292ac006` | Pin that a per-turn override cannot re-point the dialect (**F5**) | Internal |
 | `77c67d938` | Clear the CI-only gates the F1 fix left red | Internal |
 | `ffb4cdaba` | Red: walk the driver's own copy and the substrate's leaked names | — |
-| `9291cea01` | Keep the substrate's own names out of the prompt, both directions (ADR 0060) | Fixed |
+| `9291cea01` | Keep the substrate's own names out of the prompt, both directions (ADR 0063) | Fixed |
 | `c8162dedc` | Teach the reader's own dialect in the Workbench, and label what ran | Fixed |
 | `ba596ed53` | Describe the board in the session's own dialect | Fixed |
 | `a35971cb5` | Script every deterministic reply in the row's own dialect | Fixed |
@@ -433,7 +433,7 @@ TypeScript session was correct in its execution section and wrong nearly
 everywhere else: in the copy assembled around it, in the host's own prompt, in
 the scripted replies of the harnesses that run twenty-one of the rows, and in
 what the substrate declined to tell it at all. This round closes that class and
-writes down the rule (ADR 0060: **one RLM turn is prompted in one dialect, in
+writes down the rule (ADR 0063: **one RLM turn is prompted in one dialect, in
 both directions, and one walker enforces it**).
 
 The walker is the deliverable, not the individual fixes. Every item below was
@@ -478,7 +478,7 @@ it in its data; "residual" means the leak is real and open.
 | `dialect/lashlang.rs` `output_limit_cell_copy` | **Fixed this round** — said "per cell" to a reader who has only seen blocks |
 | `driver/history.rs` runtime notes (`history` entry count) | Dialect-neutral; no change. The line names a bound variable, not syntax |
 | `protocol/prompt.rs` host-environment section | **Fixed this round** — one inventory, two formatters, `__` namespace hidden |
-| `protocol/driver.rs:890` `lashlang_step_<turn>_<iteration>` event ids | **Carve-out.** Durable session-graph identifiers, and the model receives `kind: "lashlang_step"` in `history`. ADR 0060 |
+| `protocol/driver.rs:890` `lashlang_step_<turn>_<iteration>` event ids | **Carve-out.** Durable session-graph identifiers, and the model receives `kind: "lashlang_step"` in `history`. ADR 0063 |
 | `driver.rs:566/592` test-fixture `lashlang_step_*` ids | Same carve-out; they mirror the durable ids on purpose |
 | `lash_typescript::parse` name resolution | **Fixed this round (F11)** — the executor passes the live session globals as an ambient root scope; a name nobody has still rejects at parse |
 | Execution trace `language` field | **Fixed this round** — records the dialect of the source that ran. The event name, JSONL file name and graph API keep their Lashlang names, because those describe the substrate |
@@ -521,7 +521,7 @@ seam fails it.
 
 ### The walker's carve-out list, in full
 
-`SUBSTRATE_CARVE_OUTS` (`dialect/prompt_walker_tests.rs`) and ADR 0060 hold the
+`SUBSTRATE_CARVE_OUTS` (`dialect/prompt_walker_tests.rs`) and ADR 0063 hold the
 same three entries. A carve-out is an identifier a prompt may spell in the other
 dialect's vocabulary **because the model genuinely receives it in its data**;
 everything else is either hidden or fixed.

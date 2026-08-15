@@ -69,7 +69,7 @@ pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVoca
 ///
 /// The host surface is declared once, in Lashlang `TypeExpr`s, and both
 /// dialects have to describe it. Rendering `list[str]` or `-> float` to a
-/// TypeScript reader would be the same defect ADR 0060 closes everywhere else,
+/// TypeScript reader would be the same defect ADR 0063 closes everywhere else,
 /// so the mapping is explicit rather than a formatted passthrough.
 /// A host type's name as TypeScript can spell it.
 ///
@@ -725,7 +725,7 @@ mod tests {
             "the reader's own primitive name, not `trigger.register`: {section}"
         );
         assert!(section.contains("triggers.list"), "{section}");
-        // And none of it may arrive in Lashlang's type syntax (ADR 0060).
+        // And none of it may arrive in Lashlang's type syntax (ADR 0063).
         for leak in ["list[", "-> str", ": str`", "float`", "trigger.register"] {
             assert!(!section.contains(leak), "`{leak}` leaked: {section}");
         }

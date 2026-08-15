@@ -75,7 +75,7 @@ pub fn rlm_execution_section_for_host_environment(
 /// Hiding rather than renaming is deliberate. The module path is a durable
 /// link-time identifier: it is embedded in every lowered TypeScript program,
 /// including the persisted bodies of durable processes that must still resolve
-/// when a worker wakes them after a restart. ADR 0060 records the rule and the
+/// when a worker wakes them after a restart. ADR 0063 records the rule and the
 /// carve-out list.
 fn module_is_runtime_internal(path: &[String]) -> bool {
     path.first()

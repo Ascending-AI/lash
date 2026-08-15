@@ -85,7 +85,7 @@ impl DevProviderScenario {
     /// The scripted provider for this scenario, in the dialect the host is
     /// configured to run.
     ///
-    /// ADR 0060 is about prompts; this is the same rule one layer out. Every
+    /// ADR 0063 is about prompts; this is the same rule one layer out. Every
     /// reply below is a *cell*, and a cell in the wrong dialect cannot execute:
     /// the session refuses it, the turn never reaches a terminal state, and the
     /// scenario hangs rather than failing. Nine of the twenty-one TypeScript
