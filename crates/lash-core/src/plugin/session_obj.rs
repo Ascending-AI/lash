@@ -340,10 +340,19 @@ impl PluginSession {
                                     repeated_plugin_id: earlier.plugin_id.clone(),
                                 });
                             }
-                            out.push(PluginOwned {
-                                plugin_id: earlier.plugin_id.clone(),
-                                value: directive,
-                            });
+                            let is_terminal_restriction = matches!(
+                                &directive,
+                                PluginDirective::AbortTurn { .. }
+                            ) || matches!(
+                                &directive,
+                                PluginDirective::ShortCircuitTool { output } if !output.is_success()
+                            );
+                            if is_terminal_restriction {
+                                out.push(PluginOwned {
+                                    plugin_id: earlier.plugin_id.clone(),
+                                    value: directive,
+                                });
+                            }
                         }
                     }
                 }

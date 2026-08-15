@@ -255,6 +255,40 @@ async fn terminal_conflict_is_an_observable_composition_event() {
 }
 
 #[tokio::test]
+async fn reinspection_does_not_emit_a_self_conflict() {
+    let plugins = before_tool_plugin_stack(vec![
+        fixed_before_tool_factory("policy", policy_denial()),
+        fixed_before_tool_factory(
+            "normalizer",
+            crate::PluginDirective::ReplaceToolArgs {
+                args: json!({ "value": "normalized" }),
+            },
+        ),
+    ]);
+    let (event_tx, mut events) = mpsc::channel(8);
+    let session_graph = Arc::new(RecordingSessionGraph::default());
+    let mut context = exact_dispatch_context_with_plugins(plugins);
+    context.event_tx = event_tx;
+    context.session_graph = session_graph.clone();
+
+    let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
+        .await
+        .record
+        .output;
+
+    assert!(!output.is_success());
+    assert_eq!(
+        output.value_for_projection()["code"],
+        json!("policy_denied")
+    );
+    assert!(events.try_recv().is_err(), "self-conflict runtime event");
+    assert!(
+        session_graph.events.lock_recover().is_empty(),
+        "self-conflict trace event"
+    );
+}
+
+#[tokio::test]
 async fn replacement_is_seen_by_remaining_plugin_hooks() {
     let inspected = Arc::new(std::sync::Mutex::new(Vec::new()));
     let inspector_observations = Arc::clone(&inspected);
@@ -419,4 +453,105 @@ async fn clean_bounded_reinspection_runs_on_replaced_arguments() {
         ]
     );
     assert_eq!(output.value_for_projection(), json!("replaced"));
+}
+
+#[tokio::test]
+async fn reinspection_rehonors_terminals_without_reapplying_side_effects() {
+    let invocations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let auditor_invocations = Arc::clone(&invocations);
+    let auditor = before_tool_factory(
+        "auditor",
+        Arc::new(move |ctx| {
+            let auditor_invocations = Arc::clone(&auditor_invocations);
+            Box::pin(async move {
+                auditor_invocations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut directives = vec![crate::PluginDirective::emit_runtime_events(vec![
+                    crate::PluginRuntimeEvent::Custom {
+                        name: "audit".to_string(),
+                        payload: json!({ "value": ctx.args["value"] }),
+                    },
+                ])];
+                if ctx.args["value"] == json!("forbidden") {
+                    directives.push(policy_denial());
+                }
+                Ok(directives)
+            })
+        }),
+    );
+    let replacer = fixed_before_tool_factory(
+        "replacer",
+        crate::PluginDirective::ReplaceToolArgs {
+            args: json!({ "value": "forbidden" }),
+        },
+    );
+    let plugins = before_tool_plugin_stack(vec![auditor, replacer]);
+    let (event_tx, mut events) = mpsc::channel(8);
+    let mut context = exact_dispatch_context_with_plugins(plugins);
+    context.event_tx = event_tx;
+
+    let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
+        .await
+        .record
+        .output;
+
+    assert_eq!(invocations.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert!(!output.is_success());
+    assert_eq!(
+        output.value_for_projection()["code"],
+        json!("policy_denied")
+    );
+    let event = events.try_recv().expect("first-pass audit event");
+    let crate::SessionStreamEvent::PluginEvent { plugin_id, event } = event else {
+        panic!("expected plugin runtime event");
+    };
+    assert_eq!(plugin_id, "auditor");
+    let crate::PluginRuntimeEvent::Custom { name, payload } = event else {
+        panic!("expected custom audit event");
+    };
+    assert_eq!(name, "audit");
+    assert_eq!(payload["value"], json!("original"));
+    assert!(
+        events.try_recv().is_err(),
+        "reinspection duplicated audit event"
+    );
+}
+
+#[tokio::test]
+async fn two_unconditional_replacers_are_a_typed_composition_error() {
+    let plugins = before_tool_plugin_stack(vec![
+        fixed_before_tool_factory(
+            "normalizer_one",
+            crate::PluginDirective::ReplaceToolArgs {
+                args: json!({ "value": "one" }),
+            },
+        ),
+        fixed_before_tool_factory(
+            "normalizer_two",
+            crate::PluginDirective::ReplaceToolArgs {
+                args: json!({ "value": "two" }),
+            },
+        ),
+    ]);
+
+    let error = plugins
+        .before_tool_call(crate::plugin::ToolCallHookContext::new(
+            "session".to_string(),
+            "beta".to_string(),
+            json!({ "value": "original" }),
+            beta_tool().manifest().argument_projection,
+            crate::TurnContext::default(),
+            Arc::new(crate::testing::MockSessionManager::default()),
+        ))
+        .await
+        .expect_err("two unconditional replacers must fail closed");
+
+    let crate::PluginError::BeforeToolCallReplacementConflict {
+        replacing_plugin_id,
+        repeated_plugin_id,
+    } = error
+    else {
+        panic!("expected typed replacement conflict: {error:?}");
+    };
+    assert_eq!(replacing_plugin_id, "normalizer_two");
+    assert_eq!(repeated_plugin_id, "normalizer_one");
 }

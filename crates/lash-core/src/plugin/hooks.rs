@@ -15,6 +15,13 @@ pub type SessionConfigMutator = Arc<
 >;
 pub type BeforeTurnHook =
     Arc<dyn Fn(TurnHookContext) -> PluginFuture<Vec<PluginDirective>> + Send + Sync>;
+/// Inspects a tool call before dispatch and returns directives for the runtime to apply.
+///
+/// A hook may be invoked more than once for one call when a later hook replaces the arguments.
+/// That bounded reinspection honors only restrictive terminal directives (`AbortTurn` and denied
+/// or cancelled `ShortCircuitTool`); side effects already applied from the initial pass are not
+/// applied again. A replacement emitted during reinspection is rejected as a typed composition
+/// error.
 pub type BeforeToolCallHook =
     Arc<dyn Fn(ToolCallHookContext) -> PluginFuture<Vec<PluginDirective>> + Send + Sync>;
 pub type AfterToolCallHook =

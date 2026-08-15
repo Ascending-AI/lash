@@ -27,7 +27,9 @@ produces another replacement, Lash rejects composition with the typed
 `PluginError::BeforeToolCallReplacementConflict`; it does not seek a fixed
 point. This makes a single replacement visible to every argument-inspecting
 hook regardless of whether the inspector was registered before or after the
-replacer.
+replacer. Reinspection is inspection only: Lash honors denials and aborts from
+the repeated hook invocation, but does not re-apply side effects already
+applied from its initial invocation.
 
 Terminal directives form a restrictive join:
 
@@ -38,7 +40,8 @@ Terminal directives form a restrictive join:
 The most restrictive terminal directive wins regardless of registration order.
 Equal-strength conflicts use plugin ID as a stable tie-breaker; directives from
 the same plugin use first-emitted-wins. Thus a hook can reduce permission but
-cannot restore it. Non-terminal side effects continue to run in directive order.
+cannot restore it. Non-terminal side effects from the initial pass continue to
+run in directive order.
 
 `AbortTurn` is the strongest stop directive in this join, but at the
 before-tool-call seam it does not abort the enclosing turn. It projects as a
@@ -46,7 +49,7 @@ failed tool result. When a later `AbortTurn` displaces an earlier structured
 denial, Lash therefore retains the denial's typed failure code and message
 instead of degrading that evidence to the abort's generic `tool_error`.
 
-Every terminal conflict is emitted through the awaited session trace seam as a
+Every inter-plugin terminal conflict is emitted through the awaited session trace seam as a
 custom `before_tool_call.directive_conflict` event identifying the winning and
 ignored plugin IDs and directive kinds. The event is attributed to the actual
 later plugin whose directive caused the conflict. If the trace service rejects
@@ -58,14 +61,24 @@ channel remains best-effort when full or closed.
 
 - Deny-then-allow and allow-then-deny both deny; abort wins against every other
   terminal outcome.
-- Argument normalizers remain supported. Earlier and later policy hooks inspect
-  one replacement, while a replacement during bounded reinspection is a typed
-  composition rejection.
+- A conditional argument normalizer that reaches a fixed point is supported:
+  earlier and later policy hooks inspect its replacement. Two unconditional
+  replacers hard-fail every call with the typed composition rejection. This is
+  fail-closed by design, and the bounded rejection is also the termination
+  proof: Lash never seeks another fixed point.
+- A before-tool hook may run more than once for one call. Its repeated
+  invocation is reinspection only: denials and aborts are re-honored, while
+  side-effecting directives are not re-applied.
 - Plugin registration order still orders transformations and side effects, but
   it cannot change terminal permission. This is locked by
   `replacement_is_reinspected_by_earlier_policy_in_either_registration_order`,
   `clean_bounded_reinspection_runs_on_replaced_arguments`, and
   `replacement_during_bounded_reinspection_is_a_typed_composition_error`.
+  `reinspection_does_not_emit_a_self_conflict` pins conflict evidence,
+  `reinspection_rehonors_terminals_without_reapplying_side_effects` pins
+  reinspection effects, and
+  `two_unconditional_replacers_are_a_typed_composition_error` pins the
+  fail-closed termination rule.
 - `PluginDirective` remains a transient in-process value with the same public
   and serde shape; the change needs no persistence or wire migration.
 

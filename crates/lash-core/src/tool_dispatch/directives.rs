@@ -154,7 +154,9 @@ impl BeforeToolDirectiveFold {
         } else {
             (current, candidate)
         };
-        emit_terminal_conflict(context, &later_plugin_id, &winner, &ignored).await;
+        if winner.plugin_id != ignored.plugin_id {
+            emit_terminal_conflict(context, &later_plugin_id, &winner, &ignored).await;
+        }
         if let Some(denial) = displaced_denial {
             winner.result = denial;
         }

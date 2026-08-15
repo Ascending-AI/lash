@@ -78,12 +78,13 @@ pub(crate) fn plugin_runtime_session_events(
 ///
 /// Before-tool-call hooks compose monotonically. Argument replacements take effect immediately;
 /// earlier hooks are reinspected once with the replacement, and another replacement during that
-/// bounded pass is rejected with [`PluginError::BeforeToolCallReplacementConflict`]. Terminal
-/// directives are joined by restrictiveness: abort beats a denied or cancelled short-circuit,
-/// which beats a successful short-circuit. Equal-strength conflicts use plugin ID as a stable
-/// tie-breaker, and a single plugin's first-emitted equal-strength terminal wins. The runtime emits
-/// terminal conflicts on the session trace seam and also attempts a plugin-attributed runtime
-/// event without blocking dispatch.
+/// bounded pass is rejected with [`PluginError::BeforeToolCallReplacementConflict`]. Reinspection
+/// honors denials and aborts only; side effects from the initial pass are not applied again.
+/// Terminal directives are joined by restrictiveness: abort beats a denied or cancelled
+/// short-circuit, which beats a successful short-circuit. Equal-strength conflicts use plugin ID
+/// as a stable tie-breaker, and a single plugin's first-emitted equal-strength terminal wins. The
+/// runtime emits inter-plugin terminal conflicts on the session trace seam and also attempts a
+/// plugin-attributed runtime event without blocking dispatch.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 // justification: directives are transient public plugin values and the common short-circuit output avoids another allocation.
