@@ -51,12 +51,19 @@ v1, and children inherit the parent's, so a TypeScript row whose child session r
 Lashlang prompt is the same violation. Letting a host pick a different dialect per child
 is future work.
 
-The data directory must be fresh per row, not merely per scenario. A session's dialect is
-durably pinned at its first commit, so reopening one under a different `LASH_RUNBOOK_DIALECT`
-is refused — a store carried over from the other row's dialect fails every route that opens
-a session, and carrying one over in the other direction keeps serving the recorded dialect
-while the environment claims otherwise. Neither is a battery result; both are a dirty
-harness.
+The data directory must be fresh per row, not merely per scenario, and this is the rule
+most likely to be silently violated. A session's dialect is durably pinned at its **first
+commit**, and the recorded pin always wins: both shipped hosts ask for the ambient
+`LASH_RUNBOOK_DIALECT` on every session open, and a session that already recorded a
+different one keeps its own — the workbench falls back to the recorded dialect, and
+`agent-service` catches the same conflict and reopens. So reopening a carried-over store
+under the other row's `LASH_RUNBOOK_DIALECT` does **not** fail: every route stays green and
+serves the *recorded* dialect while the environment claims the other one. Green routes are
+therefore no evidence at all that the store is clean, and the row's whole bundle is
+mislabeled evidence — the exact defect this matrix exists to catch. A fresh data directory
+is the only thing that makes the environment variable and the served dialect the same fact.
+Confirm the served dialect from the row's own evidence (prompt, cell tag, execution events),
+never from the environment.
 
 Runbook prose predating the parity matrix may say “Lashlang cell/program/source.” Read
 that as “the active dialect's cell/program/source” unless it names a stable product API,
