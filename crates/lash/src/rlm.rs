@@ -45,6 +45,34 @@ pub trait RlmSessionBuilderExt: Sized {
     fn final_answer_format(self, format: lash_rlm_types::RlmFinalAnswerFormat) -> Result<Self>;
 }
 
+/// Reads the dialect a session actually recorded.
+///
+/// The write side of this pair ([`RlmSessionBuilderExt::rlm_dialect`]) is a
+/// *request*: the recorded pin wins, so what a host asked for and what a
+/// session runs can differ whenever the store predates the request. Anything a
+/// host labels with a language — a rendered transcript, an API payload, an
+/// evidence bundle — has to read the recorded value rather than repeat its own
+/// configuration, or it will label the wrong dialect precisely in the case the
+/// label exists to disambiguate.
+#[cfg(feature = "rlm")]
+pub trait RlmSessionReadViewExt {
+    /// The dialect recorded on this session, defaulting to Lashlang for a
+    /// session that has recorded none (which is how every pre-dialect session
+    /// reads).
+    fn rlm_dialect(&self) -> lash_rlm_types::RlmDialect;
+}
+
+#[cfg(feature = "rlm")]
+impl RlmSessionReadViewExt for lash_core::SessionReadView {
+    fn rlm_dialect(&self) -> lash_rlm_types::RlmDialect {
+        self.protocol_turn_options()
+            .decode::<lash_rlm_types::RlmCreateExtras>()
+            .ok()
+            .and_then(|extras| extras.dialect)
+            .unwrap_or_default()
+    }
+}
+
 #[cfg(feature = "rlm")]
 impl RlmSessionBuilderExt for SessionBuilder {
     fn rlm_dialect(mut self, dialect: lash_rlm_types::RlmDialect) -> Result<Self> {

@@ -940,7 +940,9 @@ mod tests {
         );
         let context =
             lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-                Arc::new(crate::control_tools::RlmControlToolsProvider),
+                Arc::new(crate::control_tools::RlmControlToolsProvider {
+                    vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                }),
                 catalog,
                 invocation,
             );
@@ -4058,7 +4060,11 @@ mod tests {
 
             let globals = state.bound_variable_values(&BTreeSet::new());
             let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-            let rendered = crate::rlm_support::render_bound_variables(&mut cache, &globals);
+            let rendered = crate::rlm_support::render_bound_variables(
+                &mut cache,
+                &globals,
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            );
 
             assert!(
                 rendered.contains("- `scratch_note` = after execution"),
@@ -4122,11 +4128,20 @@ mod tests {
             let globals = state.bound_variable_values(&exclude);
 
             let mut warm = crate::rlm_support::BoundVariableRenderCache::default();
-            let _ = crate::rlm_support::render_bound_variables(&mut warm, &globals);
+            let _ = crate::rlm_support::render_bound_variables(
+                &mut warm,
+                &globals,
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            );
             let t2 = std::time::Instant::now();
             let mut s2 = 0usize;
             for _ in 0..n {
-                s2 += crate::rlm_support::render_bound_variables(&mut warm, &globals).len();
+                s2 += crate::rlm_support::render_bound_variables(
+                    &mut warm,
+                    &globals,
+                    crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                )
+                .len();
             }
             let warm_us = t2.elapsed().as_nanos() as f64 / n as f64 / 1000.0;
 
@@ -4134,7 +4149,12 @@ mod tests {
             let mut s3 = 0usize;
             for _ in 0..n {
                 let mut cold = crate::rlm_support::BoundVariableRenderCache::default();
-                s3 += crate::rlm_support::render_bound_variables(&mut cold, &globals).len();
+                s3 += crate::rlm_support::render_bound_variables(
+                    &mut cold,
+                    &globals,
+                    crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                )
+                .len();
             }
             let cold_us = t3.elapsed().as_nanos() as f64 / n as f64 / 1000.0;
 
@@ -4195,7 +4215,12 @@ mod tests {
 
             let globals = state.bound_variable_values(&BTreeSet::new());
             let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-            let s = crate::rlm_support::render_bound_variables(&mut cache, &globals).to_string();
+            let s = crate::rlm_support::render_bound_variables(
+                &mut cache,
+                &globals,
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            )
+            .to_string();
 
             // Large record -> type + keys=N + projector preview.
             assert!(s.contains("`big_map`:"), "{s}");

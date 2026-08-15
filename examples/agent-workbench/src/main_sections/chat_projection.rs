@@ -205,6 +205,14 @@ fn transcript_rows_from_committed(
     user_replacements: &BTreeMap<String, ChatMessage>,
     protocol_state_message_ids: &BTreeSet<String>,
 ) -> Vec<TranscriptRow> {
+    // The label comes from the dialect the session recorded, not from this
+    // process's ambient configuration: the recorded pin is what the executor
+    // actually ran, and the two differ exactly when a store outlives a config
+    // change — the case a language label exists to disambiguate.
+    let language = {
+        use lash::rlm::RlmSessionReadViewExt as _;
+        read_view.rlm_dialect().language_id()
+    };
     read_view
         .chronological_projection()
         .into_entries()
@@ -247,7 +255,7 @@ fn transcript_rows_from_committed(
                         }
                         vec![TranscriptRow::CodeBlock {
                             id: step.id,
-                            language: "lashlang".to_string(),
+                            language: language.to_string(),
                             code: step.code,
                             output,
                             success: step.error.is_none(),

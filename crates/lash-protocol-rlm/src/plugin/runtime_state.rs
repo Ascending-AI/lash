@@ -75,7 +75,14 @@ impl RlmRuntimeState {
         &self,
     ) -> Vec<lash_core::PromptContribution> {
         let bindings = self.session_projected_bindings.lock().await;
-        RlmProjectionExtension::prompt_contributions_for(&bindings)
+        RlmProjectionExtension::prompt_contributions_for(
+            &bindings,
+            self.dialect.prompt_vocabulary(),
+        )
+    }
+
+    pub(super) fn dialect_prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
+        self.dialect.prompt_vocabulary()
     }
 
     pub(super) fn shared_bound_variables_prompt(&self) -> SharedBoundVariablesPrompt {
@@ -94,7 +101,7 @@ impl RlmRuntimeState {
         let rendered = prepared.map_or_else(
             || {
                 let mut cache = BoundVariableRenderCache::default();
-                render_bound_variables(&mut cache, &[])
+                render_bound_variables(&mut cache, &[], self.dialect.prompt_vocabulary())
             },
             crate::dialect::BoundVariablesPromptRender::render,
         );

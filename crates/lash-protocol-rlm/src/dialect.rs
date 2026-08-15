@@ -1,4 +1,4 @@
-mod lashlang;
+pub(crate) mod lashlang;
 mod typescript;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -87,8 +87,69 @@ pub(crate) trait RlmDialectSession: Send {
     ) -> Result<BoundVariablesPromptRender, SessionError>;
 }
 
+/// The dialect-specific words and call forms every shared prompt fragment
+/// needs.
+///
+/// Prompt copy was dialect-aware only where it was obviously a *cell* — the
+/// execution section, the retry copy, the finalization copy. Everything else
+/// assembled around those (bound variables, read-only variables, tool docs,
+/// budget escalation, the final-answer instruction) was written when Lashlang
+/// was the only dialect and hardcoded its syntax. A TypeScript session was
+/// therefore told, in the same prompt, to write `<typescript>` cells and that
+/// its variables were "bound in lashlang ... in `<lashlang>` blocks". A model
+/// cannot follow both; the judged battery caught one spending reasoning tokens
+/// reconciling the contradiction.
+///
+/// One struct rather than a dozen trait methods, so a new fragment has an
+/// obvious place to read its words from and `no_cross_dialect_text_in_the_
+/// assembled_prompt` has one source of truth to check against.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DialectPromptVocabulary {
+    /// How the prompt names the language in prose.
+    pub(crate) language_name: &'static str,
+    /// The opening cell tag, quoted in prose that points at cells.
+    pub(crate) cell_open_tag: &'static str,
+    /// What the prompt calls one unit of code: Lashlang says "block".
+    pub(crate) cell_noun: &'static str,
+    /// The call that prints a value for inspection.
+    pub(crate) print_call: &'static str,
+    /// `print x` vs `console.log(x)`, ready to take a value expression.
+    pub(crate) print_statement_prefix: &'static str,
+    pub(crate) print_statement_suffix: &'static str,
+    /// The finish form as the prompt spells it in prose.
+    pub(crate) finish_statement: &'static str,
+    /// The continue-as control call, as a model would write it.
+    pub(crate) continue_as_call: &'static str,
+    /// A complete continue-as example for the tool doc.
+    pub(crate) continue_as_example: &'static str,
+}
+
+impl Default for DialectPromptVocabulary {
+    /// The default dialect's words, matching `RlmDialect::default()`.
+    fn default() -> Self {
+        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY
+    }
+}
+
+impl DialectPromptVocabulary {
+    /// `print x` / `console.log(x)` for one expression.
+    pub(crate) fn print_statement(&self, expression: &str) -> String {
+        format!(
+            "{}{expression}{}",
+            self.print_statement_prefix, self.print_statement_suffix
+        )
+    }
+}
+
 pub(crate) trait RlmDialect: Send + Sync {
     fn language_id(&self) -> &'static str;
+
+    /// The words shared prompt fragments use when they name this dialect's
+    /// syntax. See [`DialectPromptVocabulary`].
+    fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
+
+    /// The call path a model writes to invoke `tool` in this dialect.
+    fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> Result<String, SessionError>;
 
     fn snapshot_engine_id(&self) -> &'static str;
 
@@ -200,3 +261,34 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+pub(crate) fn test_dialect_services() -> LashlangDialectServices {
+    LashlangDialectServices {
+        projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+        artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
+        deferred_tool_resolver: None,
+        execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+        execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn lashlang_test_dialect() -> LashlangDialect {
+    LashlangDialect::new(
+        lash_lashlang_runtime::LashlangSurface::default(),
+        test_dialect_services(),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn typescript_test_dialect() -> TypescriptDialect {
+    TypescriptDialect::new(
+        lash_lashlang_runtime::LashlangSurface::default(),
+        test_dialect_services(),
+    )
+}
+
+#[cfg(test)]
+#[path = "dialect/prompt_walker_tests.rs"]
+mod prompt_walker_tests;

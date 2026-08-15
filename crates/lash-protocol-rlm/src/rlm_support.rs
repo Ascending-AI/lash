@@ -46,10 +46,29 @@ pub(crate) fn decode_rlm_termination_options(
 /// or `None` when there's nothing to say. The string is intentionally
 /// per-turn dynamic; callers must place it AFTER the cache breakpoint,
 /// never inside the cached system prompt.
+/// Public API shape, unchanged: renders the default dialect's wording.
+///
+/// The RLM driver calls [`format_budget_suffix_with_vocabulary`] with the
+/// session's own dialect; this wrapper exists so the crate's public surface
+/// does not have to expose the internal vocabulary type.
 pub fn format_budget_suffix(
     turn_index: usize,
     usage: Option<&PromptUsage>,
     max_budget_tokens: Option<usize>,
+) -> Option<String> {
+    format_budget_suffix_with_vocabulary(
+        turn_index,
+        usage,
+        max_budget_tokens,
+        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+    )
+}
+
+pub(crate) fn format_budget_suffix_with_vocabulary(
+    turn_index: usize,
+    usage: Option<&PromptUsage>,
+    max_budget_tokens: Option<usize>,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> Option<String> {
     let max = max_budget_tokens?;
     let usage = usage?;
@@ -61,15 +80,23 @@ pub fn format_budget_suffix(
     let mut content =
         format!("Turn: {turn_index} · Tokens: {used} · frame switch threshold: {max} ({pct}%).");
     if pct >= 60 {
+        let call = vocabulary.continue_as_call;
+        let cell = vocabulary.cell_noun;
         let tail = if used >= max {
-            "Past the frame switch threshold. End this block with `control.continue_as(...)` now; do not call `finish` or do more work after it. Pack only what the new frame needs into `task` + `seed`."
+            format!(
+                "Past the frame switch threshold. End this {cell} with `{call}` now; do not call `finish` or do more work after it. Pack only what the new frame needs into `task` + `seed`."
+            )
         } else if pct >= 90 {
-            "Budget tight — finish only the current step, then end the block with `control.continue_as(...)`."
+            format!(
+                "Budget tight — finish only the current step, then end the {cell} with `{call}`."
+            )
         } else {
-            "Look for a clean frame switch point; when you switch, make `control.continue_as(...)` the terminal action in the block."
+            format!(
+                "Look for a clean frame switch point; when you switch, make `{call}` the terminal action in the {cell}."
+            )
         };
         content.push('\n');
-        content.push_str(tail);
+        content.push_str(&tail);
     }
     Some(content)
 }
@@ -149,7 +176,10 @@ impl ReadOnlyVariableDoc {
     }
 }
 
-pub(crate) fn render_read_only_variables(mut docs: Vec<ReadOnlyVariableDoc>) -> String {
+pub(crate) fn render_read_only_variables(
+    mut docs: Vec<ReadOnlyVariableDoc>,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> String {
     docs.sort_by(|left, right| left.name.cmp(&right.name));
     let shapes = docs
         .iter()
@@ -163,7 +193,10 @@ pub(crate) fn render_read_only_variables(mut docs: Vec<ReadOnlyVariableDoc>) -> 
     }
 
     let mut lines = vec![
-        "These read-only values are already in scope. Access them directly in `<lashlang>` blocks; do not recreate them manually.".to_string(),
+        format!(
+            "These read-only values are already in scope. Access them directly in `{}` {}s; do not recreate them manually.",
+            vocabulary.cell_open_tag, vocabulary.cell_noun
+        ),
         String::new(),
         "Read-only variables:".to_string(),
     ];
@@ -186,10 +219,17 @@ pub(crate) fn render_read_only_variables(mut docs: Vec<ReadOnlyVariableDoc>) -> 
 pub(crate) fn render_bound_variables(
     cache: &mut BoundVariableRenderCache,
     globals: &[(String, FlowValue)],
+    vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> Arc<str> {
     let mut lines = vec![
-        "These variables are already bound in lashlang. Access them directly in `<lashlang>` blocks; do not recreate them manually.".to_string(),
-        "Small values are shown in full; larger ones show only a truncated preview (record keys, or the head and tail of a list/string) — but the variable still holds its COMPLETE value. A short preview never means state was lost; `print` the variable (or the part you need) to see the rest.".to_string(),
+        format!(
+            "These variables are already bound in {}. Access them directly in `{}` {}s; do not recreate them manually.",
+            vocabulary.language_name, vocabulary.cell_open_tag, vocabulary.cell_noun
+        ),
+        format!(
+            "Small values are shown in full; larger ones show only a truncated preview (record keys, or the head and tail of a list/string) — but the variable still holds its COMPLETE value. A short preview never means state was lost; `{}` the variable (or the part you need) to see the rest.",
+            vocabulary.print_call
+        ),
     ];
 
     // Drop cache slots for variables that no longer exist.
@@ -246,7 +286,7 @@ pub(crate) fn render_bound_variables(
         "list",
     ));
     for row in &rows {
-        let line = render_row_line(row, &registry);
+        let line = render_row_line(row, &registry, vocabulary);
         cache.entries.insert(
             row.name.clone(),
             BoundVariableRenderCacheEntry {
@@ -342,7 +382,11 @@ fn history_item_type_definition() -> Vec<String> {
     ]
 }
 
-fn render_row_line(row: &WorkRow, registry: &SchemaRegistry) -> String {
+fn render_row_line(
+    row: &WorkRow,
+    registry: &SchemaRegistry,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> String {
     if let Some(inline) = &row.inline {
         // Value shown explicitly; no type/size hint needed.
         return format!("- `{}` = {inline}", row.name);
@@ -362,7 +406,10 @@ fn render_row_line(row: &WorkRow, registry: &SchemaRegistry) -> String {
     if row.size_hint.is_some() {
         // The preview is display-only; reassure the value is still live so the
         // model `print`s it rather than concluding state was lost.
-        line.push_str(&format!(" (full value live — `print {}`)", row.name));
+        line.push_str(&format!(
+            " (full value live — `{}`)",
+            vocabulary.print_statement(&row.name)
+        ));
     }
     line
 }
@@ -775,14 +822,23 @@ mod bound_variable_tests {
 
     fn render_with_cache(cache: &mut BoundVariableRenderCache, value: serde_json::Value) -> String {
         let globals = globals(value);
-        render_bound_variables(cache, &globals).to_string()
+        render_bound_variables(
+            cache,
+            &globals,
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        )
+        .to_string()
     }
 
     #[test]
     fn small_values_render_inline_without_type_or_size() {
         let g = globals(json!({ "inventory": ["lantern", "sword"], "count": 3 }));
         let mut cache = BoundVariableRenderCache::default();
-        let rendered = render_bound_variables(&mut cache, &g);
+        let rendered = render_bound_variables(
+            &mut cache,
+            &g,
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        );
         let s = &rendered;
         assert!(s.contains("- `inventory` = [\"lantern\",\"sword\"]"), "{s}");
         assert!(s.contains("- `count` = 3"), "{s}");
@@ -796,7 +852,11 @@ mod bound_variable_tests {
         let big: Vec<String> = (0..500).map(|i| format!("item-{i}")).collect();
         let g = globals(json!({ "big": big }));
         let mut cache = BoundVariableRenderCache::default();
-        let rendered = render_bound_variables(&mut cache, &g);
+        let rendered = render_bound_variables(
+            &mut cache,
+            &g,
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        );
         let s = &rendered;
         assert!(s.contains("- `big`:"), "{s}");
         assert!(s.contains("len=500"), "{s}");
@@ -812,7 +872,12 @@ mod bound_variable_tests {
         );
         let g = globals(json!({ "map": rooms }));
         let mut cache = BoundVariableRenderCache::default();
-        let s = render_bound_variables(&mut cache, &g).to_string();
+        let s = render_bound_variables(
+            &mut cache,
+            &g,
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        )
+        .to_string();
         assert!(s.contains("`map`:"), "{s}"); // type still shown
         assert!(s.contains("keys=30"), "{s}"); // size still shown
         assert!(s.contains("≈ {"), "{s}"); // preview present
@@ -825,7 +890,12 @@ mod bound_variable_tests {
         let items: Vec<_> = (0..40).map(|i| json!(format!("note-{i:02}"))).collect();
         let g = globals(json!({ "notes": items }));
         let mut cache = BoundVariableRenderCache::default();
-        let s = render_bound_variables(&mut cache, &g).to_string();
+        let s = render_bound_variables(
+            &mut cache,
+            &g,
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        )
+        .to_string();
         assert!(s.contains("len=40"), "{s}");
         assert!(s.contains("note-00"), "{s}"); // head retained
         assert!(s.contains("note-39"), "{s}"); // tail retained

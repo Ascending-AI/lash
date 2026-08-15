@@ -291,6 +291,12 @@ impl RlmProjectedBindings {
 pub(crate) struct RlmProjectionExtension {
     pub(crate) bindings: RlmProjectedBindings,
     pub(crate) tool_result_projectors: Vec<RlmToolResultProjector>,
+    /// The words the read-only-variables blurb is written in.
+    ///
+    /// An extension can be built by a host before any dialect is resolved, so
+    /// this starts at the default dialect's vocabulary and the protocol sets
+    /// the session's real one as soon as it owns the extension.
+    pub(crate) vocabulary: crate::dialect::DialectPromptVocabulary,
 }
 
 impl RlmProjectionExtension {
@@ -298,6 +304,7 @@ impl RlmProjectionExtension {
         Self {
             bindings,
             tool_result_projectors: Vec::new(),
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
         }
     }
 
@@ -305,6 +312,7 @@ impl RlmProjectionExtension {
         Self {
             bindings: RlmProjectedBindings::new(),
             tool_result_projectors: vec![projector],
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
         }
     }
 
@@ -317,6 +325,7 @@ impl RlmProjectionExtension {
 
     pub(crate) fn prompt_contributions_for(
         bindings: &RlmProjectedBindings,
+        vocabulary: crate::dialect::DialectPromptVocabulary,
     ) -> Vec<PromptContribution> {
         let docs = bindings.prompt_docs();
         if docs.is_empty() {
@@ -324,7 +333,7 @@ impl RlmProjectionExtension {
         }
         vec![PromptContribution::environment(
             "Read-Only Variables",
-            crate::rlm_support::render_read_only_variables(docs),
+            crate::rlm_support::render_read_only_variables(docs, vocabulary),
         )]
     }
 }
@@ -335,7 +344,7 @@ impl ProtocolTurnExtension for RlmProjectionExtension {
     }
 
     fn prompt_contributions(&self) -> Vec<PromptContribution> {
-        Self::prompt_contributions_for(&self.bindings)
+        Self::prompt_contributions_for(&self.bindings, self.vocabulary)
     }
 }
 
@@ -588,9 +597,12 @@ mod tests {
                 }),
             )
             .expect("bind task payload");
-        let contribution = RlmProjectionExtension::prompt_contributions_for(&bindings)
-            .pop()
-            .expect("prompt contribution");
+        let contribution = RlmProjectionExtension::prompt_contributions_for(
+            &bindings,
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        )
+        .pop()
+        .expect("prompt contribution");
 
         assert!(
             contribution

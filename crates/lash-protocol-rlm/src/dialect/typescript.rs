@@ -25,9 +25,34 @@ impl TypescriptDialect {
     }
 }
 
+pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVocabulary =
+    crate::dialect::DialectPromptVocabulary {
+        language_name: "TypeScript",
+        cell_open_tag: "<typescript>",
+        cell_noun: "cell",
+        print_call: "console.log",
+        print_statement_prefix: "console.log(",
+        print_statement_suffix: ")",
+        finish_statement: "finish(value)",
+        continue_as_call: "control.continue_as(...)",
+        continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } });",
+    };
+
 impl RlmDialect for TypescriptDialect {
     fn language_id(&self) -> &'static str {
         LANGUAGE_ID
+    }
+
+    fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
+        TYPESCRIPT_PROMPT_VOCABULARY
+    }
+
+    fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> Result<String, SessionError> {
+        Ok(
+            lash_lashlang_runtime::required_tool_typescript_executable(manifest)
+                .map_err(|error| SessionError::Protocol(error.to_string()))?
+                .call_path(),
+        )
     }
 
     fn snapshot_engine_id(&self) -> &'static str {
@@ -315,7 +340,7 @@ impl RlmDialectSession for TypescriptDialectSession {
             let mut cache = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            render_bound_variables(&mut cache, &globals)
+            render_bound_variables(&mut cache, &globals, TYPESCRIPT_PROMPT_VOCABULARY)
         }))
     }
 }

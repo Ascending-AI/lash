@@ -44,9 +44,34 @@ impl LashlangDialect {
     }
 }
 
+pub(crate) const LASHLANG_PROMPT_VOCABULARY: crate::dialect::DialectPromptVocabulary =
+    crate::dialect::DialectPromptVocabulary {
+        language_name: "lashlang",
+        cell_open_tag: "<lashlang>",
+        cell_noun: "block",
+        print_call: "print",
+        print_statement_prefix: "print ",
+        print_statement_suffix: "",
+        finish_statement: "finish <value>",
+        continue_as_call: "control.continue_as(...)",
+        continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } })?",
+    };
+
 impl RlmDialect for LashlangDialect {
     fn language_id(&self) -> &'static str {
         LANGUAGE_ID
+    }
+
+    fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
+        LASHLANG_PROMPT_VOCABULARY
+    }
+
+    fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> Result<String, SessionError> {
+        Ok(
+            lash_lashlang_runtime::required_tool_lashlang_executable(manifest)
+                .map_err(|error| SessionError::Protocol(error.to_string()))?
+                .call_path(),
+        )
     }
 
     fn snapshot_engine_id(&self) -> &'static str {
@@ -324,7 +349,7 @@ impl RlmDialectSession for LashlangDialectSession {
             let mut cache = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            render_bound_variables(&mut cache, &globals)
+            render_bound_variables(&mut cache, &globals, LASHLANG_PROMPT_VOCABULARY)
         }))
     }
 }
