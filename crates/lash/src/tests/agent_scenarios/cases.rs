@@ -20,6 +20,8 @@ use super::process_parent_atomicity::agent_scenario_public_process_parents_are_l
 use super::transcript::agent_scenario_transcript;
 #[cfg(feature = "rlm")]
 use lash_core::llm::types::LlmUsage;
+#[cfg(feature = "rlm")]
+use lash_core::testing::behavior_transcript::normalize_opaque_blob_size_labels;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug)]
@@ -275,7 +277,7 @@ finish result"#,
             .min_completed_process_graphs(1),
         )
         .await?;
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -284,7 +286,7 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
         root                     turn_state            stored logical=370B
-        root                     tool_state            stored logical=3.3KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=346B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="lookup" kind="lashlang" terminal=true
@@ -426,7 +428,7 @@ finish result"#,
             .min_completed_process_graphs(1),
         )
         .await?;
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -435,13 +437,13 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=5.9KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=341B
-        session-001              tool_state            stored logical=6.6KB
+        session-001              tool_state            stored logical=<opaque>
         session-001              plugin_snapshot       stored logical=342B
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
@@ -487,7 +489,7 @@ finish result"#,
             .min_completed_process_graphs(2),
         )
         .await?;
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -496,7 +498,7 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=3.1KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
@@ -547,7 +549,7 @@ finish result"#,
         // Expect test first: the failure path's shape is the review artifact —
         // which cell failed, that the child's reason surfaced, and that the
         // parent's processes still folded to a terminal state.
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -560,13 +562,13 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=5.9KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=346B
-        session-001              tool_state            stored logical=6.6KB
+        session-001              tool_state            stored logical=<opaque>
         session-001              plugin_snapshot       stored logical=342B
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
@@ -632,7 +634,7 @@ finish { joined: [left_value, right_value] }"#,
         // Expect test first: the reviewable artifact is the spawn -> await ->
         // terminal fold plus what each turn actually committed, and a changed
         // shape is easier to judge than the first assertion that trips on it.
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -641,7 +643,7 @@ finish { joined: [left_value, right_value] }"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=3.1KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true

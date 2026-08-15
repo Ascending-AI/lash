@@ -87,6 +87,26 @@ pub const TEXT_BUDGET_CHARS: usize = 72;
 /// Character budget for one canonical-JSON attribute value.
 pub const JSON_BUDGET_CHARS: usize = 96;
 
+/// Normalize opaque checkpoint blob size labels before snapshotting a transcript.
+pub fn normalize_opaque_blob_size_labels(transcript: &str) -> String {
+    // House rule: never snapshot opaque-blob sizes; retain typed components.
+    transcript
+        .lines()
+        .map(|line| {
+            if line.contains("tool_state") && line.contains("stored logical=") {
+                let prefix = line
+                    .split_once("logical=")
+                    .map(|(prefix, _)| prefix)
+                    .expect("matched opaque tool-state size label");
+                format!("{prefix}logical=<opaque>")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Durable-write event names the vocabulary can emit.
 ///
 /// `scripts/check-transcript-diff.py` keys the `Transcript:` justification rule
@@ -1066,6 +1086,16 @@ mod tests {
         assert!(
             DURABLE_WRITE_EVENTS.contains(&CHECKPOINT_COMMIT_EVENT),
             "the commit event must stay in the durable-marker list"
+        );
+    }
+
+    #[test]
+    fn opaque_blob_size_normalization_keeps_typed_components_and_refs() {
+        let transcript = "root                     turn_state            stored logical=240B\nroot                     tool_state            stored logical=6.8KB\nroot                     plugin_snapshot       stored logical=342B\nroot                     tool_state            ref (unchanged)";
+
+        assert_eq!(
+            normalize_opaque_blob_size_labels(transcript),
+            "root                     turn_state            stored logical=240B\nroot                     tool_state            stored logical=<opaque>\nroot                     plugin_snapshot       stored logical=342B\nroot                     tool_state            ref (unchanged)"
         );
     }
 
