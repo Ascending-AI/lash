@@ -87,26 +87,6 @@ pub const TEXT_BUDGET_CHARS: usize = 72;
 /// Character budget for one canonical-JSON attribute value.
 pub const JSON_BUDGET_CHARS: usize = 96;
 
-/// Normalize opaque checkpoint blob size labels before snapshotting a transcript.
-pub fn normalize_opaque_blob_size_labels(transcript: &str) -> String {
-    // House rule: never snapshot opaque-blob sizes; retain typed components.
-    transcript
-        .lines()
-        .map(|line| {
-            if line.contains("tool_state") && line.contains("stored logical=") {
-                let prefix = line
-                    .split_once("logical=")
-                    .map(|(prefix, _)| prefix)
-                    .expect("matched opaque tool-state size label");
-                format!("{prefix}logical=<opaque>")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// Durable-write event names the vocabulary can emit.
 ///
 /// `scripts/check-transcript-diff.py` keys the `Transcript:` justification rule
@@ -505,6 +485,10 @@ impl Usage {
 
 impl Component {
     /// A component whose body reached the store.
+    ///
+    /// The opaque `tool_state` body is rendered without its logical byte size;
+    /// behavior-transcript snapshots retain the stored/ref distinction without
+    /// pinning an encoding-dependent blob measurement.
     pub fn stored(name: impl Into<String>, logical_bytes: Option<usize>) -> Self {
         Self {
             name: name.into(),
@@ -522,6 +506,9 @@ impl Component {
 
     fn rendered_body(&self) -> String {
         match self.body {
+            ComponentBody::Stored { .. } if self.name == "tool_state" => {
+                "stored logical=<opaque>".to_string()
+            }
             ComponentBody::Stored {
                 logical_bytes: Some(bytes),
             } => format!("stored logical={}", format_bytes(bytes)),
@@ -1090,13 +1077,25 @@ mod tests {
     }
 
     #[test]
-    fn opaque_blob_size_normalization_keeps_typed_components_and_refs() {
-        let transcript = "root                     turn_state            stored logical=240B\nroot                     tool_state            stored logical=6.8KB\nroot                     plugin_snapshot       stored logical=342B\nroot                     tool_state            ref (unchanged)";
-
-        assert_eq!(
-            normalize_opaque_blob_size_labels(transcript),
-            "root                     turn_state            stored logical=240B\nroot                     tool_state            stored logical=<opaque>\nroot                     plugin_snapshot       stored logical=342B\nroot                     tool_state            ref (unchanged)"
+    fn opaque_tool_state_sizes_are_normalized_by_the_renderer() {
+        let mut transcript = Transcript::new();
+        transcript.record(
+            Entry::commit(session("s"), 0, 1, Usage::none())
+                .component(Component::stored("turn_state", Some(240)))
+                .component(Component::stored("tool_state", Some(6_800)))
+                .component(Component::stored("plugin_snapshot", Some(342)))
+                .component(Component::unchanged_ref("tool_state")),
         );
+
+        let rendered = transcript.render();
+        insta::assert_snapshot!(rendered, @r###"
+        session-001  commit    checkpoint.commit       rev=0->1
+        session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
+        session-001              turn_state            stored logical=240B
+        session-001              tool_state            stored logical=<opaque>
+        session-001              plugin_snapshot       stored logical=342B
+        session-001              tool_state            ref (unchanged)
+        "###);
     }
 
     #[test]

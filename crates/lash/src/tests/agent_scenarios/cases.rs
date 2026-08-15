@@ -20,8 +20,6 @@ use super::process_parent_atomicity::agent_scenario_public_process_parents_are_l
 use super::transcript::agent_scenario_transcript;
 #[cfg(feature = "rlm")]
 use lash_core::llm::types::LlmUsage;
-#[cfg(feature = "rlm")]
-use lash_core::testing::behavior_transcript::normalize_opaque_blob_size_labels;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug)]
@@ -277,7 +275,7 @@ finish result"#,
             .min_completed_process_graphs(1),
         )
         .await?;
-        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -428,7 +426,7 @@ finish result"#,
             .min_completed_process_graphs(1),
         )
         .await?;
-        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -489,7 +487,7 @@ finish result"#,
             .min_completed_process_graphs(2),
         )
         .await?;
-        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -549,7 +547,7 @@ finish result"#,
         // Expect test first: the failure path's shape is the review artifact —
         // which cell failed, that the child's reason surfaced, and that the
         // parent's processes still folded to a terminal state.
-        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
@@ -634,7 +632,7 @@ finish { joined: [left_value, right_value] }"#,
         // Expect test first: the reviewable artifact is the spawn -> await ->
         // terminal fold plus what each turn actually committed, and a changed
         // shape is easier to judge than the first assertion that trips on it.
-        insta::assert_snapshot!(normalize_opaque_blob_size_labels(&agent_scenario_transcript(&run, "root")), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
