@@ -580,9 +580,9 @@ with no other heavy build job running concurrently.
 |---|---|
 | `cargo fmt --all --check` | PASS |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0). Red twice before it: a `&format!` at the `continue_as` doc and `step_output_text` crossing the argument bound once the vocabulary joined it |
-| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-trace -p lash-restate-postgres-workers-e2e --locked` | PASS; **722 run, 722 passed**, 13 skipped. Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
-| `cargo test -p lash-runtime --features rlm --lib` | PASS; 247 tests. Run explicitly because the RLM-feature tests, including the new per-turn-override pin, are `cfg(feature = "rlm")` |
-| `cargo test --workspace --locked` | PASS; **4,501 passed, zero failures**, exit 0 at `0602c5f4a`, re-run green in the closure round. Executed alone with nothing else building and scored on the **passed count** rather than the exit code. Its first execution was red on three agent-scenario size labels; those are this round's own doing (the shortened `continue_as` description) and are re-recorded, not drift |
+| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-trace -p lash-restate-postgres-workers-e2e --locked` | PASS; **724 run, 724 passed**, 13 skipped after the closure round (722 before it). Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
+| `cargo test -p lash-runtime --features rlm --lib` | PASS; 248 tests. Run explicitly because the RLM-feature tests, including the new per-turn-override pin, are `cfg(feature = "rlm")` |
+| `cargo test --workspace --locked` | PASS; **4,502 passed, zero failures**, exit 0 (4,501 at `0602c5f4a`; the closure round adds the served-prompt assertion). Executed alone with nothing else building and scored on the **passed count** rather than the exit code. Its first execution was red on three agent-scenario size labels; those are this round's own doing (the shortened `continue_as` description) and are re-recorded, not drift |
 | `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,488 entries, after re-anchoring 33 references. `RlmSessionReadViewExt` and its `rlm_dialect` moved from `unused-add` to `used-asserted` on the new end-to-end label assertion |
 | `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
 | `python3 scripts/test_judged_runbook_matrix.py` | PASS; 6 tests (4 before this round) |
