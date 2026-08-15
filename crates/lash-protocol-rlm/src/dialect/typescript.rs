@@ -384,11 +384,67 @@ mod tests {
             section.contains("TS_MUTABLE_CAPTURE_UNSUPPORTED"),
             "{section}"
         );
-        assert!(
-            section.contains("TS_FOR_OF_ITERATOR_UNSUPPORTED"),
-            "{section}"
-        );
+        assert!(section.contains("TS_FOR_OF_UNSUPPORTED"), "{section}");
         insta::assert_snapshot!("typescript_execution_section", section);
+    }
+
+    /// Every `TS_` token the prompt names must be a code the dialect can
+    /// actually emit.
+    ///
+    /// The prompt is prose, so a code name in it is unchecked by the compiler.
+    /// This layer shipped `TS_FOR_OF_ITERATOR_UNSUPPORTED` — a code that has
+    /// never existed — into the production prompt, into the assertion above
+    /// (which pinned the falsehood rather than catching it), and into a runbook
+    /// gate that could therefore never fire. Telling the model to expect a
+    /// string it will never see degrades exactly the error recovery the prompt
+    /// exists to support, so the whole class is closed here rather than the one
+    /// instance.
+    #[test]
+    fn every_diagnostic_code_named_in_the_prompt_exists() {
+        let dialect = TypescriptDialect::new(
+            LashlangSurface::default(),
+            LashlangDialectServices {
+                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+        );
+        let prompt = dialect
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+            )
+            .expect("render execution section");
+        let real = lash_typescript::DiagnosticCode::ALL
+            .iter()
+            .map(|code| code.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        let mut named = std::collections::BTreeSet::new();
+        let mut rest = prompt.as_str();
+        while let Some(start) = rest.find("TS_") {
+            rest = &rest[start..];
+            let end = rest
+                .find(|character: char| !character.is_ascii_uppercase() && character != '_')
+                .unwrap_or(rest.len());
+            named.insert(&rest[..end]);
+            rest = &rest[end..];
+        }
+        assert!(
+            named.len() >= 7,
+            "the walker found only {named:?}; the prompt names more than that"
+        );
+
+        let phantom = named
+            .iter()
+            .filter(|token| !real.contains(**token))
+            .collect::<Vec<_>>();
+        assert!(
+            phantom.is_empty(),
+            "the prompt names {phantom:?}, which the dialect cannot emit"
+        );
     }
 
     #[test]
