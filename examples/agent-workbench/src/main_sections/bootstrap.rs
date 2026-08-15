@@ -262,7 +262,6 @@ async fn async_main() -> AnyhowResult<()> {
 
     let state = AppState {
         core,
-        #[cfg(not(test))]
         rlm_dialect,
         attachment_store,
         trigger_store,
@@ -293,6 +292,23 @@ async fn async_main() -> AnyhowResult<()> {
         process_deployment,
         process_worker,
     );
+    // Create the persistent session up front, so the ambient dialect is applied
+    // exactly once, at creation. Every later open asks for no dialect and gets
+    // whatever was recorded: a session's dialect is durably pinned at its first
+    // commit, and asserting the ambient one on reopen fails every route when
+    // the store predates the flip. A parity row therefore needs a fresh data
+    // directory, which `runbooks/RULES.md` requires.
+    state
+        .creating_session_builder(state.session_ids.current())
+        .open()
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "failed to open the workbench session as `{}`: {error}",
+                rlm_dialect.language_id()
+            )
+        })?;
+
     emit_workbench_trace(
         &state.trace_sink,
         None,

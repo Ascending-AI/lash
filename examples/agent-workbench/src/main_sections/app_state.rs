@@ -1,14 +1,27 @@
 
 impl AppState {
+    /// Opens an existing session, asking for no particular dialect.
+    ///
+    /// A session's dialect is durably pinned at its first commit, so asserting
+    /// the ambient one on every open is both wrong directions at once: against
+    /// a store holding Lashlang sessions, `LASH_RUNBOOK_DIALECT=typescript`
+    /// makes every route that opens a session fail, while the reverse flip is
+    /// silently ignored and keeps serving the recorded dialect. Reopening asks
+    /// for nothing and gets what was recorded.
     fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
+        self.core.session(session_id)
+    }
+
+    /// Opens a session that this call is creating, pinning the ambient dialect.
+    ///
+    /// The only place `LASH_RUNBOOK_DIALECT` is applied. A parity row must
+    /// therefore start from a fresh data directory, which `runbooks/RULES.md`
+    /// requires.
+    fn creating_session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
         use lash::rlm::RlmSessionBuilderExt as _;
 
         let builder = self.core.session(session_id);
-        #[cfg(test)]
-        let dialect = lash::rlm::RlmDialect::Lashlang;
-        #[cfg(not(test))]
-        let dialect = self.rlm_dialect;
-        match dialect {
+        match self.rlm_dialect {
             lash::rlm::RlmDialect::Lashlang => builder,
             lash::rlm::RlmDialect::Typescript => builder
                 .rlm_dialect(lash::rlm::RlmDialect::Typescript)

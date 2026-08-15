@@ -387,6 +387,7 @@ fn attachment_usage_gate_state(
         .expect("gate process observer configured");
     AppState {
         core,
+        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store,
         trigger_store: in_memory_trigger_store(),
         process_observer,

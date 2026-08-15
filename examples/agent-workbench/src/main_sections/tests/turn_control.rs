@@ -52,6 +52,7 @@ mod turn_control_timeout_tests {
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
@@ -288,6 +289,7 @@ mod turn_control_timeout_tests {
             .expect("process observer configured");
         AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
@@ -466,6 +468,7 @@ finish (await handle)?
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,

@@ -433,6 +433,7 @@ mod tests {
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
@@ -512,6 +513,7 @@ mod tests {
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
@@ -781,6 +783,7 @@ finish "gap source"
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
@@ -1061,6 +1064,7 @@ finish initial
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
@@ -1257,6 +1261,7 @@ finish initial
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
@@ -1420,6 +1425,7 @@ finish initial
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
@@ -1898,6 +1904,7 @@ finish initial
                 .expect("open durable product events");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store,
             process_observer,

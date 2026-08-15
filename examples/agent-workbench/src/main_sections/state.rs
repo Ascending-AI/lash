@@ -2,7 +2,12 @@ use lash::sync::MutexExt;
 #[derive(Clone)]
 struct AppState {
     core: LashCore,
-    #[cfg(not(test))]
+    /// The dialect new sessions are created with, from `LASH_RUNBOOK_DIALECT`.
+    ///
+    /// A plain field rather than a `cfg(test)` fork: forking it meant the
+    /// production and test builds of `session_builder` differed by
+    /// construction, so no test could ever reach the TypeScript branch of the
+    /// code that ships.
     rlm_dialect: lash::rlm::RlmDialect,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,

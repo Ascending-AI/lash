@@ -843,7 +843,7 @@ async fn reset_chat(
         }),
     );
     let session = state
-        .session_builder(new_session_id.clone())
+        .creating_session_builder(new_session_id.clone())
         .open()
         .await
         .map_err(AppError::session_open)?;

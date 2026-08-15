@@ -132,6 +132,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         .expect("process observer configured");
     AppState {
         core,
+        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         trigger_store,
         process_observer,

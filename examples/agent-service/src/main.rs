@@ -316,6 +316,7 @@ async fn async_main() -> anyhow_like::Result<()> {
         model,
         Some(model_variant),
         durability,
+        crate::state::rlm_dialect_from_env()?,
     );
     state
         .recover_pending_chat_forks()

@@ -225,6 +225,7 @@
             .expect("process observer configured");
         let state = AppState {
             core: resumed_core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,

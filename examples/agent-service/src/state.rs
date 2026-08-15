@@ -21,6 +21,12 @@ pub(crate) struct AppStateData {
     default_model_variant: Option<String>,
     #[cfg_attr(not(feature = "restate"), allow(dead_code))]
     durability: AgentServiceDurability,
+    /// The dialect a newly created chat session is pinned to.
+    ///
+    /// Read once at construction rather than from the environment on every
+    /// session open, so the value is injectable and a chat's dialect cannot
+    /// change under it mid-process.
+    rlm_dialect: lash::rlm::RlmDialect,
     #[cfg(feature = "restate")]
     restate_ingress_url: Option<String>,
     #[cfg(feature = "restate")]
@@ -58,6 +64,7 @@ impl AppStateData {
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
+        rlm_dialect: lash::rlm::RlmDialect,
     ) -> Self {
         Self {
             core,
@@ -66,6 +73,7 @@ impl AppStateData {
             default_model,
             default_model_variant,
             durability,
+            rlm_dialect,
         }
     }
 
@@ -108,26 +116,32 @@ impl AppStateData {
     ) -> AppResult<LashSession> {
         use lash::rlm::RlmSessionBuilderExt as _;
 
-        let builder = self
-            .core
-            .session(chat_id)
-            .session_spec(lash::SessionSpec::inherit().model(model))
-            .plugin::<DemoPlugin>(DemoPluginConfig {
-                db: Arc::clone(&self.db),
-            });
-        let builder = match std::env::var("LASH_RUNBOOK_DIALECT")
-            .unwrap_or_else(|_| "lashlang".to_string())
-            .as_str()
-        {
-            "lashlang" => builder,
-            "typescript" => builder.rlm_dialect(lash::rlm::RlmDialect::Typescript)?,
-            other => {
-                return Err(AppError::internal(format!(
-                    "LASH_RUNBOOK_DIALECT must be a registered RLM language id (`lashlang` or `typescript`), got `{other}`"
-                )));
-            }
+        let builder = || {
+            self.core
+                .session(chat_id)
+                .session_spec(lash::SessionSpec::inherit().model(model.clone()))
+                .plugin::<DemoPlugin>(DemoPluginConfig {
+                    db: Arc::clone(&self.db),
+                })
         };
-        Ok(builder.open().await?)
+        // The ambient dialect applies to a chat this call is creating. An
+        // existing chat keeps the dialect recorded at its first commit: asking
+        // for a different one is a hard error, and asserting it on every open
+        // made every route fail against a store that predates the flip. Asking
+        // and accepting the recorded answer is the same rule, stated so that a
+        // reopen cannot break.
+        if self.rlm_dialect == lash::rlm::RlmDialect::Lashlang {
+            return Ok(builder().open().await?);
+        }
+        match builder()
+            .rlm_dialect(lash::rlm::RlmDialect::Typescript)?
+            .open()
+            .await
+        {
+            Ok(session) => Ok(session),
+            Err(error) if is_dialect_pin_conflict(&error) => Ok(builder().open().await?),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub(crate) async fn with_db<T, F>(&self, f: F) -> AppResult<T>
@@ -270,4 +284,32 @@ impl AgentServiceDurability {
 
 pub(crate) mod anyhow_like {
     pub(crate) type Result<T> = std::result::Result<T, String>;
+}
+
+/// Whether opening a session failed because it already recorded a different
+/// dialect, as opposed to failing for any other reason.
+///
+/// Matched on the message because the pin lives in the protocol plugin and
+/// surfaces as a protocol error; a narrower match would need the plugin's error
+/// type in this example's dependency set. A wrong answer here can only make a
+/// genuinely broken open retry once without the dialect and fail again.
+fn is_dialect_pin_conflict(error: &lash::EmbedError) -> bool {
+    error.to_string().contains("RLM dialect is durably pinned")
+}
+
+/// The dialect new chat sessions are created with, from `LASH_RUNBOOK_DIALECT`.
+///
+/// Read once at startup so the value is injected into the state rather than
+/// consulted on every session open.
+pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
+    match std::env::var("LASH_RUNBOOK_DIALECT")
+        .unwrap_or_else(|_| "lashlang".to_string())
+        .as_str()
+    {
+        "lashlang" => Ok(lash::rlm::RlmDialect::Lashlang),
+        "typescript" => Ok(lash::rlm::RlmDialect::Typescript),
+        other => Err(format!(
+            "LASH_RUNBOOK_DIALECT must be a registered RLM language id (`lashlang` or `typescript`), got `{other}`"
+        )),
+    }
 }
