@@ -144,4 +144,28 @@ mod tests {
             Some("typescript")
         );
     }
+
+    /// A whitespace-dirtied open tag is not a cell, in any dialect.
+    ///
+    /// `<typescript >` is not recognized, so a reply carrying one falls back to
+    /// the prose path this diagnostic exists to replace. That is deliberate and
+    /// symmetric rather than an oversight: the *active* dialect's grammar
+    /// refuses the same shape, so recognizing it here would name a foreign cell
+    /// in a case where the model's own dialect would have refused an identical
+    /// tag. The residue is named here so the next reader does not have to
+    /// rediscover which half of the behaviour is designed.
+    #[test]
+    fn a_malformed_open_tag_is_not_a_cell_in_either_dialect() {
+        let malformed = "<typescript >\nfinish(1);\n</typescript>";
+        assert_eq!(foreign_dialect_cell(malformed, LASHLANG_TAGS), None);
+        // And the active dialect's own grammar agrees, which is what makes the
+        // asymmetry a non-issue: neither reading executes anything.
+        assert!(
+            matches!(
+                extract_cell("<lashlang >\nfinish 1\n</lashlang>", LASHLANG_TAGS),
+                Ok(None)
+            ),
+            "a malformed active open tag is not a cell either"
+        );
+    }
 }

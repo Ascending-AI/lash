@@ -548,6 +548,14 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
 /// each of these a *scenario* rather than a loop.
 #[test]
 fn every_dev_provider_scenario_reaches_a_finish() {
+    // `ToolValue` is excluded, and the exclusion carries its reason: its cell
+    // does not finish, it calls a tool whose result *is* the terminal
+    // (`ToolControl::Finish`), so the turn ends on the tool's control rather
+    // than on a `finish` in the cell. It is single-shot for that reason, not
+    // an oversight — the shape `code-failure` got wrong was a scenario that
+    // could not terminate at all, and this one terminates through the other
+    // seam. `RenderedSurface` is likewise single-shot and does finish, so it
+    // is covered by the tag/link walk instead.
     for scenario in [
         failure_provider::DevProviderScenario::AuthFailureOnce,
         failure_provider::DevProviderScenario::RateLimitOnce,
@@ -563,6 +571,11 @@ fn every_dev_provider_scenario_reaches_a_finish() {
             let last = scenario
                 .scripted_cell_for_test(dialect, 1)
                 .unwrap_or_else(|| panic!("{} scripts a second call", scenario.as_str()));
+            assert_ne!(
+                scenario,
+                failure_provider::DevProviderScenario::ToolValue,
+                "ToolValue terminates through its tool's control, not a scripted finish"
+            );
             let finish = match dialect {
                 lash::rlm::RlmDialect::Typescript => "finish(",
                 _ => "finish ",
@@ -586,6 +599,16 @@ fn every_dev_provider_scenario_reaches_a_finish() {
 /// was a hang rather than a red row. The timeout here is the regression guard:
 /// a scenario that cannot terminate must fail this test rather than run out the
 /// harness.
+///
+/// **Reproducing the hang takes two reverts, not one.** Restoring the shipped
+/// cell alone is not enough: the same fix also added the `call == 0` retry
+/// branch, and that branch on its own makes the scenario terminate (the bad
+/// cell fails, the retry finishes, and this test passes in ~0.15s). Both
+/// changes have to come out — the shipped `fail "..."` cell as the *only*
+/// scripted reply — for the 60s timeout to fire with "never reached a terminal
+/// state". With only the cell reverted, the fixture that goes red instead is
+/// `every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect`, which
+/// link-verifies the cell in both dialects.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
     for dialect in [

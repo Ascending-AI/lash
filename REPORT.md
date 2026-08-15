@@ -357,7 +357,7 @@ argument for the walker existing at all.
 | B (red side) | The transcript-label fix had no test observing a TypeScript session's rendered label end to end | `/api/state` projection asserted in both dialects | `c8162dedc` |
 | A (agent-service) | The tic-tac-toe board context named `finish "<sentence>"` and "the lashlang block" to every dialect | both directions asserted | `ba596ed53` |
 | C (harnesses) | Four deterministic harnesses scripted Lashlang cells whatever the row claimed. A foreign cell cannot execute, so the row **hangs** rather than failing | cell-tag walk + link of every scripted cell | `a35971cb5` |
-| C (`code-failure`) | Broken in *both* dialects: `fail "..."` at cell top level is process-only, so the cell never committed and the unbounded turn budget re-asked the provider forever. No test existed | executed fixture, 60s timeout, reproduces the hang | `a35971cb5` |
+| C (`code-failure`) | Broken in *both* dialects: `fail "..."` at cell top level is process-only, so the cell never committed and the unbounded turn budget re-asked the provider forever. No test existed | executed fixture, 60s timeout. **Two reverts** reproduce the hang: the shipped cell *and* the `call == 0` retry branch — the retry alone makes it terminate. With only the cell reverted, the link-verify fixture goes red instead | `a35971cb5` |
 | E (matrix) | Two standard-mode hosts were billed for a TypeScript row describing a session they never open | two new self-tests, total derived | `0424bdfed` |
 | D (generalized) | Two judged gates asked for readings a correct run cannot produce: a marker's absence from an omitted request body, and `lane_held = false` from a race the harness deliberately does not fix | — (documentation) | `2bae0152a` |
 | O3 (discoverability) | A TypeScript session was never told its trigger sources, host data types or `triggers.*` operations exist, while the host prompt told it to use `cron.Schedule`. A judged row watched a model search, find nothing, and produce a VOID | new dialect test, both directions | `3034ed91e` |
@@ -515,11 +515,19 @@ Things a reader should not have to dig for:
   typed-rendering changes rather than copy edits, and both are asserted by
   equality in `KNOWN_TYPE_SYNTAX_RESIDUALS` so they cannot be forgotten or
   silently joined by a third.
-- **Three agent-scenario size labels drifted before this round.** The canonical
-  workspace run found them; restoring this branch's inherited
-  `lash-protocol-rlm` reproduces the drift, so they are not this round's doing —
-  the previous round's "workspace test PASS" row was stale. They are re-recorded
-  here rather than left red.
+- **Three agent-scenario size labels changed because of this round, and the
+  first version of this report said otherwise.** The claim was "pre-existing
+  drift, the previous round's PASS row was stale". It is false. This round
+  routed the `continue_as` tool description through the vocabulary, so
+  `"…the last meaningful statement in the lashlang block…"` became
+  `"…in the block…"` — nine bytes shorter, in a description that is serialized
+  into `tool_state`, whose logical size those transcripts assert. Restoring
+  `cell_noun: "lashlang block"` restores all three labels exactly. The bisect
+  that produced the wrong conclusion reverted only `crates/lash-protocol-rlm`,
+  which is where `dialect/lashlang.rs` lives — and it *did* still reproduce,
+  because the revert also restored the old vocabulary; the inference "therefore
+  pre-existing" did not follow. The committed labels are right; the sentence
+  about a previous round was not, and it is withdrawn.
 - **The `code-failure` scenario shipped with no test at all**, which is how it
   came to script a program that is invalid in both dialects. Its unbounded
   retry is a second defect (FIG-1407, main-side) that this round deliberately
@@ -542,7 +550,7 @@ with no other heavy build job running concurrently.
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0). Red twice before it: a `&format!` at the `continue_as` doc and `step_output_text` crossing the argument bound once the vocabulary joined it |
 | `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-trace -p lash-restate-postgres-workers-e2e --locked` | PASS; **722 run, 722 passed**, 13 skipped. Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
 | `cargo test -p lash-runtime --features rlm --lib` | PASS; 247 tests. Run explicitly because the RLM-feature tests, including the new per-turn-override pin, are `cfg(feature = "rlm")` |
-| `cargo test --workspace --locked` | PASS; **4,501 passed, zero failures**, exit 0. The canonical final run, executed alone with nothing else building, and scored on the **passed count** rather than the exit code. Its first execution this round was red on three agent-scenario size labels, which reproduce with this branch's inherited `lash-protocol-rlm` restored and are therefore pre-existing drift, re-recorded here |
+| `cargo test --workspace --locked` | PASS; **4,501 passed, zero failures**, exit 0 at `0602c5f4a`, re-run green in the closure round. Executed alone with nothing else building and scored on the **passed count** rather than the exit code. Its first execution was red on three agent-scenario size labels; those are this round's own doing (the shortened `continue_as` description) and are re-recorded, not drift |
 | `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,488 entries, after re-anchoring 33 references. `RlmSessionReadViewExt` and its `rlm_dialect` moved from `unused-add` to `used-asserted` on the new end-to-end label assertion |
 | `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
 | `python3 scripts/test_judged_runbook_matrix.py` | PASS; 6 tests (4 before this round) |
@@ -556,7 +564,7 @@ with no other heavy build job running concurrently.
 |---|---|
 | A (driver copy) + O1 | The walker was extended first and reported five violations across both directions: `execution section` contains `__typescript_runtime`; `output limit` and `output limit retry` contain `per cell` (Lashlang); `history preview notice` and `history output reference` contain `re-print` (TypeScript). Committed red at `ffb4cdaba` |
 | A (host prompt) | The host-side walker asserts each prompt against the *other* dialect's marker list and requires both lists to fire, so the check cannot go vacuous. The link check found a real constraint while being written — a definition's `const` must be named exactly its `name` literal — which failed two of the three TypeScript tutorials until the copy was corrected |
-| C (`code-failure`) | Restoring the shipped cell (`fail "..."` in both dialects) makes `the_code_failure_scenario_renders_a_failed_cell_and_terminates` fail at its 60s timeout with "the lashlang code-failure scenario never reached a terminal state" — the hang reproduced, then green again in 0.18s |
+| C (`code-failure`) | Restoring the shipped cell **and** removing the `call == 0` retry branch — the true shipped shape — makes `the_code_failure_scenario_renders_a_failed_cell_and_terminates` fail at its 60s timeout with "the lashlang code-failure scenario never reached a terminal state"; green again in 0.18s. Reverting the cell alone is not sufficient: the retry branch makes the scenario terminate on its own, and what goes red then is the link-verify fixture, in both dialects |
 | C (harnesses) | With the example routing unwired, the walker reports `typescript prompt fragment `tool docs` contains `)?``; the fixture's Lashlang rendering is separately asserted to contain `)?` so the marker has something real to catch |
 | E (matrix) | The row total is derived from the four category lists and pinned, so a reclassification that leaves RULES.md or this report stale turns the self-test red |
 | F11 | Reverting the executor's one-line wiring (`parse_with_globals` → `parse`) turns both TypeScript legs of `a_cell_reads_what_an_earlier_cell_bound_in_both_dialects` and `a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects` red, with both Lashlang legs still green — the dialect asymmetry named directly. The crate-level rule has its own five-case suite (`crates/lash-typescript/tests/session_globals.rs`) |

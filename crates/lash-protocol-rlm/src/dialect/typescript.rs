@@ -23,6 +23,25 @@ impl TypescriptDialect {
     pub(crate) fn new(surface: LashlangSurface, services: LashlangDialectServices) -> Self {
         Self { surface, services }
     }
+
+    /// A dialect that can render prompts and diagnostics but cannot execute,
+    /// mirroring `LashlangDialect::prompt_only`. The protocol driver needs one
+    /// per dialect to answer questions about cells without an execution
+    /// environment behind it.
+    pub(crate) fn prompt_only(surface: LashlangSurface) -> Self {
+        Self {
+            surface,
+            services: LashlangDialectServices {
+                projection_resolver: std::sync::Arc::new(
+                    crate::projection::ProjectionRegistry::new(),
+                ),
+                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+        }
+    }
 }
 
 fn is_plain_identifier(text: &str) -> bool {
@@ -52,6 +71,17 @@ pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVoca
 /// dialects have to describe it. Rendering `list[str]` or `-> float` to a
 /// TypeScript reader would be the same defect ADR 0060 closes everywhere else,
 /// so the mapping is explicit rather than a formatted passthrough.
+/// A host type's name as TypeScript can spell it.
+///
+/// Host data types are named with dots (`cron.Tick`), which is a valid
+/// *reference* in Lashlang and not a valid TypeScript identifier. The
+/// declaration already renders as `type cron_Tick = …`, so every reference to
+/// it has to agree — otherwise the model is shown a type it cannot resolve
+/// against the declaration immediately above it.
+fn typescript_type_name(name: &str) -> String {
+    name.replace('.', "_")
+}
+
 fn typescript_type(ty: &lashlang::TypeExpr) -> String {
     match ty {
         lashlang::TypeExpr::Any | lashlang::TypeExpr::Dict => "unknown".to_string(),
@@ -79,7 +109,7 @@ fn typescript_type(ty: &lashlang::TypeExpr) -> String {
                 .join("; ");
             format!("{{ {fields} }}")
         }
-        lashlang::TypeExpr::Ref(name) => name.to_string(),
+        lashlang::TypeExpr::Ref(name) => typescript_type_name(name),
         lashlang::TypeExpr::Process { input, output, .. } => format!(
             "ProcessDefinition<{}, {}>",
             typescript_type(input),
@@ -92,15 +122,32 @@ fn typescript_type(ty: &lashlang::TypeExpr) -> String {
     }
 }
 
+/// The host surface, in this dialect's spelling.
+///
+/// A TypeScript session used to receive no inventory at all: the section
+/// rendered tool signatures and stopped, so the trigger sources, their
+/// event types and the `triggers.*` operations were invisible — while the
+/// host's own prompt told the model to use them. A judged row watched a
+/// model search for `cron.Schedule`, find nothing, and conclude the trigger
+/// APIs did not exist.
+/// `TriggerSource<cron.Tick>` → `TriggerSource<cron_Tick>`.
+///
+/// The inventory resolves a constructor's output to a nominal label built from
+/// the host type's own dotted name; only the payload inside the angle brackets
+/// needs this dialect's spelling.
+fn typescript_nominal_output(output: &str) -> String {
+    match output.split_once('<') {
+        Some((head, tail)) => {
+            format!(
+                "{head}<{}",
+                typescript_type_name(tail.trim_end_matches('>'))
+            ) + ">"
+        }
+        None => typescript_type_name(output),
+    }
+}
+
 impl TypescriptDialect {
-    /// The host surface, in this dialect's spelling.
-    ///
-    /// A TypeScript session used to receive no inventory at all: the section
-    /// rendered tool signatures and stopped, so the trigger sources, their
-    /// event types and the `triggers.*` operations were invisible — while the
-    /// host's own prompt told the model to use them. A judged row watched a
-    /// model search for `cron.Schedule`, find nothing, and conclude the trigger
-    /// APIs did not exist.
     fn render_host_surface_section(
         &self,
         tool_catalog: &lash_core::ToolCatalog,
@@ -185,7 +232,7 @@ impl TypescriptDialect {
                         "{}(input: {}): {}",
                         constructor.path,
                         typescript_type(constructor.input),
-                        constructor.output
+                        typescript_nominal_output(&constructor.output)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -199,7 +246,10 @@ impl TypescriptDialect {
                 .trigger_sources
                 .iter()
                 .map(|(source_ty, event)| {
-                    format!("- `{source_ty}` can be passed to `registerTrigger` as its `source` and emits `{event}`")
+                    format!(
+                        "- `{source_ty}` can be passed to `registerTrigger` as its `source` and emits `{}`",
+                        typescript_type_name(event)
+                    )
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -234,6 +284,12 @@ impl RlmDialect for TypescriptDialect {
     /// `finish`. Anything it does not recognize still loses the try-operator
     /// and gains a terminator, which is the difference between "reads like
     /// TypeScript" and "is a syntax error".
+    ///
+    /// It rewrites line by line, so an example whose *string literal* spans a
+    /// real newline would have a terminator inserted inside the literal. No
+    /// authored example does that (they escape it as `\n`), and the walker
+    /// parses every rendered example, so the day one does the check fails
+    /// rather than the model reading a syntax error.
     fn render_tool_example(&self, example: &str) -> String {
         example
             .lines()
@@ -643,9 +699,26 @@ mod tests {
         assert!(section.contains("### Host surface"), "{section}");
         assert!(
             section.contains(
-                "cron.Schedule(input: { expr: string; tz?: string }): TriggerSource<cron.Tick>"
+                "cron.Schedule(input: { expr: string; tz?: string }): TriggerSource<cron_Tick>"
             ),
             "the constructor must be declared in TypeScript's own type spelling: {section}"
+        );
+        // The reference and the declaration must agree: a dotted name is a
+        // valid Lashlang reference and not a TypeScript identifier, so the
+        // model would otherwise be shown a type it cannot resolve against the
+        // declaration directly above it.
+        assert!(section.contains("type cron_Tick ="), "{section}");
+        // Every *reference* agrees with the declaration. The host's real dotted
+        // name survives only in the comment above each declaration, which is
+        // the bridge to the name the host's own errors and docs use.
+        let code_lines = section
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !code_lines.contains("cron.Tick"),
+            "no reference may keep the dotted spelling: {section}"
         );
         assert!(
             section.contains("`cron.Schedule` can be passed to `registerTrigger`"),

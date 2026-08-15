@@ -20,6 +20,31 @@ use crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY;
 use crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY;
 use lash_lashlang_runtime::ToolDefinitionLashlangExt as _;
 
+/// The authored example corpus, as the shipped tools spell it.
+///
+/// Copied deliberately rather than read from a live catalog: this is the shape
+/// authors write, and the rewriter has to survive every one of them. Each is a
+/// real example from `lash-tools`, `lash-plugin-process-controls`,
+/// `lash-protocol-standard` or the workbench's deferred-tool registry.
+fn authored_tool_examples() -> Vec<&'static str> {
+    vec![
+        r#"await web.search({ query: "latest Rust release notes", limit: 5 })?"#,
+        r#"await files.read({ path: "src/main.rs", offset: 1, limit: 120 })?"#,
+        r#"await files.edit({ path: "src/main.rs", edits: [{ oldText: "old();", newText: "new();" }] })?"#,
+        r#"await files.glob({ pattern: "**/*.rs", path: "crates/lash/src", limit: 50 })?"#,
+        r#"await files.write({ path: "hello.txt", content: "hello\n" })?"#,
+        r#"await shell.exec({ cmd: "cargo test -p lash-protocol-rlm", timeout_ms: 600000 })?"#,
+        "probe = await shell.exec({ cmd: \"test -f Cargo.lock\" })?\nfinish probe.exit_code == 0",
+        r#"await shell.start({ cmd: "nohup ./daemon --serve", detach: true })?"#,
+        r#"await shell.write({ process_id: "call-shell-1", chars: "", close_stdin: true })?"#,
+        r#"await processes.list({ status: "any" })?"#,
+        r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#,
+        r#"await tools.batch({ tool_calls: [{ tool: "read_file", parameters: { path: "src/main.rs" } }] })?"#,
+        r#"await tools.search({ query: "text checksum", limit: 3 })?"#,
+        r#"await workbench_deferred.stats({ /* matching arguments */ })?"#,
+    ]
+}
+
 /// Text that names the *other* dialect, with the reason each token is a defect.
 fn foreign_markers(language_id: &str) -> Vec<&'static str> {
     match language_id {
@@ -35,8 +60,15 @@ fn foreign_markers(language_id: &str) -> Vec<&'static str> {
             "re-print",
             "finish <value>",
             // Lashlang's *type* syntax, which the host-surface inventory is
-            // declared in and both dialects have to render.
+            // declared in and both dialects have to render. The bound-variable
+            // block renders a whole type line in it, not one token: pinning
+            // only `list[` described the leak as narrower than it is.
             "list[",
+            // Written with the trailing punctuation so they cannot match
+            // TypeScript's own `: string` / `: number`.
+            ": str,",
+            ": int,",
+            "?: any |",
             "-> str",
             // The Lashlang try-operator, in an authored tool example.
             ")?",
@@ -312,6 +344,9 @@ fn no_assembled_prompt_fragment_carries_the_other_dialects_words() {
 /// residual that cannot be forgotten is different in kind from one that is
 /// merely known.
 const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[
+    "typescript prompt fragment `bound variables` contains `: int,`",
+    "typescript prompt fragment `bound variables` contains `: str,`",
+    "typescript prompt fragment `bound variables` contains `?: any |`",
     "typescript prompt fragment `bound variables` contains `list[`",
     "typescript prompt fragment `tool docs` contains `-> str`",
 ];
@@ -333,6 +368,30 @@ fn the_two_vocabularies_are_actually_different() {
         LASHLANG_PROMPT_VOCABULARY.finish_statement,
         TYPESCRIPT_PROMPT_VOCABULARY.finish_statement
     );
+    // RV-3: a rendered example must be *parseable* TypeScript, not merely free
+    // of foreign markers. The marker walk cannot tell "reads like TypeScript"
+    // from "is a syntax error", and a syntax error in an example is exactly the
+    // defect the examples fix exists to close. Parsed rather than linked: an
+    // example names host modules and free identifiers that no isolated
+    // environment has, so `TS_UNKNOWN_BINDING` is expected and a *syntax* error
+    // is not.
+    let typescript = crate::dialect::typescript_test_dialect();
+    let mut unparseable = Vec::new();
+    for example in authored_tool_examples() {
+        let rendered = typescript.render_tool_example(example);
+        if let Err(error) = lash_typescript::parse(&rendered) {
+            let code = format!("{:?}", error.code);
+            if code.contains("UnknownBinding") || code.contains("LinkError") {
+                continue;
+            }
+            unparseable.push(format!("`{example}` → `{rendered}`: {error}"));
+        }
+    }
+    assert!(
+        unparseable.is_empty(),
+        "rendered examples that are not TypeScript: {unparseable:#?}"
+    );
+
     // Non-vacuity for the example surface: the *authored* corpus really does
     // carry the try-operator, so the marker has something to catch. Reading it
     // from the Lashlang rendering proves the fixture, not the assertion.
