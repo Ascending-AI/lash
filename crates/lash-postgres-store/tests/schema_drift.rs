@@ -1201,6 +1201,308 @@ async fn main_component_50_store_upgrades_cleanly_to_51() {
     scratch.cleanup().await;
 }
 
+/// Migration DDL belongs to the installation anchored by the version ledger,
+/// even when an earlier writable schema appears on `search_path`.
+#[tokio::test]
+async fn component_50_migration_stays_in_the_anchored_namespace() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-50 migration namespace law: database URL is not set");
+        return;
+    };
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let front = format!("lash_migration_front_{suffix}");
+    let back = format!("lash_migration_anchor_{suffix}");
+    let mut admin = PgConnection::connect(&database_url)
+        .await
+        .expect("connect migration namespace admin");
+    admin
+        .execute(format!("CREATE SCHEMA {front}; CREATE SCHEMA {back}").as_str())
+        .await
+        .expect("create migration namespaces");
+    admin
+        .execute(format!("SET search_path TO {back}").as_str())
+        .await
+        .expect("point admin at anchored namespace");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut admin)
+        .await
+        .expect("provision current schema in anchored namespace");
+    admin
+        .execute(
+            "DROP TABLE lash_tool_intent_submissions;
+             DROP TABLE lash_process_parent_end_plans;
+             UPDATE lash_schema_versions
+                SET version = 50
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await
+        .expect("rewind anchored installation to component 50");
+    admin
+        .close()
+        .await
+        .expect("close migration namespace admin");
+
+    let pool = pool_with_search_path(&database_url, &format!("{front}, {back}")).await;
+    PostgresStorage::from_pool_with(
+        pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::LashManaged,
+            schema_check: SchemaCheck::Enforce,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("migrate the anchored component-50 installation");
+
+    let front_relations: i64 = sqlx::query_scalar(
+        "SELECT count(*)
+           FROM pg_catalog.pg_class AS class
+           JOIN pg_catalog.pg_namespace AS namespace
+             ON namespace.oid = class.relnamespace
+          WHERE namespace.nspname = $1
+            AND class.relname LIKE 'lash\\_%' ESCAPE '\\'",
+    )
+    .bind(&front)
+    .fetch_one(&pool)
+    .await
+    .expect("count front-schema Lash relations");
+    assert_eq!(
+        front_relations, 0,
+        "migration and creation DDL must not split into the earlier schema"
+    );
+    let anchored_artifacts: i64 = sqlx::query_scalar(
+        "SELECT count(*)
+           FROM pg_catalog.pg_class AS class
+           JOIN pg_catalog.pg_namespace AS namespace
+             ON namespace.oid = class.relnamespace
+          WHERE namespace.nspname = $1
+            AND class.relname = ANY($2)",
+    )
+    .bind(&back)
+    .bind(vec![
+        "idx_lash_tool_intent_submissions_scope",
+        "lash_process_parent_end_plans",
+        "lash_tool_intent_submissions",
+    ])
+    .fetch_one(&pool)
+    .await
+    .expect("count anchored migration artifacts");
+    assert_eq!(anchored_artifacts, 3);
+    let current_schema: String = sqlx::query_scalar("SELECT current_schema()::text")
+        .fetch_one(&pool)
+        .await
+        .expect("read restored caller search path");
+    assert_eq!(
+        current_schema, front,
+        "open must restore the caller's search path"
+    );
+
+    pool.close().await;
+    let mut admin = PgConnection::connect(&database_url)
+        .await
+        .expect("connect migration namespace cleanup");
+    for schema in [&front, &back] {
+        admin
+            .execute(format!("DROP SCHEMA {schema} CASCADE").as_str())
+            .await
+            .expect("drop migration namespace");
+    }
+}
+
+/// A component-50 stamp on a component-51 catalog is not a migration source.
+/// It is evidence that the version ledger and live schema diverged, so Lash
+/// must refuse before running any migration DDL rather than guessing which
+/// parts of an apparently newer catalog are trustworthy.
+#[tokio::test]
+async fn component_50_stamp_with_51_artifacts_is_refused_without_mutation() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-50 divergence law: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    let capture = installed_capture();
+    scratch
+        .apply(
+            "UPDATE lash_schema_versions
+                SET version = 50
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    let before: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT class.relname, class.oid::bigint
+           FROM pg_catalog.pg_class AS class
+           JOIN pg_catalog.pg_namespace AS namespace
+             ON namespace.oid = class.relnamespace
+          WHERE namespace.nspname = current_schema()
+            AND class.relname = ANY($1)
+          ORDER BY class.relname",
+    )
+    .bind(vec![
+        "idx_lash_tool_intent_submissions_scope",
+        "lash_process_parent_end_plans",
+        "lash_tool_intent_submissions",
+    ])
+    .fetch_all(&scratch.pool)
+    .await
+    .expect("probe divergent migration artifacts before open");
+    assert_eq!(
+        before.len(),
+        3,
+        "the fixture must retain all version-51 artifacts"
+    );
+
+    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
+        let error = PostgresStorage::from_pool_with(
+            scratch.pool.clone(),
+            PostgresStoreConfig {
+                schema_provisioning: SchemaProvisioning::LashManaged,
+                schema_check: check,
+                ..PostgresStoreConfig::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| {
+            panic!("a component-50 stamp over version-51 artifacts must be refused under {check:?}")
+        });
+        let rendered = error.to_string();
+        for fragment in [
+            "has version 50",
+            "expected 51",
+            "schema artifacts newer than the recorded version",
+            "lash_process_parent_end_plans",
+            "inspect and recreate",
+        ] {
+            assert!(
+                rendered.contains(fragment),
+                "typed {check:?} divergence refusal must contain {fragment:?}: {rendered}"
+            );
+        }
+    }
+    let denial_events = capture.events_for(&scratch.name);
+    for check in ["Enforce", "WarnOnly"] {
+        assert!(
+            denial_events.iter().any(|event| {
+                event.contains("outcome=denied_migration_divergence")
+                    && event.contains(&format!("schema_check={check}"))
+                    && event.contains("migration_detail_kind=migration_artifacts")
+                    && event.contains("lash_process_parent_end_plans")
+            }),
+            "the {check} divergence denial must emit its artifact basis: {denial_events:#?}"
+        );
+    }
+
+    let after: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT class.relname, class.oid::bigint
+           FROM pg_catalog.pg_class AS class
+           JOIN pg_catalog.pg_namespace AS namespace
+             ON namespace.oid = class.relnamespace
+          WHERE namespace.nspname = current_schema()
+            AND class.relname = ANY($1)
+          ORDER BY class.relname",
+    )
+    .bind(vec![
+        "idx_lash_tool_intent_submissions_scope",
+        "lash_process_parent_end_plans",
+        "lash_tool_intent_submissions",
+    ])
+    .fetch_all(&scratch.pool)
+    .await
+    .expect("probe divergent migration artifacts after refusal");
+    assert_eq!(
+        after, before,
+        "the refused open must not mutate migration artifacts"
+    );
+    let version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read component version after divergence refusal");
+    assert_eq!(
+        version, 50,
+        "the refused open must not advance the version ledger"
+    );
+
+    scratch.cleanup().await;
+}
+
+/// A migration is permission to transform one exact published source shape,
+/// not every catalog carrying its version integer.
+#[tokio::test]
+async fn drifted_component_50_source_is_refused_before_migration_ddl() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-50 source-shape law: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "DROP TABLE lash_tool_intent_submissions;
+             DROP TABLE lash_process_parent_end_plans;
+             DROP TABLE lash_processes CASCADE;
+             UPDATE lash_schema_versions
+                SET version = 50
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    let error = PostgresStorage::from_pool_with(
+        scratch.pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::LashManaged,
+            schema_check: SchemaCheck::Enforce,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .err()
+    .expect("a drifted component-50 source must be refused");
+    let rendered = error.to_string();
+    for fragment in [
+        "has version 50",
+        "expected 51",
+        "does not match the published component-50 migration source shape",
+        "lash_processes: table is missing",
+        "inspect and recreate",
+    ] {
+        assert!(
+            rendered.contains(fragment),
+            "typed source-shape refusal must contain {fragment:?}: {rendered}"
+        );
+    }
+    let introduced_relations: i64 = sqlx::query_scalar(
+        "SELECT count(*)
+           FROM pg_catalog.pg_class AS class
+           JOIN pg_catalog.pg_namespace AS namespace
+             ON namespace.oid = class.relnamespace
+          WHERE namespace.nspname = current_schema()
+            AND class.relname = ANY($1)",
+    )
+    .bind(vec![
+        "idx_lash_tool_intent_submissions_scope",
+        "lash_process_parent_end_plans",
+        "lash_tool_intent_submissions",
+    ])
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("probe migration artifacts after source-shape refusal");
+    assert_eq!(
+        introduced_relations, 0,
+        "source-shape refusal must run no migration DDL"
+    );
+    let version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read version after source-shape refusal");
+    assert_eq!(version, 50);
+
+    scratch.cleanup().await;
+}
+
 /// WarnOnly is a shape valve, not permission to run workers against the
 /// component-50 schema before its migration has been applied.
 #[tokio::test]
@@ -1611,7 +1913,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(50)", "finding_total=0"],
+        &["found_version=Some(51)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1783,7 +2085,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=50"]
+    for field in ["component=lash-postgres-store", "expected_version=51"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)

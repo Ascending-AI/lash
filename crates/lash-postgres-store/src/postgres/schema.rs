@@ -12,12 +12,23 @@ pub(crate) const SCHEMA_ADVISORY_LOCK_KEY: (i32, i32) = (715421, 907001);
 struct SchemaMigration {
     from: i32,
     to: i32,
+    source_missing_tables: &'static [&'static str],
+    introduced_relations: &'static [&'static str],
     statements: &'static [&'static str],
 }
 
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
     from: 50,
     to: 51,
+    source_missing_tables: &[
+        "lash_process_parent_end_plans",
+        "lash_tool_intent_submissions",
+    ],
+    introduced_relations: &[
+        "lash_process_parent_end_plans",
+        "lash_tool_intent_submissions",
+        "idx_lash_tool_intent_submissions_scope",
+    ],
     statements: &[
         r#"CREATE TABLE lash_process_parent_end_plans (
             process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
@@ -77,13 +88,63 @@ pub(crate) async fn ensure_schema(
         // have this build's creation statements layered over it.
         let search_path = read_search_path(&mut tx).await?;
         let installation = resolve_installation(&mut tx, &search_path).await?;
+        let mut search_path_to_restore = None;
         let preflight_mismatch = if let Some(installation) = installation {
             match read_component_version(&mut tx, &installation, &SchemaShape::expected()).await? {
-                ComponentVersion::Readable(Some(found))
-                    if options.check == SchemaCheck::Enforce
-                        && apply_schema_migration(&mut tx, found).await? =>
-                {
-                    None
+                ComponentVersion::Readable(Some(found)) if found != SCHEMA_VERSION => {
+                    match apply_schema_migration(
+                        &mut tx,
+                        installation.namespace(),
+                        found,
+                        options.check == SchemaCheck::Enforce,
+                    )
+                    .await?
+                    {
+                        SchemaMigrationOutcome::Applied {
+                            previous_search_path,
+                        } => {
+                            search_path_to_restore = Some(previous_search_path);
+                            None
+                        }
+                        SchemaMigrationOutcome::NotApplicable => {
+                            Some((installation.namespace().to_string(), Some(found)))
+                        }
+                        SchemaMigrationOutcome::Divergent { artifacts } => {
+                            let preflight = SchemaReport {
+                                schema: Some(installation.namespace().to_string()),
+                                expected_version: SCHEMA_VERSION,
+                                found_version: Some(found),
+                                findings: vec![SchemaFinding::VersionMismatch {
+                                    expected: SCHEMA_VERSION,
+                                    found: Some(found),
+                                }],
+                            };
+                            record_schema_migration_denial(
+                                &preflight,
+                                options,
+                                "denied_migration_divergence",
+                                "migration_artifacts",
+                                &artifacts.join(", "),
+                            );
+                            return Err(schema_migration_divergence_error(found, &artifacts));
+                        }
+                        SchemaMigrationOutcome::SourceMismatch { report } => {
+                            let details = report
+                                .findings
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            record_schema_migration_denial(
+                                &report,
+                                options,
+                                "denied_migration_source_shape",
+                                "migration_source_findings",
+                                &details,
+                            );
+                            return Err(schema_migration_source_mismatch_error(found, &report));
+                        }
+                    }
                 }
                 ComponentVersion::Readable(found) if found != Some(SCHEMA_VERSION) => {
                     Some((installation.namespace().to_string(), found))
@@ -126,14 +187,20 @@ pub(crate) async fn ensure_schema(
             return Err(version_mismatch_error(found_version));
         }
         tx.execute(SCHEMA_DDL).await.map_err(store_sqlx_error)?;
+        if let Some(search_path) = search_path_to_restore {
+            sqlx::query("SELECT set_config('search_path', $1, true)")
+                .bind(search_path)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
     }
 
     let report = verify_schema_shape(&mut tx).await?;
-    // The component version is the reject-and-recreate boundary, and it is
-    // unconditional: `SchemaCheck` governs the catalog comparison only. Letting
-    // `WarnOnly` downgrade this would turn lash's own recommended escape hatch
-    // into a path that silently runs one build against another schema generation,
-    // which is exactly the cross-version corruption the boundary exists to stop.
+    // Any mismatch left after the explicit migration preflight is the
+    // reject-and-recreate boundary. `SchemaCheck` governs the catalog comparison
+    // only; letting `WarnOnly` downgrade this would silently run one build against
+    // another schema generation.
     if report.found_version != Some(SCHEMA_VERSION) {
         record_schema_gate_decision(&report, options, "denied_version");
         return Err(version_mismatch_error(report.found_version));
@@ -193,16 +260,59 @@ pub(crate) async fn ensure_schema(
     Ok(signing_secret)
 }
 
+enum SchemaMigrationOutcome {
+    NotApplicable,
+    Applied { previous_search_path: String },
+    Divergent { artifacts: Vec<String> },
+    SourceMismatch { report: SchemaReport },
+}
+
 async fn apply_schema_migration(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    namespace: &str,
     found: i32,
-) -> Result<bool, StoreError> {
+    apply: bool,
+) -> Result<SchemaMigrationOutcome, StoreError> {
     let Some(migration) = SCHEMA_MIGRATIONS
         .iter()
         .find(|migration| migration.from == found && migration.to == SCHEMA_VERSION)
     else {
-        return Ok(false);
+        return Ok(SchemaMigrationOutcome::NotApplicable);
     };
+    let artifacts = sqlx::query_scalar::<_, String>(
+        r#"SELECT pg_catalog.format('%I.%I', namespace.nspname, class.relname)
+           FROM pg_catalog.pg_class AS class
+           JOIN pg_catalog.pg_namespace AS namespace
+             ON namespace.oid = class.relnamespace
+          WHERE namespace.nspname = ANY(pg_catalog.current_schemas(true))
+            AND class.relname = ANY($1)
+          ORDER BY namespace.nspname, class.relname"#,
+    )
+    .bind(migration.introduced_relations)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if !artifacts.is_empty() {
+        return Ok(SchemaMigrationOutcome::Divergent { artifacts });
+    }
+    if !apply {
+        return Ok(SchemaMigrationOutcome::NotApplicable);
+    }
+    let source_report = verify_schema_migration_source_shape(tx).await?;
+    if !migration.matches_source_shape(&source_report) {
+        return Ok(SchemaMigrationOutcome::SourceMismatch {
+            report: source_report,
+        });
+    }
+    let previous_search_path: String = sqlx::query_scalar("SELECT current_setting('search_path')")
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    sqlx::query("SELECT set_config('search_path', pg_catalog.quote_ident($1::text), true)")
+        .bind(namespace)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     for statement in migration.statements {
         sqlx::query(statement)
             .execute(&mut **tx)
@@ -216,7 +326,65 @@ async fn apply_schema_migration(
         outcome = "migrated",
         "applied Lash-managed PostgreSQL schema migration"
     );
-    Ok(true)
+    Ok(SchemaMigrationOutcome::Applied {
+        previous_search_path,
+    })
+}
+
+impl SchemaMigration {
+    fn matches_source_shape(&self, report: &SchemaReport) -> bool {
+        if report.found_version != Some(self.from) {
+            return false;
+        }
+        let mut missing_tables = self
+            .source_missing_tables
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut saw_version = false;
+        for finding in &report.findings {
+            match finding {
+                SchemaFinding::VersionMismatch { expected, found }
+                    if *expected == self.to && *found == Some(self.from) =>
+                {
+                    if saw_version {
+                        return false;
+                    }
+                    saw_version = true;
+                }
+                SchemaFinding::MissingTable { table } if missing_tables.remove(table.as_str()) => {}
+                _ => return false,
+            }
+        }
+        saw_version && missing_tables.is_empty()
+    }
+}
+
+fn schema_migration_divergence_error(found: i32, artifacts: &[String]) -> StoreError {
+    StoreError::Backend(format!(
+        "Postgres schema component `{SCHEMA_COMPONENT}` has version {found}, expected \
+         {SCHEMA_VERSION}, but the live schema contains schema artifacts newer than the recorded \
+         version: {}. Lash will not guess whether this is a partial migration, version-ledger \
+         rollback, or other corruption. Stop the deployment, inspect and recreate the whole Lash \
+         trust domain before retrying; see docs/persistence.html#delete-sessions.",
+        artifacts.join(", ")
+    ))
+}
+
+fn schema_migration_source_mismatch_error(found: i32, report: &SchemaReport) -> StoreError {
+    let findings = report
+        .findings
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ");
+    StoreError::Backend(format!(
+        "Postgres schema component `{SCHEMA_COMPONENT}` has version {found}, expected \
+         {SCHEMA_VERSION}, but the live schema does not match the published component-{found} \
+         migration source shape. Lash will not run migration DDL against an unknown source or \
+         guess at repairs. Stop the deployment, inspect and recreate the whole Lash trust domain \
+         before retrying; source-shape findings: {findings}"
+    ))
 }
 
 /// Runs the structural check under the published advisory key, held in *shared*
@@ -327,6 +495,43 @@ fn record_schema_gate_decision(
             "lash Postgres schema gate decided against admitting the database as-is"
         ),
     }
+}
+
+/// Emits the full basis for a migration-specific denial.
+///
+/// The ordinary schema-gate event carries finding counts. Migration preflight
+/// also consults concrete artifact names or source-shape findings, so those
+/// inputs ride the denial event rather than existing only in the returned error.
+fn record_schema_migration_denial(
+    report: &SchemaReport,
+    options: SchemaOpenOptions,
+    outcome: &'static str,
+    detail_kind: &'static str,
+    details: &str,
+) {
+    let counts = report.finding_counts();
+    let fields = tracing::field::display(
+        counts
+            .iter()
+            .map(|(section, count)| format!("{section}={count}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    let schema = report.schema.as_deref().unwrap_or("<unresolved>");
+    tracing::warn!(
+        component = SCHEMA_COMPONENT,
+        schema,
+        expected_version = report.expected_version,
+        found_version = ?report.found_version,
+        provisioning = ?options.provisioning,
+        schema_check = ?options.check,
+        findings = %fields,
+        finding_total = report.findings.len(),
+        migration_detail_kind = detail_kind,
+        migration_details = details,
+        outcome,
+        "lash Postgres schema migration preflight refused the database"
+    );
 }
 
 /// Renders the reject-and-recreate boundary error, naming the remedy rather than

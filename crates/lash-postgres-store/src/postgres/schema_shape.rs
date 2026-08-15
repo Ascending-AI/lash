@@ -1037,9 +1037,9 @@ fn diff_paired_objects<T: PairedObject>(
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SchemaFinding {
-    /// The component version stamp is absent or names another version. Always
-    /// fatal at open, in every provisioning mode and regardless of
-    /// [`SchemaCheck`].
+    /// The component version stamp is absent or names another version. Fatal in
+    /// every mode unless Lash-managed `Enforce` consumes an exact explicit
+    /// migration before the ordinary open report is evaluated.
     VersionMismatch {
         /// Version this build implements.
         expected: i32,
@@ -1388,7 +1388,7 @@ mod introspect;
 
 pub(crate) use introspect::{
     ComponentVersion, read_component_version, read_search_path, resolve_installation,
-    verify_schema_shape,
+    verify_schema_migration_source_shape, verify_schema_shape,
 };
 /// Reached only by the artifact-generation and catalog tests, which drive the
 /// introspection directly rather than through a full verification.

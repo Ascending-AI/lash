@@ -110,9 +110,10 @@ if seeded["committed_sessions"] != len(seeded["session_ids"]):
 if seeded["trigger_reservations"] != 1:
     fail(f"the seeded trigger did not reserve exactly one delivery: {seeded}")
 
+divergent = checkpoint("refused_divergent_store", "02-refusal.jsonl")
 stale = checkpoint("refused_older_store", "02-refusal.jsonl")
 future = checkpoint("refused_newer_store", "02-refusal.jsonl")
-for refusal in (stale, future):
+for refusal in (divergent, stale, future):
     found = refusal["found_version"]
     expected = refusal["expected_version"]
     message = refusal["error"]
@@ -120,8 +121,19 @@ for refusal in (stale, future):
         fail(f"refusal did not name both versions: {refusal}")
     if refusal["opened"]:
         fail(f"a mismatched store was opened: {refusal}")
-if stale["found_version"] >= stale["expected_version"]:
+if divergent["found_version"] != divergent["expected_version"] - 1:
+    fail(f"divergent-store refusal was not the migration-source version: {divergent}")
+for fragment in (
+    "schema artifacts newer than the recorded version",
+    "lash_process_parent_end_plans",
+    "inspect and recreate",
+):
+    if fragment not in divergent["error"]:
+        fail(f"divergence refusal omitted {fragment!r}: {divergent}")
+if stale["found_version"] >= divergent["found_version"]:
     fail(f"older-store refusal was not older: {stale}")
+if stale["current_artifact_count"] != 0:
+    fail(f"older-store fixture retained current-only schema artifacts: {stale}")
 if future["found_version"] <= future["expected_version"]:
     fail(f"newer-store refusal was not newer: {future}")
 
@@ -144,7 +156,7 @@ if health["session_ids_reused"] != seeded["session_ids"]:
 if health["trigger_reservations"] != 1 or health["trigger_process_status"] != "Completed":
     fail(f"the post-bump trigger did not deliver to a finished process: {health}")
 
-print("version-bump recreation gates: seed, both refusals, recreation, and health all asserted")
+print("version-bump recreation gates: seed, divergence/older/newer refusals, recreation, and health all asserted")
 PY
 
 if grep -Fn 'panicked at' "$test_output" >&2; then
@@ -152,4 +164,4 @@ if grep -Fn 'panicked at' "$test_output" >&2; then
   exit 1
 fi
 echo "panic gate: clean (no 'panicked at' lines in version-bump recreation E2E output)" | tee -a "$test_output"
-echo "version-bump recreation e2e passed: scenarios=4 artifacts=$artifact_dir" | tee -a "$test_output"
+echo "version-bump recreation e2e passed: phases=4 refusal_cases=3 artifacts=$artifact_dir" | tee -a "$test_output"

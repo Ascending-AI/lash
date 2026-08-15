@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 50.
+-- lash-postgres-store schema, component version 51.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -7,11 +7,11 @@
 -- verifies the resulting structure at open and rejects a mismatch with a
 -- per-object diff.
 --
--- The component schema is a reject-and-recreate boundary; there is no
--- migration chain between versions. Every statement is creation-only and
--- idempotent, so applying the file twice is a no-op, and nothing here is
--- schema-qualified, so the file provisions into whichever schema the session's
--- `search_path` resolves.
+-- The component schema is a reject-and-recreate boundary except for explicit
+-- migrations implemented by the owning build. Every statement in this artifact
+-- is creation-only and idempotent, so applying the file twice is a no-op, and
+-- nothing here is schema-qualified, so the file provisions into whichever schema
+-- the session's `search_path` resolves.
 
 CREATE TABLE IF NOT EXISTS lash_schema_versions (
     component TEXT PRIMARY KEY,

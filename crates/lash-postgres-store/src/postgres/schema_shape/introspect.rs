@@ -215,6 +215,25 @@ async fn probe_columns_match_expected(
 pub(crate) async fn verify_schema_shape(
     connection: &mut PgConnection,
 ) -> Result<SchemaReport, StoreError> {
+    verify_schema_shape_with_version_policy(connection, true).await
+}
+
+/// Reads the full live shape even when the component stamp differs.
+///
+/// Ordinary opens short-circuit on a readable version mismatch because a diff
+/// against an unrelated generation is noise. An explicit migration is the one
+/// place that needs the opposite answer: it must prove the live catalog is the
+/// exact published source shape before executing any DDL.
+pub(crate) async fn verify_schema_migration_source_shape(
+    connection: &mut PgConnection,
+) -> Result<SchemaReport, StoreError> {
+    verify_schema_shape_with_version_policy(connection, false).await
+}
+
+async fn verify_schema_shape_with_version_policy(
+    connection: &mut PgConnection,
+    short_circuit_version_mismatch: bool,
+) -> Result<SchemaReport, StoreError> {
     let expected = SchemaShape::expected();
     let table_names: Vec<String> = expected.tables.keys().cloned().collect();
     let search_path = read_search_path(connection).await?;
@@ -240,17 +259,22 @@ pub(crate) async fn verify_schema_shape(
         found_version,
         findings: Vec::new(),
     };
-    if let ComponentVersion::Readable(version) = stamp
-        && version != Some(SCHEMA_VERSION)
-    {
+    let readable_version_mismatch = match &stamp {
+        ComponentVersion::Readable(version) if *version != Some(SCHEMA_VERSION) => Some(*version),
+        ComponentVersion::Readable(_) | ComponentVersion::Unreadable => None,
+    };
+    if let Some(version) = readable_version_mismatch {
         report.findings.push(SchemaFinding::VersionMismatch {
             expected: SCHEMA_VERSION,
             found: version,
         });
-        return Ok(report);
+        if short_circuit_version_mismatch {
+            return Ok(report);
+        }
     }
-    report.findings =
-        read_shadow_findings(connection, &installation, &search_path, &table_names).await?;
+    report
+        .findings
+        .extend(read_shadow_findings(connection, &installation, &search_path, &table_names).await?);
     let resolved = resolve_tables(connection, &installation, &table_names).await?;
     let found = read_live_shape(connection, &resolved).await?;
     report.findings.extend(expected.diff(&found));
