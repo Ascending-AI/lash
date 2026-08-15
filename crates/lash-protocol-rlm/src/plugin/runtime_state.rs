@@ -548,6 +548,37 @@ mod tests {
                     SessionError::Protocol(message)
                         if message == "RLM language `python` is not registered"
                 ));
+
+                // The registered-but-inactive case is the one that matters for
+                // dialect integrity: `lashlang` is a real, registered dialect,
+                // and this session is pinned to `typescript`. Without this
+                // fence a TypeScript session would execute a `<lashlang>` cell
+                // — the cross-dialect violation `runbooks/RULES.md` treats as
+                // an abort-and-RCA event. An earlier revision of this test
+                // covered only the unregistered language, and deleting the
+                // fence left the whole package green.
+                let inactive = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        lash_core::ExecRequest {
+                            language: "lashlang".to_string(),
+                            code: "finish(42)".to_string(),
+                            accept_finish: true,
+                        },
+                    )
+                    .await
+                    .expect_err("a registered but inactive dialect must be rejected");
+
+                assert!(
+                    matches!(
+                        &inactive,
+                        SessionError::Protocol(message)
+                            if message
+                                == "RLM language `lashlang` is registered but session \
+                                    language `typescript` is pinned"
+                    ),
+                    "{inactive:?}"
+                );
             });
     }
 }

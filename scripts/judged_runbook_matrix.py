@@ -46,6 +46,19 @@ def rows(config: dict[str, object]) -> list[dict[str, str]]:
     return result
 
 
+def select_shard(
+    all_rows: list[dict[str, str]], index: int, count: int
+) -> list[dict[str, str]]:
+    """The rows belonging to shard `index` of `count`, 1-based.
+
+    A function rather than a comprehension inside `main` so the test can drive
+    this arithmetic instead of restating it. A test that re-implements the
+    split proves Python slicing works and nothing about the script: dropping a
+    row here used to leave it green.
+    """
+    return [row for offset, row in enumerate(all_rows) if offset % count == index - 1]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--shard", type=parse_shard, default=(1, 1), metavar="I/N")
@@ -58,7 +71,7 @@ def main() -> int:
         print(f"missing runbooks: {', '.join(missing)}", file=sys.stderr)
         return 2
     index, count = args.shard
-    selected = [row for offset, row in enumerate(all_rows) if offset % count == index - 1]
+    selected = select_shard(all_rows, index, count)
     print(
         json.dumps(
             {
