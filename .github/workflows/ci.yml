@@ -248,6 +248,8 @@ jobs:
       # PRs compare with their target branch's merge-base. Main pushes compare
       # with HEAD~1 so the landed tree is independently rechecked; manual
       # workflow dispatches have no meaningful base and intentionally skip it.
+      # The PR guarantee requires a current merge ref, enforced by an up-to-date
+      # branch rule or merge queue; a stale merge ref has a stale merge-base.
       - name: Check versioned surface bumps
         if: github.event_name != 'workflow_dispatch'
         run: |

@@ -6,6 +6,11 @@ compares a deliberately narrow projection of the merge-base tree with the head
 tree; a changed projection requires the head's version constant to be strictly
 greater than the merge-base value.
 
+For pull requests, this guarantee assumes CI checks a current GitHub merge ref
+whose target-branch parent is the latest protected-branch tip. Repositories must
+enforce an up-to-date branch or merge queue; a stale merge ref can produce an
+older merge-base and cannot prove that independently-landed bumps stay ordered.
+
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.  Pull-request CI passes the PR merge-base explicitly.
 """
@@ -32,6 +37,7 @@ class Guard:
     kind: str
     paths: tuple[str, ...]
     symbols: tuple[str, ...] = ()
+    must_cover: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,10 @@ class Surface:
     guards: tuple[Guard, ...]
     version_regex: str | None = None
 
+    @property
+    def key(self) -> str:
+        return f"{self.constant_path}:{self.constant}"
+
 
 @dataclass(frozen=True)
 class Failure:
@@ -49,6 +59,18 @@ class Failure:
     base_version: int
     head_version: int
     changed_guards: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SurfaceError:
+    surface: Surface
+    detail: str
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    failures: tuple[Failure, ...]
+    errors: tuple[SurfaceError, ...]
 
 
 class CheckError(RuntimeError):
@@ -112,6 +134,7 @@ def load_config(path: Path) -> tuple[Surface, ...]:
             kind = raw_guard.get("kind")
             paths = raw_guard.get("paths")
             symbols = raw_guard.get("symbols", [])
+            must_cover = raw_guard.get("must_cover", [])
             if kind not in {"file", "rust_items", "rust_serde_shapes"}:
                 raise CheckError(f"{guard_location} has unsupported kind {kind!r}")
             if not isinstance(paths, list) or not paths or not all(
@@ -122,11 +145,28 @@ def load_config(path: Path) -> tuple[Surface, ...]:
                 isinstance(value, str) and value for value in symbols
             ):
                 raise CheckError(f"{guard_location} symbols must be strings")
+            if not isinstance(must_cover, list) or not all(
+                isinstance(value, str) and value for value in must_cover
+            ):
+                raise CheckError(f"{guard_location} must_cover must be strings")
             if kind == "rust_items" and not symbols:
                 raise CheckError(f"{guard_location} rust_items requires symbols")
             if kind != "rust_items" and symbols:
                 raise CheckError(f"{guard_location} only rust_items accepts symbols")
-            guards.append(Guard(kind, tuple(paths), tuple(symbols)))
+            if kind == "rust_serde_shapes" and not must_cover:
+                raise CheckError(
+                    f"{guard_location} rust_serde_shapes requires must_cover"
+                )
+            if kind not in {"file", "rust_serde_shapes"} and must_cover:
+                raise CheckError(
+                    f"{guard_location} only file and rust_serde_shapes accept "
+                    "must_cover"
+                )
+            if len(must_cover) != len(set(must_cover)):
+                raise CheckError(f"{guard_location} must_cover contains duplicates")
+            guards.append(
+                Guard(kind, tuple(paths), tuple(symbols), tuple(must_cover))
+            )
 
         version_regex = raw_surface.get("version_regex")
         if version_regex is not None and not isinstance(version_regex, str):
@@ -289,19 +329,6 @@ def rust_item_end(text: str, start: int) -> int:
     raise CheckError("unterminated Rust item while extracting guarded shape")
 
 
-def rust_item_start_with_attributes(text: str, declaration_start: int) -> int:
-    line_start = text.rfind("\n", 0, declaration_start) + 1
-    cursor = line_start
-    while cursor > 0:
-        previous_end = cursor - 1
-        previous_start = text.rfind("\n", 0, previous_end) + 1
-        previous = text[previous_start:previous_end].strip()
-        if not previous.startswith("#["):
-            break
-        cursor = previous_start
-    return cursor
-
-
 def strip_rust_trivia(text: str) -> str:
     """Remove Rust whitespace/comments while preserving literals and tokens."""
     output: list[str] = []
@@ -358,6 +385,150 @@ def strip_rust_trivia(text: str) -> str:
     return "".join(output)
 
 
+def rust_attribute_end(text: str, start: int) -> int:
+    """Return the end of one balanced Rust outer attribute."""
+    if not text.startswith("#[", start):
+        raise CheckError("Rust attribute extraction did not start at #[")
+    index = start + 2
+    bracket_depth = 1
+    block_comment_depth = 0
+    state = "normal"
+    raw_closer = ""
+    while index < len(text):
+        char = text[index]
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if state == "line_comment":
+            if char == "\n":
+                state = "normal"
+            index += 1
+            continue
+        if state == "block_comment":
+            if char == "/" and following == "*":
+                block_comment_depth += 1
+                index += 2
+            elif char == "*" and following == "/":
+                block_comment_depth -= 1
+                index += 2
+                if block_comment_depth == 0:
+                    state = "normal"
+            else:
+                index += 1
+            continue
+        if state == "string":
+            if char == "\\":
+                index += 2
+            else:
+                index += 1
+                if char == '"':
+                    state = "normal"
+            continue
+        if state == "raw":
+            closing = text.find(raw_closer, index)
+            if closing < 0:
+                raise CheckError(
+                    "unterminated Rust raw string while extracting attribute"
+                )
+            index = closing + len(raw_closer)
+            state = "normal"
+            continue
+
+        if char == "/" and following == "/":
+            state = "line_comment"
+            index += 2
+        elif char == "/" and following == "*":
+            state = "block_comment"
+            block_comment_depth = 1
+            index += 2
+        elif raw := _raw_string_start(text, index):
+            index, raw_closer = raw
+            state = "raw"
+        elif char == '"' or (char == "b" and following == '"'):
+            state = "string"
+            index += 2 if char == "b" else 1
+        elif char_end := _char_literal_end(text, index):
+            index = char_end
+        elif char == "[":
+            bracket_depth += 1
+            index += 1
+        elif char == "]":
+            bracket_depth -= 1
+            index += 1
+            if bracket_depth == 0:
+                return index
+        else:
+            index += 1
+    raise CheckError("unterminated Rust outer attribute")
+
+
+def rust_outer_attribute_ranges(text: str) -> tuple[tuple[int, int], ...]:
+    """Find outer attributes while ignoring attribute-looking text in trivia."""
+    ranges: list[tuple[int, int]] = []
+    index = 0
+    while index < len(text):
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if text.startswith("#[", index):
+            end = rust_attribute_end(text, index)
+            ranges.append((index, end))
+            index = end
+        elif text[index] == "/" and following == "/":
+            newline = text.find("\n", index + 2)
+            index = len(text) if newline < 0 else newline + 1
+        elif text[index] == "/" and following == "*":
+            index += 2
+            block_depth = 1
+            while index < len(text) and block_depth:
+                if text.startswith("/*", index):
+                    block_depth += 1
+                    index += 2
+                elif text.startswith("*/", index):
+                    block_depth -= 1
+                    index += 2
+                else:
+                    index += 1
+        elif raw := _raw_string_start(text, index):
+            content_start, closer = raw
+            closing = text.find(closer, content_start)
+            if closing < 0:
+                raise CheckError(
+                    "unterminated Rust raw string while finding outer attributes"
+                )
+            index = closing + len(closer)
+        elif text[index] == '"' or (text[index] == "b" and following == '"'):
+            index += 2 if text[index] == "b" else 1
+            while index < len(text):
+                if text[index] == "\\":
+                    index += 2
+                else:
+                    closing = text[index] == '"'
+                    index += 1
+                    if closing:
+                        break
+        elif char_end := _char_literal_end(text, index):
+            index = char_end
+        else:
+            index += 1
+    return tuple(ranges)
+
+
+def rust_item_start_with_attributes(
+    text: str,
+    declaration_start: int,
+    attribute_ranges: tuple[tuple[int, int], ...] | None = None,
+) -> int:
+    """Walk back across complete attributes and interleaved Rust comments."""
+    line_start = text.rfind("\n", 0, declaration_start) + 1
+    cursor = line_start
+    ranges = attribute_ranges or rust_outer_attribute_ranges(text[:declaration_start])
+    eligible = [attribute for attribute in ranges if attribute[1] <= cursor]
+    while eligible:
+        start, end = eligible[-1]
+        if strip_rust_trivia(text[end:cursor]):
+            break
+        cursor = start
+        eligible.pop()
+    return cursor
+
+
 RUST_DECLARATION = re.compile(
     r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
     r"(?:const|static|fn|struct|enum|type)[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
@@ -371,11 +542,12 @@ RUST_SERDE_SHAPE = re.compile(
 def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
     wanted = set(names)
     found: dict[str, str] = {}
+    attribute_ranges = rust_outer_attribute_ranges(text)
     for match in RUST_DECLARATION.finditer(text):
         name = match.group(1)
         if name not in wanted:
             continue
-        start = rust_item_start_with_attributes(text, match.start())
+        start = rust_item_start_with_attributes(text, match.start(), attribute_ranges)
         end = rust_item_end(text, match.start())
         value = strip_rust_trivia(text[start:end])
         if name in found and found[name] != value:
@@ -386,9 +558,10 @@ def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
 
 def serde_shapes(text: str) -> dict[str, str]:
     found: dict[str, str] = {}
+    attribute_ranges = rust_outer_attribute_ranges(text)
     for match in RUST_SERDE_SHAPE.finditer(text):
         name = match.group(1)
-        start = rust_item_start_with_attributes(text, match.start())
+        start = rust_item_start_with_attributes(text, match.start(), attribute_ranges)
         attributes = text[start : match.start()]
         if "Serialize" not in attributes and "Deserialize" not in attributes:
             continue
@@ -404,26 +577,36 @@ def serde_shapes(text: str) -> dict[str, str]:
 
 
 def guard_signature(
-    view: RepositoryView, revision: str, guard: Guard
+    view: RepositoryView,
+    revision: str,
+    guard: Guard,
+    *,
+    enforce_presence: bool,
 ) -> tuple[tuple[str, str], ...]:
     paths = view.matching_paths(revision, guard.paths)
     signature: list[tuple[str, str]] = []
     found_symbols: set[str] = set()
+    covered_shapes: set[str] = set()
+    covered_markers: set[str] = set()
     for path in paths:
         content = view.content(revision, path)
         if content is None:
             continue
         if guard.kind == "file":
             signature.append((path, content))
+            covered_markers.update(
+                marker for marker in guard.must_cover if marker in content
+            )
         elif guard.kind == "rust_items":
             items = named_rust_items(content, guard.symbols)
             found_symbols.update(items)
             signature.extend((f"{path}:{name}", value) for name, value in items.items())
         else:
             items = serde_shapes(content)
+            covered_shapes.update(name.partition("#")[0] for name in items)
             signature.extend((f"{path}:{name}", value) for name, value in items.items())
 
-    if guard.kind == "rust_items":
+    if guard.kind == "rust_items" and enforce_presence:
         missing = sorted(set(guard.symbols) - found_symbols)
         if missing:
             raise CheckError(
@@ -431,16 +614,25 @@ def guard_signature(
                 f"{', '.join(guard.paths)}: "
                 + ", ".join(missing)
             )
-    elif guard.kind == "rust_serde_shapes" and not signature:
-        raise CheckError(
-            f"{revision[:12]}: no Serde-derived shapes found in "
-            f"{', '.join(guard.paths)}"
-        )
-    elif guard.kind == "file" and not paths:
-        raise CheckError(
-            f"{revision[:12]}: guarded file pattern matched nothing: "
-            f"{', '.join(guard.paths)}"
-        )
+    elif guard.kind == "rust_serde_shapes" and enforce_presence:
+        missing = sorted(set(guard.must_cover) - covered_shapes)
+        if missing:
+            raise CheckError(
+                f"{revision[:12]}: required Serde shapes not found in "
+                f"{', '.join(guard.paths)}: " + ", ".join(missing)
+            )
+    elif guard.kind == "file" and enforce_presence:
+        if not paths:
+            raise CheckError(
+                f"{revision[:12]}: guarded file pattern matched nothing: "
+                f"{', '.join(guard.paths)}"
+            )
+        missing = sorted(set(guard.must_cover) - covered_markers)
+        if missing:
+            raise CheckError(
+                f"{revision[:12]}: required file markers not found in "
+                f"{', '.join(guard.paths)}: " + ", ".join(missing)
+            )
     return tuple(sorted(signature))
 
 
@@ -477,22 +669,44 @@ def version_at(view: RepositoryView, revision: str, surface: Surface) -> int:
 
 def check_surfaces(
     repo: Path, base: str, head: str, surfaces: Iterable[Surface]
-) -> tuple[Failure, ...]:
+) -> CheckResult:
     base_revision = resolve_revision(repo, base)
     head_revision = resolve_revision(repo, head)
     view = RepositoryView(repo)
     failures: list[Failure] = []
+    errors: list[SurfaceError] = []
     for surface in surfaces:
-        head_version = version_at(view, head_revision, surface)
+        try:
+            head_version = version_at(view, head_revision, surface)
+        except CheckError as error:
+            errors.append(SurfaceError(surface, str(error)))
+            continue
         changed_guards: list[str] = []
         for guard in surface.guards:
-            base_signature = guard_signature(view, base_revision, guard)
-            head_signature = guard_signature(view, head_revision, guard)
+            try:
+                base_signature = guard_signature(
+                    view, base_revision, guard, enforce_presence=False
+                )
+                head_signature = guard_signature(
+                    view, head_revision, guard, enforce_presence=True
+                )
+            except CheckError as error:
+                errors.append(
+                    SurfaceError(
+                        surface,
+                        f"guard {', '.join(guard.paths)}: {error}",
+                    )
+                )
+                continue
             if base_signature != head_signature:
                 changed_guards.extend(guard.paths)
         if not changed_guards:
             continue
-        base_version = version_at(view, base_revision, surface)
+        try:
+            base_version = version_at(view, base_revision, surface)
+        except CheckError as error:
+            errors.append(SurfaceError(surface, str(error)))
+            continue
         if head_version <= base_version:
             failures.append(
                 Failure(
@@ -502,7 +716,30 @@ def check_surfaces(
                     changed_guards=tuple(dict.fromkeys(changed_guards)),
                 )
             )
-    return tuple(failures)
+    return CheckResult(tuple(failures), tuple(errors))
+
+
+def select_surfaces(
+    surfaces: tuple[Surface, ...], selectors: Iterable[str]
+) -> tuple[Surface, ...]:
+    selected: list[Surface] = []
+    for selector in selectors:
+        key_matches = [surface for surface in surfaces if surface.key == selector]
+        matches = key_matches or [
+            surface for surface in surfaces if surface.constant == selector
+        ]
+        if len(matches) != 1:
+            detail = ""
+            if matches:
+                detail = "; use one of: " + ", ".join(
+                    surface.key for surface in matches
+                )
+            raise CheckError(
+                f"--surface {selector} matched {len(matches)} inventory entries"
+                f"{detail}"
+            )
+        selected.extend(matches)
+    return tuple(selected)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -516,7 +753,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--surface",
         action="append",
         default=[],
-        help="check only one uniquely named constant (repeatable; diagnostic use)",
+        help=(
+            "check one surface by unique constant or <constant_path>:<constant> "
+            "key (repeatable; diagnostic use)"
+        ),
     )
     parser.add_argument("--repo", type=Path, default=ROOT, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
@@ -527,32 +767,28 @@ def main(argv: list[str] | None = None) -> int:
     try:
         surfaces = load_config(args.config)
         if args.surface:
-            selected: list[Surface] = []
-            for constant in args.surface:
-                matches = [
-                    surface for surface in surfaces if surface.constant == constant
-                ]
-                if len(matches) != 1:
-                    raise CheckError(
-                        f"--surface {constant} matched {len(matches)} inventory "
-                        "entries; "
-                        "the name must be unique"
-                    )
-                selected.extend(matches)
-            surfaces = tuple(selected)
+            surfaces = select_surfaces(surfaces, args.surface)
         base = resolve_revision(args.repo, args.base)
         head = resolve_revision(args.repo, args.head)
-        failures = check_surfaces(args.repo, base, head, surfaces)
+        result = check_surfaces(args.repo, base, head, surfaces)
     except CheckError as error:
         print(f"version-bump check error: {error}", file=sys.stderr)
         return 2
 
-    if failures:
+    if result.errors:
+        print(
+            f"version-bump check errors against merge-base {base[:12]}:",
+            file=sys.stderr,
+        )
+        for error in result.errors:
+            print(f"- {error.surface.key}: {error.detail}", file=sys.stderr)
+
+    if result.failures:
         print(
             f"version-bump check failed against merge-base {base[:12]}:",
             file=sys.stderr,
         )
-        for failure in failures:
+        for failure in result.failures:
             paths = ", ".join(failure.changed_guards)
             print(
                 f"- {failure.surface.constant} is {failure.head_version}; merge-base "
@@ -560,6 +796,9 @@ def main(argv: list[str] | None = None) -> int:
                 f"{failure.surface.constant} strictly past {failure.base_version}.",
                 file=sys.stderr,
             )
+    if result.errors:
+        return 2
+    if result.failures:
         return 1
 
     print(

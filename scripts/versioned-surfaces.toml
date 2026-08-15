@@ -1,11 +1,23 @@
 # Versioned wire/persistence surface inventory for check_version_bumps.py.
 #
-# A `file` guard compares the complete file. `rust_items` compares only the
-# named Rust declarations/functions (comments and formatting are ignored).
+# A `file` guard compares the complete file and may require literal
+# `must_cover` markers. `rust_items` compares only the named Rust
+# declarations/functions (comments and formatting are ignored).
 # `rust_serde_shapes` compares every Serde-derived struct/enum in the matched
-# source files. The latter intentionally fails closed for a few private helper
-# carriers: changing one requires the family bump even if it later proves not
-# to cross the boundary.
+# source files and requires explicit `must_cover` anchors so detection cannot
+# silently lose headline shapes. The latter intentionally fails closed for a
+# few private helper carriers: changing one requires the family bump even if it
+# later proves not to cross the boundary. Whole-file guards such as PostgreSQL's
+# schema.sql inherently cover every table in that authoritative schema file.
+#
+# A surface's diagnostic key is `<constant_path>:<constant>`; use that key with
+# `--surface` when constants such as SCHEMA_VERSION are not globally unique.
+#
+# This check is deliberately CI-only, unlike the sibling PostgreSQL-payload and
+# durable-read fixture checkers: its merge-base guarantee requires a current
+# fetched target branch. PR protection must require an up-to-date merge ref or
+# merge queue so independently landed version bumps cannot be hidden by a stale
+# merge-base.
 
 [[surface]]
 constant = "REMOTE_PROTOCOL_VERSION"
@@ -15,6 +27,7 @@ description = "JSON wire structs and enums exchanged by Lash remote peers"
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lash-remote-protocol/src/*.rs"]
+must_cover = ["RemoteLlmRequest", "RemoteProcessInput", "RemoteTurnEvent"]
 
 [[surface]]
 constant = "SCHEMA_VERSION"
@@ -26,6 +39,27 @@ description = "PostgreSQL tables, indexes, constraints, and persisted column sha
 [[surface.guard]]
 kind = "file"
 paths = ["crates/lash-postgres-store/schema.sql"]
+must_cover = [
+  "CREATE TABLE IF NOT EXISTS lash_schema_versions",
+  "CREATE TABLE IF NOT EXISTS lash_blobs",
+  "CREATE TABLE IF NOT EXISTS lash_sessions",
+  "CREATE TABLE IF NOT EXISTS lash_graph_nodes",
+  "CREATE TABLE IF NOT EXISTS lash_session_meta",
+  "CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits",
+  "CREATE TABLE IF NOT EXISTS lash_session_execution_leases",
+  "CREATE TABLE IF NOT EXISTS lash_queued_work_batches",
+  "CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs",
+  "CREATE TABLE IF NOT EXISTS lash_attachment_manifest",
+  "CREATE TABLE IF NOT EXISTS lash_processes",
+  "CREATE TABLE IF NOT EXISTS lash_process_events",
+  "CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries",
+  "CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions",
+  "CREATE TABLE IF NOT EXISTS lash_trigger_occurrences",
+  "CREATE TABLE IF NOT EXISTS lash_trigger_deliveries",
+  "CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay",
+  "CREATE TABLE IF NOT EXISTS lash_await_event_waits",
+  "CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts",
+]
 
 [[surface]]
 constant = "TRACE_SCHEMA_VERSION"
@@ -37,6 +71,7 @@ description = "NDJSON trace records, event variants, contexts, and graph payload
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lash-trace/src/*.rs"]
+must_cover = ["TraceRecord", "TraceEvent"]
 
 [[surface]]
 constant = "SCHEMA_VERSION"
@@ -390,6 +425,7 @@ paths = [
   "crates/lash-protocol-rlm/src/protocol/state.rs",
   "crates/lash-protocol-rlm/src/projection/bindings.rs",
 ]
+must_cover = ["RlmSnapshotRoot", "RlmDriverState", "ProjectionRef"]
 
 [[surface]]
 constant = "BYTECODE_FORMAT_VERSION"
@@ -404,6 +440,7 @@ symbols = ["Instruction"]
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/runtime/vm/continuation.rs"]
+must_cover = ["VmContinuation"]
 
 [[surface]]
 constant = "LASHLANG_SEGMENT_STATE_VERSION"
@@ -423,6 +460,7 @@ description = "serialized Lashlang workflow graph document"
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/workflow_graph.rs"]
+must_cover = ["WorkflowGraph"]
 
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
@@ -432,6 +470,7 @@ description = "serialized optional workflow type-facet projection"
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/workflow_graph/facets.rs"]
+must_cover = ["WorkflowNodeTypeFacets"]
 
 # Sweep exclusions: APP_VERSION and LASHLANG_COMPILER_VERSION mirror package
 # versions; MCP_PROTOCOL_VERSION, ANTHROPIC_VERSION, and CODE_ASSIST_API_VERSION
