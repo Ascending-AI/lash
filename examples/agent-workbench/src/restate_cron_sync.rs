@@ -158,8 +158,7 @@ where
     Classify: Fn(lash::EmbedError) -> S::Error,
 {
     let session = state
-        .session_builder(session_id)
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(&classify_embed_error)?;
     let registrations = session

@@ -1,23 +1,23 @@
 
 impl AppState {
-    /// Opens an existing session, asking for no particular dialect.
+    /// Opens a session, asking for the ambient dialect and accepting the one
+    /// already recorded.
     ///
-    /// A session's dialect is durably pinned at its first commit, so asserting
-    /// the ambient one on every open is both wrong directions at once: against
-    /// a store holding Lashlang sessions, `LASH_RUNBOOK_DIALECT=typescript`
-    /// makes every route that opens a session fail, while the reverse flip is
-    /// silently ignored and keeps serving the recorded dialect. Reopening asks
-    /// for nothing and gets what was recorded.
+    /// A dialect becomes durable at the session's first *commit*, not at open.
+    /// An earlier version of this applied `LASH_RUNBOOK_DIALECT` only on the
+    /// two call sites that create, and both of those open and drop without
+    /// running a turn — so the pin evaporated with the handle and the first
+    /// real turn, opening with no dialect and finding nothing recorded,
+    /// committed `lashlang` permanently. A workbench told to serve TypeScript
+    /// served Lashlang.
+    ///
+    /// So every open asks, and a session that already recorded a different
+    /// dialect keeps its own: asking is what makes the pin land at the first
+    /// commit, and accepting the recorded answer is what stops a store from an
+    /// earlier row failing every route. Observably this is still create-only —
+    /// the ambient value can only take effect on a session that has recorded
+    /// nothing.
     fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
-        self.core.session(session_id)
-    }
-
-    /// Opens a session that this call is creating, pinning the ambient dialect.
-    ///
-    /// The only place `LASH_RUNBOOK_DIALECT` is applied. A parity row must
-    /// therefore start from a fresh data directory, which `runbooks/RULES.md`
-    /// requires.
-    fn creating_session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
         use lash::rlm::RlmSessionBuilderExt as _;
 
         let builder = self.core.session(session_id);
@@ -26,6 +26,22 @@ impl AppState {
             lash::rlm::RlmDialect::Typescript => builder
                 .rlm_dialect(lash::rlm::RlmDialect::Typescript)
                 .expect("the typed TypeScript session option must serialize"),
+        }
+    }
+
+    /// Opens through [`Self::session_builder`], falling back to the recorded
+    /// dialect when this session was pinned to a different one.
+    ///
+    /// The fallback is what keeps a carried-over store from failing every
+    /// route; `runbooks/RULES.md` still requires a fresh data directory per
+    /// parity row, for evidence purity rather than to avoid an error.
+    async fn open_session(&self, session_id: &str) -> Result<lash::LashSession, lash::EmbedError> {
+        match self.session_builder(session_id.to_string()).open().await {
+            Ok(session) => Ok(session),
+            Err(error) if is_dialect_pin_conflict(&error) => {
+                self.core.session(session_id.to_string()).open().await
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -280,8 +296,7 @@ impl AppState {
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         let session = self
-            .session_builder(session_id)
-            .open()
+            .open_session(session_id)
             .await
             .map_err(|error| {
                 self.session_admission_error(session_id, "api.turn.cancel", error)
@@ -1070,4 +1085,14 @@ mod app_error_tests {
             })
         );
     }
+}
+
+/// Whether opening a session failed because it already recorded a different
+/// dialect, as opposed to failing for any other reason.
+///
+/// Matched on the message because the pin lives in the protocol plugin and
+/// surfaces as a protocol error. A wrong answer here can only make a genuinely
+/// broken open retry once without the dialect and fail again.
+fn is_dialect_pin_conflict(error: &lash::EmbedError) -> bool {
+    error.to_string().contains("RLM dialect is durably pinned")
 }

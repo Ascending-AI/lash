@@ -17,8 +17,7 @@ async fn app_state(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .session_builder(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| state.session_admission_error(&session_id, "api.state", error))?;
     let observation_snapshot = session.observe().recoverable_chat_snapshot();
@@ -285,8 +284,7 @@ async fn session_observations(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .session_builder(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.observations", error)
@@ -326,8 +324,7 @@ async fn send_turn(
         })?;
     drop(
         state
-            .session_builder(session_id.clone())
-            .open()
+            .open_session(&session_id)
             .await
             .map_err(|error| {
                 state.session_admission_error(&session_id, "api.turn", error)
@@ -707,8 +704,7 @@ async fn enqueue_tool_catalog_refresh(
 ) -> Result<lash::SessionCommandReceipt, AppError> {
     let session_id = state.current_session_id();
     let session = state
-        .session_builder(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
@@ -843,8 +839,7 @@ async fn reset_chat(
         }),
     );
     let session = state
-        .creating_session_builder(new_session_id.clone())
-        .open()
+        .open_session(&new_session_id)
         .await
         .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
@@ -928,8 +923,7 @@ async fn list_queued_work(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .session_builder(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.queued_work.list", error)
@@ -954,8 +948,7 @@ async fn run_queued_work_batch(
         ));
     }
     let session = state
-        .session_builder(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.queued_work.run", error)
@@ -1014,8 +1007,7 @@ async fn cancel_queued_work_batch(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .session_builder(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.queued_work.cancel", error)

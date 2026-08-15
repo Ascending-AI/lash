@@ -45,6 +45,7 @@ mod tests {
     include!("tests/recoverable_chat.rs");
     include!("tests/recoverable_chat_bare_prose.rs");
     include!("tests/recoverable_chat_failures.rs");
+    include!("tests/typescript_dialect.rs");
     include!("tests/continue_as_projection.rs");
     include!("tests/tool_catalog.rs");
     include!("tests/deferred_tools.rs");
