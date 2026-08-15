@@ -210,6 +210,165 @@ pub enum RemoteExecutionEvidenceCollectionInterruption {
     ProtocolAbort,
 }
 
+/// Wire mirror of one logical LLM call and every provider attempt it consumed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteLlmCallRecord {
+    pub call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub attempts: Vec<RemoteAttemptRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteAttemptRecord {
+    pub ordinal: u32,
+    pub started_at_ms: u64,
+    pub duration_ms: u64,
+    pub outcome: RemoteAttemptOutcome,
+    pub protocol_position: RemoteProtocolPosition,
+    pub retry_budget_consumed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_decision: Option<RemoteRetryDecision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<RemoteNormalizedError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<RemoteExecutionEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_disposition: Option<RemoteGenerationDisposition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<RemoteUsage>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteAttemptOutcome {
+    Completed,
+    Failed,
+    Aborted,
+    Interrupted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProtocolPosition {
+    NoResponse,
+    ResponseObserved,
+    OutputStarted,
+    TerminalObserved,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteRetryDecision {
+    pub scheduled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteNormalizedError {
+    pub class: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
+}
+
+pub(crate) fn validate_llm_call_record(
+    record: &RemoteLlmCallRecord,
+) -> Result<(), RemoteProtocolError> {
+    require_non_empty("RemoteLlmCallRecord", "call_id", &record.call_id)?;
+    if record.attempts.is_empty() {
+        return Err(RemoteProtocolError::InvalidEnvelope {
+            type_name: "RemoteLlmCallRecord",
+            message: "attempts must contain at least one provider attempt".to_string(),
+        });
+    }
+    for (index, attempt) in record.attempts.iter().enumerate() {
+        let expected =
+            u32::try_from(index + 1).map_err(|_| RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteLlmCallRecord",
+                message: "attempt count exceeds the supported ordinal range".to_string(),
+            })?;
+        if attempt.ordinal != expected {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteLlmCallRecord",
+                message: format!(
+                    "attempt ordinal {} must equal its one-based position {expected}",
+                    attempt.ordinal
+                ),
+            });
+        }
+        if let Some(error) = &attempt.error {
+            require_non_empty("RemoteNormalizedError", "class", &error.class)?;
+        }
+        match attempt.outcome {
+            RemoteAttemptOutcome::Completed => {
+                if attempt.protocol_position != RemoteProtocolPosition::TerminalObserved {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteLlmCallRecord",
+                        message: format!(
+                            "completed attempt {} must have terminal_observed protocol position",
+                            attempt.ordinal
+                        ),
+                    });
+                }
+                if attempt.error.is_some() {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteLlmCallRecord",
+                        message: format!(
+                            "completed attempt {} must not carry an error",
+                            attempt.ordinal
+                        ),
+                    });
+                }
+                if attempt
+                    .retry_decision
+                    .as_ref()
+                    .is_some_and(|decision| decision.scheduled)
+                {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteLlmCallRecord",
+                        message: format!(
+                            "completed attempt {} must not schedule a retry",
+                            attempt.ordinal
+                        ),
+                    });
+                }
+            }
+            RemoteAttemptOutcome::Failed if attempt.error.is_none() => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteLlmCallRecord",
+                    message: format!("failed attempt {} must carry an error", attempt.ordinal),
+                });
+            }
+            RemoteAttemptOutcome::Failed
+            | RemoteAttemptOutcome::Aborted
+            | RemoteAttemptOutcome::Interrupted => {}
+        }
+        if attempt
+            .retry_decision
+            .as_ref()
+            .is_some_and(|decision| decision.scheduled)
+            && index + 1 == record.attempts.len()
+        {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteLlmCallRecord",
+                message: format!(
+                    "attempt {} schedules a retry but no following attempt is sealed",
+                    attempt.ordinal
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 impl RemoteLlmResponse {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;

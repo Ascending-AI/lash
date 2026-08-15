@@ -275,6 +275,13 @@ async fn standard_runtime_trace_records_stream_event_entries() {
                 response_meta: None,
             }],
             response_metadata: Default::default(),
+            execution_evidence: Some(crate::ExecutionEvidence {
+                served_model: Some("served-model".to_string()),
+                provider_response_id: Some("provider-response-1".to_string()),
+                reasoning_output_tokens: Some(0),
+                provider_finish_reason: Some("stop".to_string()),
+                ..crate::ExecutionEvidence::default()
+            }),
             ..LlmResponse::default()
         }),
     }]);
@@ -313,6 +320,14 @@ async fn standard_runtime_trace_records_stream_event_entries() {
         &turn.outcome,
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
     ));
+    let attempt_evidence = turn.llm_calls[0].attempts[0]
+        .evidence
+        .as_ref()
+        .expect("response evidence reaches the sealed attempt ledger");
+    assert_eq!(
+        attempt_evidence.provider_response_id.as_deref(),
+        Some("provider-response-1")
+    );
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
     let entries = logged
@@ -368,6 +383,14 @@ async fn standard_runtime_trace_records_stream_event_entries() {
         .iter()
         .find(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("llm_call_completed"))
         .expect("completed llm call entry");
+    assert_eq!(
+        response_entry["attempts"][0]["execution_evidence"]["served_model"].as_str(),
+        Some("served-model")
+    );
+    assert_eq!(
+        response_entry["attempts"][0]["execution_evidence"]["reasoning_output_tokens"].as_u64(),
+        Some(0)
+    );
     let stream_summary = response_entry
         .get("stream_summary")
         .and_then(|value| value.as_object())

@@ -39,6 +39,31 @@ impl GoogleOAuthProvider {
         }
     }
 
+    pub(crate) fn execution_evidence_from_value(value: &Value) -> Option<ExecutionEvidence> {
+        let response = value.get("response").unwrap_or(value);
+        let usage = response.get("usageMetadata").unwrap_or(&Value::Null);
+        let evidence = ExecutionEvidence {
+            served_model: response
+                .get("modelVersion")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            provider_response_id: response
+                .get("responseId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            reasoning_output_tokens: usage
+                .get("thoughtsTokenCount")
+                .or_else(|| usage.get("reasoningTokenCount"))
+                .or_else(|| usage.get("reasoningTokens"))
+                .and_then(Value::as_u64),
+            provider_finish_reason: Self::finish_reason_str(value).map(str::to_string),
+            ..ExecutionEvidence::default()
+        };
+        (evidence != ExecutionEvidence::default()).then_some(evidence)
+    }
+
     fn text_parts_from_event(event: &Value) -> Vec<(String, Option<String>, bool)> {
         let mut out = Vec::new();
         let Some(candidates) = event
@@ -231,6 +256,7 @@ impl GoogleOAuthProvider {
         finish_event: &mut Option<Value>,
     ) -> Result<(), LlmTransportError> {
         let mut provider_usage = None;
+        let mut execution_evidence = None;
         let mut reasoning_deltas = Vec::new();
         Self::process_sse_event_with_text_parts(
             raw,
@@ -240,6 +266,7 @@ impl GoogleOAuthProvider {
                 reasoning_deltas: &mut reasoning_deltas,
                 usage,
                 provider_usage: &mut provider_usage,
+                execution_evidence: &mut execution_evidence,
                 tool_call_parts,
                 output_parts: None,
                 finish_event,
@@ -259,6 +286,7 @@ impl GoogleOAuthProvider {
             reasoning_deltas,
             usage,
             provider_usage,
+            execution_evidence,
             tool_call_parts,
             output_parts,
             finish_event,
@@ -268,6 +296,15 @@ impl GoogleOAuthProvider {
         }
         let event: Value = serde_json::from_str(raw)
             .map_err(|e| LlmTransportError::new(format!("Invalid Cloud Code SSE payload: {e}")))?;
+        ExecutionEvidence::merge_optional(
+            execution_evidence,
+            Self::execution_evidence_from_value(&event),
+        )
+        .map_err(|error| {
+            LlmTransportError::new(format!("Google stream {error}"))
+                .with_kind(ProviderFailureKind::Stream)
+                .with_code(error.code())
+        })?;
         let new_usage = Self::usage_from_event(&event);
         if new_usage.input_tokens > 0
             || new_usage.output_tokens > 0

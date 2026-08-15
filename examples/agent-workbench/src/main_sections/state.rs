@@ -400,6 +400,9 @@ enum StreamItem {
     TurnInput {
         receipt: TurnInputReceipt,
     },
+    ModelCallRecorded {
+        record: lash::remote::llm::RemoteLlmCallRecord,
+    },
     Done {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_id: Option<String>,
@@ -466,11 +469,129 @@ impl ProductEventHistory {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum PersistedProductEventHistories {
-    Current(HashMap<String, ProductEventHistory>),
-    Legacy(HashMap<String, Vec<ProductEvent>>),
+const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 1;
+
+#[derive(Serialize)]
+struct PersistedProductEventLog<'a> {
+    format_version: u32,
+    histories: &'a HashMap<String, ProductEventHistory>,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ProductEventLogDecodeError {
+    #[error("invalid JSON: {0}")]
+    InvalidJson(#[source] serde_json::Error),
+    #[error("field `format_version` must be an unsigned 32-bit integer")]
+    InvalidFormatVersion,
+    #[error("format version mismatch: expected {expected}, found {found}")]
+    FormatVersionMismatch { expected: u32, found: u32 },
+    #[error("field `histories` is required")]
+    MissingHistories,
+    #[error("field `{field}` could not be decoded: {source}")]
+    Field {
+        field: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("unversioned product event log mixes legacy event arrays with history objects")]
+    MixedUnversionedShapes,
+    #[error("product event log root must be a JSON object")]
+    InvalidRoot,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("decode product event log `{path}`: {source}")]
+struct ProductEventLogLoadError {
+    path: PathBuf,
+    #[source]
+    source: ProductEventLogDecodeError,
+}
+
+fn decode_product_event_histories(
+    bytes: &[u8],
+) -> Result<HashMap<String, ProductEventHistory>, ProductEventLogDecodeError> {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(ProductEventLogDecodeError::InvalidJson)?;
+    let root = value
+        .as_object()
+        .ok_or(ProductEventLogDecodeError::InvalidRoot)?;
+
+    // Released logs used arbitrary session ids as root keys. Treat
+    // `format_version` as the wrapper discriminator only when its value cannot
+    // itself be a released history object or legacy event array.
+    let versioned = root
+        .get("format_version")
+        .is_some_and(|value| !value.is_object() && !value.is_array());
+    if versioned {
+        let found = root
+            .get("format_version")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or(ProductEventLogDecodeError::InvalidFormatVersion)?;
+        if found != PRODUCT_EVENT_LOG_FORMAT_VERSION {
+            return Err(ProductEventLogDecodeError::FormatVersionMismatch {
+                expected: PRODUCT_EVENT_LOG_FORMAT_VERSION,
+                found,
+            });
+        }
+        let histories = root
+            .get("histories")
+            .cloned()
+            .ok_or(ProductEventLogDecodeError::MissingHistories)?;
+        return serde_json::from_value::<HashMap<String, ProductEventHistory>>(histories)
+            .map(|histories| {
+                histories
+                    .into_iter()
+                    .map(|(session_id, history)| (session_id, history.normalized()))
+                    .collect()
+            })
+            .map_err(|source| ProductEventLogDecodeError::Field {
+                field: "histories",
+                source,
+            });
+    }
+
+    let values = root.values().collect::<Vec<_>>();
+    let all_histories = values.iter().all(|value| value.is_object());
+    let all_legacy = values.iter().all(|value| value.is_array());
+    if all_histories {
+        return serde_json::from_value::<HashMap<String, ProductEventHistory>>(value)
+            .map(|histories| {
+                histories
+                    .into_iter()
+                    .map(|(session_id, history)| (session_id, history.normalized()))
+                    .collect()
+            })
+            .map_err(|source| ProductEventLogDecodeError::Field {
+                field: "histories",
+                source,
+            });
+    }
+    if all_legacy {
+        return serde_json::from_value::<HashMap<String, Vec<ProductEvent>>>(value)
+            .map(|histories| {
+                histories
+                    .into_iter()
+                    .map(|(session_id, events)| {
+                        let cursor = events.last().map_or(0, |event| event.sequence);
+                        (
+                            session_id,
+                            ProductEventHistory {
+                                cursor,
+                                events,
+                                event_ids: BTreeSet::new(),
+                            }
+                            .normalized(),
+                        )
+                    })
+                    .collect()
+            })
+            .map_err(|source| ProductEventLogDecodeError::Field {
+                field: "histories",
+                source,
+            });
+    }
+    Err(ProductEventLogDecodeError::MixedUnversionedShapes)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -524,29 +645,12 @@ impl SessionEventRegistry {
 
     fn persistent(path: PathBuf, channel_capacity: usize) -> AnyhowResult<Self> {
         let histories = match std::fs::read(&path) {
-            Ok(bytes) => match serde_json::from_slice(&bytes)
-                .with_context(|| format!("decode product event log `{}`", path.display()))?
-            {
-                PersistedProductEventHistories::Current(histories) => histories
-                    .into_iter()
-                    .map(|(session_id, history)| (session_id, history.normalized()))
-                    .collect(),
-                PersistedProductEventHistories::Legacy(histories) => histories
-                    .into_iter()
-                    .map(|(session_id, events)| {
-                        let cursor = events.last().map_or(0, |event| event.sequence);
-                        (
-                            session_id,
-                            ProductEventHistory {
-                                cursor,
-                                events,
-                                event_ids: BTreeSet::new(),
-                            }
-                            .normalized(),
-                        )
-                    })
-                    .collect(),
-            },
+            Ok(bytes) => decode_product_event_histories(&bytes).map_err(|source| {
+                ProductEventLogLoadError {
+                    path: path.clone(),
+                    source,
+                }
+            })?,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
             Err(err) => {
                 return Err(err)
@@ -685,6 +789,7 @@ impl SessionEventRegistry {
                 ..
             } => active_turn_ids.contains(turn_id),
             StreamItem::TurnInput { .. }
+            | StreamItem::ModelCallRecorded { .. }
             | StreamItem::Done {
                 turn_id: None,
                 ..
@@ -695,7 +800,7 @@ impl SessionEventRegistry {
         }
     }
 
-    /// Retire the product rows this workbench published on behalf of `turn_id`,
+    /// Retire the transient product rows this workbench published on behalf of `turn_id`,
     /// reporting the message ids it removed.
     ///
     /// A turn that failed has no outcome for its optimistic rows to stand for —
@@ -750,7 +855,11 @@ impl SessionEventRegistry {
         let Some(path) = self.path.as_deref() else {
             return;
         };
-        let bytes = serde_json::to_vec(histories).expect("serialize product event log");
+        let bytes = serde_json::to_vec(&PersistedProductEventLog {
+            format_version: PRODUCT_EVENT_LOG_FORMAT_VERSION,
+            histories,
+        })
+        .expect("serialize product event log");
         let temporary = path.with_extension("json.tmp");
         std::fs::write(&temporary, bytes).unwrap_or_else(|err| {
             panic!(

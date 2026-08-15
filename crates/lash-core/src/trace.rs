@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use lash_trace::{
-    TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
-    TraceLlmResponse, TraceRecord, TraceRetryAttempt, TraceSink, TraceTokenUsage, TraceToolSpec,
-    sha256_hex,
+    TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceExecutionEvidence,
+    TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TraceRecord, TraceRetryAttempt, TraceSink,
+    TraceTokenUsage, TraceToolSpec, sha256_hex,
 };
 
 use crate::llm::types::{
@@ -516,6 +516,30 @@ pub(crate) fn trace_llm_attempts(
                     .as_ref()
                     .and_then(|decision| decision.delay)
                     .map(|delay| delay.as_millis().try_into().unwrap_or(u64::MAX)),
+                execution_evidence: attempt.evidence.as_ref().map(|evidence| {
+                    let crate::ExecutionEvidence {
+                        served_model,
+                        provider_response_id,
+                        provider_request_id,
+                        reasoning_output_tokens,
+                        provider_finish_reason,
+                        collection_interruption,
+                    } = evidence;
+                    TraceExecutionEvidence {
+                        served_model: served_model.clone(),
+                        provider_response_id: provider_response_id.clone(),
+                        provider_request_id: provider_request_id.clone(),
+                        reasoning_output_tokens: *reasoning_output_tokens,
+                        provider_finish_reason: provider_finish_reason.clone(),
+                        collection_interruption: collection_interruption.map(|interruption| {
+                            match interruption {
+                                crate::ExecutionEvidenceCollectionInterruption::ProtocolAbort => {
+                                    "protocol_abort".to_string()
+                                }
+                            }
+                        }),
+                    }
+                }),
             })
             .collect(),
     )
@@ -542,6 +566,7 @@ pub(crate) fn trace_tool_attempt(
         duration_ms: record.duration_ms,
         reason,
         delay_ms,
+        execution_evidence: None,
     }
 }
 

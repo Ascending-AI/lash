@@ -885,7 +885,15 @@ pub struct LlmStreamEvidence {
 }
 
 impl LlmStreamEvidence {
-    pub fn merge(&mut self, next: Self) {
+    pub fn merge(&mut self, next: Self) -> Result<(), ExecutionEvidenceMergeError> {
+        if next.execution_evidence.is_some()
+            && self.http_summary.is_none()
+            && next.http_summary.is_none()
+        {
+            return Err(ExecutionEvidenceMergeError::BeforeResponseStart);
+        }
+        let mut execution_evidence = self.execution_evidence.clone();
+        ExecutionEvidence::merge_optional(&mut execution_evidence, next.execution_evidence)?;
         if next.provider_usage.is_some() {
             self.provider_usage = next.provider_usage;
         }
@@ -895,13 +903,93 @@ impl LlmStreamEvidence {
         if next.http_summary.is_some() {
             self.http_summary = next.http_summary;
         }
-        if next.execution_evidence.is_some() {
-            self.execution_evidence = next.execution_evidence;
-        }
+        self.execution_evidence = execution_evidence;
         if next.generation_disposition.is_some() {
             self.generation_disposition = next.generation_disposition;
         }
         self.response_metadata.extend(next.response_metadata);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod stream_evidence_contract_tests {
+    use super::*;
+
+    fn response_started() -> LlmStreamEvidence {
+        LlmStreamEvidence {
+            http_summary: Some("HTTP POST https://provider.test (stream)".to_string()),
+            ..LlmStreamEvidence::default()
+        }
+    }
+
+    #[test]
+    fn execution_identity_and_reasoning_counts_are_monotonic_at_the_shared_seam() {
+        let mut evidence = response_started();
+        evidence
+            .merge(LlmStreamEvidence {
+                execution_evidence: Some(ExecutionEvidence {
+                    served_model: Some("served-a".to_string()),
+                    provider_response_id: Some("response-a".to_string()),
+                    reasoning_output_tokens: Some(17),
+                    ..ExecutionEvidence::default()
+                }),
+                ..LlmStreamEvidence::default()
+            })
+            .expect("first provider facts establish shared evidence");
+        evidence
+            .merge(LlmStreamEvidence {
+                execution_evidence: Some(ExecutionEvidence {
+                    served_model: Some("served-a".to_string()),
+                    provider_response_id: Some("response-a".to_string()),
+                    reasoning_output_tokens: Some(0),
+                    ..ExecutionEvidence::default()
+                }),
+                ..LlmStreamEvidence::default()
+            })
+            .expect("a trailing explicit zero cannot regress a positive count");
+        let conflict = evidence
+            .merge(LlmStreamEvidence {
+                execution_evidence: Some(ExecutionEvidence {
+                    served_model: Some("served-b".to_string()),
+                    provider_response_id: Some("response-b".to_string()),
+                    ..ExecutionEvidence::default()
+                }),
+                ..LlmStreamEvidence::default()
+            })
+            .expect_err("identity drift must fail at the shared seam");
+
+        assert!(matches!(
+            conflict,
+            ExecutionEvidenceMergeError::IdentityConflict {
+                field: "served_model",
+                ..
+            }
+        ));
+        assert_eq!(conflict.code(), "stream_evidence_identity_conflict");
+
+        let merged = evidence.execution_evidence.expect("execution evidence");
+        assert_eq!(merged.served_model.as_deref(), Some("served-a"));
+        assert_eq!(merged.provider_response_id.as_deref(), Some("response-a"));
+        assert_eq!(merged.reasoning_output_tokens, Some(17));
+    }
+
+    #[test]
+    fn execution_evidence_cannot_precede_response_establishment() {
+        let mut evidence = LlmStreamEvidence::default();
+        let error = evidence
+            .merge(LlmStreamEvidence {
+                execution_evidence: Some(ExecutionEvidence {
+                    provider_response_id: Some("too-early".to_string()),
+                    ..ExecutionEvidence::default()
+                }),
+                ..LlmStreamEvidence::default()
+            })
+            .expect_err("provider facts before response start must fail");
+
+        assert_eq!(error, ExecutionEvidenceMergeError::BeforeResponseStart);
+        assert_eq!(error.code(), "stream_evidence_before_response_start");
+        assert_eq!(evidence.execution_evidence, None);
     }
 }
 
@@ -1004,6 +1092,114 @@ pub struct ExecutionEvidence {
     /// accepted. Present only when Lash deliberately preempted collection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection_interruption: Option<ExecutionEvidenceCollectionInterruption>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExecutionEvidenceMergeError {
+    BeforeResponseStart,
+    IdentityConflict {
+        field: &'static str,
+        current: String,
+        next: String,
+    },
+}
+
+impl ExecutionEvidenceMergeError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::BeforeResponseStart => "stream_evidence_before_response_start",
+            Self::IdentityConflict { .. } => "stream_evidence_identity_conflict",
+        }
+    }
+}
+
+impl std::fmt::Display for ExecutionEvidenceMergeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BeforeResponseStart => {
+                formatter.write_str("provider execution evidence preceded response establishment")
+            }
+            Self::IdentityConflict {
+                field,
+                current,
+                next,
+            } => write!(
+                formatter,
+                "provider execution evidence changed {field} from `{current}` to `{next}`"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ExecutionEvidenceMergeError {}
+
+impl ExecutionEvidence {
+    pub fn merge_optional(
+        accumulated: &mut Option<Self>,
+        next: Option<Self>,
+    ) -> Result<(), ExecutionEvidenceMergeError> {
+        let Some(next) = next else { return Ok(()) };
+        if next == Self::default() {
+            return Ok(());
+        }
+        let mut merged = accumulated.clone().unwrap_or_default();
+        merged.merge(next)?;
+        *accumulated = Some(merged);
+        Ok(())
+    }
+
+    pub fn merge(&mut self, next: Self) -> Result<(), ExecutionEvidenceMergeError> {
+        fn merge_identity(
+            current: &mut Option<String>,
+            next: Option<String>,
+            field: &'static str,
+        ) -> Result<(), ExecutionEvidenceMergeError> {
+            match (current.as_deref(), next) {
+                (Some(existing), Some(next)) if existing != next => {
+                    Err(ExecutionEvidenceMergeError::IdentityConflict {
+                        field,
+                        current: existing.to_string(),
+                        next,
+                    })
+                }
+                (None, Some(next)) => {
+                    *current = Some(next);
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        }
+
+        let ExecutionEvidence {
+            served_model,
+            provider_response_id,
+            provider_request_id,
+            reasoning_output_tokens,
+            provider_finish_reason,
+            collection_interruption,
+        } = next;
+        let mut merged = self.clone();
+        merge_identity(&mut merged.served_model, served_model, "served_model")?;
+        merge_identity(
+            &mut merged.provider_response_id,
+            provider_response_id,
+            "provider_response_id",
+        )?;
+        merge_identity(
+            &mut merged.provider_request_id,
+            provider_request_id,
+            "provider_request_id",
+        )?;
+        merged.reasoning_output_tokens =
+            match (merged.reasoning_output_tokens, reasoning_output_tokens) {
+                (Some(current), Some(next)) => Some(current.max(next)),
+                (current, next) => current.or(next),
+            };
+        merged.provider_finish_reason = provider_finish_reason.or(merged.provider_finish_reason);
+        merged.collection_interruption = collection_interruption.or(merged.collection_interruption);
+        *self = merged;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

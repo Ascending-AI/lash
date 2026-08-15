@@ -511,6 +511,110 @@ impl From<RemoteExecutionEvidenceCollectionInterruption>
     }
 }
 
+impl From<core_llm::LlmCallRecord> for RemoteLlmCallRecord {
+    fn from(value: core_llm::LlmCallRecord) -> Self {
+        let core_llm::LlmCallRecord {
+            call_id: core_llm::LlmCallId(call_id),
+            label,
+            attempts,
+        } = value;
+        Self {
+            call_id,
+            label,
+            attempts: attempts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<core_llm::AttemptRecord> for RemoteAttemptRecord {
+    fn from(value: core_llm::AttemptRecord) -> Self {
+        let core_llm::AttemptRecord {
+            ordinal,
+            started_at,
+            duration,
+            outcome,
+            protocol_position,
+            retry_budget_consumed,
+            retry_decision,
+            error,
+            evidence,
+            generation_disposition,
+            usage,
+        } = value;
+        Self {
+            ordinal,
+            started_at_ms: started_at,
+            duration_ms: duration.as_millis().try_into().unwrap_or(u64::MAX),
+            outcome: outcome.into(),
+            protocol_position: protocol_position.into(),
+            retry_budget_consumed,
+            retry_decision: retry_decision.map(Into::into),
+            error: error.map(Into::into),
+            evidence: evidence.map(Into::into),
+            generation_disposition: generation_disposition.map(Into::into),
+            usage: usage.map(Into::into),
+        }
+    }
+}
+
+impl From<core_llm::AttemptOutcome> for RemoteAttemptOutcome {
+    fn from(value: core_llm::AttemptOutcome) -> Self {
+        match value {
+            core_llm::AttemptOutcome::Completed => Self::Completed,
+            core_llm::AttemptOutcome::Failed => Self::Failed,
+            core_llm::AttemptOutcome::Aborted => Self::Aborted,
+            core_llm::AttemptOutcome::Interrupted => Self::Interrupted,
+        }
+    }
+}
+
+impl From<core_llm::ProtocolPosition> for RemoteProtocolPosition {
+    fn from(value: core_llm::ProtocolPosition) -> Self {
+        match value {
+            core_llm::ProtocolPosition::NoResponse => Self::NoResponse,
+            core_llm::ProtocolPosition::ResponseObserved => Self::ResponseObserved,
+            core_llm::ProtocolPosition::OutputStarted => Self::OutputStarted,
+            core_llm::ProtocolPosition::TerminalObserved => Self::TerminalObserved,
+        }
+    }
+}
+
+impl From<core_llm::RetryDecision> for RemoteRetryDecision {
+    fn from(value: core_llm::RetryDecision) -> Self {
+        let core_llm::RetryDecision {
+            scheduled,
+            delay,
+            reason,
+        } = value;
+        Self {
+            scheduled,
+            delay_ms: delay.map(|value| value.as_millis().try_into().unwrap_or(u64::MAX)),
+            reason,
+        }
+    }
+}
+
+impl From<core_llm::NormalizedError> for RemoteNormalizedError {
+    fn from(value: core_llm::NormalizedError) -> Self {
+        let core_llm::NormalizedError {
+            class,
+            provider_code,
+            http_status,
+            provider_request_id,
+            retry_after,
+            diagnostic: _,
+        } = value;
+        Self {
+            class,
+            provider_code,
+            http_status,
+            provider_request_id,
+            retry_after_ms: retry_after
+                .map(|value| value.as_millis().try_into().unwrap_or(u64::MAX)),
+        }
+    }
+}
+
 impl From<core_llm::GenerationOptions> for RemoteGenerationOptions {
     fn from(value: core_llm::GenerationOptions) -> Self {
         let core_llm::GenerationOptions {

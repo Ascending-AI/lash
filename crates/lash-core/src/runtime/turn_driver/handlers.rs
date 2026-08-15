@@ -161,6 +161,14 @@ impl RuntimeTurnDriver<'_> {
             }
         };
         if let Some(call_record) = call_record {
+            send_turn_activity(
+                event_tx,
+                TurnActivityId::new(call_record.call_id.0.clone()),
+                TurnEvent::ModelCallRecorded {
+                    record: call_record.clone(),
+                },
+            )
+            .await;
             self.llm_calls.push(call_record);
         }
         let loud_provider_panic = result.as_ref().err().and_then(|error| {

@@ -219,6 +219,9 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
                     .map(|id| id.0.to_string())
                     .collect(),
             },
+            lash_core::TurnEvent::ModelCallRecorded { record } => Self::ModelCallRecorded {
+                record: record.into(),
+            },
             lash_core::TurnEvent::CodeBlockStarted {
                 language,
                 code,

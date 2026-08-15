@@ -455,6 +455,13 @@ fn retry_attempts_are_optional_additive_event_fields() {
             duration_ms: 10,
             reason: Some("http_429".to_string()),
             delay_ms: Some(250),
+            execution_evidence: Some(lash_trace::TraceExecutionEvidence {
+                served_model: Some("served-model".to_string()),
+                provider_response_id: Some("provider-response-1".to_string()),
+                reasoning_output_tokens: Some(0),
+                provider_finish_reason: Some("stop".to_string()),
+                ..Default::default()
+            }),
         },
         lash_trace::TraceRetryAttempt {
             ordinal: 2,
@@ -462,6 +469,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
             duration_ms: 20,
             reason: None,
             delay_ms: None,
+            execution_evidence: None,
         },
     ]);
     let event = TraceEvent::ToolCallCompleted {
@@ -480,6 +488,14 @@ fn retry_attempts_are_optional_additive_event_fields() {
     assert_eq!(json["attempts"].as_array().map(Vec::len), Some(2));
     assert_eq!(json["attempts"][0]["reason"], "http_429");
     assert_eq!(json["attempts"][0]["delay_ms"], 250);
+    assert_eq!(
+        json["attempts"][0]["execution_evidence"]["served_model"],
+        "served-model"
+    );
+    assert_eq!(
+        json["attempts"][0]["execution_evidence"]["reasoning_output_tokens"],
+        0
+    );
     assert!(json["attempts"][1].get("reason").is_none());
     assert!(json["attempts"][1].get("delay_ms").is_none());
     assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 4);

@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ensure_protocol_version;
+use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 
 // Wire mirror of the runtime usage counters. This is a deliberately versioned
@@ -59,10 +60,14 @@ impl RemoteTurnActivity {
         ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnActivity", "id", &self.id)?;
         require_non_empty("RemoteTurnActivity", "correlation_id", &self.correlation_id)?;
-        if let RemoteTurnEvent::TurnInputApplied { applications } = &self.event {
-            for application in applications {
-                application.validate()?;
+        match &self.event {
+            RemoteTurnEvent::TurnInputApplied { applications } => {
+                for application in applications {
+                    application.validate()?;
+                }
             }
+            RemoteTurnEvent::ModelCallRecorded { record } => validate_llm_call_record(record)?,
+            _ => {}
         }
         Ok(())
     }
@@ -83,6 +88,9 @@ pub enum RemoteTurnEvent {
     ModelAttemptReset {
         assistant_prose_correlation_ids: Vec<String>,
         reasoning_correlation_ids: Vec<String>,
+    },
+    ModelCallRecorded {
+        record: RemoteLlmCallRecord,
     },
     CodeBlockStarted {
         language: String,

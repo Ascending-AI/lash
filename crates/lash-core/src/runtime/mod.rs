@@ -1146,6 +1146,10 @@ pub enum TurnEvent {
         assistant_prose_correlation_ids: Vec<TurnActivityId>,
         reasoning_correlation_ids: Vec<TurnActivityId>,
     },
+    /// A sealed per-call attempt ledger, including provider-reported evidence.
+    ModelCallRecorded {
+        record: crate::LlmCallRecord,
+    },
     CodeBlockStarted {
         language: String,
         code: String,

@@ -203,7 +203,7 @@ mod tests {
     #[tokio::test]
     async fn anthropic_requires_message_stop_and_retains_partial_usage() {
         let body = concat!(
-            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":8,\"cache_read_input_tokens\":2}}}\n\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial_1\",\"model\":\"claude-sonnet-4-6-served\",\"usage\":{\"input_tokens\":8,\"cache_read_input_tokens\":2,\"output_tokens_details\":{\"thinking_tokens\":0}}}}\n\n",
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n",
             "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n",
             "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"lookup\",\"input\":{}}}\n\n",
@@ -235,6 +235,20 @@ mod tests {
         assert_eq!(partial.usage.input_tokens, 8);
         assert_eq!(partial.usage.output_tokens, 3);
         assert!(partial.provider_usage.is_some());
+        let evidence = partial
+            .execution_evidence
+            .as_ref()
+            .expect("Anthropic partial response retains observed provider evidence");
+        assert_eq!(
+            evidence.provider_response_id.as_deref(),
+            Some("msg_partial_1")
+        );
+        assert_eq!(
+            evidence.served_model.as_deref(),
+            Some("claude-sonnet-4-6-served")
+        );
+        assert_eq!(evidence.provider_finish_reason.as_deref(), Some("end_turn"));
+        assert_eq!(evidence.reasoning_output_tokens, Some(0));
         assert!(
             partial
                 .parts
@@ -246,6 +260,48 @@ mod tests {
                 .lock_recover()
                 .iter()
                 .any(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_stream_evidence_is_monotonic_and_rejects_identity_drift() {
+        let monotonic_body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_stable\",\"model\":\"claude-stable\",\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":7}}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0}}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let mut monotonic = AnthropicProvider::new("key")
+            .with_transport(Arc::new(StaticSseTransport(monotonic_body)));
+        let response = monotonic
+            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .await
+            .expect("a cumulative trailing zero must not erase a positive count");
+        assert_eq!(
+            response
+                .execution_evidence
+                .expect("stream evidence")
+                .reasoning_output_tokens,
+            Some(7)
+        );
+
+        let drifting_body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_first\",\"model\":\"claude-first\",\"usage\":{}}}\n\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_second\",\"model\":\"claude-second\",\"usage\":{}}}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let mut drifting = AnthropicProvider::new("key")
+            .with_transport(Arc::new(StaticSseTransport(drifting_body)));
+        let error = drifting
+            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .await
+            .expect_err("one stream cannot change provider response identity");
+        assert!(
+            error.message.contains("served_model")
+                || error.message.contains("provider_response_id"),
+            "identity-drift error must name the conflicting field: {error:?}"
         );
     }
 

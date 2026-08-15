@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ensure_protocol_version;
+use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::llm::{RemoteLlmTerminalReason, RemoteProviderFailureKind};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::turn_control::RemoteTurnCancellationEvidence;
@@ -31,6 +32,8 @@ pub struct RemoteTurnResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<RemoteToolCallSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub llm_calls: Vec<RemoteLlmCallRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issues: Vec<RemoteTurnIssue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub activities: Vec<RemoteTurnActivity>,
@@ -53,6 +56,19 @@ impl RemoteTurnResult {
         if let Some(cancellation) = self.cancellation.as_ref() {
             cancellation.validate()?;
         }
+        let mut summary_records = HashMap::new();
+        for record in &self.llm_calls {
+            validate_llm_call_record(record)?;
+            if summary_records
+                .insert(record.call_id.as_str(), record)
+                .is_some()
+            {
+                return Err(RemoteProtocolError::DuplicateLlmCallSummary {
+                    call_id: record.call_id.clone(),
+                });
+            }
+        }
+        let mut activity_records = HashMap::new();
         for activity in &self.activities {
             if activity.protocol_version != self.protocol_version {
                 return Err(RemoteProtocolError::MismatchedNestedProtocolVersion {
@@ -63,6 +79,35 @@ impl RemoteTurnResult {
                 });
             }
             activity.validate()?;
+            if let crate::usage_activity::RemoteTurnEvent::ModelCallRecorded { record } =
+                &activity.event
+                && activity_records
+                    .insert(record.call_id.as_str(), record)
+                    .is_some()
+            {
+                return Err(RemoteProtocolError::DuplicateLlmCallActivity {
+                    call_id: record.call_id.clone(),
+                });
+            }
+        }
+        for (call_id, activity_record) in &activity_records {
+            let Some(summary_record) = summary_records.get(call_id) else {
+                return Err(RemoteProtocolError::MissingLlmCallSummary {
+                    call_id: (*call_id).to_string(),
+                });
+            };
+            if summary_record != activity_record {
+                return Err(RemoteProtocolError::ConflictingLlmCallRecord {
+                    call_id: (*call_id).to_string(),
+                });
+            }
+        }
+        for call_id in summary_records.keys() {
+            if !activity_records.contains_key(call_id) {
+                return Err(RemoteProtocolError::MissingLlmCallActivity {
+                    call_id: (*call_id).to_string(),
+                });
+            }
         }
         Ok(())
     }

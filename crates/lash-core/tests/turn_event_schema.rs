@@ -16,9 +16,10 @@ use std::collections::BTreeSet;
 
 use lash_core::runtime::QueuedWorkClaimBoundary;
 use lash_core::{
-    CheckpointKind, MessageOrigin, MessageRole, PluginMessage, PluginRuntimeEvent, TokenUsage,
-    ToolCallOutput, ToolFailure, ToolFailureClass, TurnActivity, TurnActivityId, TurnCause,
-    TurnEvent, TurnInputApplication,
+    AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin,
+    MessageRole, PluginMessage, PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput,
+    ToolFailure, ToolFailureClass, TurnActivity, TurnActivityId, TurnCause, TurnEvent,
+    TurnInputApplication,
 };
 use serde_json::json;
 
@@ -31,6 +32,7 @@ fn expected_type_tag(event: &TurnEvent) -> &'static str {
         TurnEvent::AssistantProseDelta { .. } => "assistant_prose_delta",
         TurnEvent::ReasoningDelta { .. } => "reasoning_delta",
         TurnEvent::ModelAttemptReset { .. } => "model_attempt_reset",
+        TurnEvent::ModelCallRecorded { .. } => "model_call_recorded",
         TurnEvent::CodeBlockStarted { .. } => "code_block_started",
         TurnEvent::CodeBlockCompleted { .. } => "code_block_completed",
         TurnEvent::ToolCallStarted { .. } => "tool_call_started",
@@ -55,6 +57,7 @@ const ALL_TURN_EVENT_TAGS: &[&str] = &[
     "assistant_prose_delta",
     "reasoning_delta",
     "model_attempt_reset",
+    "model_call_recorded",
     "code_block_started",
     "code_block_completed",
     "tool_call_started",
@@ -151,6 +154,43 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "type": "model_attempt_reset",
                 "assistant_prose_correlation_ids": ["prose-1"],
                 "reasoning_correlation_ids": ["reasoning-1"],
+            }),
+        ),
+        (
+            "model_call_recorded",
+            TurnEvent::ModelCallRecorded {
+                record: LlmCallRecord {
+                    call_id: LlmCallId("llm-call-1".to_string()),
+                    label: Some("primary".to_string()),
+                    attempts: vec![AttemptRecord {
+                        ordinal: 1,
+                        started_at: 7,
+                        duration: std::time::Duration::from_millis(3),
+                        outcome: AttemptOutcome::Completed,
+                        protocol_position: ProtocolPosition::TerminalObserved,
+                        retry_budget_consumed: true,
+                        retry_decision: None,
+                        error: None,
+                        evidence: None,
+                        generation_disposition: None,
+                        usage: None,
+                    }],
+                },
+            },
+            json!({
+                "type": "model_call_recorded",
+                "record": {
+                    "call_id": "llm-call-1",
+                    "label": "primary",
+                    "attempts": [{
+                        "ordinal": 1,
+                        "started_at": 7,
+                        "duration": { "secs": 0, "nanos": 3000000 },
+                        "outcome": "completed",
+                        "protocol_position": "terminal_observed",
+                        "retry_budget_consumed": true,
+                    }],
+                },
             }),
         ),
         (

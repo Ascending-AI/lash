@@ -44,9 +44,7 @@ impl RemoteTurnResult {
             execution,
             token_usage,
             children_usage,
-            // ADR 0032 aggregation is local-only in this step. The remote
-            // protocol mirror is intentionally deferred.
-            llm_calls: _,
+            llm_calls,
             tool_calls,
             errors,
         } = turn;
@@ -76,6 +74,7 @@ impl RemoteTurnResult {
             },
             execution: execution.into(),
             tool_calls: tool_calls.into_iter().map(Into::into).collect(),
+            llm_calls: llm_calls.into_iter().map(Into::into).collect(),
             issues: errors.into_iter().map(Into::into).collect(),
             activities: activities.into_iter().collect(),
             metadata: HashMap::new(),

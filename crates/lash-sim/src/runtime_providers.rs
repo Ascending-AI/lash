@@ -96,6 +96,28 @@ pub fn runtime_script_for_text(
     Ok(ProviderWireScript::from_json_str(&encoded)?)
 }
 
+/// Google runtime fixture variant that reports an explicit zero reasoning
+/// count without weakening the canonical fixture's non-zero coverage.
+pub fn google_runtime_script_for_text_with_explicit_zero_reasoning(
+    text: &str,
+) -> Result<ProviderWireScript, RuntimeProviderError> {
+    let mut script = runtime_script_value_for_text(GOOGLE_OAUTH, text)?;
+    for timeline_index in [1, 2] {
+        let encoded = script
+            .pointer(&format!("/timeline/{timeline_index}/data"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                RuntimeProviderError::new(format!(
+                    "Google runtime script missing timeline[{timeline_index}].data"
+                ))
+            })?;
+        let mut event: Value = serde_json::from_str(encoded)?;
+        event["response"]["usageMetadata"]["thoughtsTokenCount"] = json!(0);
+        set_sse_data(&mut script, timeline_index, event)?;
+    }
+    ProviderWireScript::from_json_str(&script.to_string()).map_err(Into::into)
+}
+
 /// The runtime provider wire script for `text` as a still-mutable JSON value,
 /// before it is parsed into a `ProviderWireScript`. This lets failure-script
 /// builders reuse the exact happy-path request match and content framing for a
@@ -197,6 +219,8 @@ pub fn runtime_script_value_for_text(
                 1,
                 json!({
                     "response": {
+                        "responseId": "google-evidence-1",
+                        "modelVersion": "gemini-3.1-pro-served",
                         "candidates": [
                             {
                                 "content": {
@@ -448,4 +472,60 @@ where
     T: LlmHttpTransport + 'static,
 {
     transport.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::ProviderWireEvent;
+
+    fn sse_payload(event: &ProviderWireEvent) -> Value {
+        let ProviderWireEvent::Sse { data, .. } = event else {
+            panic!("expected scripted SSE event");
+        };
+        serde_json::from_str(data).expect("scripted SSE payload is JSON")
+    }
+
+    #[test]
+    fn generated_google_partial_fixture_preserves_canonical_identity_and_reasoning() {
+        let script = live_failure_script(GOOGLE_OAUTH, 2).expect("Google partial fixture");
+        let payload = sse_payload(&script.timeline[1]);
+        assert_eq!(
+            payload.pointer("/response/responseId"),
+            Some(&json!("google-evidence-1"))
+        );
+        assert_eq!(
+            payload.pointer("/response/modelVersion"),
+            Some(&json!("gemini-3.1-pro-served"))
+        );
+        assert_eq!(
+            payload.pointer("/response/usageMetadata/thoughtsTokenCount"),
+            Some(&json!(1))
+        );
+    }
+
+    #[test]
+    fn generated_google_explicit_zero_reasoning_variant_preserves_presence() {
+        let script = google_runtime_script_for_text_with_explicit_zero_reasoning("answer")
+            .expect("Google explicit-zero variant");
+        for timeline_index in [1, 2] {
+            let payload = sse_payload(&script.timeline[timeline_index]);
+            assert_eq!(
+                payload.pointer("/response/usageMetadata/thoughtsTokenCount"),
+                Some(&json!(0))
+            );
+        }
+    }
+
+    #[test]
+    fn generated_openai_fixture_does_not_carry_google_identity_fields() {
+        let script = runtime_script_value_for_text(OPENAI, "answer").expect("OpenAI fixture");
+        let payload = sse_payload(
+            &ProviderWireScript::from_json_str(&script.to_string())
+                .expect("valid OpenAI fixture")
+                .timeline[4],
+        );
+        assert!(payload.pointer("/response/responseId").is_none());
+        assert!(payload.pointer("/response/modelVersion").is_none());
+    }
 }

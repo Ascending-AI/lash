@@ -22,6 +22,14 @@ assert.ok(
 const multiAttachmentMessage = JSON.parse(
   process.env.LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE ?? "null",
 );
+const executionEvidenceScenarios = JSON.parse(
+  process.env.LASH_WORKBENCH_EXECUTION_EVIDENCE_SCENARIOS ?? "null",
+);
+assert.equal(
+  executionEvidenceScenarios?.providers?.length,
+  2,
+  "execution evidence must come from real Rust runtime scenarios",
+);
 assert.ok(
   multiAttachmentMessage,
   "LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE must come from the Rust projection gate",
@@ -1184,6 +1192,303 @@ function snapshot(sessionId, cursor, eventIds = []) {
     },
   };
 }
+
+test("real provider turns survive cursor replay, recovery races, terminal replacement, and production snapshot rendering", async () => {
+  for (const scenario of executionEvidenceScenarios.providers) {
+    const target = { textContent: "" };
+    const snapshots = [];
+    const scheduledStateRetries = [];
+    const stateRetryDelays = [];
+    let nextStateRetryTimerId = 0;
+    let resolveDelayedSnapshot;
+    let handledModelCalls = 0;
+    const element = () => ({
+      value: "",
+      innerHTML: "",
+      textContent: "",
+      appendChild() {},
+      addEventListener() {},
+    });
+    const scorecardContext = {
+      Map,
+      Set,
+      Math,
+      Number,
+      executionScorecard: target,
+      finishTransientRows() {},
+      async fetchStateSnapshot() {
+        const next = snapshots.shift();
+        return next === "delayed"
+          ? new Promise(resolve => { resolveDelayedSnapshot = resolve; })
+          : next;
+      },
+      renderShellStatus() {},
+      setTimeout(callback, delay) {
+        const timer = { id: ++nextStateRetryTimerId, callback };
+        scheduledStateRetries.push(timer);
+        stateRetryDelays.push(delay);
+        return timer.id;
+      },
+      clearTimeout(timerId) {
+        const index = scheduledStateRetries.findIndex(timer => timer.id === timerId);
+        if (index >= 0) scheduledStateRetries.splice(index, 1);
+      },
+      renderError() {},
+      snapshotFailureReason(error) { return String(error); },
+      __LASH_WORKBENCH_TURN_EVENT_HOOK__(event) {
+        if (event.type === "model_call_recorded") handledModelCalls += 1;
+      },
+      modelInput: element(),
+      variantSelect: element(),
+      knownModels: new Set(),
+      modelListenersBound: false,
+      document: { getElementById: element, createElement: element },
+      clearTerminalTurnTombstones() {},
+      clearTranscript() {},
+      validateModel() {},
+      knownWebState: null,
+      knownSessionLabel: null,
+      renderUsage() {},
+      renderQueuedWork() {},
+      renderStateTranscript() {},
+      renderIngressReceipt() {},
+      recordTurnInputApplications() {},
+      busy: false,
+      streamGeneration: 1,
+      restartEventStreams() {},
+      setBusy(value) { this.busy = value; },
+    };
+    vm.runInNewContext(
+      `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+       ${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+       ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
+       this.executionScorecardState = createExecutionScorecardState();
+       this.projectionState = createWorkbenchProjectionState();
+       this.shellAvailability = createShellAvailability();
+       this.renderedProductEvents = projectionState.renderedProductEvents;
+       this.appliedObservationEvents = projectionState.appliedObservationEvents;
+       ${markedSource("WORKBENCH_TURN_EVENT_REDUCER", "WORKBENCH_TURN_EVENT_REDUCER")}
+       ${markedSource("WORKBENCH_STATE_SNAPSHOT", "WORKBENCH_STATE_SNAPSHOT")}
+       ${markedSource("WORKBENCH_STATE_RETRY", "WORKBENCH_STATE_RETRY")}
+       ${markedSource("WORKBENCH_REMOTE_STREAM_RECOVERY", "WORKBENCH_REMOTE_STREAM_RECOVERY")}`,
+      scorecardContext,
+    );
+    scorecardContext.applyProjectionSnapshot(
+      scorecardContext.projectionState,
+      scenario.first_snapshot,
+      true,
+    );
+    scorecardContext.markShellHydrated(scorecardContext.shellAvailability);
+
+    const firstLine = JSON.stringify(scenario.first_observation_line);
+    scorecardContext.handleObservationStreamLine(firstLine);
+    scorecardContext.handleObservationStreamLine(firstLine);
+    assert.equal(handledModelCalls, 1, "cursor dedupe must stop a second reducer dispatch");
+    const firstRows = target.textContent
+      .split("\n")
+      .filter(row => row.includes(scenario.expected.first_call_id));
+    assert.equal(firstRows.length, 2, "the real retry call must render both attempt rows");
+    assert.match(firstRows[0], /#1 failed/);
+    assert.match(firstRows[0], /position no_response/);
+    assert.match(
+      firstRows[0],
+      new RegExp(`error ${scenario.expected.failed_attempt_error_class}`),
+    );
+    assert.match(firstRows[0], /retry scheduled/);
+    assert.doesNotMatch(firstRows[0], / · (?:model|response|finish|reasoning) /);
+    assert.match(firstRows[1], /#2 completed/);
+    assert.match(firstRows[1], /position terminal_observed/);
+    assert.match(firstRows[1], new RegExp(`model ${scenario.expected.served_model}`));
+    assert.match(firstRows[1], new RegExp(`response ${scenario.expected.response_id}`));
+    assert.match(firstRows[1], new RegExp(`finish ${scenario.expected.finish}`));
+    assert.match(firstRows[1], /reasoning 0/);
+
+    snapshots.push(scenario.first_snapshot);
+    scorecardContext.handleObservationStreamLine(
+      JSON.stringify(scenario.first_terminal_replacement_line),
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the production snapshot renderer must retain the first runtime ledger",
+    );
+    assert.equal(
+      target.textContent
+        .split("\n")
+        .filter(row => row.includes(scenario.expected.first_call_id)).length,
+      2,
+      "terminal replacement must retain both retry attempts",
+    );
+
+    const retriesBeforeGap = scheduledStateRetries.length;
+    snapshots.push("delayed");
+    scorecardContext.executionScorecardState.delete(scenario.expected.first_call_id);
+    scorecardContext.renderExecutionScorecard(
+      scorecardContext.executionScorecardState,
+      target,
+    );
+    assert.doesNotMatch(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the replay gap must contain a scorecard row that only a snapshot can backfill",
+    );
+    scorecardContext.handleObservationStreamLine(JSON.stringify({
+      type: "replay_gap",
+      gap: { latest_cursor: scenario.first_snapshot.observation.cursor },
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+    scorecardContext.handleObservationStreamLine(
+      JSON.stringify(scenario.second_observation_line),
+    );
+    assert.equal(handledModelCalls, 2);
+    resolveDelayedSnapshot(scenario.first_snapshot);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(
+      scheduledStateRetries.length,
+      retriesBeforeGap + 1,
+      "an overtaken replay-gap snapshot must schedule a fresh recovery",
+    );
+    assert.match(
+      target.textContent,
+      new RegExp(scenario.expected.second_call_id),
+      "an observation arriving during recovery must survive the older snapshot",
+    );
+    assert.doesNotMatch(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the overtaken snapshot itself must not erase the newer observation",
+    );
+
+    snapshots.push("delayed");
+    const firstRetry = scheduledStateRetries.shift();
+    assert.ok(firstRetry, "the stale replay-gap response must arm the production retry");
+    firstRetry.callback();
+    await new Promise(resolve => setImmediate(resolve));
+    const racingObservation = JSON.parse(JSON.stringify(scenario.second_observation_line));
+    racingObservation.event.cursor += "-retry-race";
+    scorecardContext.handleObservationStreamLine(JSON.stringify(racingObservation));
+    resolveDelayedSnapshot(scenario.final_snapshot);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(
+      scheduledStateRetries.length,
+      1,
+      "a second stale response must keep the bounded production retry chain alive",
+    );
+    assert.equal(
+      scorecardContext.shellAvailability.channels.state,
+      false,
+      "a stale retry must keep the state channel down while the gap row is missing",
+    );
+    assert.equal(
+      scorecardContext.shellStatusModel(scorecardContext.shellAvailability).banner.hidden,
+      false,
+      "a stale retry must keep the reconnecting banner visible",
+    );
+    assert.doesNotMatch(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the second stale response must not pretend the missing row was repaired",
+    );
+
+    snapshots.push(scenario.final_snapshot);
+    const secondRetry = scheduledStateRetries.shift();
+    assert.ok(secondRetry, "the second stale response must arm the next bounded retry");
+    secondRetry.callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the armed production retry must backfill the scorecard row after a quiet window",
+    );
+    assert.match(
+      target.textContent,
+      new RegExp(scenario.expected.second_call_id),
+      "fresh gap recovery must retain the observation that overtook the stale snapshot",
+    );
+    assert.deepEqual(
+      target.textContent
+        .split("\n")
+        .filter(row => row.includes(scenario.expected.first_call_id))
+        .map(row => row.match(/#\d+/)?.[0]),
+      ["#1", "#2"],
+      "gap recovery must restore retry attempt identity and order",
+    );
+    assert.deepEqual(
+      stateRetryDelays,
+      [900, 1800],
+      "stale recovery must retain the production retry backoff",
+    );
+    assert.equal(scorecardContext.shellAvailability.channels.state, true);
+    assert.equal(
+      scorecardContext.shellStatusModel(scorecardContext.shellAvailability).banner.hidden,
+      true,
+      "the successful retry must clear the reconnecting banner",
+    );
+    assert.equal(scheduledStateRetries.length, 0);
+
+    snapshots.push(scenario.final_snapshot);
+    scorecardContext.handleObservationStreamLine(
+      JSON.stringify(scenario.second_terminal_replacement_line),
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    for (const callId of [scenario.expected.first_call_id, scenario.expected.second_call_id]) {
+      assert.match(target.textContent, new RegExp(callId));
+    }
+    assert.equal(
+      target.textContent.split("\n").length,
+      3,
+      "the real terminal replacement must converge to two retry rows plus the second call",
+    );
+  }
+});
+
+test("execution scorecard ordering follows attempt start time with call id as tie-breaker", () => {
+  const target = { textContent: "" };
+  const scorecardContext = { Map };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+     this.scorecard = createExecutionScorecardState();`,
+    scorecardContext,
+  );
+  for (const [call_id, started_at_ms] of [["a-call", 30], ["!call", 20], ["A-call", 10]]) {
+    scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
+      call_id,
+      attempts: [{ ordinal: 1, started_at_ms, outcome: "completed", evidence: { reasoning_output_tokens: 0 } }],
+    });
+  }
+  scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
+  assert.deepEqual(
+    target.textContent.split("\n").map(line => line.split(" #", 1)[0]),
+    ["A-call", "!call", "a-call"],
+  );
+});
+
+test("execution scorecard explains collection interruption only when reported", () => {
+  const target = { textContent: "" };
+  const scorecardContext = { Map, Math, Number };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+     this.scorecard = createExecutionScorecardState();`,
+    scorecardContext,
+  );
+  scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
+    call_id: "partial",
+    attempts: [{
+      ordinal: 1,
+      started_at_ms: 1,
+      outcome: "aborted",
+      evidence: { collection_interruption: "protocol_abort" },
+    }],
+  });
+  scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
+    call_id: "complete",
+    attempts: [{ ordinal: 1, started_at_ms: 2, outcome: "completed", evidence: {} }],
+  });
+  scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
+  assert.equal(target.textContent.match(/collection interrupted:/g)?.length, 1);
+  assert.match(target.textContent, /collection interrupted: protocol_abort/);
+});
 
 test("a snapshot overtaken by a live event cannot erase its row", () => {
   const projection = createWorkbenchProjectionState();

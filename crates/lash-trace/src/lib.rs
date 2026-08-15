@@ -407,6 +407,25 @@ pub struct TraceRetryAttempt {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delay_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_evidence: Option<TraceExecutionEvidence>,
+}
+
+/// Provider-reported facts attached to one sealed LLM attempt.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceExecutionEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_response_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_finish_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_interruption: Option<String>,
 }
 
 impl TraceEvent {

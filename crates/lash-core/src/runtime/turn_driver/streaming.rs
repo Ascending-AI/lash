@@ -1187,7 +1187,19 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
             LlmStreamEvent::Evidence(evidence) => {
-                state.stream_evidence.merge(evidence);
+                state.stream_evidence.merge(evidence).map_err(|error| {
+                    let code = error.code().to_string();
+                    LlmCallError {
+                        message: error.to_string(),
+                        retryable: false,
+                        kind: crate::ProviderFailureKind::Stream,
+                        raw: None,
+                        code: Some(code),
+                        terminal_reason: crate::LlmTerminalReason::ProviderError,
+                        request_body: state.stream_evidence.request_body.clone(),
+                        partial_response: None,
+                    }
+                })?;
             }
             LlmStreamEvent::RetryStatus {
                 wait_seconds,

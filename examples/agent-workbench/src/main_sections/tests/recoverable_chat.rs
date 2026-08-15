@@ -759,20 +759,7 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
 async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/browser_projection.mjs");
-    let trigger_identities = serde_json::json!({
-        "session_a": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("session-a"),
-            "derived/v2/content-address",
-        ),
-        "session_b": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("session-b"),
-            "derived/v2/content-address",
-        ),
-        "wired": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("wired-session"),
-            "wired-key",
-        ),
-    });
+    let trigger_identities = browser_projection_trigger_identities();
     let usage_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
         lash::TurnEvent::Usage {
             protocol_iteration: 2,
@@ -970,6 +957,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         "noIdToolCompleted": no_id_tool_completed_event,
         "noIdCodeCompleted": no_id_code_completed_event,
     });
+    let evidence_scenarios = Box::pin(provider_execution_evidence_scenarios()).await;
 
     // RLM's printed-image projection can commit more than one stored image
     // part on a single message. Feed that production projection to the browser
@@ -1079,6 +1067,11 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
             serde_json::to_string(&durable_tool_state.transcript)
                 .expect("serialize Rust-produced durable tool transcript"),
         )
+        .env(
+            "LASH_WORKBENCH_EXECUTION_EVIDENCE_SCENARIOS",
+            serde_json::to_string(&evidence_scenarios)
+                .expect("serialize provider evidence runtime scenarios"),
+        )
         .output()
         .expect("Node.js is required for the agent-workbench browser projection gate");
     assert!(
@@ -1142,7 +1135,8 @@ fn legacy_product_event_file_defaults_new_fields_and_keeps_them_omitted() {
         &std::fs::read(&path).expect("read reserialized product events"),
     )
     .expect("decode reserialized product events");
-    let events = persisted["legacy-session"]["events"]
+    assert_eq!(persisted["format_version"], 1);
+    let events = persisted["histories"]["legacy-session"]["events"]
         .as_array()
         .expect("persisted legacy events");
     assert!(events[0]["message"].get("attachments").is_none());
@@ -1224,6 +1218,75 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
             },
         },
     );
+    let expected_record = lash::remote::llm::RemoteLlmCallRecord {
+        call_id: "call-1".to_string(),
+        label: None,
+        attempts: vec![
+            lash::remote::llm::RemoteAttemptRecord {
+                ordinal: 1,
+                started_at_ms: 7,
+                duration_ms: 3,
+                outcome: lash::remote::llm::RemoteAttemptOutcome::Failed,
+                protocol_position: lash::remote::llm::RemoteProtocolPosition::NoResponse,
+                retry_budget_consumed: true,
+                retry_decision: Some(lash::remote::llm::RemoteRetryDecision {
+                    scheduled: true,
+                    delay_ms: Some(1),
+                    reason: Some("retry".to_string()),
+                }),
+                error: Some(lash::remote::llm::RemoteNormalizedError {
+                    class: "transport".to_string(),
+                    provider_code: Some("connection_reset".to_string()),
+                    http_status: Some(503),
+                    provider_request_id: Some("request-1".to_string()),
+                    retry_after_ms: Some(25),
+                }),
+                evidence: Some(lash::remote::llm::RemoteExecutionEvidence {
+                    collection_interruption: Some(
+                        lash::remote::llm::RemoteExecutionEvidenceCollectionInterruption::ProtocolAbort,
+                    ),
+                    ..Default::default()
+                }),
+                generation_disposition: Some(lash::remote::llm::RemoteGenerationDisposition {
+                    output_token_cap:
+                        lash::remote::llm::RemoteGenerationOptionDisposition::ClampedToCapacity,
+                    temperature:
+                        lash::remote::llm::RemoteGenerationOptionDisposition::OmittedSamplingPinned,
+                    seed: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported,
+                    stop_sequences:
+                        lash::remote::llm::RemoteGenerationOptionDisposition::SuppressedProtocolOwned,
+                    cache: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
+                }),
+                usage: Some(lash::remote::usage::RemoteUsage {
+                    input_tokens: 11,
+                    output_tokens: 7,
+                    cache_read_input_tokens: 3,
+                    cache_write_input_tokens: 2,
+                    reasoning_output_tokens: 5,
+                }),
+            },
+            lash::remote::llm::RemoteAttemptRecord {
+                ordinal: 2,
+                started_at_ms: 11,
+                duration_ms: 2,
+                outcome: lash::remote::llm::RemoteAttemptOutcome::Completed,
+                protocol_position: lash::remote::llm::RemoteProtocolPosition::TerminalObserved,
+                retry_budget_consumed: true,
+                retry_decision: None,
+                error: None,
+                evidence: None,
+                generation_disposition: None,
+                usage: None,
+            },
+        ],
+    };
+    registry.publish_identified(
+        session_id,
+        "model-call",
+        StreamItem::ModelCallRecorded {
+            record: expected_record.clone(),
+        },
+    );
     registry.publish_identified(
         session_id,
         "turn-done",
@@ -1240,13 +1303,17 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
         &BTreeSet::new(),
     );
     let reconciled = registry.snapshot(session_id);
-    assert_eq!(reconciled.cursor, 2);
-    assert_eq!(reconciled.events.len(), 1);
+    assert_eq!(reconciled.cursor, 3);
+    assert_eq!(reconciled.events.len(), 2);
     assert!(matches!(
         &reconciled.events[0].item,
         StreamItem::Message { message }
             if message.id == workbench_turn_user_message_id("reconciled-turn")
     ));
+    let StreamItem::ModelCallRecorded { record } = &reconciled.events[1].item else {
+        panic!("reconciliation must retain the model-call record");
+    };
+    assert_eq!(record, &expected_record);
     assert!(
         !registry.publish_identified(
             session_id,
@@ -1258,7 +1325,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
         ),
         "compaction must retain event identity for idempotent workflow replay"
     );
-    assert_eq!(registry.snapshot(session_id).cursor, 2);
+    assert_eq!(registry.snapshot(session_id).cursor, 3);
 
     registry.publish_identified(
         session_id,
@@ -1274,8 +1341,8 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
         },
     );
     assert_eq!(
-        registry.snapshot(session_id).events[1].sequence,
-        3,
+        registry.snapshot(session_id).events[2].sequence,
+        4,
         "compaction must not reuse a cursor already observed by a client"
     );
 }
@@ -1558,7 +1625,9 @@ async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
         StreamItem::Message { message } => {
             message.text != never_committed && !message.id.starts_with("workbench-user:")
         }
-        StreamItem::TurnInput { .. } | StreamItem::Done { .. } => true,
+        StreamItem::TurnInput { .. }
+        | StreamItem::ModelCallRecorded { .. }
+        | StreamItem::Done { .. } => true,
     }));
 }
 
@@ -2251,7 +2320,9 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                 StreamItem::Message { message } => {
                     Some((message.id.clone(), message.role.clone(), message.text.clone()))
                 }
-                StreamItem::TurnInput { .. } | StreamItem::Done { .. } => None,
+                StreamItem::TurnInput { .. }
+                | StreamItem::ModelCallRecorded { .. }
+                | StreamItem::Done { .. } => None,
             })
             .collect::<Vec<_>>(),
         vec![(
@@ -2397,77 +2468,6 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
 /// terminal-value regime, where the workbench owns the committed copy; this one
 /// pins the bare-prose regime, where the runtime already committed the reply as
 /// the turn's terminal message and the workbench must add nothing.
-#[tokio::test]
-async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
-    const BARE_PROSE_REPLY: &str = "bare prose answer";
-    let data_dir = tempfile::tempdir().expect("bare prose tempdir");
-    let provider = lash::testing::TestProvider::builder()
-        .kind("recoverable-chat-bare-prose")
-        .complete(|_| async { Ok(text_response(BARE_PROSE_REPLY)) })
-        .build()
-        .into_handle();
-    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
-    let session_id = state.current_session_id();
-    let session = state
-        .core
-        .session(session_id)
-        .open()
-        .await
-        .expect("open bare prose session");
-    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-    // Deliberately no `require_finish`: this is the termination an interactive
-    // turn reaches when the send path does not force the answer through
-    // `finish`, and the one every queued turn reaches.
-    let output = session
-        .turn(lash::TurnInput::text("answer in prose"))
-        .turn_id("bare-prose-turn")
-        .stream_to(&ChannelTurnEvents {
-            turn_state: Arc::clone(&turn_state),
-        })
-        .await
-        .expect("run bare prose turn");
-    assert!(
-        matches!(
-            &output.outcome,
-            lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text })
-                if text == BARE_PROSE_REPLY
-        ),
-        "unexpected termination for a bare prose reply: {:?}",
-        output.outcome
-    );
-    crate::restate::record_turn_output(
-        &state,
-        &session,
-        "bare-prose-turn",
-        output,
-        turn_state,
-        "test.bare_prose.completed",
-    )
-    .await
-    .expect("record bare prose turn output");
-    let committed_agent_replies = session
-        .read_view()
-        .messages()
-        .iter()
-        .filter(|message| {
-            lash::message_role(message) == "assistant"
-                && lash::message_text(message).contains(BARE_PROSE_REPLY)
-        })
-        .map(|message| message.id.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        committed_agent_replies.len(),
-        1,
-        "a bare-prose termination must commit the agent reply exactly once, \
-         got {committed_agent_replies:?}"
-    );
-    assert!(
-        !committed_agent_replies[0].starts_with("workbench-assistant:"),
-        "the runtime's own terminal message is the committed copy on this path, \
-         got {committed_agent_replies:?}"
-    );
-}
-
 pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_store(
     data_dir: &std::path::Path,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,

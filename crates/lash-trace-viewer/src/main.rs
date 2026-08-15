@@ -25,6 +25,8 @@ use lash_trace::{
 use serde::Serialize;
 use serde_json::Value;
 
+#[cfg(test)]
+mod execution_evidence_tests;
 mod render;
 use render::interpret_typed;
 
@@ -1066,7 +1068,7 @@ mod tests {
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn loaded_trace(records: Vec<TraceRecord>) -> LoadedTrace {
+    pub(super) fn loaded_trace(records: Vec<TraceRecord>) -> LoadedTrace {
         LoadedTrace {
             records: records
                 .into_iter()
@@ -1135,7 +1137,7 @@ mod tests {
     /// the drift-guard test below asserts each renders a non-empty kind/title,
     /// and `interpret_typed`'s exhaustive match refuses to compile if a variant
     /// is added without a rendering.
-    fn every_variant() -> Vec<TraceEvent> {
+    pub(super) fn every_variant() -> Vec<TraceEvent> {
         vec![
             TraceEvent::SessionStarted {
                 metadata: Default::default(),
@@ -1185,6 +1187,14 @@ mod tests {
                         duration_ms: 12,
                         reason: Some("http_429".to_string()),
                         delay_ms: Some(250),
+                        execution_evidence: Some(lash_trace::TraceExecutionEvidence {
+                            served_model: Some("served-model".to_string()),
+                            provider_response_id: Some("provider-response-1".to_string()),
+                            reasoning_output_tokens: Some(0),
+                            provider_finish_reason: Some("stop".to_string()),
+                            collection_interruption: Some("protocol_abort".to_string()),
+                            ..Default::default()
+                        }),
                     },
                     lash_trace::TraceRetryAttempt {
                         ordinal: 2,
@@ -1192,6 +1202,10 @@ mod tests {
                         duration_ms: 8,
                         reason: None,
                         delay_ms: None,
+                        execution_evidence: Some(lash_trace::TraceExecutionEvidence {
+                            served_model: Some("served-model-2".to_string()),
+                            ..Default::default()
+                        }),
                     },
                 ]),
             },
@@ -1267,6 +1281,7 @@ mod tests {
                         duration_ms: 1,
                         reason: Some("busy".to_string()),
                         delay_ms: Some(10),
+                        execution_evidence: None,
                     },
                     lash_trace::TraceRetryAttempt {
                         ordinal: 2,
@@ -1274,6 +1289,7 @@ mod tests {
                         duration_ms: 3,
                         reason: None,
                         delay_ms: None,
+                        execution_evidence: None,
                     },
                 ]),
             },
@@ -1469,30 +1485,6 @@ mod tests {
         assert_eq!(model.stats.failures, 2);
         // LlmCallCompleted usage (18) + TokenUsage usage (18); reasoning excluded.
         assert_eq!(model.stats.total_tokens, 36);
-    }
-
-    #[test]
-    fn llm_and_tool_retry_ladders_render_attempt_count_reason_and_delay() {
-        let trace = loaded_trace(
-            every_variant()
-                .into_iter()
-                .filter(|event| {
-                    matches!(
-                        event,
-                        TraceEvent::LlmCallCompleted { .. } | TraceEvent::ToolCallCompleted { .. }
-                    )
-                })
-                .map(|event| TraceRecord::new(TraceContext::default(), event))
-                .collect(),
-        );
-        let model = build_model(&trace);
-        assert_eq!(model.events.len(), 2);
-        for event in model.events {
-            assert!(event.summary.contains("attempts: 2"));
-            assert!(event.summary.contains("#1 failed"));
-            assert!(event.summary.contains("retry after"));
-            assert!(event.summary.contains("#2 completed"));
-        }
     }
 
     #[test]

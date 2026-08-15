@@ -1,4 +1,6 @@
 mod config;
+#[cfg(test)]
+mod execution_evidence_tests;
 pub mod oauth;
 mod provider;
 #[cfg(test)]
@@ -163,7 +165,7 @@ mod tests {
 
     #[tokio::test]
     async fn google_default_tolerates_eof_but_strict_policy_retains_partial_usage() {
-        let body = "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"legacy\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2}}}\n\n";
+        let body = "data: {\"response\":{\"responseId\":\"google-partial-1\",\"modelVersion\":\"gemini-partial-served\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"legacy\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":0}}}\n\n";
         let wire_request = json!({ "model": "gemini-test" });
         let tolerant = GoogleOAuthProvider::new("access", "refresh", 0)
             .with_transport(Arc::new(StaticSseTransport::new(body)));
@@ -206,6 +208,20 @@ mod tests {
         assert_eq!(partial.usage.input_tokens, 6);
         assert_eq!(partial.usage.output_tokens, 2);
         assert!(partial.provider_usage.is_some());
+        let evidence = partial
+            .execution_evidence
+            .as_ref()
+            .expect("Google partial response retains observed provider evidence");
+        assert_eq!(
+            evidence.provider_response_id.as_deref(),
+            Some("google-partial-1")
+        );
+        assert_eq!(
+            evidence.served_model.as_deref(),
+            Some("gemini-partial-served")
+        );
+        assert_eq!(evidence.provider_finish_reason, None);
+        assert_eq!(evidence.reasoning_output_tokens, Some(0));
         assert!(
             partial
                 .parts
@@ -258,14 +274,18 @@ mod tests {
 
     #[tokio::test]
     async fn google_strict_policy_accepts_finish_reason() {
-        let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]}}]}}\n\n";
+        let body = "data: {\"response\":{\"responseId\":\"google-response-1\",\"modelVersion\":\"gemini-3.1-pro-served\",\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":0}}}\n\n";
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
         let provider = GoogleOAuthProvider::new("access", "refresh", 0)
             .with_transport(Arc::new(StaticSseTransport::new(body)));
         let response = provider
             .execute_request(
                 "access",
                 json!({ "model": "gemini-test" }),
-                Some(LlmEventSender::new(|_| {})),
+                Some(LlmEventSender::new(move |event| {
+                    event_sink.lock_recover().push(event);
+                })),
                 None,
                 StreamTermination::RequireTerminalEvidence,
                 None,
@@ -274,6 +294,27 @@ mod tests {
             .expect("finishReason is terminal evidence");
         assert_eq!(response.full_text, "done");
         assert_eq!(response.terminal_reason, LlmTerminalReason::Stop);
+        let evidence = response
+            .execution_evidence
+            .as_ref()
+            .expect("Google success carries provider-reported execution evidence");
+        assert_eq!(
+            evidence.provider_response_id.as_deref(),
+            Some("google-response-1")
+        );
+        assert_eq!(
+            evidence.served_model.as_deref(),
+            Some("gemini-3.1-pro-served")
+        );
+        assert_eq!(evidence.provider_finish_reason.as_deref(), Some("STOP"));
+        assert_eq!(evidence.reasoning_output_tokens, Some(0));
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Evidence(stream)
+                    if stream.execution_evidence.as_ref() == Some(evidence)
+            )
+        }));
     }
 
     const REASONING_SIGNATURE_1: &str = "U0lHLTE=";
@@ -824,6 +865,7 @@ mod tests {
         let mut reasoning_deltas = Vec::new();
         let mut usage = LlmUsage::default();
         let mut provider_usage: Option<Value> = None;
+        let mut execution_evidence = None;
         let mut finish_event: Option<Value> = None;
         let meta = json!({"promptTokenCount": 6, "candidatesTokenCount": 4});
         for raw in [
@@ -841,6 +883,7 @@ mod tests {
                     reasoning_deltas: &mut reasoning_deltas,
                     usage: &mut usage,
                     provider_usage: &mut provider_usage,
+                    execution_evidence: &mut execution_evidence,
                     tool_call_parts: None,
                     output_parts: None,
                     finish_event: &mut finish_event,
@@ -861,6 +904,7 @@ mod tests {
         let mut reasoning_deltas = Vec::new();
         let mut usage = LlmUsage::default();
         let mut provider_usage = None;
+        let mut execution_evidence = None;
         let mut finish_event = None;
         GoogleOAuthProvider::process_sse_event_with_text_parts(
             &json!({"response":{"candidates":[{"content":{"parts":[{
@@ -874,6 +918,7 @@ mod tests {
                 reasoning_deltas: &mut reasoning_deltas,
                 usage: &mut usage,
                 provider_usage: &mut provider_usage,
+                execution_evidence: &mut execution_evidence,
                 tool_call_parts: None,
                 output_parts: None,
                 finish_event: &mut finish_event,
@@ -1152,6 +1197,7 @@ mod tests {
         let mut reasoning_deltas = Vec::new();
         let mut usage = LlmUsage::default();
         let mut provider_usage = None;
+        let mut execution_evidence = None;
         let mut output_parts = Vec::new();
         let mut streaming_parts = Vec::new();
         let mut finish_event = None;
@@ -1163,6 +1209,7 @@ mod tests {
                 reasoning_deltas: &mut reasoning_deltas,
                 usage: &mut usage,
                 provider_usage: &mut provider_usage,
+                execution_evidence: &mut execution_evidence,
                 tool_call_parts: Some(&mut streaming_parts),
                 output_parts: Some(&mut output_parts),
                 finish_event: &mut finish_event,
@@ -1475,6 +1522,7 @@ mod tests {
                 let mut reasoning_deltas = Vec::new();
                 let mut usage = LlmUsage::default();
                 let mut provider_usage = None;
+                let mut execution_evidence = None;
                 let mut output_parts = Vec::new();
                 let mut tool_calls = Vec::new();
                 let mut finish_event = None;
@@ -1493,6 +1541,7 @@ mod tests {
                             reasoning_deltas: &mut reasoning_deltas,
                             usage: &mut usage,
                             provider_usage: &mut provider_usage,
+                            execution_evidence: &mut execution_evidence,
                             tool_call_parts: Some(&mut tool_calls),
                             output_parts: Some(&mut output_parts),
                             finish_event: &mut finish_event,

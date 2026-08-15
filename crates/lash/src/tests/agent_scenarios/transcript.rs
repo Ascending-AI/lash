@@ -178,6 +178,7 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entr
         lash_core::TurnEvent::QueuedWorkStarted { .. }
         | lash_core::TurnEvent::AssistantProseDelta { .. }
         | lash_core::TurnEvent::ReasoningDelta { .. }
+        | lash_core::TurnEvent::ModelCallRecorded { .. }
         | lash_core::TurnEvent::Usage { .. }
         | lash_core::TurnEvent::ChildUsage { .. }
         | lash_core::TurnEvent::PluginRuntime { .. } => return None,

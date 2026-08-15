@@ -594,6 +594,17 @@
       overflow-wrap: anywhere;
     }
 
+    .execution-scorecard {
+      margin: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      font: 11px/1.45 var(--mono);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
     /* ─── center ─── */
 
     .main {
@@ -2068,6 +2079,8 @@
         <div class="status-row"><span>session</span><span id="sessionId">connecting…</span></div>
         <div class="status-row"><span>usage</span><span id="usageTotal">0 total</span></div>
         <div class="status-row"><span>tokens</span><span id="usageBreakdown">0 in · 0 out</span></div>
+        <div class="status-row"><span>execution evidence</span></div>
+        <pre id="executionScorecard" class="execution-scorecard" aria-live="polite">no model attempts yet</pre>
         <button id="newSessionTab" class="ghost-btn" type="button" title="Open an isolated session in a second tab">new session tab</button>
       </div>
     </aside>
@@ -2288,6 +2301,7 @@
     const sessionId = document.getElementById("sessionId");
     const usageTotal = document.getElementById("usageTotal");
     const usageBreakdown = document.getElementById("usageBreakdown");
+    const executionScorecard = document.getElementById("executionScorecard");
     const triggerRegistrations = document.getElementById("triggerRegistrations");
     const triggerCount = document.getElementById("triggerCount");
     const newSessionTab = document.getElementById("newSessionTab");
@@ -2304,6 +2318,7 @@
         sessionId: null,
         productCursor: 0,
         observationCursor: null,
+        replayIncarnationId: null,
         recoveryGeneration: 0,
         renderedProductEvents: new Set(),
         appliedObservationEvents: new Set()
@@ -2314,7 +2329,9 @@
       return {
         generation: ++projection.recoveryGeneration,
         sessionId: projection.sessionId,
-        productCursor: projection.productCursor
+        productCursor: projection.productCursor,
+        observationCursor: projection.observationCursor,
+        replayIncarnationId: projection.replayIncarnationId
       };
     }
 
@@ -2324,6 +2341,8 @@
       return token.generation === projection.recoveryGeneration
         && token.sessionId === projection.sessionId
         && snapshotSession === token.sessionId
+        && token.observationCursor === projection.observationCursor
+        && token.replayIncarnationId === projection.replayIncarnationId
         && projection.productCursor <= snapshotCursor;
     }
 
@@ -2338,6 +2357,7 @@
         projection.appliedObservationEvents.clear();
         projection.productCursor = snapshotProductCursor;
         projection.observationCursor = snapshotObservationCursor;
+        projection.replayIncarnationId = null;
       } else {
         projection.productCursor = Math.max(
           projection.productCursor,
@@ -2357,6 +2377,80 @@
       return authoritative ? false : currentBusy;
     }
     // END WORKBENCH_PROJECTION_STATE
+
+    // BEGIN WORKBENCH_EXECUTION_SCORECARD
+    function createExecutionScorecardState() {
+      return new Map();
+    }
+
+    function applyExecutionScorecardRecord(state, record) {
+      if (!record?.call_id) return;
+      state.set(record.call_id, record);
+    }
+
+    function executionScorecardText(state) {
+      const lines = [];
+      const startedAt = record => Math.min(
+        ...(record.attempts || []).map(attempt => Number(attempt.started_at_ms)),
+        Number.MAX_SAFE_INTEGER
+      );
+      const records = [...state.values()].sort((left, right) => {
+        const byStart = startedAt(left) - startedAt(right);
+        if (byStart) return byStart;
+        return left.call_id < right.call_id ? -1 : left.call_id > right.call_id ? 1 : 0;
+      });
+      for (const record of records) {
+        for (const attempt of record.attempts || []) {
+          const evidence = attempt.evidence || {};
+          const error = attempt.error || {};
+          const retry = attempt.retry_decision;
+          const usage = attempt.usage;
+          const generation = attempt.generation_disposition;
+          const facts = [
+            attempt.protocol_position && `position ${attempt.protocol_position}`,
+            error.class && `error ${error.class}`,
+            error.provider_code && `code ${error.provider_code}`,
+            error.http_status !== undefined && `http ${error.http_status}`,
+            error.provider_request_id && `request ${error.provider_request_id}`,
+            error.retry_after_ms !== undefined && `retry-after ${error.retry_after_ms}ms`,
+            retry && (retry.scheduled ? "retry scheduled" : "retry not scheduled"),
+            retry?.delay_ms !== undefined && `delay ${retry.delay_ms}ms`,
+            retry?.reason && `retry reason ${retry.reason}`,
+            attempt.retry_budget_consumed === true && "retry budget consumed",
+            attempt.retry_budget_consumed === false && "retry budget not consumed",
+            usage && `usage input=${usage.input_tokens} output=${usage.output_tokens}`,
+            generation && `generation output=${generation.output_token_cap}`,
+            evidence.served_model && `model ${evidence.served_model}`,
+            evidence.provider_response_id && `response ${evidence.provider_response_id}`,
+            evidence.provider_finish_reason && `finish ${evidence.provider_finish_reason}`,
+            evidence.reasoning_output_tokens !== undefined
+              && `reasoning ${evidence.reasoning_output_tokens}`,
+            evidence.collection_interruption
+              && `collection interrupted: ${evidence.collection_interruption}`,
+          ].filter(Boolean);
+          const suffix = facts.length ? ` · ${facts.join(" · ")}` : "";
+          lines.push(`${record.call_id} #${attempt.ordinal} ${attempt.outcome}${suffix}`);
+        }
+      }
+      return lines.join("\n") || "no model attempts yet";
+    }
+
+    function renderExecutionScorecard(state, target) {
+      target.textContent = executionScorecardText(state);
+    }
+
+    function rebuildExecutionScorecard(state, events, target) {
+      state.clear();
+      for (const event of events || []) {
+        if (event.type === "model_call_recorded") {
+          applyExecutionScorecardRecord(state, event.record);
+        }
+      }
+      renderExecutionScorecard(state, target);
+    }
+    // END WORKBENCH_EXECUTION_SCORECARD
+
+    const executionScorecardState = createExecutionScorecardState();
 
     // BEGIN WORKBENCH_SHELL_AVAILABILITY
     /* "idle" and "no turns yet" are claims about the session; the shell can only
@@ -3413,6 +3507,7 @@
     // END WORKBENCH_TRANSIENT_SETTLEMENT
 
     // BEGIN WORKBENCH_TURN_EVENT_DISPATCH
+    // BEGIN WORKBENCH_TURN_EVENT_REDUCER
     function handleTurnEvent(event, turnId) {
       globalThis.__LASH_WORKBENCH_TURN_EVENT_HOOK__?.(event, turnId);
       if (event.type === "model_request_started") clearRetryStatus(turnId);
@@ -3422,6 +3517,10 @@
       if (event.type === "reasoning_delta") appendReasoning(event.text, event.correlation_id, turnId);
       if (event.type === "model_attempt_reset") resetModelAttempt(event);
       if (event.type === "retry_status") renderRetryStatus(event, turnId);
+      if (event.type === "model_call_recorded") {
+        applyExecutionScorecardRecord(executionScorecardState, event.record);
+        renderExecutionScorecard(executionScorecardState, executionScorecard);
+      }
       if (event.type === "code_block_started") startCodeBlock(event, turnId);
       if (event.type === "code_block_completed") completeCodeBlock(event, turnId);
       if (event.type === "tool_call_started") appendStartedTool(event, turnId);
@@ -3430,6 +3529,7 @@
       if (event.type === "tool_value") appendAssistantText(renderTerminalValue(event.value), null, turnId);
       if (event.type === "usage") renderStreamingUsage(event.cumulative, turnId);
     }
+    // END WORKBENCH_TURN_EVENT_REDUCER
     // END WORKBENCH_TURN_EVENT_DISPATCH
 
     // BEGIN WORKBENCH_POST_COMMAND
@@ -3594,6 +3694,7 @@
       }
     }
 
+    // BEGIN WORKBENCH_REMOTE_STREAM_RECOVERY
     function parseStreamLine(line) {
       if (!line.trim()) return;
       try {
@@ -3624,6 +3725,10 @@
       );
       if (event.type === "message") renderMessage(event.message);
       if (event.type === "turn_input") renderIngressReceipt(event.receipt);
+      if (event.type === "model_call_recorded") {
+        applyExecutionScorecardRecord(executionScorecardState, event.record);
+        renderExecutionScorecard(executionScorecardState, executionScorecard);
+      }
       if (event.type === "done") {
         finishTransientRows(event.turn_id);
         setBusy(false, "ready");
@@ -3649,6 +3754,7 @@
       if (item.type === "terminal_replacement") {
         projectionState.observationCursor =
           item.cursor || item.event?.cursor || projectionState.observationCursor;
+        handleObservation(item.event);
         finishTransientRows(item.event?.turn_id);
         recoverTerminalReplacement();
       }
@@ -3660,6 +3766,8 @@
       appliedObservationEvents.add(identity);
       projectionState.observationCursor =
         event.cursor || projectionState.observationCursor;
+      projectionState.replayIncarnationId =
+        event.replay_incarnation_id || projectionState.replayIncarnationId;
       if (event.type === "turn_activity") handleTurnEvent(event.activity, event.turn_id);
     }
 
@@ -3669,7 +3777,9 @@
         const state = await fetchStateSnapshot();
         markShellChannel(shellAvailability, "state", true);
         if (!recoveryResponseIsCurrent(projectionState, token, state)) {
+          markShellChannel(shellAvailability, "state", false);
           renderShellStatus();
+          scheduleStateRetry();
           return;
         }
         applyStateSnapshot(state, true, true);
@@ -3699,6 +3809,7 @@
         "the turn settled; reload to restore the final transcript"
       );
     }
+    // END WORKBENCH_REMOTE_STREAM_RECOVERY
 
     function stopTurn() {
       if (controller) controller.abort();
@@ -4469,6 +4580,7 @@
       syncCommandAvailability();
     }
 
+    // BEGIN WORKBENCH_STATE_SNAPSHOT
     function applyStateSnapshot(
       state,
       replaceTranscript = false,
@@ -4513,6 +4625,11 @@
       renderUsage(state.usage);
       renderQueuedWork(state.queued_work || []);
       renderStateTranscript(state);
+      rebuildExecutionScorecard(
+        executionScorecardState,
+        state.product_events?.events,
+        executionScorecard
+      );
       for (const pending of state.pending_turn_inputs || []) {
         const textItem = (pending.input?.items || []).find(item => item.Text?.text);
         renderIngressReceipt({
@@ -4528,6 +4645,7 @@
         setBusy(nextBusy, nextBusy ? "turn running · restored" : "ready");
       }
     }
+    // END WORKBENCH_STATE_SNAPSHOT
 
     /* Every snapshot request is bounded. A backend that accepts the connection
        and then blocks on an unavailable engine is otherwise indistinguishable
@@ -4648,6 +4766,7 @@
       return cleanErrorText(error?.message || "the workbench did not answer");
     }
 
+    // BEGIN WORKBENCH_STATE_RETRY
     let stateRetryTimer = 0;
     let stateRetryDelay = 900;
 
@@ -4674,17 +4793,25 @@
       const token = beginStateRecovery(projectionState);
       try {
         const state = await fetchStateSnapshot();
-        markShellChannel(shellAvailability, "state", true);
+        const isLatestRequest = token.generation === projectionState.recoveryGeneration;
+        const responseIsCurrent = recoveryResponseIsCurrent(projectionState, token, state);
         const application = snapshotApplication(shellAvailability, {
-          isLatestRequest: token.generation === projectionState.recoveryGeneration,
+          isLatestRequest,
           streamsStarted: streamGeneration > 0,
-          responseIsCurrent: recoveryResponseIsCurrent(projectionState, token, state)
+          responseIsCurrent
         });
         if (application === "ignore") {
-          /* a dropped response must not cancel a newer request's retry */
+          /* A superseded response has a newer recovery owner. A latest response
+             overtaken by live observations does not, so keep the channel down
+             and advance the existing bounded retry ladder. */
+          if (isLatestRequest) {
+            markShellChannel(shellAvailability, "state", false);
+            scheduleStateRetry();
+          }
           renderShellStatus();
           return;
         }
+        markShellChannel(shellAvailability, "state", true);
         cancelStateRetry();
         if (application === "initial") {
           applyStateSnapshot(state);
@@ -4700,6 +4827,7 @@
         throw new Error("state unavailable");
       }
     }
+    // END WORKBENCH_STATE_RETRY
 
     function formatTime(ms) {
       if (!ms) return "";

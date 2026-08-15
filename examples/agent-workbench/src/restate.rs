@@ -1212,6 +1212,17 @@ pub(crate) async fn record_turn_output(
             },
         );
     }
+    for record in output.llm_calls.iter().cloned() {
+        let call_id = record.call_id.0.clone();
+        let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();
+        state.publish_for_session_identified(
+            &session.session_id(),
+            format!("turn:{turn_id}:model-call:{call_id}"),
+            crate::StreamItem::ModelCallRecorded {
+                record: remote_record,
+            },
+        );
+    }
     match &output.outcome {
         lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled) => {
             let message = output
