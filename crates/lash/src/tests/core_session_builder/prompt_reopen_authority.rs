@@ -393,9 +393,11 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
     );
     let (_dir, _factory, store) = sqlite_prompt_probe_store("sqlite-host-reprompt", old).await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let trace = tempfile::NamedTempFile::new().expect("SQLite composition trace");
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(prompt_capture_provider(Arc::clone(&captures)))
         .model(mock_model_spec())
+        .trace_jsonl_path(trace.path())
         .build(crate::testing::runtime_lease_owner())?;
     core.session("sqlite-host-reprompt")
         .store(Arc::clone(&store))
@@ -405,6 +407,7 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
         .turn(TurnInput::text("probe"))
         .run()
         .await?;
+    core.flush_trace_sink()?;
     let rendered = rendered_system_prompt(&captures.lock_recover()[0]);
     assert!(rendered.contains("SQLITE NEW HOST PROMPT"));
     assert!(!rendered.contains("SQLITE OLD PROMPT"));
@@ -413,5 +416,14 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
         format!("{:?}", committed.config.prompt.expect("present prompt"))
             .contains("SQLITE NEW HOST PROMPT")
     );
+    let composition_events = std::fs::read_to_string(trace.path())
+        .expect("read SQLite composition trace")
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|record| record["type"] == "composition_changed")
+        .count();
+    assert_eq!(composition_events, 1, "the changed composition is emitted");
     Ok(())
 }
