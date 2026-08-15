@@ -106,15 +106,28 @@ impl AppStateData {
         chat_id: &str,
         model: ModelSpec,
     ) -> AppResult<LashSession> {
-        Ok(self
+        use lash::rlm::RlmSessionBuilderExt as _;
+
+        let builder = self
             .core
             .session(chat_id)
             .session_spec(lash::SessionSpec::inherit().model(model))
             .plugin::<DemoPlugin>(DemoPluginConfig {
                 db: Arc::clone(&self.db),
-            })
-            .open()
-            .await?)
+            });
+        let builder = match std::env::var("LASH_RUNBOOK_DIALECT")
+            .unwrap_or_else(|_| "lashlang".to_string())
+            .as_str()
+        {
+            "lashlang" => builder,
+            "typescript" => builder.rlm_dialect(lash::rlm::RlmDialect::Typescript)?,
+            other => {
+                return Err(AppError::internal(format!(
+                    "LASH_RUNBOOK_DIALECT must be a registered RLM language id (`lashlang` or `typescript`), got `{other}`"
+                )));
+            }
+        };
+        Ok(builder.open().await?)
     }
 
     pub(crate) async fn with_db<T, F>(&self, f: F) -> AppResult<T>

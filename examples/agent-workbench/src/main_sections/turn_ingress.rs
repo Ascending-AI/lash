@@ -118,8 +118,7 @@ async fn reject_if_active_turn_settled(
     }
 
     let session = state
-        .core
-        .session(acceptance.session_id.clone())
+        .session_builder(acceptance.session_id.clone())
         .open()
         .await
         .map_err(AppError::runtime)?;

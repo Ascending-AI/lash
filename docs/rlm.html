@@ -188,7 +188,7 @@ let output = session
         </div>
         <div class="listing__row">
           <div class="listing__label">shape final output</div>
-          <div class="listing__body"><p>Use <code>RlmTurnBuilderExt::require_finish()</code>, <code>require_finish_schema(...)</code>, or <code>allow_prose_or_finish()</code> per turn. Use <code>RlmSessionBuilderExt::final_answer_format(...)</code> when a root RLM session should finish Markdown, a raw value, or custom final-answer guidance. See <a href="./embedding-turns.html#rlm-and-finish">RLM finish</a>.</p></div>
+          <div class="listing__body"><p>Hosts choose a session language at creation with <code>RlmSessionBuilderExt::rlm_dialect(RlmDialect::Typescript)</code>; absence durably defaults to Lashlang, and resume retains the recorded choice. Use <code>RlmTurnBuilderExt::require_finish()</code>, <code>require_finish_schema(...)</code>, or <code>allow_prose_or_finish()</code> per turn. Use <code>RlmSessionBuilderExt::final_answer_format(...)</code> when a root RLM session should finish Markdown, a raw value, or custom final-answer guidance. See <a href="./embedding-turns.html#rlm-and-finish">RLM finish</a>.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">add tools</div>

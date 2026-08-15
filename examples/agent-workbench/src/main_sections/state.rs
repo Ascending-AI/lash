@@ -2,6 +2,8 @@ use lash::sync::MutexExt;
 #[derive(Clone)]
 struct AppState {
     core: LashCore,
+    #[cfg(not(test))]
+    rlm_dialect: lash::rlm::RlmDialect,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     process_observer: lash::process::ProcessWorkObserver,

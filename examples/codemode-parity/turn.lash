@@ -1,0 +1,2 @@
+pages = await [web.fetch({ url: "https://example.test/a" }), web.fetch({ url: "https://example.test/b" })]
+finish { count: len(pages), first: pages[0] }

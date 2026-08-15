@@ -683,8 +683,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
     reason: &str,
 ) -> Result<(), AppError> {
     let session = state
-        .core
-        .session(session_id.to_string())
+        .session_builder(session_id.to_string())
         .open()
         .await
         .map_err(AppError::session_open)?;
@@ -726,8 +725,7 @@ async fn run_user_turn(
     let turn_model_id = request.model.model.clone();
     let turn_model = model_spec_from_selection(request.model);
     let session = state
-        .core
-        .session(request.session_id.clone())
+        .session_builder(request.session_id.clone())
         .open()
         .await
         .map_err(AppError::session_open)?;
@@ -970,8 +968,7 @@ async fn run_queued_turn(
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     let session = state
-        .core
-        .session(request.session_id.clone())
+        .session_builder(request.session_id.clone())
         .open()
         .await
         .map_err(AppError::session_open)?;
@@ -1120,8 +1117,7 @@ pub(crate) async fn settle_workbench_turn(
     turn_id: &str,
 ) -> Result<(), AppError> {
     let session = state
-        .core
-        .session(session_id.to_string())
+        .session_builder(session_id.to_string())
         .open()
         .await
         .map_err(AppError::runtime)?;

@@ -79,6 +79,7 @@ async fn service_core(
 
 struct AppState {
     core: LashCore,
+    dialect: lash::rlm::RlmDialect,
 }
 
 impl AppState {
@@ -87,12 +88,19 @@ impl AppState {
         chat_id: &str,
         model: lash::ModelSpec,
     ) -> anyhow::Result<LashSession> {
-        Ok(self
+        use lash::rlm::RlmSessionBuilderExt as _;
+
+        let builder = self
             .core
             .session(chat_id)
-            .session_spec(lash::SessionSpec::inherit().model(model))
-            .open()
-            .await?)
+            .session_spec(lash::SessionSpec::inherit().model(model));
+        let builder = match self.dialect {
+            lash::rlm::RlmDialect::Lashlang => builder,
+            lash::rlm::RlmDialect::Typescript => {
+                builder.rlm_dialect(lash::rlm::RlmDialect::Typescript)?
+            }
+        };
+        Ok(builder.open().await?)
     }
 }
 

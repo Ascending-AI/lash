@@ -42,6 +42,16 @@ async fn async_main() -> AnyhowResult<()> {
 
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
+    let rlm_dialect = match std::env::var("LASH_RUNBOOK_DIALECT")
+        .unwrap_or_else(|_| "lashlang".to_string())
+        .as_str()
+    {
+        "lashlang" => lash::rlm::RlmDialect::Lashlang,
+        "typescript" => lash::rlm::RlmDialect::Typescript,
+        other => anyhow::bail!(
+            "LASH_RUNBOOK_DIALECT must be a registered RLM language id (`lashlang` or `typescript`), got `{other}`"
+        ),
+    };
     validate_provider_credentials(dev_provider_scenario, &api_key)?;
 
     let addr: SocketAddr = std::env::var("AGENT_WORKBENCH_ADDR")
@@ -252,6 +262,8 @@ async fn async_main() -> AnyhowResult<()> {
 
     let state = AppState {
         core,
+        #[cfg(not(test))]
+        rlm_dialect,
         attachment_store,
         trigger_store,
         process_observer,
@@ -291,6 +303,7 @@ async fn async_main() -> AnyhowResult<()> {
             "trace_path": trace_path_display,
             "lashlang_execution_path": lashlang_execution_path.display().to_string(),
             "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
+            "rlm_dialect": rlm_dialect.language_id(),
             "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
             "web_configured": state.web_configured,
             "store_backend": stores.backend,

@@ -74,13 +74,39 @@ impl RlmDialect for TypescriptDialect {
             .collect::<Vec<_>>()
             .join("\n");
         let tools = if tools.is_empty() {
-            String::new()
+            "\n\nNo host tools are available in this turn.".to_string()
         } else {
-            format!("\n\nAvailable tools (all calls require `await`):\n```typescript\n{tools}\n```")
+            format!(
+                "\n\n### Tools\n\nEvery call requires `await` and returns the declared `Promise<T>`:\n\n```typescript\n{tools}\n```"
+            )
         };
-        Ok(format!(
-            "## TypeScript execution\n\nUse exactly one paired `<typescript>...</typescript>` block. Cells are plain durable scripts. Durable work is declared with a top-level `const process = defineProcess({{ name: \"literal\", signals: {{}}, run: async (...) => {{ ... }} }})`. Agent primitives are `start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`, and cell-only `finish`; `wake(value)` emits run progress and `wake(handle, \"signal\", payload)` signals another run. Use `await` for tools and process handles; `Promise.all` and `Promise.allSettled` batch top-level tool promises and resolved values. Inside `run`, `return` completes successfully after enclosing `finally` blocks and an uncaught `throw` fails the run. General async function authoring and `new Date()` are named rejections in v1.{tools}"
-        ))
+        let host_api = r#"## TypeScript execution
+
+Write one script inside standalone `<typescript>` and `</typescript>` lines. Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
+
+### Host API
+
+```typescript
+interface ProcessDefinition<Input, Output> { readonly name: string }
+interface ProcessHandle<Output> extends PromiseLike<Output> {}
+declare const console: { log(...values: unknown[]): void };
+declare function print(value: unknown): void;
+declare function finish(value: unknown): never;
+declare function sleep(milliseconds: number): Promise<void>;
+declare function waitSignal(name: string): Promise<unknown>;
+declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
+declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: { input?: Input }): ProcessHandle<Output>;
+declare function wake(progress: unknown): void;
+declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: unknown): void;
+declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
+```
+
+Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
+
+### v1 guardrails
+
+Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), and async functions other than `defineProcess.run` (`TS_ASYNC_UNSUPPORTED`) reject. Capturing a `let` in a function rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; capture an immutable value or mutate through a captured object. `for...of` snapshots arrays/strings, so mutating/aliasing its source or making a user-authored call in its body rejects as `TS_FOR_OF_ITERATOR_UNSUPPORTED`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. Static methods: `Object.keys/values/entries/fromEntries/hasOwn/is`, `Array.isArray/of`, `String.fromCodePoint`, `Number.isFinite/isInteger/isNaN/isSafeInteger/parseFloat/parseInt`, `JSON.parse/stringify`, and `Math.abs/acos/asin/cbrt/ceil/cos/exp/floor/log/log10/log2/round/sin/tan/trunc/max/min/pow/sqrt/sign`. Instance methods: `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, `valueOf`. `Date.now()` and `Math.random()` are journaled; `new Date()` rejects as `TS_NEW_UNSUPPORTED`."#;
+        Ok(format!("{host_api}{tools}"))
     }
 
     fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> &'static str {
@@ -354,6 +380,15 @@ mod tests {
         );
         assert!(section.contains("defineProcess"), "{section}");
         assert!(section.contains("Promise.allSettled"), "{section}");
+        assert!(
+            section.contains("TS_MUTABLE_CAPTURE_UNSUPPORTED"),
+            "{section}"
+        );
+        assert!(
+            section.contains("TS_FOR_OF_ITERATOR_UNSUPPORTED"),
+            "{section}"
+        );
+        insta::assert_snapshot!("typescript_execution_section", section);
     }
 
     #[test]

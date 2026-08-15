@@ -1,5 +1,21 @@
 
 impl AppState {
+    fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
+        use lash::rlm::RlmSessionBuilderExt as _;
+
+        let builder = self.core.session(session_id);
+        #[cfg(test)]
+        let dialect = lash::rlm::RlmDialect::Lashlang;
+        #[cfg(not(test))]
+        let dialect = self.rlm_dialect;
+        match dialect {
+            lash::rlm::RlmDialect::Lashlang => builder,
+            lash::rlm::RlmDialect::Typescript => builder
+                .rlm_dialect(lash::rlm::RlmDialect::Typescript)
+                .expect("the typed TypeScript session option must serialize"),
+        }
+    }
+
     fn current_session_id(&self) -> String {
         self.session_ids.current()
     }
@@ -251,8 +267,7 @@ impl AppState {
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         let session = self
-            .core
-            .session(session_id)
+            .session_builder(session_id)
             .open()
             .await
             .map_err(|error| {
