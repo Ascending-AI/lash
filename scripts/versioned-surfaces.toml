@@ -1,0 +1,442 @@
+# Versioned wire/persistence surface inventory for check_version_bumps.py.
+#
+# A `file` guard compares the complete file. `rust_items` compares only the
+# named Rust declarations/functions (comments and formatting are ignored).
+# `rust_serde_shapes` compares every Serde-derived struct/enum in the matched
+# source files. The latter intentionally fails closed for a few private helper
+# carriers: changing one requires the family bump even if it later proves not
+# to cross the boundary.
+
+[[surface]]
+constant = "REMOTE_PROTOCOL_VERSION"
+constant_path = "crates/lash-remote-protocol/src/lib.rs"
+description = "JSON wire structs and enums exchanged by Lash remote peers"
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-remote-protocol/src/*.rs"]
+
+[[surface]]
+constant = "SCHEMA_VERSION"
+constant_path = "crates/lash-postgres-store/src/lib.rs"
+description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"
+
+# PostgreSQL's schema is intentionally a whole-file guard: schema.sql is the
+# authoritative shape, so even a comment-only edit fails closed.
+[[surface.guard]]
+kind = "file"
+paths = ["crates/lash-postgres-store/schema.sql"]
+
+[[surface]]
+constant = "TRACE_SCHEMA_VERSION"
+constant_path = "crates/lash-trace/src/lib.rs"
+description = "NDJSON trace records, event variants, contexts, and graph payloads"
+
+# The trace crate is itself a serialization package. All of its Serde carriers
+# share one schema version, including private decode probes.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-trace/src/*.rs"]
+
+[[surface]]
+constant = "SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+description = "SQLite session-store tables, indexes, and constraints"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sqlite-store/src/schema.rs"]
+symbols = ["SCHEMA"]
+
+[[surface]]
+constant = "PROCESS_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+description = "SQLite process-registry tables, indexes, and constraints"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sqlite-store/src/schema.rs"]
+symbols = ["PROCESS_SCHEMA"]
+
+[[surface]]
+constant = "TRIGGER_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+description = "SQLite trigger-store tables, indexes, and constraints"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sqlite-store/src/schema.rs"]
+symbols = ["TRIGGER_SCHEMA"]
+
+[[surface]]
+constant = "EFFECT_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/schema.rs"
+description = "SQLite runtime-effect and await-event tables, indexes, and constraints"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sqlite-store/src/schema.rs"]
+symbols = ["EFFECT_SCHEMA"]
+
+[[surface]]
+constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
+constant_path = "crates/lash-core/src/runtime/process/events.rs"
+description = "serialized ProcessWakeDelivery outbox payload"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/process/events.rs"]
+symbols = ["ProcessWakeDelivery"]
+
+[[surface]]
+constant = "FRAME_KEY_VERSION"
+constant_path = "crates/lash-sansio/src/frame_key.rs"
+description = "stable agent-frame key hash preimage"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/frame_key.rs"]
+symbols = ["derive"]
+
+[[surface]]
+constant = "APPEND_REQUEST_IDENTITY_ENCODING_VERSION"
+constant_path = "crates/lash-core/src/store/commit_identity.rs"
+description = "stable append-request identity byte projection"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/store/commit_identity.rs"]
+symbols = [
+  "push_len_prefixed",
+  "push_string",
+  "push_optional",
+  "push_slice",
+  "push_json_value",
+  "push_message_role",
+  "push_causal_ref",
+  "push_message_origin",
+  "push_attachment_type_metadata",
+  "push_attachment_ref",
+  "push_attachment_source",
+  "push_part_kind",
+  "push_prune_state",
+  "push_part",
+  "append_node_identity_bytes",
+  "append_request_identity_bytes",
+]
+
+[[surface]]
+constant = "PROCESS_REGISTRATION_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/runtime/process/validation.rs"
+description = "stable process-registration definition fingerprint"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/process/validation.rs"]
+symbols = [
+  "process_registration_fingerprint_preimage",
+  "project_registration_output_contract",
+  "project_registration_event_type",
+  "project_registration_value_selector",
+  "project_registration_causal_ref",
+  "project_registration_payload_leaf",
+  "project_registration_schema_leaf",
+]
+
+[[surface]]
+constant = "TRIGGER_COMMAND_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/triggers.rs"
+description = "stable trigger-command fingerprint"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers.rs"]
+symbols = ["trigger_command_preimage"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers/router.rs"]
+symbols = [
+  "project_trigger_owner",
+  "project_trigger_actor",
+  "project_trigger_draft",
+  "project_trigger_event_type",
+  "project_trigger_value_selector",
+  "project_trigger_process_input",
+  "project_trigger_payload_leaf",
+  "project_trigger_schema_leaf",
+]
+
+[[surface]]
+constant = "TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/triggers.rs"
+description = "stable trigger operation-receipt address"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers.rs"]
+symbols = ["trigger_operation_receipt_preimage"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers/router.rs"]
+symbols = ["project_trigger_owner"]
+
+[[surface]]
+constant = "TRIGGER_DEFINITION_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/triggers/router.rs"
+description = "stable trigger-subscription definition fingerprint"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers/router.rs"]
+symbols = [
+  "trigger_subscription_definition_preimage",
+  "project_trigger_owner",
+  "project_trigger_draft",
+  "project_trigger_event_type",
+  "project_trigger_value_selector",
+  "project_trigger_process_input",
+  "project_trigger_payload_leaf",
+  "project_trigger_schema_leaf",
+]
+
+[[surface]]
+constant = "TRIGGER_LOOKUP_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/triggers/router.rs"
+description = "stable trigger subscription lookup address"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers/router.rs"]
+symbols = ["trigger_subscription_address_preimage", "project_trigger_owner"]
+
+[[surface]]
+constant = "TRIGGER_SOURCE_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/triggers/router.rs"
+description = "stable default trigger-source key"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers/router.rs"]
+symbols = ["trigger_source_preimage", "project_trigger_payload_leaf"]
+
+[[surface]]
+constant = "TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/triggers/router.rs"
+description = "stable trigger-delivery process identity"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers/router.rs"]
+symbols = ["trigger_delivery_process_preimage"]
+
+[[surface]]
+constant = "DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/triggers/router.rs"
+description = "stable derived trigger-subscription key"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/triggers/router.rs"]
+symbols = ["derived_trigger_subscription_key"]
+
+[[surface]]
+constant = "DIRECT_EFFECT_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/runtime/causal.rs"
+description = "stable direct-effect replay key and discriminator"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/causal.rs"]
+symbols = [
+  "direct_effect_replay_preimage",
+  "direct_request_discriminator",
+  "project_direct_causal_ref",
+]
+
+[[surface]]
+constant = "PROCESS_TRANSFER_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/runtime/effect/envelope.rs"
+description = "stable process-transfer set identity"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/effect/envelope.rs"]
+symbols = ["process_transfer_set_preimage"]
+
+[[surface]]
+constant = "AWAIT_EVENT_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/runtime/effect/promise_semantics.rs"
+description = "stable await-event promise identity and authenticated material"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/effect/promise_semantics.rs"]
+symbols = ["promise_key_preimage", "sign_material"]
+
+[[surface]]
+constant = "PROCESS_CANCELLATION_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/runtime/process/events.rs"
+description = "stable process-cancellation replay address"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/process/events.rs"]
+symbols = ["cancellation_replay_preimage"]
+
+[[surface]]
+constant = "PROCESS_WAKE_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/runtime/process/wake.rs"
+description = "stable process-wake identity"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/process/wake.rs"]
+symbols = ["process_wake_identity_preimage"]
+
+[[surface]]
+constant = "TOOL_BATCH_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/session/tool_execution.rs"
+description = "stable tool-invocation batch identity"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/session/tool_execution.rs"]
+symbols = ["tool_invocation_batch_preimage"]
+
+[[surface]]
+constant = "USAGE_PAYLOAD_FAMILY_VERSION"
+constant_path = "crates/lash-core/src/store/runtime_commit.rs"
+description = "stable runtime-usage payload identity and persisted encoding tag"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/store/runtime_commit.rs"]
+symbols = ["usage_payload_identity_bytes"]
+
+[[surface]]
+constant = "PRODUCT_EVENT_LOG_FORMAT_VERSION"
+constant_path = "examples/agent-workbench/src/main_sections/state.rs"
+description = "agent-workbench product-event log JSON snapshot"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["examples/agent-workbench/src/main_sections/state.rs"]
+symbols = ["ProductEvent", "ProductEventHistory", "PersistedProductEventLog"]
+
+[[surface]]
+constant = "PROCESS_LEASE_SCHEMA_VERSION"
+constant_path = "crates/lash-core/src/runtime/process/model.rs"
+description = "persisted ProcessLease wire record"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/process/model.rs"]
+symbols = ["ProcessLease"]
+
+[[surface]]
+constant = "SESSION_CHECKPOINT_SCHEMA_VERSION"
+constant_path = "crates/lash-core/src/store/checkpoint.rs"
+description = "persisted session checkpoint manifest"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/store/checkpoint.rs"]
+symbols = ["SessionCheckpoint"]
+
+[[surface]]
+constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
+constant_path = "crates/lash-core/src/store/checkpoint.rs"
+description = "logical bytes stored behind checkpoint component descriptors"
+
+# Component bodies are owned by multiple runtime/plugin crates. The descriptor
+# contract is the checkable shared boundary; codec-specific changes must add a
+# narrower versioned surface here when introduced.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/store/checkpoint.rs"]
+symbols = ["CheckpointComponentDescriptor", "HydratedCheckpointComponent"]
+
+[[surface]]
+constant = "SESSION_HEAD_META_SCHEMA_VERSION"
+constant_path = "crates/lash-core/src/store/mod.rs"
+description = "persisted JSON session-head payload"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/store/mod.rs"]
+symbols = ["SessionHeadPayload"]
+
+[[surface]]
+constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
+constant_path = "crates/lash-core/src/lib.rs"
+description = "persisted protocol-specific turn options envelope"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/lib.rs"]
+symbols = ["ProtocolTurnOptions"]
+
+[[surface]]
+constant = "RLM_SNAPSHOT_VERSION"
+constant_path = "crates/lash-protocol-rlm/src/executor/snapshot.rs"
+description = "canonical typed MessagePack RLM execution snapshot"
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = [
+  "crates/lash-protocol-rlm/src/executor/state.rs",
+  "crates/lash-protocol-rlm/src/protocol/state.rs",
+  "crates/lash-protocol-rlm/src/projection/bindings.rs",
+]
+
+[[surface]]
+constant = "BYTECODE_FORMAT_VERSION"
+constant_path = "crates/lashlang/src/lib.rs"
+description = "compiled Lashlang instruction and durable VM-continuation contract"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/instruction.rs"]
+symbols = ["Instruction"]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/runtime/vm/continuation.rs"]
+
+[[surface]]
+constant = "LASHLANG_SEGMENT_STATE_VERSION"
+constant_path = "crates/lash-lashlang-runtime/src/process.rs"
+description = "persisted Restate Lashlang segment handover JSON"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-lashlang-runtime/src/process.rs"]
+symbols = ["LashlangSegmentState"]
+
+[[surface]]
+constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
+constant_path = "crates/lashlang/src/workflow_graph.rs"
+description = "serialized Lashlang workflow graph document"
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/workflow_graph.rs"]
+
+[[surface]]
+constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
+constant_path = "crates/lashlang/src/workflow_graph/facets.rs"
+description = "serialized optional workflow type-facet projection"
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/workflow_graph/facets.rs"]
+
+# Sweep exclusions: APP_VERSION and LASHLANG_COMPILER_VERSION mirror package
+# versions; MCP_PROTOCOL_VERSION, ANTHROPIC_VERSION, and CODE_ASSIST_API_VERSION
+# pin upstream protocols; DURABLE_READ_FIXTURE_SCHEMA_VERSION and GENERATOR_VERSION
+# version generated/test artifacts; LASHLANG_SEMANTIC_HASH_VERSION,
+# LASHLANG_VM_ABI_VERSION, and SOURCE_CACHE_VERSION identify hashes/caches rather
+# than serialized shapes. TOOL_INTENT_PROTOCOL_V1 is a permanently named v1
+# discriminator, not a mutable current-version constant.
