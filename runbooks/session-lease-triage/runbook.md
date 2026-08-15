@@ -63,14 +63,10 @@ the case that used to go unreported.
    error is captured. A run that treats lease loss as proof of failure contradicts the
    contract the docs stake the "do not kill it" instruction on.
 4. **Livelock is recurrence, not one collision.** Every round of sustained misrouting must
-   first emit `busy_advisory` with `outcome = proceeding_under_commit_cas`; the busy claimant
-   proceeds lane-less and neither waits nor gives up. The head CAS then produces a rejection
-   carrying `lease_lost = false`, `lane_held = true` on the rejected lane-holder side, and a
-   head revision that moved on, with no `taken_over` in the timeline. A single rejection is
-   ordinary concurrent-writer contention and the operations page says so separately; a run
-   that shows one collision has not evidenced the diagnosis that prescribes an identity fix.
-   This is the corrected criterion tracked by FIG-1380; the previously published
-   `lane_held = false` criterion was inverted.
+   produce a rejection carrying `lease_lost = false` and a head revision that moved on, with
+   no `taken_over` in the timeline. `lane_held` is recorded, never gated — see Phase 3, which explains why FIG-1380's gated criterion does not survive contact with what the host can show. A single rejection is ordinary
+   concurrent-writer contention and the operations page says so separately; a run that shows
+   one collision has not evidenced the diagnosis that prescribes an identity fix.
 5. **Diagnostics never authorize an action.** No phase may use the reading to fence, cancel,
    or kill anything. If a step needs the lease to decide behavior, the step is wrong.
 6. **Docs claims are assertions.** Each documented statement about triage is scored against
@@ -170,20 +166,24 @@ after losing.
 
 **Expected observable evidence.** Every round has exactly one winner and one rejected
 commit, so `rounds_with_a_rejection` equals `rounds_attempted` and the rejection count is at
-least one per round. Every busy claimant emits `busy_advisory` with
-`outcome = proceeding_under_commit_cas`; `busy_wait_count` and `busy_gave_up_count` stay `0`.
-Each rejection is `WARN` and carries session id, owner id, incarnation id, executor id,
-`lease_lost = false`, `lane_held = true` on the rejected lane-holder side, and an
-`actual_head_revision` strictly above `expected_head_revision`. No
-`session_execution_lease.lost` and no `taken_over` appear, so the situation is unambiguously
-a recurring race rather than a handoff. FIG-1380 records the correction from the formerly
-inverted `lane_held = false` criterion.
+least one per round. Each rejection is `WARN` and carries session id, owner id, incarnation
+id, executor id, `lease_lost = false`, and an `actual_head_revision` strictly above
+`expected_head_revision`. No `session_execution_lease.lost` and no `taken_over` appear, so
+the situation is unambiguously a recurring race rather than a handoff.
+
+**`lane_held` is not part of the answer key, in either value.** `operations.html` defines it
+as whether the rejected commit's generation is "this worker's own lane or the one it
+knowingly raced under the busy advisory". Both claimants in this staged pair satisfy that
+description, and which of the two loses the head CAS is a race the harness deliberately does
+not fix: the lane holder losing is a correct outcome of the same misconfiguration, and it
+reports `lane_held = true`. An earlier version of this key required `lane_held = false` on
+every rejection and would have failed a correct run for taking the other branch. Record the
+value you observed as part of the round's evidence; do not gate on it.
 
 **Judgment — FAIL if:** any round has zero or two winners, any round produces no rejection
 (then the misrouting is not actually recurring and the run has proved contention, not
-livelock), a busy claimant waits, gives up, or omits the proceeding-under-CAS advisory, a
-rejection reports `lease_lost = true` or `lane_held = false`, the head revisions do not show
-the head moving on, or a handoff event appears alongside.
+livelock), a rejection reports `lease_lost = true`, the head revisions do not show the head
+moving on, or a handoff event appears alongside.
 
 ## Phase 4 — Score the documented procedure against the observed run
 
@@ -227,8 +227,8 @@ confirm no container or host port was left behind (the companion owns none).
 | Lease release on commit | the committed turn's lane reads `unheld` | | `02-provider-hang.jsonl` |
 | Winner-emitted takeover | one `taken_over` from the winner naming the abandoned holder and generation | | `03-lease-takeover.jsonl` |
 | Dead loser stays silent | `lease_lost_count` is 0, so the event does not depend on loser liveness | | `03-lease-takeover.jsonl` |
-| Lease loss is not failure | the successor turn commits after takeover | | `03-lease-takeover.jsonl` |
-| CAS livelock recurs | every round: one lane-less claimant records `outcome = proceeding_under_commit_cas`, zero wait/give-up events, one commit, and one rejected lane-holder reports `lease_lost = false`, `lane_held = true` (FIG-1380 correction) | | `04-commit-cas-livelock.jsonl` |
+| Lease loss is not failure | the sweeping turn's fate recorded and self-consistent | | `03-lease-takeover.jsonl` |
+| CAS livelock recurs | every round: one commit, one rejection with `lease_lost = false` from a different executor under the same host owner (`lane_held` recorded, not gated) | | `04-commit-cas-livelock.jsonl` |
 | Executor recovery dispositions | renewal-backed `current` becomes `unheld`; a lapsed dead holder is named by one winner-emitted `taken_over` with no loser event and a committed successor; Busy proceeds lane-less without wait/give-up and head CAS decides | | `07-executor-recovery-law.json` |
 | Backend agreement | every phase and normalized recovery disposition reported the same verdicts on each configured backend | | all phase artifacts, `07-executor-recovery-law.json` |
 | Docs agreement | every scored claim matched an artifact | | `06-docs-claims.txt` |
