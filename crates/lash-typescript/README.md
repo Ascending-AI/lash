@@ -142,10 +142,13 @@ language semantics:
   cannot manufacture `undefined`.
 - Lone UTF-16 surrogates are not representable in the v1 UTF-8 value model, so
   literals reject with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`. Indexing an
-  astral string at one UTF-16 unit, and `Object.values`/`Object.entries` when
-  their string receiver would produce those units, reject at runtime with
-  `TS_LONE_SURROGATE_UNSUPPORTED`. String methods that could manufacture a lone
-  surrogate are absent from the shipped surface.
+  astral string at one UTF-16 unit, `Object.values`/`Object.entries` when their
+  string receiver would produce those units, and the two empty-separator
+  expansions — `split('')` and `replaceAll('', …)`, both of which ECMA defines
+  per UTF-16 code unit — reject at runtime with `TS_LONE_SURROGATE_UNSUPPORTED`
+  on an astral receiver. BMP receivers are unaffected. Other string methods
+  that could manufacture a lone surrogate are absent from the shipped
+  surface.
 - Appending at exactly `array.length` is supported. An assignment that skips an
   index would create holes the v1 dense-list representation cannot distinguish
   from explicit `undefined`, so it rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`.

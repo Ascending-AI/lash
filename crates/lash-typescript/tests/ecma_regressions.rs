@@ -307,9 +307,7 @@ fn empty_search_replace_all_refuses_to_split_a_surrogate_pair() {
     let error = execute("finish('\u{1F600}'.replaceAll('', '-'));")
         .expect_err("an astral receiver cannot expand per code unit");
     assert!(
-        error
-            .to_string()
-            .contains("TS_LONE_SURROGATE_UNSUPPORTED"),
+        error.to_string().contains("TS_LONE_SURROGATE_UNSUPPORTED"),
         "the refusal is the named one: {error}"
     );
 

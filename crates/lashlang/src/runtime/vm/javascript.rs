@@ -780,6 +780,15 @@ fn replace_all_string(
             let Some(matched) = value[index..].chars().next() else {
                 return Ok(output);
             };
+            if matched.len_utf16() != 1 {
+                // ECMA matches between the two code units of a surrogate pair,
+                // so node's answer here contains lone surrogates. Expanding per
+                // Unicode scalar instead would quietly give a different string;
+                // `split('')` refuses this same shape for this same reason.
+                return Err(js_stdlib_error(
+                    "TS_LONE_SURROGATE_UNSUPPORTED: replaceAll('') would create unrepresentable lone surrogates",
+                ));
+            }
             ensure_javascript_string_size(output.len() + matched.len_utf8())?;
             output.push(matched);
             index += matched.len_utf8();

@@ -20,6 +20,7 @@ Implementation commits:
 - `78f7e9cef` — latency-ordered settlement pinned for deferred batch leaves
 - `fa2ab715c` — the fixed map and padding cases fed to the oracle
 - `010663589` / `92bed819b` — the round-3 findings, red then green
+- `9016fdd3d` / (this head) — the astral empty-search divergence, red then green
 
 Every SHA above is an ancestor of the head. An earlier revision of this ledger
 named pre-rebase commits that no longer describe this history.
@@ -340,6 +341,21 @@ evidence, and raised five new findings. All five are closed.
 N1's fix carries five node rows including the end-of-string match, the empty
 receiver, the `replace` contrast that must *not* change, a non-ASCII case, and
 the replacement tokens around each empty match. N3 carries a rejection row.
+
+A polish pass after round 3 reconciled two stale doc counts and closed one
+more silent divergence. The register claimed the differential table held 310
+rows and 237 distinct expressions when it held 345 and 272, and this report
+claimed 55 method names when the inventory is 64 — both are counts restated in
+prose beside the thing they count, which is the shape that produced M5. The
+numbers are corrected and now pinned: `committed_row_counts_match_the_register`
+asserts both corpus counts against the table (mutating the register to 344
+fails it), and the method count defers to the set-equality pin rather than
+restating a number. `replaceAll('')` on an astral receiver was expanding per
+Unicode scalar where ECMA expands per UTF-16 code unit, silently returning a
+string that was neither node's answer nor a refusal; it now rejects with
+`TS_LONE_SURROGATE_UNSUPPORTED`, alongside `split('')`, which refuses the same
+shape for the same reason. BMP receivers are unchanged and stay covered by
+oracle rows.
 
 N4 is now structural rather than assertional: the allowlist is a single named
 list that both the predicate and the register pin read, and the pin asserts set
