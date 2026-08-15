@@ -112,6 +112,7 @@ pub type ProcessOutcomeObserver = Arc<dyn Fn(&ProcessEffectOutcome) + Send + Syn
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work_driver: Option<crate::ProcessWorkDriver>,
+    pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
@@ -369,6 +370,21 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Binds the durable environment store used after an admitted process
+    /// start reaches local realization.
+    ///
+    /// This is an **integrator class 3: effect-host implementor** seam for
+    /// executors that realize serialized process-start commands.
+    pub fn with_process_env_store(
+        mut self,
+        store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Process(execution) = &mut self.state {
+            execution.process_env_store = Some(store);
+        }
+        self
+    }
+
     /// Removes and returns the process outcome observer.
     ///
     /// This is public for **effect-host implementors** that transfer local
@@ -393,6 +409,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
                 registry,
                 process_work_driver,
+                process_env_store: None,
                 turn_cancellation: None,
                 effect_controller: None,
                 outcome_observer: None,

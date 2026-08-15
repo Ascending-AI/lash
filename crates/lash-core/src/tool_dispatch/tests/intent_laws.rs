@@ -703,3 +703,14 @@ async fn retry_drains_only_the_final_attempts_intents() {
     assert_eq!(events.len(), 1, "the retried declaration never drains");
     assert_eq!(events[0].payload, json!({"attempt": 2}));
 }
+#[tokio::test]
+async fn empty_v1_batch_without_a_recorded_call_id_is_a_noop() {
+    let outcomes = execute_final_tool_intents(
+        &dispatch_context(),
+        None,
+        &crate::ToolIntents::default(),
+        None,
+    )
+    .await;
+    assert!(outcomes.is_empty());
+}

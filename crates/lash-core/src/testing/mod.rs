@@ -909,6 +909,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         let command = crate::ProcessCommand::Start {
             registration,
             observers,
+            env_spec: None,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
         match self.execute(scope, command).await? {
@@ -938,6 +939,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         let command = crate::ProcessCommand::Start {
             registration,
             observers: options.initial_observers,
+            env_spec: None,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
         match self.execute(scope, command).await? {

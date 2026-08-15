@@ -2019,6 +2019,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         RuntimeEffectCommand::process(lash_core::ProcessCommand::Start {
             registration,
             observers: vec![SESSION.to_string()],
+            env_spec: None,
             execution_context: Box::default(),
         }),
     );

@@ -9,6 +9,38 @@ pub(crate) const SCHEMA_DDL: &str = include_str!("../../schema.sql");
 /// [`crate::PostgresStorage::schema_advisory_lock_key`].
 pub(crate) const SCHEMA_ADVISORY_LOCK_KEY: (i32, i32) = (715421, 907001);
 
+struct SchemaMigration {
+    from: i32,
+    to: i32,
+    statements: &'static [&'static str],
+}
+
+const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
+    from: 50,
+    to: 51,
+    statements: &[
+        r#"CREATE TABLE lash_process_parent_end_plans (
+            process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
+            actions_json TEXT NOT NULL
+        )"#,
+        r#"CREATE TABLE lash_tool_intent_submissions (
+            replay_key TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            execution_scope_id TEXT NOT NULL,
+            tool_call_id TEXT NOT NULL,
+            intent_index BIGINT NOT NULL,
+            kind TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            submission_json TEXT NOT NULL
+        )"#,
+        r#"CREATE INDEX idx_lash_tool_intent_submissions_scope
+            ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index)"#,
+        r#"UPDATE lash_schema_versions
+           SET version = 51
+         WHERE component = 'lash-postgres-store' AND version = 50"#,
+    ],
+}];
+
 /// How one open should treat the database's schema.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SchemaOpenOptions {
@@ -47,6 +79,12 @@ pub(crate) async fn ensure_schema(
         let installation = resolve_installation(&mut tx, &search_path).await?;
         let preflight_mismatch = if let Some(installation) = installation {
             match read_component_version(&mut tx, &installation, &SchemaShape::expected()).await? {
+                ComponentVersion::Readable(Some(found))
+                    if options.check == SchemaCheck::Enforce
+                        && apply_schema_migration(&mut tx, found).await? =>
+                {
+                    None
+                }
                 ComponentVersion::Readable(found) if found != Some(SCHEMA_VERSION) => {
                     Some((installation.namespace().to_string(), found))
                 }
@@ -153,6 +191,32 @@ pub(crate) async fn ensure_schema(
     record_schema_gate_decision(&report, options, admitted_as);
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(signing_secret)
+}
+
+async fn apply_schema_migration(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    found: i32,
+) -> Result<bool, StoreError> {
+    let Some(migration) = SCHEMA_MIGRATIONS
+        .iter()
+        .find(|migration| migration.from == found && migration.to == SCHEMA_VERSION)
+    else {
+        return Ok(false);
+    };
+    for statement in migration.statements {
+        sqlx::query(statement)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    tracing::info!(
+        component = SCHEMA_COMPONENT,
+        from_version = migration.from,
+        to_version = migration.to,
+        outcome = "migrated",
+        "applied Lash-managed PostgreSQL schema migration"
+    );
+    Ok(true)
 }
 
 /// Runs the structural check under the published advisory key, held in *shared*

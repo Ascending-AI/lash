@@ -86,7 +86,7 @@ impl<'run> ToolSessionAdmin<'run> {
             == crate::EffectJournalAddressing::OrdinalAddressed
         {
             return Err(PluginError::Session(
-                "ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; start the nested turn from a process step; a first-class intent protocol is pending"
+                "ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; return a typed tool intent for supported follow-on work or start the nested turn from a process step"
                     .to_string(),
             ));
         }
@@ -177,7 +177,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; start the nested turn from a process step; a first-class intent protocol is pending"
+            "plugin session error: ToolContext::sessions().start_turn() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; return a typed tool intent for supported follow-on work or start the nested turn from a process step"
         );
     }
 }

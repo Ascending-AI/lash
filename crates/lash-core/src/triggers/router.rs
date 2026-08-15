@@ -593,6 +593,7 @@ impl TriggerRouter {
                 .map(str::to_owned)
                 .into_iter()
                 .collect(),
+            env_spec: None,
             execution_context: Box::new(execution_context),
         };
         let effect_id = command.effect_id();

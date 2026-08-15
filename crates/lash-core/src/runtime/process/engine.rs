@@ -43,10 +43,16 @@ pub enum ProcessRunOutcome {
 }
 
 impl ProcessRunOutcome {
+    /// Report whether a process-engine invocation reached a terminal value.
+    ///
+    /// This is an **integrator class 3: process-engine implementor** seam.
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Terminal(_) | Self::TerminalWithParentEnd { .. })
     }
 
+    /// Borrow the terminal output without consuming engine-owned parent-end actions.
+    ///
+    /// This is an **integrator class 3: process-engine implementor** seam.
     pub fn terminal_output(&self) -> Option<&ProcessAwaitOutput> {
         match self {
             Self::Terminal(output) | Self::TerminalWithParentEnd { output, .. } => Some(output),
@@ -54,6 +60,9 @@ impl ProcessRunOutcome {
         }
     }
 
+    /// Consume a terminal engine result into output plus durable teardown actions.
+    ///
+    /// This is an **integrator class 3: process-engine implementor** seam.
     pub fn into_terminal_parts(
         self,
     ) -> Option<(

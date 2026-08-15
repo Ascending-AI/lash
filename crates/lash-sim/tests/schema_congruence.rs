@@ -8,6 +8,7 @@ const POSTGRES_SCHEMA_SHAPE: &str = include_str!("../../lash-postgres-store/sche
 // each backend's fresh-schema tests.
 const SHAPE_CHANGED_TABLES: &[(&str, &str)] = &[
     ("process_parent_end_plans", "lash_process_parent_end_plans"),
+    ("tool_intent_submissions", "lash_tool_intent_submissions"),
     ("queued_work_batches", "lash_queued_work_batches"),
 ];
 
@@ -123,12 +124,12 @@ fn sqlite_and_postgres_table_sets_are_congruent() {
 
     assert_eq!(
         sqlite.len(),
-        37,
+        38,
         "SQLite schema table count changed; update the explicit cross-backend mapping"
     );
     assert_eq!(
         postgres_raw.len(),
-        38,
+        39,
         "Postgres schema table count changed; update the explicit cross-backend mapping"
     );
     assert!(

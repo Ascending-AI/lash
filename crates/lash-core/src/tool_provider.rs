@@ -27,7 +27,7 @@ pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;
 pub use triggers::ToolTriggerClient;
 
-/// Read-only session capability available inside a recorded leaf attempt.
+/// Integrator class 3 session reads available inside a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptSessionReads {
     session_id: String,
@@ -35,6 +35,7 @@ pub struct AttemptSessionReads {
 }
 
 impl AttemptSessionReads {
+    /// Integrator class 3 read of the attempt session's effective model policy.
     pub async fn model(&self) -> Result<session::ToolSessionModel, PluginError> {
         let snapshot = self.snapshot_current().await?;
         let generation = snapshot
@@ -49,10 +50,12 @@ impl AttemptSessionReads {
         })
     }
 
+    /// Integrator class 3 snapshot of the bound session without an effect controller.
     pub async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
         self.sessions.snapshot_session(&self.session_id).await
     }
 
+    /// Integrator class 3 snapshot of a named session through controller-free reads.
     pub async fn snapshot(
         &self,
         session_id: impl AsRef<str>,
@@ -60,16 +63,18 @@ impl AttemptSessionReads {
         self.sessions.snapshot_session(session_id.as_ref()).await
     }
 
+    /// Integrator class 3 read of the bound session's serialized tool catalog.
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
         self.sessions.tool_catalog(&self.session_id).await
     }
 
+    /// Integrator class 3 shared read of the immutable serialized tool catalog.
     pub async fn shared_tool_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
         self.sessions.shared_tool_catalog(&self.session_id).await
     }
 }
 
-/// Controller-free process read capability available inside a recorded leaf attempt.
+/// Integrator class 3 controller-free process reads for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptProcessReads {
     session_id: String,
@@ -77,6 +82,7 @@ pub struct AttemptProcessReads {
 }
 
 impl AttemptProcessReads {
+    /// Integrator class 3 listing through the attempt-safe process filter.
     pub async fn list_handles_filtered(
         &self,
         filter: &crate::ProcessListFilter,
@@ -92,7 +98,7 @@ impl AttemptProcessReads {
     }
 }
 
-/// Sealed, controller-free environment for a recorded leaf attempt.
+/// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
     session_id: String,
@@ -173,35 +179,45 @@ impl<'run> AttemptContext<'run> {
         Self::from_tool_context(context, execution_scope_id.into(), None, false)
     }
 
+    /// Integrator class 3 identity for the session that owns this recorded attempt.
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
+    /// Integrator class 3 durable turn or process scope used for intent identity.
     pub fn execution_scope_id(&self) -> &str {
         &self.execution_scope_id
     }
+    /// Integrator class 3 agent-frame identity that authorized this provider attempt.
     pub fn agent_frame_id(&self) -> &str {
         &self.agent_frame_id
     }
+    /// Integrator class 3 controller-free session reads for this attempt.
     pub fn sessions(&self) -> AttemptSessionReads {
         self.sessions.clone()
     }
+    /// Integrator class 3 controller-free process reads for this attempt.
     pub fn processes(&self) -> AttemptProcessReads {
         self.processes.clone()
     }
+    /// Integrator class 3 cooperative cancellation token supplied by the attempt host.
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
         self.cancellation_token.as_ref()
     }
+    /// Integrator class 3 asynchronous process handle associated with this attempt.
     pub fn async_process_id(&self) -> Option<&str> {
         self.async_process_id.as_deref()
     }
+    /// Integrator class 3 durable process currently executing this attempt, if any.
     pub fn runtime_process_id(&self) -> Option<&str> {
         self.runtime_process_id.as_deref()
     }
+    /// Integrator class 3 attachment capability for durable tool output.
     pub fn attachments(&self) -> ToolAttachmentClient {
         ToolAttachmentClient {
             store: Arc::clone(&self.attachment_store),
         }
     }
+    /// Integrator class 3 direct-completion client attributed to this attempt call.
     pub fn direct_completions(&self) -> ToolDirectCompletionClient<'run> {
         ToolDirectCompletionClient {
             session_id: self.session_id.clone(),
@@ -210,24 +226,31 @@ impl<'run> AttemptContext<'run> {
             parent_invocation: None,
         }
     }
+    /// Integrator class 3 resolved model provider visible to the attempt host.
     pub fn provider(&self) -> Option<&crate::ProviderHandle> {
         self.provider.as_ref()
     }
+    /// Integrator class 3 payload sealed by the provider's prepare phase.
     pub fn prepared_payload(&self) -> &serde_json::Value {
         &self.prepared_payload
     }
+    /// Integrator class 3 protocol-owned execution binding for this tool call.
     pub fn tool_execution_binding(&self) -> &serde_json::Value {
         &self.tool_execution_binding
     }
+    /// Integrator class 3 stable provider call id used to derive intent identities.
     pub fn tool_call_id(&self) -> Option<&str> {
         self.tool_call_id.as_deref()
     }
+    /// Integrator class 3 one-based retry attempt number.
     pub fn attempt_number(&self) -> u32 {
         self.attempt_number
     }
+    /// Integrator class 3 retry ceiling sealed for this invocation.
     pub fn max_attempts(&self) -> u32 {
         self.max_attempts
     }
+    /// Integrator class 3 durable attempt replay key when supplied by the host.
     pub fn replay_key(&self) -> Option<&str> {
         self.replay_key.as_deref()
     }
@@ -241,15 +264,18 @@ impl<'run> AttemptContext<'run> {
     pub fn process_execution_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
         self.execution_env_spec.clone()
     }
+    /// Integrator class 3 decode of the sealed payload into a provider-owned type.
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>
     where
         T: serde::de::DeserializeOwned,
     {
         serde_json::from_value(self.prepared_payload.clone())
     }
+    /// Integrator class 3 named, attempt-attributed runtime phase for fault probes.
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
         crate::runtime::RuntimeNamedPhase::begin(self.phase_probe.clone(), phase)
     }
+    /// Integrator class 3 durable completion key or typed host-capability refusal.
     pub fn completion_key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
         if !self.completion_supported {
             return Err(crate::RuntimeError::new(
@@ -264,6 +290,7 @@ impl<'run> AttemptContext<'run> {
             )
         })
     }
+    /// Integrator class 3 canonical identity for one declared intent index.
     pub fn intent_identity(
         &self,
         intent_index: usize,

@@ -1071,7 +1071,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 35, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 36, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1480,8 +1480,32 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 35,
+            expected: 36,
         })
+    ));
+}
+
+#[test]
+fn protocol_35_peer_rejects_protocol_36_tool_intent_activity_before_variant_decode() {
+    let wire = serde_json::json!({
+        "protocol_version": 36,
+        "sequence": 1,
+        "id": "intent-outcome",
+        "correlation_id": "tool-call-1",
+        "type": "tool_intent_outcome",
+        "outcome": {
+            "status": "protocol_refused",
+            "refusal": {
+                "reason": "unsupported_protocol_version",
+                "recorded": 2
+            }
+        }
+    });
+
+    assert!(matches!(
+        RemoteTurnActivity::decode_json_expecting_protocol_version(wire.to_string().as_bytes(), 35),
+        Err(RemoteProtocolError::UnsupportedProtocolVersion { actual, expected })
+            if actual == 36 && expected == 35
     ));
 }
 

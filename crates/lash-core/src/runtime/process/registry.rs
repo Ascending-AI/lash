@@ -85,9 +85,12 @@ pub struct ProcessWorklistPage {
 }
 
 /// Durable teardown work committed atomically with one parent's terminal outcome.
+/// **Integrator class 3: store and process-engine implementors.**
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessParentEndPlan {
+    /// Terminal parent whose completion made the plan executable.
     pub process_id: String,
+    /// Ordered, replay-keyed actions retained for crash redrive.
     pub actions: Vec<crate::ToolIntentParentEndAction>,
 }
 
@@ -739,6 +742,42 @@ pub trait ProcessRegistry: Send + Sync {
 
     /// Clear one plan after all replay-keyed commands settle. Repetition is idempotent.
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError>;
+
+    /// Atomically bind a runtime-owned intent identity to its first payload.
+    ///
+    /// This is an **integrator class 3: store implementor** seam. The returned
+    /// existing row must be the authoritative first writer across processes
+    /// and facade handles.
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError>;
+
+    /// Persist the first realized outcome for an admitted intent identity.
+    ///
+    /// This is an **integrator class 3: store implementor** seam. Repetition is
+    /// idempotent and may not replace an already recorded outcome.
+    async fn complete_tool_intent_submission(
+        &self,
+        replay_key: &str,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError>;
+
+    /// Load unsettled ingress parent-end actions for one owning scope.
+    ///
+    /// This is an **integrator class 3: store implementor** seam used by hosts
+    /// to reconstruct teardown after a crash.
+    async fn pending_tool_intent_parent_end(
+        &self,
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError>;
+
+    /// Mark one durable ingress parent-end action settled.
+    ///
+    /// This is an **integrator class 3: store implementor** seam. Repetition is
+    /// idempotent so a crash after replay-keyed teardown can redrive safely.
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError>;
 
     /// Record the durable, lease-fenced "execution started" fact (ADR 0019).
     ///

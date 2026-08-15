@@ -3,18 +3,25 @@ pub use lash_sansio::ProcessParentEndPolicy;
 use serde::{Deserialize, Serialize};
 
 /// The only intent-to-command protocol understood by this build.
+/// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_PROTOCOL_V1: u16 = 1;
 /// Maximum declarations accepted from one recorded attempt.
+/// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
 /// Maximum canonical JSON bytes accepted from one recorded intent batch.
+/// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_CANONICAL_BYTES: usize = 64 * 1024;
 /// Maximum declarations of any one kind accepted from one recorded attempt.
+/// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_PER_KIND: usize = 16;
 
 /// Recorded declarations returned by a leaf tool attempt.
+/// **Integrator class 3: protocol and process-engine implementors.**
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolIntents {
+    /// Version selecting the literal admission and realization contract.
     pub protocol_version: u16,
+    /// Ordered declarations whose indexes participate in durable identity.
     pub intents: Vec<ToolIntent>,
 }
 
@@ -25,6 +32,7 @@ impl Default for ToolIntents {
 }
 
 impl ToolIntents {
+    /// Construct a version-1 declaration batch for protocol and process-engine implementors.
     pub fn v1(intents: Vec<ToolIntent>) -> Self {
         Self {
             protocol_version: TOOL_INTENT_PROTOCOL_V1,
@@ -32,12 +40,16 @@ impl ToolIntents {
         }
     }
 
+    /// Test whether a declaration batch is empty before protocol admission.
+    ///
+    /// This is an **integrator class 3: protocol and process-engine implementor** seam.
     pub fn is_empty(&self) -> bool {
         self.intents.is_empty()
     }
 }
 
 /// Durable follow-on work a recorded leaf attempt may request.
+/// **Integrator class 3: protocol and process-engine implementors.**
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "intent", rename_all = "snake_case")]
 pub enum ToolIntent {
@@ -48,6 +60,7 @@ pub enum ToolIntent {
 }
 
 impl ToolIntent {
+    /// Return the literal command kind used by protocol and process-engine implementors.
     pub fn kind(&self) -> ToolIntentKind {
         match self {
             Self::StartProcess(_) => ToolIntentKind::StartProcess,
@@ -57,6 +70,7 @@ impl ToolIntent {
         }
     }
 
+    /// Return the session binding checked by protocol and process-engine implementors.
     pub fn session_id(&self) -> &str {
         match self {
             Self::StartProcess(intent) => &intent.session_id,
@@ -67,35 +81,108 @@ impl ToolIntent {
     }
 }
 
+/// Durable first-submission row for one runtime-owned tool-intent identity.
+///
+/// This is an **integrator class 3: protocol and process-engine implementor**
+/// seam. Process registries persist it so independent facade handles and
+/// crash redrives consult the same first writer before realization.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolIntentSubmissionRecord {
+    /// Canonical `(session, scope, call, index)` identity and replay key.
+    pub identity: ToolIntentIdentity,
+    /// First submitted command kind.
+    pub kind: ToolIntentKind,
+    /// Hash of the first serialized payload.
+    pub payload_hash: String,
+    /// First payload retained for crash redrive.
+    pub intent: ToolIntent,
+    /// First typed realization outcome, absent while admission is pending.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<crate::ToolIntentExecutionOutcome>,
+    /// Whether the retained parent-end action has reached a typed outcome.
+    #[serde(default)]
+    pub parent_end_settled: bool,
+}
+
+impl ToolIntentSubmissionRecord {
+    /// Builds the canonical first-submission row for protocol and
+    /// process-engine implementors before any intent realization occurs.
+    pub fn new(
+        identity: ToolIntentIdentity,
+        intent: ToolIntent,
+    ) -> Result<Self, serde_json::Error> {
+        let kind = intent.kind();
+        let payload_hash = crate::stable_hash::sha256_hex(&serde_json::to_vec(&intent)?);
+        Ok(Self {
+            identity,
+            kind,
+            payload_hash,
+            intent,
+            outcome: None,
+            parent_end_settled: false,
+        })
+    }
+}
+
+/// Atomic result of claiming a runtime-owned tool-intent identity.
+///
+/// This is an **integrator class 3: protocol and process-engine implementor**
+/// seam returned by [`crate::ProcessRegistry`] implementations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ToolIntentSubmissionAdmission {
+    /// This caller durably installed the first submission.
+    Admitted,
+    /// Another caller or an earlier crash installed the returned first submission.
+    Existing(Box<ToolIntentSubmissionRecord>),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Start declaration consumed by protocol and process-engine implementors.
 pub struct StartProcessIntent {
+    /// Session whose authority owns the child.
     pub session_id: String,
+    /// Complete durable process-start request.
     pub request: crate::ProcessStartRequest,
+    /// Ratified action applied when the owning scope ends.
     #[serde(default)]
     pub on_parent_end: ProcessParentEndPolicy,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// Signal declaration consumed by protocol and process-engine implementors.
 pub struct SignalProcessIntent {
+    /// Session whose authority owns the signal.
     pub session_id: String,
+    /// Target process id.
     pub process_id: String,
+    /// Declared signal name.
     pub signal_name: String,
+    /// Signal payload validated by the target event schema.
     pub payload: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// Cancellation declaration consumed by protocol and process-engine implementors.
 pub struct CancelProcessIntent {
+    /// Session whose authority owns the cancellation.
     pub session_id: String,
+    /// Target process id.
     pub process_id: String,
+    /// Optional durable cancellation reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// Event declaration consumed by protocol and process-engine implementors.
 pub struct EmitProcessEventIntent {
+    /// Session whose authority owns the append.
     pub session_id: String,
+    /// Target process id.
     pub process_id: String,
+    /// Registered event type.
     pub event_type: String,
+    /// Event payload validated by the process registry.
     pub payload: serde_json::Value,
 }
 
@@ -130,22 +217,27 @@ pub fn derive_tool_intent_identity(
 /// A completed leaf-provider value. Unlike [`crate::ToolResult`], this type has
 /// no deferred variant, so a completed result can be paired with intents
 /// without making `Pending + intents` representable.
+/// **Integrator class 3: protocol and process-engine implementors.**
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolResultDone(Box<crate::ToolCallOutput>);
 
 impl ToolResultDone {
+    /// Wrap a completed tool output for protocol and process-engine implementors.
     pub fn from_output(output: crate::ToolCallOutput) -> Self {
         Self(Box::new(output))
     }
 
+    /// Construct a successful completed value for protocol and process-engine implementors.
     pub fn ok(result: serde_json::Value) -> Self {
         Self::from_output(crate::ToolCallOutput::success(result))
     }
 
+    /// Construct a failed completed value for protocol and process-engine implementors.
     pub fn failure(failure: crate::ToolFailure) -> Self {
         Self::from_output(crate::ToolCallOutput::failure(failure))
     }
 
+    /// Recover the terminal output for protocol and process-engine implementors.
     pub fn into_output(self) -> crate::ToolCallOutput {
         *self.0
     }
@@ -153,24 +245,32 @@ impl ToolResultDone {
 
 /// Value returned by a leaf provider body before the attempt effect records it.
 /// The enum is the law: only the completed variant has an intents field.
+/// **Integrator class 3: protocol and process-engine implementors.**
 #[derive(Clone, Debug)]
 pub enum ToolAttemptResult {
+    /// Terminal provider output with ordered durable declarations.
     Done {
+        /// Completed provider result.
         result: ToolResultDone,
+        /// Follow-on declarations admitted only after the attempt is recorded.
         intents: ToolIntents,
     },
+    /// Deferred provider output with no representable declarations.
     Pending(crate::PendingCompletion),
 }
 
 impl ToolAttemptResult {
+    /// Pair a completed result with its declarations for protocol and process-engine implementors.
     pub fn done(result: ToolResultDone, intents: ToolIntents) -> Self {
         Self::Done { result, intents }
     }
 
+    /// Construct a completed attempt with no declarations for protocol and process-engine implementors.
     pub fn done_without_intents(result: ToolResultDone) -> Self {
         Self::done(result, ToolIntents::default())
     }
 
+    /// Construct a pending attempt for protocol and process-engine implementors.
     pub fn pending(pending: crate::PendingCompletion) -> Self {
         Self::Pending(pending)
     }

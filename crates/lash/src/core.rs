@@ -35,6 +35,8 @@ pub struct LashCore {
     pub(crate) work_driver: Arc<InlineWorkDriverSlot>,
     /// Store-less session ids rejected for reuse by this core.
     pub(crate) ephemeral_session_ids: Arc<std::sync::Mutex<HashSet<String>>>,
+    pub(crate) tool_intent_submission_gates:
+        Arc<crate::tool_intent_ingress::RuntimeSubmissionGates>,
 }
 
 /// How a [`LashCore`] resolves its process work driver, decided at `build()`
@@ -1383,6 +1385,7 @@ impl LashCoreBuilder {
             worker_slot_supplier,
             work_driver: Arc::new(InlineWorkDriverSlot::new(work_driver)),
             ephemeral_session_ids: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            tool_intent_submission_gates: Default::default(),
         })
     }
 

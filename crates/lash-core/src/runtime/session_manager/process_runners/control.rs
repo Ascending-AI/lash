@@ -42,12 +42,14 @@ impl<'scope> ProcessCommandRunner<'scope> {
         &self,
         registration: crate::ProcessRegistration,
         observers: Vec<String>,
+        env_spec: Option<crate::ProcessExecutionEnvSpec>,
         execution_context: crate::ProcessExecutionContext,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Start {
                 registration,
                 observers,
+                env_spec,
                 execution_context: Box::new(execution_context),
             })
             .await?
@@ -256,6 +258,9 @@ impl<'scope> ProcessCommandRunner<'scope> {
             Arc::clone(&self.registry),
             self.current.host.process_work_driver.clone(),
         )
+        .with_process_env_store(Arc::clone(
+            &self.current.host.core.durability.process_env_store,
+        ))
         .with_process_effect_controller(owned_controller);
         if let Some(turn_cancellation) = self.turn_cancellation.clone() {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
@@ -385,7 +390,12 @@ impl ProcessCapability {
             "processes are unavailable in this runtime",
         )?;
         runner
-            .start(registration, options.initial_observers, execution_context)
+            .start(
+                registration,
+                options.initial_observers,
+                None,
+                execution_context,
+            )
             .await
     }
 
@@ -403,25 +413,21 @@ impl ProcessCapability {
             .parent_invocation
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
-        let env_ref = match request.env_spec.as_ref() {
-            Some(env_spec) => Some(
-                crate::persist_process_execution_env(
-                    current.host.core.durability.process_env_store.as_ref(),
-                    env_spec,
-                )
-                .await?,
-            ),
-            None => None,
-        };
+        let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
         let originator = request.originator.clone();
-        let registration = request.into_registration(env_ref).with_process_provenance(
+        let registration = request.into_registration(None).with_process_provenance(
             crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
         );
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
         self.command_runner(current, &scope)?
-            .start(registration, options.initial_observers, execution_context)
+            .start(
+                registration,
+                options.initial_observers,
+                env_spec,
+                execution_context,
+            )
             .await
     }
 

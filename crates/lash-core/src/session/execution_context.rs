@@ -131,10 +131,12 @@ impl<'run> RuntimeExecutionContext<'run> {
         crate::tool_dispatch::execute_parent_end_actions(self.dispatch.as_ref()).await
     }
 
+    /// Restore crash-retained teardown actions for protocol and process-engine implementors.
     pub fn restore_parent_end_actions(&self, actions: &[crate::ToolIntentParentEndAction]) {
         self.dispatch.recorded_intent_outcomes.restore(actions);
     }
 
+    /// Snapshot teardown actions for protocol and process-engine implementors before persistence.
     pub fn parent_end_actions(&self) -> Vec<crate::ToolIntentParentEndAction> {
         self.dispatch.recorded_intent_outcomes.snapshot()
     }

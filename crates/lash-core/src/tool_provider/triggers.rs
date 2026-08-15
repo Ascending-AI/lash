@@ -27,7 +27,7 @@ impl<'run> ToolTriggerClient<'run> {
                 == crate::EffectJournalAddressing::OrdinalAddressed
         {
             return Err(PluginError::Session(
-                "ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; emit the trigger from a process step; a first-class intent protocol is pending"
+                "ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; return a typed tool intent for supported follow-on work or emit the trigger from a process step"
                     .to_string(),
             ));
         }
@@ -122,7 +122,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "plugin session error: ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; emit the trigger from a process step; a first-class intent protocol is pending"
+            "plugin session error: ToolContext::triggers().emit() is unavailable inside an atomic tool attempt on ordinal-addressed journal tiers; return a typed tool intent for supported follow-on work or emit the trigger from a process step"
         );
     }
 }

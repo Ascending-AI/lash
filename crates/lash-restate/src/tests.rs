@@ -8105,6 +8105,7 @@ async fn restate_controller_schedules_process_workflow_without_running_executor(
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec!["session".to_string()],
+                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
@@ -8184,6 +8185,7 @@ async fn restate_controller_replays_process_start_await_command_sequence() {
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration: external_registration(process_id),
                 observers: Vec::new(),
+                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         )
@@ -8284,6 +8286,7 @@ async fn restate_controller_start_emits_send_when_external_ref_already_exists() 
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration,
                 observers: Vec::new(),
+                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         ),
@@ -8311,6 +8314,7 @@ async fn run_parent_shaped_start_await_suspend_flow(
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration: external_registration(process_id),
                 observers: Vec::new(),
+                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         ),
@@ -8432,6 +8436,7 @@ async fn restate_controller_schedules_lashlang_process_with_serializable_input()
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: Vec::new(),
+                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
@@ -9836,6 +9841,7 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec!["session".to_string()],
+                    env_spec: None,
                     execution_context: Box::new(execution_context),
                 }),
             ),
@@ -10756,6 +10762,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec![creator_scope.session_id.clone()],
+                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),

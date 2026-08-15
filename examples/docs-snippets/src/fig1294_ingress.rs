@@ -49,6 +49,77 @@ fn event_intent(session_id: &str) -> lash::tools::ToolIntent {
     })
 }
 
+struct AttemptIntentProvider;
+
+#[async_trait]
+impl ToolProvider for AttemptIntentProvider {
+    fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
+        vec![
+            ToolDefinition::raw(
+                "tool:attempt_intent_docs",
+                "attempt_intent_docs",
+                "Return a durable event declaration.",
+                ToolDefinition::default_input_schema(),
+                serde_json::json!({"type": "object"}),
+            )
+            .manifest(),
+        ]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
+        (name == "attempt_intent_docs").then(|| {
+            Arc::new(
+                ToolDefinition::raw(
+                    "tool:attempt_intent_docs",
+                    "attempt_intent_docs",
+                    "Return a durable event declaration.",
+                    ToolDefinition::default_input_schema(),
+                    serde_json::json!({"type": "object"}),
+                )
+                .contract(),
+            )
+        })
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        panic!("attempt-intent provider must use the sealed attempt context")
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash::tools::AttemptToolCall<'_>,
+    ) -> lash::tools::ToolAttemptResult {
+        lash::tools::ToolAttemptResult::done(
+            lash::tools::ToolResultDone::ok(serde_json::json!({"declared": true})),
+            lash::tools::ToolIntents::v1(vec![event_intent(call.context.session_id())]),
+        )
+    }
+}
+
+#[tokio::test]
+async fn attempt_provider_returns_a_behaviorally_checked_intent_batch() {
+    let legacy = lash_core::testing::mock_tool_context();
+    let attempt = lash_core::AttemptContext::__for_testing(&legacy, SCOPE);
+    let args = serde_json::json!({});
+    let result = ToolProvider::execute_attempt(
+        &AttemptIntentProvider,
+        lash::tools::AttemptToolCall {
+            name: "attempt_intent_docs",
+            args: &args,
+            context: &attempt,
+        },
+    )
+    .await;
+    let lash::tools::ToolAttemptResult::Done { result, intents } = result else {
+        panic!("the provider must complete atomically")
+    };
+    assert!(result.into_output().is_success());
+    assert!(!intents.is_empty());
+    assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);
+    assert_eq!(intents.intents.len(), 1);
+    assert_eq!(intents.intents[0].session_id(), attempt.session_id());
+}
+
 #[tokio::test]
 async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result<()> {
     let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default());
@@ -96,20 +167,36 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
     };
     assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);
 
-    let cross_kind = lash::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-        recorded_kind: lash_core::ToolIntentKind::StartProcess,
-        submitted_kind: lash_core::ToolIntentKind::EmitProcessEvent,
-    };
-    let lash::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-        recorded_kind,
-        submitted_kind,
+    let cross_kind_key = ingress.key("docs-cross-kind", 0);
+    let start = lash::tools::ToolIntent::StartProcess(Box::new(lash::tools::StartProcessIntent {
+        session_id: SESSION.to_string(),
+        request: lash::process::ProcessStartRequest::external(
+            "host-id-is-replaced",
+            lash::process::ProcessOriginator::host_scoped("docs-ingress"),
+            serde_json::json!({"source": "docs-snippet"}),
+        ),
+        on_parent_end: lash::tools::ProcessParentEndPolicy::Cancel,
+    }));
+    let first_kind = start.kind();
+    assert_eq!(start.session_id(), SESSION);
+    assert_ne!(first_kind, event_intent(SESSION).kind());
+    assert!(matches!(
+        ingress.submit(cross_kind_key.clone(), start).await,
+        lash::tools::ToolIntentIngressOutcome::Admitted { .. }
+    ));
+    let cross_kind = ingress.submit(cross_kind_key, event_intent(SESSION)).await;
+    let lash::tools::ToolIntentIngressOutcome::Refused {
+        refusal:
+            lash::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                recorded_kind,
+                submitted_kind,
+            },
     } = cross_kind
     else {
-        unreachable!("constructed the cross-kind refusal")
+        panic!("the second kind must be refused by the durable first writer")
     };
-    assert_eq!(recorded_kind, lash_core::ToolIntentKind::StartProcess);
-    let expected_submitted = lash_core::ToolIntentKind::EmitProcessEvent;
-    assert_eq!(submitted_kind, expected_submitted);
+    assert_eq!(recorded_kind, first_kind);
+    assert_eq!(submitted_kind, event_intent(SESSION).kind());
 
     let foreign_session = ingress
         .submit(
@@ -173,6 +260,62 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
     };
     assert!(expected_replay_key.starts_with("tool-intent:v1:sha256:"));
     assert_eq!(recorded_replay_key, "forged");
+    Ok(())
+}
+
+#[tokio::test]
+async fn ingress_start_retains_and_settles_default_parent_end() -> anyhow::Result<()> {
+    let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default());
+    registry
+        .register_process_with_observers(
+            lash::process::ProcessRegistration::new(
+                PROCESS,
+                lash::process::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash::process::RecoveryDisposition::ExternallyOwned,
+                lash::process::ProcessProvenance::host(),
+            ),
+            &[SESSION.to_string()],
+        )
+        .await?;
+    let core = test_core(Arc::clone(&registry))?;
+    let _session = core.session(SESSION).open().await?;
+
+    // docs:start:host-ingress-start-parent-end
+    let ingress = core.tool_intents(SESSION, lash::runtime::ExecutionScope::process(PROCESS))?;
+    let key = ingress.key("spawn-report-worker", 0);
+    let intent = lash::tools::ToolIntent::StartProcess(Box::new(lash::tools::StartProcessIntent {
+        session_id: SESSION.to_string(),
+        request: lash::process::ProcessStartRequest::external(
+            "replaced-by-the-intent-key",
+            lash::process::ProcessOriginator::host_scoped("report-worker"),
+            serde_json::json!({"report": 42}),
+        ),
+        on_parent_end: lash::tools::ProcessParentEndPolicy::Cancel,
+    }));
+    let lash::tools::ToolIntent::StartProcess(start_intent) = &intent else {
+        unreachable!("the documented intent is a process start")
+    };
+    assert_eq!(start_intent.session_id, SESSION);
+    assert_eq!(
+        start_intent.request.id.as_str(),
+        "replaced-by-the-intent-key"
+    );
+    assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);
+    let admitted = ingress.submit(key, intent).await;
+    assert!(matches!(
+        admitted,
+        lash::tools::ToolIntentIngressOutcome::Admitted {
+            replayed: false,
+            ..
+        }
+    ));
+
+    // Call this when the owning process scope ends. A crash may safely redrive it.
+    let settled = ingress.settle_parent_end().await?;
+    assert_eq!(settled.len(), 1);
+    // docs:end:host-ingress-start-parent-end
     Ok(())
 }
 

@@ -951,13 +951,27 @@ where
     let outcome_observer = local_executor.take_process_outcome_observer();
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
+    let process_env_store = execution.process_env_store;
     let turn_cancellation = execution.turn_cancellation;
     let outcome = match command {
         ProcessCommand::Start {
-            registration,
+            mut registration,
             observers,
+            env_spec,
             execution_context,
         } => {
+            if let Some(env_spec) = env_spec.as_ref() {
+                let env_store = process_env_store.as_ref().ok_or_else(|| {
+                    RuntimeEffectControllerError::foreign(
+                        "process_env_store_unavailable",
+                        "admitted Restate process start carries an execution environment but the executor has no environment store",
+                    )
+                })?;
+                let env_ref =
+                    lash_core::runtime::persist_process_execution_env(env_store.as_ref(), env_spec)
+                        .await?;
+                registration = registration.with_execution_env_ref(Some(env_ref));
+            }
             let record = schedule_restate_process(
                 registry,
                 registration,

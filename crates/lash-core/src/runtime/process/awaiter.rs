@@ -20,6 +20,7 @@ mod attach;
 mod change_hub;
 #[path = "awaiter/event_sink.rs"]
 mod event_sink;
+mod registry_support;
 pub use attach::ProcessAttach;
 pub use change_hub::ProcessChangeHub;
 pub use event_sink::ProcessEventSink;
@@ -70,46 +71,6 @@ pub fn watch_process_registry_with_sink(
         }),
         hub,
     )
-}
-
-impl WatchedProcessRegistry {
-    fn event_path(&self, process_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-        let mut paths = self.event_paths.lock_recover();
-        paths.retain(|_, path| path.strong_count() > 0);
-        if let Some(path) = paths.get(process_id).and_then(Weak::upgrade) {
-            return path;
-        }
-        let path = Arc::new(tokio::sync::Mutex::new(()));
-        paths.insert(process_id.to_string(), Arc::downgrade(&path));
-        path
-    }
-
-    async fn sink_cursor(&self, process_id: &str) -> Option<u64> {
-        self.sink.as_ref()?;
-        self.inner
-            .recent_events(process_id, 1)
-            .await
-            .ok()
-            .map(|events| {
-                events
-                    .into_iter()
-                    .map(|event| event.sequence)
-                    .max()
-                    .unwrap_or(0)
-            })
-    }
-
-    async fn emit_events_after(&self, process_id: &str, cursor: Option<u64>) {
-        let (Some(sink), Some(cursor)) = (self.sink.as_ref(), cursor) else {
-            return;
-        };
-        let Ok(events) = self.inner.events_after(process_id, cursor).await else {
-            return;
-        };
-        for event in events {
-            sink.emit(&event).await;
-        }
-    }
 }
 
 /// Core waiter for process terminal state and events (ADR 0016).
@@ -558,7 +519,36 @@ impl ProcessRegistry for WatchedProcessRegistry {
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         self.inner.complete_parent_end_plan(process_id).await
     }
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError> {
+        self.inner.admit_tool_intent_submission(submission).await
+    }
 
+    async fn complete_tool_intent_submission(
+        &self,
+        replay_key: &str,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError> {
+        self.inner
+            .complete_tool_intent_submission(replay_key, outcome)
+            .await
+    }
+
+    async fn pending_tool_intent_parent_end(
+        &self,
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
+        self.inner
+            .pending_tool_intent_parent_end(session_id, execution_scope_id)
+            .await
+    }
+
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
+        self.inner.complete_tool_intent_parent_end(replay_key).await
+    }
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,

@@ -21,6 +21,7 @@ lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-restate = { workspace = true }
 lash-plugin-mcp = { workspace = true, features = ["lashlang"] }
 lash-postgres-store = { workspace = true }
+lash-protocol-standard = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-s3-store = { workspace = true }
 lash-sqlite-store = { workspace = true }
@@ -35,5 +36,4 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 lash = { workspace = true, features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
-lash-protocol-standard = { workspace = true }
 tempfile = { workspace = true }

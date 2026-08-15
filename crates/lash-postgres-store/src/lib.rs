@@ -177,11 +177,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 50 adds the runtime-minted executor discriminator and store-authored
 // lease term to session lease rows. Older stores are rejected and recreated;
 // there is no compatibility read path.
-// Version 48 remains reserved by FIG-1133. Version 50 also adds the versioned
-// tool-intent carrier to recorded tool-attempt outcomes and the typed execution
-// outcomes to completed tool batches, and atomically retains pending
-// process-parent teardown beside terminal completion.
-const SCHEMA_VERSION: i32 = 50;
+// Version 48 remains reserved by FIG-1133.
+// Version 51 adds durable runtime-owned tool-intent first-submission rows and
+// process-parent teardown retention. Lash-managed version-50 stores take the
+// explicit 50 -> 51 creation-only migration at open.
+const SCHEMA_VERSION: i32 = 51;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -8,16 +8,29 @@ impl ProcessLocalExecution {
         let Self {
             registry,
             process_work_driver,
+            process_env_store,
             turn_cancellation,
             effect_controller,
             outcome_observer,
         } = self;
         let outcome = match command {
             ProcessCommand::Start {
-                registration,
+                mut registration,
                 observers,
+                env_spec,
                 execution_context: _,
             } => {
+                if let Some(env_spec) = env_spec.as_ref() {
+                    let env_store = process_env_store.as_ref().ok_or_else(|| {
+                        RuntimeEffectControllerError::foreign(
+                            "process_env_store_unavailable",
+                            "admitted process start carries an execution environment but the local executor has no environment store",
+                        )
+                    })?;
+                    let env_ref =
+                        crate::persist_process_execution_env(env_store.as_ref(), env_spec).await?;
+                    registration = registration.with_execution_env_ref(Some(env_ref));
+                }
                 let record =
                     InlineRuntimeEffectController::start_process(registry, registration, observers)
                         .await?;

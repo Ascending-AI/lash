@@ -274,6 +274,7 @@ impl Processes {
         let command = lash_core::ProcessCommand::Start {
             registration,
             observers,
+            env_spec: None,
             execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
         };
         let outcome = self

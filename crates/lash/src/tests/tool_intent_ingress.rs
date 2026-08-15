@@ -12,6 +12,17 @@ async fn ingress_core() -> Result<(LashCore, Arc<TestLocalProcessRegistry>)> {
 async fn ingress_core_with_effect_host(
     effect_host: Arc<dyn lash_core::EffectHost>,
 ) -> Result<(LashCore, Arc<TestLocalProcessRegistry>)> {
+    ingress_core_with_effect_host_and_env_store(
+        effect_host,
+        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new()),
+    )
+    .await
+}
+
+async fn ingress_core_with_effect_host_and_env_store(
+    effect_host: Arc<dyn lash_core::EffectHost>,
+    process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+) -> Result<(LashCore, Arc<TestLocalProcessRegistry>)> {
     let registry = Arc::new(TestLocalProcessRegistry::default());
     registry
         .register_process_with_observers(
@@ -38,10 +49,46 @@ async fn ingress_core_with_effect_host(
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
+        .process_env_store(process_env_store)
         .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
         .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
     Ok((core, registry))
+}
+
+#[derive(Default)]
+struct ProbeProcessEnvStore {
+    puts: std::sync::atomic::AtomicUsize,
+    fail_put: std::sync::atomic::AtomicBool,
+    values: tokio::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
+    async fn put_process_execution_env(
+        &self,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+        bytes: &[u8],
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.puts.fetch_add(1, Ordering::SeqCst);
+        if self.fail_put.load(Ordering::SeqCst) {
+            return Err(lash_core::PluginError::Session(
+                "injected process env persist failure".to_string(),
+            ));
+        }
+        self.values
+            .lock()
+            .await
+            .insert(env_ref.as_str().to_string(), bytes.to_vec());
+        Ok(())
+    }
+
+    async fn get_process_execution_env(
+        &self,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
+        Ok(self.values.lock().await.get(env_ref.as_str()).cloned())
+    }
 }
 
 #[derive(Default)]
@@ -232,6 +279,35 @@ fn start_intent(session_id: &str) -> lash_core::ToolIntent {
             lash_core::ProcessOriginator::host(),
             serde_json::Value::Null,
         ),
+        on_parent_end: Default::default(),
+    }))
+}
+
+fn start_intent_with_env(session_id: &str) -> lash_core::ToolIntent {
+    lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
+        session_id: session_id.to_string(),
+        request: lash_core::ProcessStartRequest::new(
+            "ingress-env-start",
+            lash_core::ProcessInput::ToolCall {
+                call: lash_core::PreparedToolCall::from_parts(
+                    "ingress-env-call",
+                    "tool:ingress-env",
+                    "ingress_env",
+                    serde_json::Value::Null,
+                    None,
+                    serde_json::Value::Null,
+                ),
+            },
+            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::ProcessOriginator::host(),
+        )
+        .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::default(),
+            lash_core::SessionPolicy {
+                model: mock_model_spec(),
+                ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+            },
+        )),
         on_parent_end: Default::default(),
     }))
 }
@@ -579,6 +655,106 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
 }
 
 #[tokio::test]
+async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted() -> Result<()> {
+    let (core, registry) =
+        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+            .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("runtime-cross-target-kind", 0);
+
+    let started = ingress.submit(key.clone(), start_intent(SESSION)).await;
+    assert!(matches!(
+        started,
+        crate::tools::ToolIntentIngressOutcome::Admitted {
+            outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                kind: lash_core::ToolIntentKind::StartProcess,
+                ..
+            },
+            replayed: false,
+        }
+    ));
+
+    let refused = ingress.submit(key, emit_intent(SESSION)).await;
+    assert!(matches!(
+        refused,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                recorded_kind: lash_core::ToolIntentKind::StartProcess,
+                submitted_kind: lash_core::ToolIntentKind::EmitProcessEvent,
+            }
+        }
+    ));
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == EVENT)
+            .count(),
+        0,
+        "the different target must not hide the first identity binding"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handles() -> Result<()> {
+    let (core, registry) =
+        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+            .await?;
+    let left = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let right = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = left.key("runtime-cross-handle-cancel", 0);
+
+    let (left_outcome, right_outcome) = tokio::join!(
+        left.submit(
+            key.clone(),
+            cancel_intent_with_reason(SESSION, "cross-handle"),
+        ),
+        right.submit(key, cancel_intent_with_reason(SESSION, "cross-handle"),),
+    );
+    let outcomes = [left_outcome, right_outcome];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(
+                outcome,
+                crate::tools::ToolIntentIngressOutcome::Admitted {
+                    replayed: false,
+                    ..
+                }
+            ))
+            .count(),
+        1,
+        "exactly one handle reports a fresh realization"
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(
+                outcome,
+                crate::tools::ToolIntentIngressOutcome::Refused {
+                    refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity { .. }
+                }
+            ))
+            .count(),
+        1,
+        "the independently bound handle observes the authoritative duplicate"
+    );
+    assert_eq!(
+        registry
+            .events_after(PROCESS, 0)
+            .await?
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        1,
+        "the identity realizes one cancellation"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
     let (core, registry) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -853,6 +1029,151 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
             .count(),
         1,
         "the originally admitted command realizes exactly once"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn start_env_is_persisted_after_admission_and_matching_redrive_completes() -> Result<()> {
+    let controller = Arc::new(AdmissionCrashController::default());
+    let env_store = Arc::new(ProbeProcessEnvStore::default());
+    let (core, registry) = ingress_core_with_effect_host_and_env_store(
+        Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
+        Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    )
+    .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("start-env-crash-redrive", 0);
+    let process_id = key.identity().replay_key.clone();
+
+    let crashed_ingress = ingress.clone();
+    let crashed_key = key.clone();
+    let crashed = tokio::spawn(async move {
+        crashed_ingress
+            .submit(crashed_key, start_intent_with_env(SESSION))
+            .await
+    });
+    controller.admitted.notified().await;
+    assert_eq!(
+        env_store.puts.load(Ordering::SeqCst),
+        0,
+        "journal admission must precede every durable env-store mutation"
+    );
+    crashed.abort();
+    assert!(crashed.await.expect_err("injected crash").is_cancelled());
+
+    let redriven = ingress.submit(key, start_intent_with_env(SESSION)).await;
+    assert!(
+        matches!(
+            &redriven,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                    kind: lash_core::ToolIntentKind::StartProcess,
+                    ..
+                },
+                replayed: false,
+            }
+        ),
+        "matching start redrive must complete the admitted command: {redriven:?}"
+    );
+    assert_eq!(env_store.puts.load(Ordering::SeqCst), 1);
+    let process = registry
+        .get_process(&process_id)
+        .await?
+        .expect("redrive registers the process");
+    let env_ref = process
+        .env_ref
+        .expect("registered process keeps the env ref");
+    assert!(
+        env_store
+            .get_process_execution_env(&env_ref)
+            .await?
+            .is_some(),
+        "the redriven process environment is usable"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()> {
+    let env_store = Arc::new(ProbeProcessEnvStore::default());
+    env_store.fail_put.store(true, Ordering::SeqCst);
+    let (core, registry) = ingress_core_with_effect_host_and_env_store(
+        Arc::new(crate::durability::InlineEffectHost::default()),
+        Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    )
+    .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("start-env-store-error", 0);
+    let process_id = key.identity().replay_key.clone();
+
+    let outcome = ingress
+        .submit(key.clone(), start_intent_with_env(SESSION))
+        .await;
+    assert!(matches!(
+        outcome,
+        crate::tools::ToolIntentIngressOutcome::Admitted {
+            outcome: lash_core::ToolIntentExecutionOutcome::Refused {
+                kind: lash_core::ToolIntentKind::StartProcess,
+                refusal: lash_core::ToolIntentRefusalReason::CommandFailed { .. },
+                ..
+            },
+            replayed: false,
+        }
+    ));
+    assert!(registry.get_process(&process_id).await?.is_none());
+    assert!(matches!(
+        ingress.submit(key, start_intent_with_env(SESSION)).await,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                kind: lash_core::ToolIntentKind::StartProcess,
+            }
+        }
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind() -> Result<()> {
+    let (core, registry) = ingress_core().await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::process(PROCESS))?;
+    let key = ingress.key("parent-end-retention", 0);
+    let child_id = key.identity().replay_key.clone();
+
+    let started = ingress.submit(key, start_intent(SESSION)).await;
+    assert!(matches!(
+        started,
+        crate::tools::ToolIntentIngressOutcome::Admitted {
+            outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                parent_end: Some(lash_core::ToolIntentParentEnd {
+                    policy: lash_core::ProcessParentEndPolicy::Cancel,
+                    ..
+                }),
+                ..
+            },
+            ..
+        }
+    ));
+    drop(ingress);
+
+    let redriven_scope = core.tool_intents(SESSION, lash_core::ExecutionScope::process(PROCESS))?;
+    let settled = redriven_scope.settle_parent_end().await?;
+    assert!(matches!(
+        settled.as_slice(),
+        [lash_core::ToolIntentParentEndOutcome::Cancelled { process_id, .. }]
+            if process_id == &child_id
+    ));
+    assert!(
+        registry
+            .events_after(&child_id, 0)
+            .await?
+            .iter()
+            .any(|event| event.event_type == "process.cancel_requested"),
+        "default Cancel reaches child"
+    );
+    assert!(
+        redriven_scope.settle_parent_end().await?.is_empty(),
+        "settlement is durable and idempotent"
     );
     Ok(())
 }

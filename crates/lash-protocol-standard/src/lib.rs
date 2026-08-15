@@ -150,7 +150,11 @@ fn turn_limit_exhausted_message(message_id: String, max_turns: usize) -> Message
 /// First-party facade support for hosts whose protocol driver is not Standard
 /// but which enable the native batch orchestrating operation in their builder
 /// configuration.
-#[doc(hidden)]
+///
+/// Pass this definition to
+/// [`lash_core::facade_support::PluginSpec::with_orchestrating_tool`] from the
+/// plugin installed on the facade builder. The definition's capability-bearing
+/// constructor remains sealed inside this crate.
 pub fn standard_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {
     let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
         Arc::new(StandardBatchOrchestratingTool);

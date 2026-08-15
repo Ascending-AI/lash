@@ -30,6 +30,7 @@ use super::validation::{
 mod continuation;
 #[cfg(test)]
 mod identity;
+mod local_helpers;
 #[path = "testing/parent_end.rs"]
 mod parent_end;
 mod raw_state;
@@ -43,84 +44,7 @@ use support::{
 };
 use types::{ManagedLeaseMap, ManagedProcessRecord};
 pub use types::{RawProcessRegistryStateForTesting, TestLocalProcessRegistry};
-
 impl TestLocalProcessRegistry {
-    #[doc(hidden)]
-    pub async fn worklist_page_reads_for_testing(
-        &self,
-    ) -> Vec<(usize, Option<super::ProcessWorklistCursor>)> {
-        self.worklist_page_reads.lock().await.clone()
-    }
-
-    async fn next_change_seq(&self) -> u64 {
-        let mut next = self.next_change_seq.lock().await;
-        *next = next.saturating_add(1);
-        *next
-    }
-
-    async fn process_miss(&self, process_id: &str) -> PluginError {
-        self.tombstones.lock().await.get(process_id).map_or_else(
-            || PluginError::Session(format!("unknown process `{process_id}`")),
-            |tombstone| PluginError::ProcessNoLongerRetained {
-                terminal_label: tombstone.terminal_label.clone(),
-                pruned_at_ms: tombstone.pruned_at_ms,
-            },
-        )
-    }
-
-    async fn insert_process(
-        &self,
-        registration: ProcessRegistration,
-        observers: &[SessionId],
-    ) -> Result<ProcessRecord, PluginError> {
-        let registration = prepare_process_registration(registration)?;
-        let registration_fingerprint =
-            crate::runtime::process_registration_fingerprint(&registration, observers);
-        let mut observer_set = observers.to_vec();
-        observer_set.sort();
-        observer_set.dedup();
-        let mut managed = self.managed.lock().await;
-        if let Some(existing) = managed.get(&registration.id) {
-            if existing.record.registration_fingerprint == registration_fingerprint {
-                return Ok(existing.record.clone());
-            }
-            return Err(PluginError::Session(format!(
-                "process `{}` registration fingerprint conflict: existing {}, new {}",
-                registration.id, existing.record.registration_fingerprint, registration_fingerprint
-            )));
-        }
-        let id = registration.id.clone();
-        let wake_session_id = registration.wake_session_id.clone();
-        let record = ProcessRecord::from_prepared_registration(
-            registration,
-            registration_fingerprint,
-            self.clock.timestamp_ms(),
-        );
-        let change_seq = self.next_change_seq().await;
-        managed.insert(
-            id.clone(),
-            ManagedProcessRecord {
-                record: record.clone(),
-                change_seq,
-                events: Vec::new(),
-                keyed_events: HashMap::new(),
-                parent_end_actions: None,
-            },
-        );
-        if let Some(target) = wake_session_id {
-            self.wake_targets.lock().await.insert(id.clone(), target);
-        }
-        for session_id in observer_set {
-            self.observers
-                .lock()
-                .await
-                .entry(session_id)
-                .or_default()
-                .insert(id.clone());
-        }
-        Ok(record)
-    }
-
     async fn append_managed_event(
         &self,
         record: &mut ManagedProcessRecord,
@@ -860,9 +784,81 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
         parent_end::get(self, process_id).await
     }
-
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         parent_end::complete(self, process_id).await
+    }
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let replay_key = submission.identity.replay_key.clone();
+        let mut submissions = self.tool_intent_submissions.lock().await;
+        if let Some(existing) = submissions.get(&replay_key) {
+            return Ok(crate::ToolIntentSubmissionAdmission::Existing(Box::new(
+                existing.clone(),
+            )));
+        }
+        submissions.insert(replay_key, submission);
+        Ok(crate::ToolIntentSubmissionAdmission::Admitted)
+    }
+
+    async fn complete_tool_intent_submission(
+        &self,
+        replay_key: &str,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut submissions = self.tool_intent_submissions.lock().await;
+        let submission = submissions.get_mut(replay_key).ok_or_else(|| {
+            PluginError::Session(format!("unknown tool-intent submission `{replay_key}`"))
+        })?;
+        if submission.outcome.is_none() {
+            submission.outcome = Some(outcome);
+        }
+        Ok(submission.clone())
+    }
+
+    async fn pending_tool_intent_parent_end(
+        &self,
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut pending = self
+            .tool_intent_submissions
+            .lock()
+            .await
+            .values()
+            .filter(|submission| {
+                submission.identity.session_id == session_id
+                    && submission.identity.execution_scope_id == execution_scope_id
+                    && !submission.parent_end_settled
+                    && matches!(
+                        submission.outcome,
+                        Some(crate::ToolIntentExecutionOutcome::Executed {
+                            parent_end: Some(_),
+                            ..
+                        })
+                    )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        pending.sort_by_key(|submission| submission.identity.intent_index);
+        Ok(pending)
+    }
+
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
+        if let Some(submission) = self
+            .tool_intent_submissions
+            .lock()
+            .await
+            .get_mut(replay_key)
+        {
+            submission.parent_end_settled = true;
+        }
+        Ok(())
     }
     async fn record_first_started_with_authority(
         &self,

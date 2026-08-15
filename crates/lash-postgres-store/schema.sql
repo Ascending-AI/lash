@@ -356,6 +356,19 @@ CREATE TABLE IF NOT EXISTS lash_process_parent_end_plans (
     actions_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
+    replay_key TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    execution_scope_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    intent_index BIGINT NOT NULL,
+    kind TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    submission_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
+    ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index);
+
 CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
     scope_id TEXT NOT NULL,
     session_id TEXT,
@@ -469,7 +482,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 50)
+VALUES ('lash-postgres-store', 51)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

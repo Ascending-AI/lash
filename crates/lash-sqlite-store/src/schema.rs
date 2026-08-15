@@ -492,6 +492,19 @@ CREATE TABLE IF NOT EXISTS process_parent_end_plans (
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS tool_intent_submissions (
+    replay_key          TEXT PRIMARY KEY,
+    session_id          TEXT NOT NULL,
+    execution_scope_id  TEXT NOT NULL,
+    tool_call_id        TEXT NOT NULL,
+    intent_index        INTEGER NOT NULL,
+    kind                TEXT NOT NULL,
+    payload_hash        TEXT NOT NULL,
+    submission_json     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
+    ON tool_intent_submissions(session_id, execution_scope_id, intent_index);
+
 ";
 
 // Bumped to 10: ADR 0020 added a per-store process-row `change_seq` plus the

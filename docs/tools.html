@@ -159,7 +159,7 @@ async fn lookup_weather(args: WeatherArgs) -&gt; WeatherReport {
         <div class="section" id="tool-capabilities">
           <div class="section-header">
             <h2>Tool Capabilities</h2>
-            <p><code>ToolContext</code> exposes named capabilities instead of a broad runtime host handle. Tools ask for exactly the capability they need: the current model, the current session snapshot, the flat tool catalog, Tool Catalog membership control, child-session client, process admin, process event append, or a direct completion.</p>
+            <p>Legacy <code>ToolContext</code> implementations expose named read and session capabilities instead of a broad runtime host handle. Atomic leaf providers receive the sealed <code>AttemptContext</code>: they read through its projections and return typed <code>ToolIntents</code> for durable starts, signals, cancellations, and event emission. Independently durable composition belongs in processes.</p>
           </div>
           <div class="table">
             <table>
@@ -173,11 +173,57 @@ async fn lookup_weather(args: WeatherArgs) -&gt; WeatherReport {
                 <tr><td><code>context.sessions()</code></td><td>Cloneable child-session client: <code>create_session</code>, <code>close_session</code>, and one-shot <code>start_turn</code>. Inside atomic tool attempts, <code>start_turn</code> is available on runtime-owned and key-addressed tiers but returns a typed refusal on ordinal-addressed Restate tiers; decompose it into a process step. Durable background work uses process handles observed by sessions, not child-turn handles.</td></tr>
                 <tr><td><code>attempt.processes()</code></td><td>Controller-free process reads for a leaf attempt. Durable starts, signals, cancellation, and event emission are returned as typed <code>ToolIntents</code>; multi-step durable work is authored as orchestration. The old leaf process-admin capability and its tier-specific refusals are removed.</td></tr>
                 <tr><td><code>context.triggers().emit(...).await?</code></td><td>Emit a trigger occurrence. Inside atomic tool attempts this is available on runtime-owned and key-addressed tiers, but ordinal-addressed Restate tiers return a typed refusal; emit from a process step.</td></tr>
-                <tr><td><code>context.process_events().emit(...).await?</code></td><td>Append typed process events from legacy <code>ToolContext</code> code already executing inside a durable process. Interim hazard: this registry-authorized route is outside the effect journal and is not available from sealed <code>AttemptContext</code>; new leaf providers return <code>EmitProcessEvent</code> instead.</td></tr>
+                <tr><td><code>context.process_events().emit(...).await?</code></td><td>Compatibility route for legacy <code>ToolContext</code> code already executing inside a durable process. It is deliberately unavailable from sealed <code>AttemptContext</code>; atomic leaf providers return <code>EmitProcessEvent</code>, while new multi-step work uses orchestration or a process step.</td></tr>
                 <tr><td><code>context.direct_completions().complete(request, source).await?</code></td><td>Run a one-shot LLM request. Missing <code>session_id</code> and <code>caused_by</code> are filled from the current tool call for tracing and usage attribution. Inside a tool attempt, the provider call is opaque work in that atomic attempt; outside an attempt it is an independently journaled direct effect.</td></tr>
               </tbody>
             </table>
           </div>
+          <h3>Enable native batch for a non-Standard protocol</h3>
+          <p>The Standard protocol installs its native <code>batch</code> operation automatically. A host with a different protocol driver opts in explicitly through the facade builder's plugin configuration:</p>
+          <pre data-lang="rust" data-snippet="plugins_tools#enable-native-batch"><code>fn enable_native_batch(builder: lash::LashCoreBuilder) -&gt; lash::LashCoreBuilder {
+    use lash::plugins::{PluginSpec, StaticPluginFactory};
+
+    let spec = PluginSpec::new()
+        .with_orchestrating_tool(lash_protocol_standard::standard_batch_orchestrating_tool());
+    builder.plugin(Arc::new(StaticPluginFactory::new(
+        "my-protocol-native-batch",
+        spec,
+    )))
+}</code></pre>
+          <h3>Submit a host start and settle its parent policy</h3>
+          <p>Hosts outside a turn use the scope-bound intent ingress. A start retains its default <code>Cancel</code> parent-end action durably; call <code>settle_parent_end</code> when the owning scope ends.</p>
+          <pre data-lang="rust" data-snippet="fig1294_ingress#host-ingress-start-parent-end"><code>let ingress = core.tool_intents(SESSION, lash::runtime::ExecutionScope::process(PROCESS))?;
+let key = ingress.key("spawn-report-worker", 0);
+let intent = lash::tools::ToolIntent::StartProcess(Box::new(lash::tools::StartProcessIntent {
+    session_id: SESSION.to_string(),
+    request: lash::process::ProcessStartRequest::external(
+        "replaced-by-the-intent-key",
+        lash::process::ProcessOriginator::host_scoped("report-worker"),
+        serde_json::json!({"report": 42}),
+    ),
+    on_parent_end: lash::tools::ProcessParentEndPolicy::Cancel,
+}));
+let lash::tools::ToolIntent::StartProcess(start_intent) = &amp;intent else {
+    unreachable!("the documented intent is a process start")
+};
+assert_eq!(start_intent.session_id, SESSION);
+assert_eq!(
+    start_intent.request.id.as_str(),
+    "replaced-by-the-intent-key"
+);
+assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);
+let admitted = ingress.submit(key, intent).await;
+assert!(matches!(
+    admitted,
+    lash::tools::ToolIntentIngressOutcome::Admitted {
+        replayed: false,
+        ..
+    }
+));
+
+// Call this when the owning process scope ends. A crash may safely redrive it.
+let settled = ingress.settle_parent_end().await?;
+assert_eq!(settled.len(), 1);</code></pre>
           <pre data-lang="rust" data-snippet="plugins_tools#direct-completion-tool"><code>use lash::direct::{DirectOutputSpec, DirectRequest};
 
 async fn rank(call: ToolCall&lt;'_&gt;) -&gt; ToolResult {

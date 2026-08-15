@@ -9,11 +9,11 @@ pub(crate) async fn execute_final_tool_intents(
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Vec<crate::ToolIntentExecutionOutcome> {
     let execution_scope_id = context.effect_controller.scoped().scope_id().to_string();
+    if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V1 {
+        return Vec::new();
+    }
     if let Some(refusal) = admit_batch(&context.session_id, tool_call_id, intents) {
         return refuse_all(context, &execution_scope_id, tool_call_id, intents, refusal);
-    }
-    if intents.intents.is_empty() {
-        return Vec::new();
     }
 
     let mut outcomes = Vec::with_capacity(intents.intents.len());

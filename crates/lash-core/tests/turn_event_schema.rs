@@ -18,8 +18,8 @@ use lash_core::runtime::QueuedWorkClaimBoundary;
 use lash_core::{
     AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin,
     MessageRole, PluginMessage, PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput,
-    ToolFailure, ToolFailureClass, ToolIntentExecutionOutcome, ToolIntentIdentity,
-    ToolIntentKind, TurnActivity, TurnActivityId, TurnCause, TurnEvent, TurnInputApplication,
+    ToolFailure, ToolFailureClass, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+    TurnActivity, TurnActivityId, TurnCause, TurnEvent, TurnInputApplication,
 };
 use serde_json::json;
 

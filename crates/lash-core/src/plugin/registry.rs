@@ -119,9 +119,13 @@ impl PluginSpec {
         self
     }
 
-    /// Enable a completed first-party orchestrating tool definition for this
-    /// host configuration.
-    #[doc(hidden)]
+    /// Enable a completed first-party orchestrating tool definition in this
+    /// host's plugin configuration.
+    ///
+    /// This is an **integrator class 3: protocol and process-engine
+    /// implementor** seam. Use a first-party definition such as
+    /// `lash_protocol_standard::standard_batch_orchestrating_tool`; external
+    /// code cannot construct arbitrary orchestrating definitions.
     pub fn with_orchestrating_tool(
         mut self,
         definition: crate::tool_provider::orchestration::OrchestratingToolDef,

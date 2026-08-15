@@ -5,6 +5,19 @@ use std::sync::Arc;
 use lash::plugins::PluginFactory;
 use lash::tools::{ToolCall, ToolResult};
 
+// docs:start:enable-native-batch
+fn enable_native_batch(builder: lash::LashCoreBuilder) -> lash::LashCoreBuilder {
+    use lash::plugins::{PluginSpec, StaticPluginFactory};
+
+    let spec = PluginSpec::new()
+        .with_orchestrating_tool(lash_protocol_standard::standard_batch_orchestrating_tool());
+    builder.plugin(Arc::new(StaticPluginFactory::new(
+        "my-protocol-native-batch",
+        spec,
+    )))
+}
+// docs:end:enable-native-batch
+
 // docs:start:direct-completion-tool
 use lash::direct::{DirectOutputSpec, DirectRequest};
 

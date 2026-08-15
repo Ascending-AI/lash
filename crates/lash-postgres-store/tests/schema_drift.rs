@@ -1141,9 +1141,106 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 50")
+                && rendered.contains("expected 51")
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
+        );
+    }
+    scratch.cleanup().await;
+}
+
+/// Main's published component-50 shape upgrades through the single explicit
+/// 50 -> 51 migration before the creation-only target DDL is evaluated.
+#[tokio::test]
+async fn main_component_50_store_upgrades_cleanly_to_51() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-50 migration law: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "DROP TABLE lash_tool_intent_submissions;
+             DROP TABLE lash_process_parent_end_plans;
+             UPDATE lash_schema_versions
+                SET version = 50
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    PostgresStorage::from_pool_with(
+        scratch.pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::LashManaged,
+            schema_check: SchemaCheck::Enforce,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("the exact published component-50 shape migrates to 51");
+
+    let version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read migrated component version");
+    assert_eq!(version, 51);
+    for table in [
+        "lash_process_parent_end_plans",
+        "lash_tool_intent_submissions",
+    ] {
+        let present: bool =
+            sqlx::query_scalar("SELECT to_regclass(current_schema() || '.' || $1) IS NOT NULL")
+                .bind(table)
+                .fetch_one(&scratch.pool)
+                .await
+                .expect("read migrated table");
+        assert!(present, "migration omitted {table}");
+    }
+    scratch.cleanup().await;
+}
+
+/// WarnOnly is a shape valve, not permission to run workers against the
+/// component-50 schema before its migration has been applied.
+#[tokio::test]
+async fn warn_only_refuses_component_50_before_process_workers_can_open() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-50 WarnOnly law: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "DROP TABLE lash_tool_intent_submissions;
+             DROP TABLE lash_process_parent_end_plans;
+             UPDATE lash_schema_versions
+                SET version = 50
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    for provisioning in [
+        SchemaProvisioning::HostProvisioned,
+        SchemaProvisioning::LashManaged,
+    ] {
+        let error = PostgresStorage::from_pool_with(
+            scratch.pool.clone(),
+            PostgresStoreConfig {
+                schema_provisioning: provisioning,
+                schema_check: SchemaCheck::WarnOnly,
+                ..PostgresStoreConfig::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("{provisioning:?} WarnOnly must refuse component 50"));
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("has version 50")
+                && rendered.contains("expected 51")
+                && rendered.contains("does not relax it"),
+            "typed version refusal was lost for {provisioning:?}: {rendered}"
         );
     }
     scratch.cleanup().await;
@@ -1383,7 +1480,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 50 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 51 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;

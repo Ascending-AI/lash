@@ -277,6 +277,7 @@ mod tests {
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration,
                 observers: Vec::new(),
+                env_spec: None,
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
         );
@@ -295,6 +296,7 @@ mod tests {
             registration,
             observers,
             execution_context,
+            ..
         } = *command
         else {
             panic!("wrong process command");

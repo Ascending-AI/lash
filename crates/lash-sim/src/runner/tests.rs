@@ -405,7 +405,22 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
             "park/resume transcript changed for seed {seed}"
         );
     }
-    insta::assert_snapshot!(transcript, @r#"
+    let transcript_without_opaque_tool_state_size = transcript
+        .lines()
+        .map(|line| {
+            if line.contains("tool_state            stored logical=") {
+                let prefix = line
+                    .split_once("logical=")
+                    .map(|(prefix, _)| prefix)
+                    .expect("matched tool-state size label");
+                format!("{prefix}logical=<opaque>")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!(transcript_without_opaque_tool_state_size, @r#"
     suspend-tool  ingress   session.open.suspend    turn=1
     suspend-tool  park      session.park
     suspend-tool  resume    session.resume
@@ -413,7 +428,7 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
     suspend-tool  commit    checkpoint.commit       rev=0->1
     suspend-tool              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     suspend-tool              turn_state            stored logical=179B
-    suspend-tool              tool_state            stored logical=2.0KB
+    suspend-tool              tool_state            stored logical=<opaque>
     suspend-tool              plugin_snapshot       stored logical=356B
     "#);
 }

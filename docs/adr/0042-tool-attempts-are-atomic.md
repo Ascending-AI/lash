@@ -139,7 +139,11 @@ replays identical evidence even if the live registry changes. A start's env
 spec, observers, input, and parent-end policy all come from the recorded
 payload. Tool visibility is therefore an authoring-time catalog decision, not
 a replay-time intent gate; a future contract requiring such a gate must record
-it as a separate admission fact.
+it as a separate admission fact. The laws
+`start_env_is_persisted_after_admission_and_matching_redrive_completes` and
+`start_env_store_error_is_typed_and_registers_no_process` pin both sides of the
+journal-first boundary: environment state is written only after admission, and
+a failed environment write cannot leave a registered process behind.
 
 After the enclosing turn or process reaches its end, recorded start intents are
 handled by a deterministic parent-end step. Version 1 deliberately exposes only
@@ -169,10 +173,15 @@ outcome has a different intent kind returns
 `IdentityBoundToDifferentIntent`, as proved by
 `identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking` and
 `identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success`.
-Runtime-owned tiers have no effect journal; a process-store replay-key collision
-surfaces as the typed `DuplicateIdentity` ingress refusal, proved by
-`runtime_owned_duplicate_identity_is_a_typed_ingress_refusal` and, for identical,
-changed-reason, and concurrent cancellation duplicates,
+Runtime-owned tiers bind the first submitted envelope in the process registry,
+so all ingress handles and all process targets observe one authoritative
+identity record. The laws
+`runtime_owned_identity_is_bound_before_a_different_target_is_submitted` and
+`runtime_owned_identity_gate_is_shared_across_independent_ingress_handles` prove
+that scope. A process-store replay-key collision surfaces as the typed
+`DuplicateIdentity` ingress refusal, proved by
+`runtime_owned_duplicate_identity_is_a_typed_ingress_refusal` and, for
+identical, changed-reason, and concurrent cancellation duplicates,
 `runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once`. On an
 ordinal-addressed tier every external submit is a new engine invocation rather
 than a key lookup, so a host must not treat a second invocation as an ingress
@@ -196,7 +205,10 @@ terminal write, including between two commands, therefore redrives the plan.
 Lashlang segment state version 2 carries the compact actions across segment
 boundaries so an early-segment start is governed at the real process end.
 Successful and refused adjudications emit structured evidence containing the
-full identity, policy, child process id, and typed outcome.
+full identity, policy, child process id, and typed outcome. The public ingress
+facade reconstructs and settles the retained plan after a host scope is rebound;
+`ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind` proves
+that the default `Cancel` policy survives that boundary and is redrive-safe.
 
 `shell.start` and its detached form map explicitly to `Abandon`: their
 owner-bound commands intentionally continue across turns, so the generic

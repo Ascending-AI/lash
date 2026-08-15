@@ -941,8 +941,9 @@ pub(crate) use store::{
 pub use tool_intent::{
     CancelProcessIntent, EmitProcessEventIntent, ProcessParentEndPolicy, SignalProcessIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
-    TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptResult, ToolIntent, ToolIntents,
-    ToolResultDone, derive_tool_intent_identity,
+    TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptResult, ToolIntent,
+    ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents, ToolResultDone,
+    derive_tool_intent_identity,
 };
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall,

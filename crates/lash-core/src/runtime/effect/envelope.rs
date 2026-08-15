@@ -494,6 +494,10 @@ pub enum ProcessCommand {
         registration: ProcessRegistration,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         observers: Vec<String>,
+        /// Captured environment carried inside the journal admission and
+        /// persisted by the local executor before process registration.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_spec: Option<crate::ProcessExecutionEnvSpec>,
         #[serde(
             default,
             skip_serializing_if = "boxed_process_execution_context_is_empty"

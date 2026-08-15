@@ -72,6 +72,9 @@ jobs:
       - name: Lint docs
         run: python3 scripts/lint_docs.py
 
+      - name: Lint orchestrating tools
+        run: python3 scripts/lint_orchestrating_tools.py
+
       - name: Lint rustdoc
         run: bash scripts/check-rustdoc.sh
 

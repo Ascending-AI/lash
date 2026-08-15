@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 50
+version 51
 table lash_attachment_manifest
   column attachment_id text not-null
   column canonical_uri text not-null
@@ -299,6 +299,16 @@ table lash_sessions
   column leaf_node_id text nullable
   column session_id text not-null
   primary-key (session_id)
+table lash_tool_intent_submissions
+  column execution_scope_id text not-null
+  column intent_index bigint not-null
+  column kind text not-null
+  column payload_hash text not-null
+  column replay_key text not-null
+  column session_id text not-null
+  column submission_json text not-null
+  column tool_call_id text not-null
+  primary-key (replay_key)
 table lash_trigger_deliveries
   column created_at_ms bigint not-null
   column occurrence_id text not-null
