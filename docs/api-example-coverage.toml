@@ -19545,6 +19545,36 @@ disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: plugin hosts report the stored append node count for corrupt receipts."
 
 [[api]]
+symbol = "lash::plugins::PluginError::BeforeToolCallReplacementConflict"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::BeforeToolCallReplacementConflict"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins.rs:166#let rendered = error.to_string();"
+assertion = "examples/docs-snippets/src/plugins.rs:177#assert!(rendered.contains(\"normalizer\") && rendered.contains(\"policy\"));"
+
+[[api]]
+symbol = "lash::plugins::PluginError::BeforeToolCallReplacementConflict::repeated_plugin_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::BeforeToolCallReplacementConflict::repeated_plugin_id"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins.rs:176#assert_eq!(repeated_plugin_id, \"policy\");"
+assertion = "examples/docs-snippets/src/plugins.rs:176#assert_eq!(repeated_plugin_id, \"policy\");"
+
+[[api]]
+symbol = "lash::plugins::PluginError::BeforeToolCallReplacementConflict::replacing_plugin_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::BeforeToolCallReplacementConflict::replacing_plugin_id"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins.rs:175#assert_eq!(replacing_plugin_id, \"normalizer\");"
+assertion = "examples/docs-snippets/src/plugins.rs:175#assert_eq!(replacing_plugin_id, \"normalizer\");"
+
+[[api]]
 symbol = "lash::plugins::PluginError::ClockBeforeUnixEpoch"
 kind = "variant"
 availability = "default+all-features"

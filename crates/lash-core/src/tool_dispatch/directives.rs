@@ -61,7 +61,8 @@ impl BeforeToolDirectiveFold {
                                 kind: BeforeToolTerminalKind::DeniedShortCircuit,
                                 result: ToolResult::err_fmt(err.to_string()),
                             },
-                        );
+                        )
+                        .await;
                     }
                 }
                 PluginDirective::ReplaceToolArgs { args: replacement } => {
@@ -80,7 +81,8 @@ impl BeforeToolDirectiveFold {
                             kind,
                             result: ToolResult::from_output(output),
                         },
-                    );
+                    )
+                    .await;
                 }
                 PluginDirective::AbortTurn { message, .. } => {
                     self.fold_terminal(
@@ -90,7 +92,8 @@ impl BeforeToolDirectiveFold {
                             kind: BeforeToolTerminalKind::AbortTurn,
                             result: ToolResult::err_fmt(message),
                         },
-                    );
+                    )
+                    .await;
                 }
                 PluginDirective::EmitRuntimeEvents { events } => {
                     emit_plugin_runtime_events(&context.event_tx, &plugin_id, events).await;
@@ -110,7 +113,8 @@ impl BeforeToolDirectiveFold {
                                 kind: BeforeToolTerminalKind::DeniedShortCircuit,
                                 result: ToolResult::err_fmt(err),
                             },
-                        );
+                        )
+                        .await;
                     }
                 }
                 PluginDirective::EnqueueMessages { .. } => {
@@ -123,25 +127,37 @@ impl BeforeToolDirectiveFold {
                                 "before_tool_call does not support message injection",
                             ),
                         },
-                    );
+                    )
+                    .await;
                 }
             }
         }
     }
 
-    fn fold_terminal(&mut self, context: &ToolDispatchContext<'_>, candidate: BeforeToolTerminal) {
+    async fn fold_terminal(
+        &mut self,
+        context: &ToolDispatchContext<'_>,
+        candidate: BeforeToolTerminal,
+    ) {
         let Some(current) = self.terminal.take() else {
             self.terminal = Some(candidate);
             return;
         };
+        let later_plugin_id = candidate.plugin_id.clone();
         let candidate_wins = candidate.kind > current.kind
             || (candidate.kind == current.kind && candidate.plugin_id < current.plugin_id);
-        let (winner, ignored) = if candidate_wins {
+        let displaced_denial = (current.kind == BeforeToolTerminalKind::DeniedShortCircuit
+            && candidate.kind == BeforeToolTerminalKind::AbortTurn)
+            .then(|| current.result.clone());
+        let (mut winner, ignored) = if candidate_wins {
             (candidate, current)
         } else {
             (current, candidate)
         };
-        emit_terminal_conflict(context, &winner, &ignored);
+        emit_terminal_conflict(context, &later_plugin_id, &winner, &ignored).await;
+        if let Some(denial) = displaced_denial {
+            winner.result = denial;
+        }
         self.terminal = Some(winner);
     }
 
@@ -163,31 +179,41 @@ pub(super) async fn apply_before_tool_directives(
     fold.finish()
 }
 
-fn emit_terminal_conflict(
+async fn emit_terminal_conflict(
     context: &ToolDispatchContext<'_>,
+    later_plugin_id: &str,
     winner: &BeforeToolTerminal,
     ignored: &BeforeToolTerminal,
 ) {
-    tracing::warn!(
-        target: "lash::plugin_composition",
-        winner_plugin_id = %winner.plugin_id,
-        winner_directive = winner.kind.as_str(),
-        ignored_plugin_id = %ignored.plugin_id,
-        ignored_directive = ignored.kind.as_str(),
-        "before_tool_call terminal directive conflict"
-    );
+    let payload = serde_json::json!({
+        "winner_plugin_id": winner.plugin_id,
+        "winner_directive": winner.kind.as_str(),
+        "ignored_plugin_id": ignored.plugin_id,
+        "ignored_directive": ignored.kind.as_str(),
+    });
+    if let Err(err) = emit_trace(
+        context,
+        later_plugin_id,
+        "before_tool_call.directive_conflict".to_string(),
+        payload.clone(),
+        lash_trace::TraceContext::default().for_session(context.session_id.clone()),
+    )
+    .await
+    {
+        tracing::error!(
+            target: "lash::plugin_composition",
+            later_plugin_id,
+            error = %err,
+            "failed to emit before_tool_call directive conflict trace"
+        );
+    }
     let _ = context
         .event_tx
         .try_send(crate::SessionStreamEvent::PluginEvent {
-            plugin_id: crate::session_model::PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID.to_string(),
+            plugin_id: later_plugin_id.to_string(),
             event: crate::PluginRuntimeEvent::Custom {
                 name: "before_tool_call.directive_conflict".to_string(),
-                payload: serde_json::json!({
-                    "winner_plugin_id": winner.plugin_id,
-                    "winner_directive": winner.kind.as_str(),
-                    "ignored_plugin_id": ignored.plugin_id,
-                    "ignored_directive": ignored.kind.as_str(),
-                }),
+                payload,
             },
         });
 }

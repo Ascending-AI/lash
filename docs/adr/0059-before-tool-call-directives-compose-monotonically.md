@@ -19,12 +19,15 @@ it does not add a general per-call permission system or hook priorities.
 
 ## Decision
 
-Before-tool-call hooks run in registration order, but each
-`ReplaceToolArgs` takes effect before the next hook is invoked. The remaining
-hook chain therefore inspects the current arguments, not a stale initial
-snapshot. Re-running already-completed hooks would require fixed-point and
-cycle semantics for transformations without adding a stronger safety property,
-so Lash deliberately advances once through the remaining chain.
+Before-tool-call hooks run in registration order. Each `ReplaceToolArgs` takes
+effect immediately, then Lash re-runs every earlier hook once with the replaced
+arguments before advancing through the remaining hook chain. Directives from
+that bounded reinspection participate in the same fold. If the reinspection
+produces another replacement, Lash rejects composition with the typed
+`PluginError::BeforeToolCallReplacementConflict`; it does not seek a fixed
+point. This makes a single replacement visible to every argument-inspecting
+hook regardless of whether the inspector was registered before or after the
+replacer.
 
 Terminal directives form a restrictive join:
 
@@ -34,22 +37,40 @@ Terminal directives form a restrictive join:
 
 The most restrictive terminal directive wins regardless of registration order.
 Equal-strength conflicts use plugin ID as a stable tie-breaker; directives from
-the same plugin retain authored order. Thus a hook can reduce permission but
+the same plugin use first-emitted-wins. Thus a hook can reduce permission but
 cannot restore it. Non-terminal side effects continue to run in directive order.
 
-Every terminal conflict emits a `lash::plugin_composition` warning identifying
-the winning and ignored plugin IDs and directive kinds. Lash also attempts a
-non-blocking plugin runtime event named `before_tool_call.directive_conflict`;
-the structured warning remains the guaranteed evidence if that best-effort
-channel is full or closed. A conflict is never silently dropped.
+`AbortTurn` is the strongest stop directive in this join, but at the
+before-tool-call seam it does not abort the enclosing turn. It projects as a
+failed tool result. When a later `AbortTurn` displaces an earlier structured
+denial, Lash therefore retains the denial's typed failure code and message
+instead of degrading that evidence to the abort's generic `tool_error`.
+
+Every terminal conflict is emitted through the awaited session trace seam as a
+custom `before_tool_call.directive_conflict` event identifying the winning and
+ignored plugin IDs and directive kinds. The event is attributed to the actual
+later plugin whose directive caused the conflict. If the trace service rejects
+the event, Lash logs that emission failure. Lash also attempts a non-blocking
+plugin runtime event with the same attribution and payload; that secondary
+channel remains best-effort when full or closed.
 
 ## Consequences
 
 - Deny-then-allow and allow-then-deny both deny; abort wins against every other
   terminal outcome.
-- Argument normalizers remain supported, and later policy hooks inspect their
-  normalized arguments.
+- Argument normalizers remain supported. Earlier and later policy hooks inspect
+  one replacement, while a replacement during bounded reinspection is a typed
+  composition rejection.
 - Plugin registration order still orders transformations and side effects, but
-  it cannot change terminal permission.
+  it cannot change terminal permission. This is locked by
+  `replacement_is_reinspected_by_earlier_policy_in_either_registration_order`,
+  `clean_bounded_reinspection_runs_on_replaced_arguments`, and
+  `replacement_during_bounded_reinspection_is_a_typed_composition_error`.
 - `PluginDirective` remains a transient in-process value with the same public
   and serde shape; the change needs no persistence or wire migration.
+
+FIG-1399 records the option to reconsider replacement semantics once real
+multi-plugin compositions provide evidence for a different policy. This ADR
+does not depend on any particular production before-tool hook registrant.
+The separate `after_tool_call` directive fold is unchanged and remains tracked
+by FIG-1400.

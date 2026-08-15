@@ -203,20 +203,20 @@ fn update_plan_definition() -&gt; ToolDefinition {
     <div class="section" id="before-tool-call-composition">
       <div class="section-header">
         <h2>Before-tool-call composition</h2>
-        <p>Before-tool-call hooks may only preserve or reduce permission. Installing another plugin cannot turn an earlier denial or abort into permission to continue.</p>
+        <p>Before-tool-call hooks may only preserve or reduce permission. Argument inspection remains effective on either side of one bounded replacement.</p>
       </div>
       <div class="listing">
         <div class="listing__row">
           <div class="listing__label">arguments</div>
-          <div class="listing__body"><p>Hooks run in plugin registration order. A <code>ReplaceToolArgs</code> directive takes effect immediately, and every remaining hook inspects the replacement rather than the original snapshot.</p></div>
+          <div class="listing__body"><p>Hooks run in plugin registration order. A <code>ReplaceToolArgs</code> directive takes effect immediately, then every earlier hook runs once on the replacement before the remaining chain advances. Another replacement during that bounded reinspection is rejected as a typed <code>BeforeToolCallReplacementConflict</code>.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">terminal precedence</div>
-          <div class="listing__body"><p>The fold joins terminal directives by restrictiveness: <code>AbortTurn</code> wins over a failed or cancelled <code>ShortCircuitTool</code>, which wins over a successful short-circuit. Equal-strength conflicts use plugin ID as a stable tie-breaker, so reversing registration order does not change the result.</p></div>
+          <div class="listing__body"><p>The fold joins terminal directives by restrictiveness: <code>AbortTurn</code> wins over a failed or cancelled <code>ShortCircuitTool</code>, which wins over a successful short-circuit. Equal-strength conflicts use plugin ID as a stable tie-breaker; within one plugin, the first-emitted equal-strength terminal wins. At this seam <code>AbortTurn</code> is a failed tool result rather than an enclosing-turn abort, so a later abort that displaces an earlier structured denial retains the denial's typed code and message.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">conflicts</div>
-          <div class="listing__body"><p>A losing terminal directive is never silently discarded. Lash always emits a <code>lash::plugin_composition</code> warning with the winning and ignored plugin IDs and directive kinds. It also publishes a best-effort <code>lash.plugin_runtime</code> event named <code>before_tool_call.directive_conflict</code> when the runtime-event channel can accept it without blocking tool dispatch.</p></div>
+          <div class="listing__body"><p>Lash emits each terminal conflict through the awaited session trace seam, carrying the winning and ignored plugin IDs and directive kinds and attributing the event to the actual later plugin. A runtime event named <code>before_tool_call.directive_conflict</code> carries the same identity-bearing payload when that secondary channel can accept it without blocking tool dispatch.</p></div>
         </div>
       </div>
     </div>

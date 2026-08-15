@@ -1,6 +1,23 @@
 use super::*;
 use crate::plugin::PluginFactory;
 
+#[derive(Default)]
+struct RecordingSessionGraph {
+    events: std::sync::Mutex<Vec<lash_trace::TraceEvent>>,
+}
+
+#[async_trait::async_trait]
+impl crate::plugin::SessionGraphService for RecordingSessionGraph {
+    async fn emit_trace_event(
+        &self,
+        _context: lash_trace::TraceContext,
+        event: lash_trace::TraceEvent,
+    ) -> Result<(), crate::PluginError> {
+        self.events.lock_recover().push(event);
+        Ok(())
+    }
+}
+
 fn before_tool_factory(
     id: &'static str,
     hook: crate::plugin::BeforeToolCallHook,
@@ -151,8 +168,6 @@ async fn multi_plugin_abort_wins_in_either_registration_order() {
             ("allow", successful_short_circuit()),
             ("abort", abort_turn()),
         ],
-        vec![("abort", abort_turn()), ("deny", policy_denial())],
-        vec![("deny", policy_denial()), ("abort", abort_turn())],
     ] {
         let output = dispatch_with_terminal_plugins(directives).await;
         assert!(!output.is_success());
@@ -160,6 +175,22 @@ async fn multi_plugin_abort_wins_in_either_registration_order() {
         assert_eq!(projected["code"], json!("tool_error"));
         assert_eq!(projected["message"], json!("plugin aborted the turn"));
     }
+
+    let output =
+        dispatch_with_terminal_plugins(vec![("deny", policy_denial()), ("abort", abort_turn())])
+            .await;
+    assert!(!output.is_success());
+    let projected = output.value_for_projection();
+    assert_eq!(projected["code"], json!("policy_denied"));
+    assert_eq!(projected["message"], json!("policy denied the call"));
+
+    let output =
+        dispatch_with_terminal_plugins(vec![("abort", abort_turn()), ("deny", policy_denial())])
+            .await;
+    assert!(!output.is_success());
+    let projected = output.value_for_projection();
+    assert_eq!(projected["code"], json!("tool_error"));
+    assert_eq!(projected["message"], json!("plugin aborted the turn"));
 }
 
 #[tokio::test]
@@ -186,19 +217,21 @@ async fn terminal_conflict_is_an_observable_composition_event() {
         fixed_before_tool_factory("allow", successful_short_circuit()),
     ]);
     let (event_tx, mut events) = mpsc::channel(8);
+    let session_graph = Arc::new(RecordingSessionGraph::default());
     let mut context = exact_dispatch_context_with_plugins(plugins);
     context.event_tx = event_tx;
+    context.session_graph = session_graph.clone();
 
     let _ = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" })).await;
 
-    let event = events.recv().await.expect("composition event");
+    let event = timeout(Duration::from_secs(1), events.recv())
+        .await
+        .expect("composition event receive timed out")
+        .expect("composition event channel closed");
     let crate::SessionStreamEvent::PluginEvent { plugin_id, event } = event else {
         panic!("expected plugin runtime event");
     };
-    assert_eq!(
-        plugin_id,
-        crate::session_model::PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID
-    );
+    assert_eq!(plugin_id, "allow");
     let crate::PluginRuntimeEvent::Custom { name, payload } = event else {
         panic!("expected custom composition event");
     };
@@ -206,6 +239,19 @@ async fn terminal_conflict_is_an_observable_composition_event() {
     assert_eq!(payload["winner_plugin_id"], json!("deny"));
     assert_eq!(payload["winner_directive"], json!("denied_short_circuit"));
     assert_eq!(payload["ignored_plugin_id"], json!("allow"));
+
+    let trace_events = session_graph.events.lock_recover();
+    let [lash_trace::TraceEvent::Custom { name, payload }] = trace_events.as_slice() else {
+        panic!("expected one durable composition trace event: {trace_events:?}");
+    };
+    assert_eq!(name, "plugin.allow.before_tool_call.directive_conflict");
+    assert_eq!(payload["winner_plugin_id"], json!("deny"));
+    assert_eq!(payload["winner_directive"], json!("denied_short_circuit"));
+    assert_eq!(payload["ignored_plugin_id"], json!("allow"));
+    assert_eq!(
+        payload["ignored_directive"],
+        json!("successful_short_circuit")
+    );
 }
 
 #[tokio::test]
@@ -239,6 +285,138 @@ async fn replacement_is_seen_by_remaining_plugin_hooks() {
     assert_eq!(
         inspected.lock_recover().as_slice(),
         &[json!({ "value": "replaced" })]
+    );
+    assert_eq!(output.value_for_projection(), json!("replaced"));
+}
+
+#[tokio::test]
+async fn replacement_is_reinspected_by_earlier_policy_in_either_registration_order() {
+    for policy_first in [true, false] {
+        let policy = before_tool_factory(
+            "policy",
+            Arc::new(|ctx| {
+                Box::pin(async move {
+                    if ctx.args["value"] == json!("forbidden") {
+                        Ok(vec![policy_denial()])
+                    } else {
+                        Ok(Vec::new())
+                    }
+                })
+            }),
+        );
+        let replacer = fixed_before_tool_factory(
+            "replacer",
+            crate::PluginDirective::ReplaceToolArgs {
+                args: json!({ "value": "forbidden" }),
+            },
+        );
+        let mut factories = if policy_first {
+            vec![policy, replacer]
+        } else {
+            vec![replacer, policy]
+        };
+        factories.push(fixed_before_tool_factory(
+            "allow",
+            successful_short_circuit(),
+        ));
+        let context = exact_dispatch_context_with_plugins(before_tool_plugin_stack(factories));
+
+        let output =
+            dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
+                .await
+                .record
+                .output;
+
+        assert!(!output.is_success(), "policy_first={policy_first}");
+        assert_eq!(
+            output.value_for_projection()["code"],
+            json!("policy_denied"),
+            "policy_first={policy_first}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn replacement_during_bounded_reinspection_is_a_typed_composition_error() {
+    let earlier = before_tool_factory(
+        "earlier",
+        Arc::new(|ctx| {
+            Box::pin(async move {
+                if ctx.args["value"] == json!("forbidden") {
+                    Ok(vec![crate::PluginDirective::ReplaceToolArgs {
+                        args: json!({ "value": "second replacement" }),
+                    }])
+                } else {
+                    Ok(Vec::new())
+                }
+            })
+        }),
+    );
+    let later = fixed_before_tool_factory(
+        "later",
+        crate::PluginDirective::ReplaceToolArgs {
+            args: json!({ "value": "forbidden" }),
+        },
+    );
+    let plugins = before_tool_plugin_stack(vec![earlier, later]);
+
+    let error = plugins
+        .before_tool_call(crate::plugin::ToolCallHookContext::new(
+            "session".to_string(),
+            "beta".to_string(),
+            json!({ "value": "original" }),
+            beta_tool().manifest().argument_projection,
+            crate::TurnContext::default(),
+            Arc::new(crate::testing::MockSessionManager::default()),
+        ))
+        .await
+        .expect_err("a reinspection pass cannot replace arguments again");
+
+    let crate::PluginError::BeforeToolCallReplacementConflict {
+        replacing_plugin_id,
+        repeated_plugin_id,
+    } = error
+    else {
+        panic!("expected typed replacement conflict: {error:?}");
+    };
+    assert_eq!(replacing_plugin_id, "later");
+    assert_eq!(repeated_plugin_id, "earlier");
+}
+
+#[tokio::test]
+async fn clean_bounded_reinspection_runs_on_replaced_arguments() {
+    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let earlier_observed = Arc::clone(&observed);
+    let earlier = before_tool_factory(
+        "earlier",
+        Arc::new(move |ctx| {
+            let earlier_observed = Arc::clone(&earlier_observed);
+            Box::pin(async move {
+                earlier_observed.lock_recover().push(ctx.args);
+                Ok(Vec::new())
+            })
+        }),
+    );
+    let later = fixed_before_tool_factory(
+        "later",
+        crate::PluginDirective::ReplaceToolArgs {
+            args: json!({ "value": "replaced" }),
+        },
+    );
+    let context =
+        exact_dispatch_context_with_plugins(before_tool_plugin_stack(vec![earlier, later]));
+
+    let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
+        .await
+        .record
+        .output;
+
+    assert_eq!(
+        observed.lock_recover().as_slice(),
+        &[
+            json!({ "value": "original" }),
+            json!({ "value": "replaced" }),
+        ]
     );
     assert_eq!(output.value_for_projection(), json!("replaced"));
 }
