@@ -498,6 +498,7 @@
     "signature": "d51d23a53aa1f947e9f7177e1babef81c26d0b9ed4597ad36412880e82eca528"
   },
   "wake_delivery": {
+    "version": 1,
     "wake_id": "wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228",
     "target_session_id": "durable-read-fixture",
     "process_id": "durable-read-wake-process",
