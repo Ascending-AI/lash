@@ -28,7 +28,10 @@ dialect that can hold state across a turn and one that can only run
 self-contained one-shot cells, and it is now covered by deterministic
 dual-dialect fixtures driven through the production turn path.
 
-This round is written up first in the review ledger and ratified as ADR 0060.
+This round is written up first in the review ledger and ratified as ADR 0060. A
+context-clean fresh-eyes verification returned FIT-WITH-FIXES; its findings —
+one live prompt leak the walker could not see, one false attribution in this
+ledger, and six narrow gaps — are closed in the closure round below.
 
 Three review rounds landed on this branch: two independent adversarial reviews
 (APPROVE-WITH-FIXES) and one fresh-eyes final verification that returned
@@ -328,6 +331,9 @@ Every hash below is reachable from the branch head.
 | `304f2bfcd` | Name a cell of the inactive dialect instead of reading it as prose | Fixed |
 | `6b60a5524` | Check the extraction recognition list against the dialects themselves | — |
 | `c706ff7bc` | Let a cell read what an earlier cell bound (F11), and label the trace | Fixed |
+| `0602c5f4a` | Report the battery-defect round | Internal |
+| `504b92a20` | Assemble the read-only-variables block once, in the session's dialect (**RV-1**) | Fixed |
+| `c5d709bbd` | Close the verification round's low findings (RV-3…RV-8, M4) | Internal |
 | final report commit | Regenerate this report against the branch as it stands | Internal |
 
 ## Review ledger
@@ -375,7 +381,8 @@ it in its data; "residual" means the leak is real and open.
 | Site | Disposition |
 |---|---|
 | `dialect/lashlang.rs`, `dialect/typescript.rs` execution sections | Dialect-owned already; TypeScript gained the host-surface inventory this round |
-| `rlm_support.rs` bound variables / read-only variables (prose) | Vocabulary-routed (A-core) |
+| `rlm_support.rs` bound variables (prose) | Vocabulary-routed (A-core) |
+| `rlm_support.rs` read-only variables (prose) | Vocabulary-routed (A-core) on the protocol's hook, and **assembled a second time** by `lash-core` from the turn-extension handle in Lashlang — closed in the closure round (RV-1). Both routes are now walked |
 | `tool_catalog.rs` call paths | Vocabulary-routed (A-core) |
 | `tool_catalog.rs` authored examples | **Fixed this round** — rendered through `RlmDialect::render_tool_example` |
 | `control_tools.rs` `continue_as` doc + example | Vocabulary-routed (A-core); the battery's saved prompt predates that commit |
@@ -403,6 +410,29 @@ it in its data; "residual" means the leak is real and open.
 | Runbook harnesses (`version_bump`, `session_lease_triage`, `process_operator_flow`) | **Fixed this round** |
 | `mock_provider.rs` scripted cells | Left alone: it serves `restate-postgres-workers`, which is not a judged parity scenario and has no dialect row |
 
+### Closure round — the fresh-eyes verification's findings
+
+The round was verified context-clean (FIT-WITH-FIXES) with every headline claim
+re-run or mutation-attacked. Two findings were substantive; six were narrow.
+
+| Finding | What it was | Red side | Fix |
+|---|---|---|---|
+| **RV-1 (product)** | `TurnInput::rlm_project` stores the bindings **twice** — as the protocol's plugin input and as a `ProtocolTurnExtension` handle whose `prompt_contributions()` `lash-core` rendered itself, from a hardcoded Lashlang vocabulary. The duplication was invisible while one dialect existed, because `merge_prompt_contributions` drops byte-identical contributions; the second dialect made the copies differ, so a TypeScript session received its own block *and* "Access them directly in `<lashlang>` blocks" underneath it | walker renders both routes; served-prompt count measured 1 (Lashlang) vs **2** (TypeScript) | `504b92a20` |
+| **RV-2 (ledger)** | This report claimed the three agent-scenario size labels were pre-existing drift and that an earlier round's PASS row was stale. False, and withdrawn — see the honest ledger | `cell_noun: "lashlang block"` restores all three labels | `c5d709bbd` |
+| RV-3 | Rendered tool examples were never parsed, only marker-checked | found a real rewriter limitation on its first run | `c5d709bbd` |
+| RV-4 | `type cron_Tick` declared, `cron.Tick` referenced | assertion over non-comment lines | `c5d709bbd` |
+| RV-5 | The residual register pinned `list[` when the whole type line leaks | four rows, punctuation-anchored markers | `c5d709bbd` |
+| RV-6 | The foreign-cell driver fixture was one-directional | `RlmDriver::for_language` + the reverse test | `c5d709bbd` |
+| RV-7 | `<typescript >` degrades to prose | both halves stated in a test | `c5d709bbd` |
+| RV-8 | `ToolValue`'s exclusion from the terminates-test was unexplained | the reason is now asserted | `c5d709bbd` |
+| M4 | The `code-failure` red-side recipe was incomplete | two reverts, not one | `c5d709bbd` |
+
+RV-1 is the one the round's own instrument should have caught and did not: the
+walker owned every fragment the crate *renders*, and this one is rendered by
+`lash-core` from a handle the crate hands it. The walker now renders both
+routes, which is the class closure — a third copy assembled through the generic
+seam fails it.
+
 ### The walker's carve-out list, in full
 
 `SUBSTRATE_CARVE_OUTS` (`dialect/prompt_walker_tests.rs`) and ADR 0060 hold the
@@ -421,10 +451,12 @@ is hidden from the prompt instead (nothing about it has to reach a model), and
 the trace record's `language` field is now the source's dialect rather than the
 engine's.
 
-And two leaks are **residuals**, not carve-outs — real, open, and asserted by
-equality in `KNOWN_TYPE_SYNTAX_RESIDUALS` so a third cannot join them quietly:
-tool-doc signatures render `-> str`, and the bound-variable block renders
-`list[HistoryItem]`, both to a TypeScript reader.
+And the **residuals** are real, open, and asserted by equality in
+`KNOWN_TYPE_SYNTAX_RESIDUALS` so a third cannot join them quietly: tool-doc
+signatures render `-> str`, and the bound-variable block renders a whole type
+line in Lashlang's syntax (`list[`, `: str,`, `: int,`, `?: any |`) — five rows,
+one per token that actually leaks, after the verification round pointed out that
+pinning `list[` alone described the leak as narrower than it is.
 
 ### Fresh-eyes final verification (BLOCK) — prior round
 
