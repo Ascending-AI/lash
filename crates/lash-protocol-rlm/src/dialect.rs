@@ -151,6 +151,18 @@ pub(crate) trait RlmDialect: Send + Sync {
     /// The call path a model writes to invoke `tool` in this dialect.
     fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> Result<String, SessionError>;
 
+    /// One authored tool example, in this dialect's syntax.
+    ///
+    /// Examples are authored once, as Lashlang source, next to the tool that
+    /// owns them (`await web.search({ query: "..." })?`). They are a second
+    /// model-facing surface on top of the call path, and the `?` try-operator
+    /// that six of seven examples in the resident catalog carry is a *syntax
+    /// error* in TypeScript: a judged row's saved prompt showed a TypeScript
+    /// session being shown seven examples it could not have run.
+    fn render_tool_example(&self, example: &str) -> String {
+        example.to_string()
+    }
+
     fn snapshot_engine_id(&self) -> &'static str;
 
     fn cell_tags(&self) -> CellTags;

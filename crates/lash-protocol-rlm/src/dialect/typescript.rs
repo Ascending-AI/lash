@@ -25,6 +25,14 @@ impl TypescriptDialect {
     }
 }
 
+fn is_plain_identifier(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        && !text.starts_with(|character: char| character.is_ascii_digit())
+}
+
 pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVocabulary =
     crate::dialect::DialectPromptVocabulary {
         language_name: "TypeScript",
@@ -37,6 +45,169 @@ pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVoca
         continue_as_call: "control.continue_as(...)",
         continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } });",
     };
+
+/// Lashlang's type syntax in TypeScript's spelling.
+///
+/// The host surface is declared once, in Lashlang `TypeExpr`s, and both
+/// dialects have to describe it. Rendering `list[str]` or `-> float` to a
+/// TypeScript reader would be the same defect ADR 0060 closes everywhere else,
+/// so the mapping is explicit rather than a formatted passthrough.
+fn typescript_type(ty: &lashlang::TypeExpr) -> String {
+    match ty {
+        lashlang::TypeExpr::Any | lashlang::TypeExpr::Dict => "unknown".to_string(),
+        lashlang::TypeExpr::Str => "string".to_string(),
+        lashlang::TypeExpr::Int | lashlang::TypeExpr::Float => "number".to_string(),
+        lashlang::TypeExpr::Bool => "boolean".to_string(),
+        lashlang::TypeExpr::Null => "null".to_string(),
+        lashlang::TypeExpr::Enum(values) => values
+            .iter()
+            .map(|value| format!("\"{value}\""))
+            .collect::<Vec<_>>()
+            .join(" | "),
+        lashlang::TypeExpr::List(item) => format!("Array<{}>", typescript_type(item)),
+        lashlang::TypeExpr::Object(fields) => {
+            if fields.is_empty() {
+                return "Record<string, never>".to_string();
+            }
+            let fields = fields
+                .iter()
+                .map(|field| {
+                    let optional = if field.optional { "?" } else { "" };
+                    format!("{}{optional}: {}", field.name, typescript_type(&field.ty))
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!("{{ {fields} }}")
+        }
+        lashlang::TypeExpr::Ref(name) => name.to_string(),
+        lashlang::TypeExpr::Process { input, output, .. } => format!(
+            "ProcessDefinition<{}, {}>",
+            typescript_type(input),
+            typescript_type(output)
+        ),
+        lashlang::TypeExpr::TriggerHandle(event) => {
+            format!("TriggerHandle<{}>", typescript_type(event))
+        }
+        other => lashlang::format_type_expr(other),
+    }
+}
+
+impl TypescriptDialect {
+    /// The host surface, in this dialect's spelling.
+    ///
+    /// A TypeScript session used to receive no inventory at all: the section
+    /// rendered tool signatures and stopped, so the trigger sources, their
+    /// event types and the `triggers.*` operations were invisible — while the
+    /// host's own prompt told the model to use them. A judged row watched a
+    /// model search for `cron.Schedule`, find nothing, and conclude the trigger
+    /// APIs did not exist.
+    fn render_host_surface_section(
+        &self,
+        tool_catalog: &lash_core::ToolCatalog,
+    ) -> Result<String, SessionError> {
+        let host_environment = self
+            .surface
+            .host_environment(tool_catalog)
+            .map_err(|error| {
+                SessionError::Protocol(format!("invalid host tool surface: {error}"))
+            })?;
+        let inventory = crate::protocol::prompt::host_surface_inventory(&host_environment);
+        // Catalog tools already have a fully typed declaration under **Tools**,
+        // rendered from the same contract; repeating them here would be a
+        // second, weaker copy of the same signature.
+        let documented_tools = tool_catalog
+            .tools
+            .iter()
+            .filter_map(|tool| {
+                lash_lashlang_runtime::required_tool_typescript_executable(&tool.manifest)
+                    .ok()
+                    .map(|binding| binding.call_path())
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let operations = inventory
+            .operations
+            .iter()
+            .filter(|operation| {
+                !documented_tools.contains(&format!("{}.{}", operation.alias, operation.operation))
+            })
+            .collect::<Vec<_>>();
+        if operations.is_empty()
+            && inventory.data_types.is_empty()
+            && inventory.constructors.is_empty()
+            && inventory.trigger_sources.is_empty()
+        {
+            return Ok(String::new());
+        }
+        let mut section = String::from("\n\n### Host surface");
+        if !operations.is_empty() {
+            let lines = operations
+                .iter()
+                .map(|operation| {
+                    format!(
+                        "declare function {}_{}(input: {}): Promise<{}>; // await {}.{}(input)",
+                        operation.alias,
+                        operation.operation,
+                        typescript_type(operation.input),
+                        typescript_type(operation.output),
+                        operation.alias,
+                        operation.operation
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            section.push_str(&format!(
+                "\n\nAwaited runtime operations, called as `await <module>.<operation>(input)`:\n\n```typescript\n{lines}\n```"
+            ));
+        }
+        if !inventory.data_types.is_empty() {
+            let lines = inventory
+                .data_types
+                .iter()
+                .map(|(name, ty)| {
+                    format!(
+                        "// {name}\ntype {} = {};",
+                        name.replace('.', "_"),
+                        typescript_type(ty)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            section.push_str(&format!(
+                "\n\nNamed host data types:\n\n```typescript\n{lines}\n```"
+            ));
+        }
+        if !inventory.constructors.is_empty() {
+            let lines = inventory
+                .constructors
+                .iter()
+                .map(|constructor| {
+                    format!(
+                        "{}(input: {}): {}",
+                        constructor.path,
+                        typescript_type(constructor.input),
+                        constructor.output
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            section.push_str(&format!(
+                "\n\nPure value constructors. Never `await` these; use them wherever an expression is allowed:\n\n```typescript\n{lines}\n```"
+            ));
+        }
+        if !inventory.trigger_sources.is_empty() {
+            let lines = inventory
+                .trigger_sources
+                .iter()
+                .map(|(source_ty, event)| {
+                    format!("- `{source_ty}` can be passed to `registerTrigger` as its `source` and emits `{event}`")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            section.push_str(&format!("\n\nTrigger source protocol metadata:\n\n{lines}"));
+        }
+        Ok(section)
+    }
+}
 
 impl RlmDialect for TypescriptDialect {
     fn language_id(&self) -> &'static str {
@@ -53,6 +224,47 @@ impl RlmDialect for TypescriptDialect {
                 .map_err(|error| SessionError::Protocol(error.to_string()))?
                 .call_path(),
         )
+    }
+
+    /// Rewrites an authored Lashlang example into this dialect.
+    ///
+    /// Deliberately a small, total rewriter over the shapes the authored corpus
+    /// actually uses rather than a translator: every example is a sequence of
+    /// statement lines that are either an awaited call, an assignment, or a
+    /// `finish`. Anything it does not recognize still loses the try-operator
+    /// and gains a terminator, which is the difference between "reads like
+    /// TypeScript" and "is a syntax error".
+    fn render_tool_example(&self, example: &str) -> String {
+        example
+            .lines()
+            .map(|line| {
+                let trimmed = line.trim_end();
+                if trimmed.is_empty() {
+                    return String::new();
+                }
+                let indent_len = trimmed.len() - trimmed.trim_start().len();
+                let (indent, body) = trimmed.split_at(indent_len);
+                // `expr?` — the Lashlang try-operator. TypeScript propagates a
+                // rejection from `await` itself, so the operator has no twin.
+                let body = body.strip_suffix('?').unwrap_or(body);
+                let body = match body.strip_prefix("finish ") {
+                    Some(value) => format!("finish({value})"),
+                    None => match body.split_once(" = ") {
+                        Some((name, value)) if is_plain_identifier(name) => {
+                            format!("const {name} = {value}")
+                        }
+                        _ => body.to_string(),
+                    },
+                };
+                let body = if body.ends_with(';') || body.ends_with('{') || body.ends_with(',') {
+                    body
+                } else {
+                    format!("{body};")
+                };
+                format!("{indent}{body}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn snapshot_engine_id(&self) -> &'static str {
@@ -105,6 +317,7 @@ impl RlmDialect for TypescriptDialect {
                 "\n\n### Tools\n\nEvery call requires `await` and returns the declared `Promise<T>`:\n\n```typescript\n{tools}\n```"
             )
         };
+        let host_surface = self.render_host_surface_section(tool_catalog)?;
         let host_api = r#"## TypeScript execution
 
 Write one script inside standalone `<typescript>` and `</typescript>` lines. Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
@@ -131,7 +344,7 @@ Declare durable work only as a top-level `const p = defineProcess({ name: "liter
 ### v1 guardrails
 
 Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), and async functions other than `defineProcess.run` (`TS_ASYNC_UNSUPPORTED`) reject. Capturing a `let` in a function rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; capture an immutable value or mutate through a captured object. `for...of` snapshots arrays/strings, so a body that mutates, aliases, or passes the iterable itself rejects as `TS_FOR_OF_UNSUPPORTED`; calls that do not touch the iterable are fine. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. These common shapes also reject, so write them out longhand: destructuring (`TS_DESTRUCTURING_UNSUPPORTED`), spread in arrays or objects (`TS_SPREAD_UNSUPPORTED`), optional chaining (`TS_OPTIONAL_CHAINING_UNSUPPORTED`), `switch` (`TS_SWITCH_UNSUPPORTED`), and regex literals (`TS_REGEXP_UNSUPPORTED`). Static methods: `Object.keys/values/entries/fromEntries/hasOwn/is`, `Array.isArray/of`, `String.fromCodePoint`, `Number.isFinite/isInteger/isNaN/isSafeInteger/parseFloat/parseInt`, `JSON.parse/stringify`, and `Math.abs/acos/asin/cbrt/ceil/cos/exp/floor/log/log10/log2/round/sin/tan/trunc/max/min/pow/sqrt/sign`. Instance methods: `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, `valueOf`. `Date.now()` and `Math.random()` are journaled; `new Date()` rejects as `TS_NEW_UNSUPPORTED`."#;
-        Ok(format!("{host_api}{tools}"))
+        Ok(format!("{host_api}{tools}{host_surface}"))
     }
 
     fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> &'static str {
@@ -366,6 +579,83 @@ mod tests {
         assert_eq!(dialect.snapshot_engine_id(), "typescript");
         assert_eq!(dialect.cell_tags().open, "<typescript>");
         assert_eq!(dialect.cell_tags().close, "</typescript>");
+    }
+
+    /// A TypeScript session must be told what it may register a trigger on.
+    ///
+    /// The section used to render tool signatures and stop, so a host that
+    /// declared `cron.Schedule` and the `triggers.*` operations advertised them
+    /// in its own prompt copy while the substrate told the model nothing. A
+    /// judged row watched a model search for `cron.Schedule`, find nothing, and
+    /// conclude the trigger APIs did not exist — a VOID row produced by a
+    /// prompt that denied a capability the session actually had.
+    #[test]
+    fn the_execution_section_declares_the_hosts_trigger_surface() {
+        let mut resources = lashlang::LashlangHostCatalog::new();
+        lashlang::add_trigger_resource_operations(&mut resources);
+        resources
+            .add_trigger_source_constructor(
+                ["cron", "Schedule"],
+                lashlang::TypeExpr::Object(vec![
+                    lashlang::TypeField {
+                        name: "expr".into(),
+                        ty: lashlang::TypeExpr::Str,
+                        optional: false,
+                    },
+                    lashlang::TypeField {
+                        name: "tz".into(),
+                        ty: lashlang::TypeExpr::Str,
+                        optional: true,
+                    },
+                ]),
+                lashlang::NamedDataType::object(
+                    "cron.Tick",
+                    vec![lashlang::TypeField {
+                        name: "fired_at".into(),
+                        ty: lashlang::TypeExpr::Str,
+                        optional: false,
+                    }],
+                )
+                .expect("valid tick type"),
+            )
+            .expect("cron trigger source");
+        let dialect = TypescriptDialect::new(
+            lash_lashlang_runtime::LashlangSurface {
+                abilities: lashlang::LashlangAbilities::all(),
+                language_features: Default::default(),
+                resources,
+            },
+            LashlangDialectServices {
+                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+        );
+        let section = dialect
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &lash_core::ToolCatalog::from_tool_definitions(vec![]),
+            )
+            .expect("render execution section");
+
+        assert!(section.contains("### Host surface"), "{section}");
+        assert!(
+            section.contains(
+                "cron.Schedule(input: { expr: string; tz?: string }): TriggerSource<cron.Tick>"
+            ),
+            "the constructor must be declared in TypeScript's own type spelling: {section}"
+        );
+        assert!(
+            section.contains("`cron.Schedule` can be passed to `registerTrigger`"),
+            "the reader's own primitive name, not `trigger.register`: {section}"
+        );
+        assert!(section.contains("triggers.list"), "{section}");
+        // And none of it may arrive in Lashlang's type syntax (ADR 0060).
+        for leak in ["list[", "-> str", ": str`", "float`", "trigger.register"] {
+            assert!(!section.contains(leak), "`{leak}` leaked: {section}");
+        }
     }
 
     #[test]

@@ -34,6 +34,14 @@ fn foreign_markers(language_id: &str) -> Vec<&'static str> {
             "`print ",
             "re-print",
             "finish <value>",
+            // Lashlang's *type* syntax, which the host-surface inventory is
+            // declared in and both dialects have to render.
+            "list[",
+            "-> str",
+            // The Lashlang try-operator, in an authored tool example.
+            ")?",
+            "-> float",
+            "trigger.register",
         ],
         // And the reverse: a Lashlang session must not be handed TypeScript.
         // The last two are the *substrate* direction: internal identifiers the
@@ -97,6 +105,13 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
         }),
         serde_json::json!({ "type": "string" }),
     )
+    .with_examples(vec![
+        // Authored as Lashlang, like every example in the resident catalog.
+        // Six of seven in the shipped catalog carry the try-operator, which is
+        // a syntax error in TypeScript.
+        r#"await web.fetch({ url: "https://example.test/" })?"#.to_string(),
+        "page = await web.fetch({ url: \"https://example.test/\" })?\nfinish page".to_string(),
+    ])
     .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
         ["web"],
         "fetch",
@@ -226,11 +241,37 @@ fn no_assembled_prompt_fragment_carries_the_other_dialects_words() {
             }
         }
     }
-    assert!(
-        violations.is_empty(),
-        "the assembled prompt mixes dialects: {violations:#?}"
+    violations.sort();
+    let residuals = KNOWN_TYPE_SYNTAX_RESIDUALS
+        .iter()
+        .map(|residual| (*residual).to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        violations, residuals,
+        "the assembled prompt mixes dialects, or a known residual changed. \
+         Fixing one means deleting its row from KNOWN_TYPE_SYNTAX_RESIDUALS."
     );
 }
+
+/// The leaks this round measured but did not close, named rather than hidden.
+///
+/// Both are the *type* syntax of the host's declarations, not prose, and both
+/// come from renderers that live outside this crate's dialect seam: tool docs
+/// are rendered by `lash_core`'s contract renderer
+/// (`compact_contract_with_signature_name(...).render_markdown()`), and the
+/// bound-variable block builds its own shape language (`list[...]`,
+/// `HistoryItem`) from a schema registry. Teaching either to speak a second
+/// dialect is a typed-rendering change across crates, not a copy edit, so it is
+/// recorded here instead of being half-done.
+///
+/// This list is asserted *exactly*: a third leak fails the walker, and closing
+/// one of these fails it too until its row is deleted. That is the point — a
+/// residual that cannot be forgotten is different in kind from one that is
+/// merely known.
+const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[
+    "typescript prompt fragment `bound variables` contains `list[`",
+    "typescript prompt fragment `tool docs` contains `-> str`",
+];
 
 /// The walker only measures if its marker list can fire. Both vocabularies are
 /// asserted to be genuinely different so a future refactor cannot make the
@@ -249,6 +290,37 @@ fn the_two_vocabularies_are_actually_different() {
         LASHLANG_PROMPT_VOCABULARY.finish_statement,
         TYPESCRIPT_PROMPT_VOCABULARY.finish_statement
     );
+    // Non-vacuity for the example surface: the *authored* corpus really does
+    // carry the try-operator, so the marker has something to catch. Reading it
+    // from the Lashlang rendering proves the fixture, not the assertion.
+    let example_fixture = assembled_prompt_fragments(&crate::dialect::lashlang_test_dialect())
+        .into_iter()
+        .find(|(name, _)| *name == "tool docs")
+        .expect("tool docs fragment");
+    assert!(
+        example_fixture.1.contains(")?"),
+        "the fixture's authored examples must carry the try-operator: {}",
+        example_fixture.1
+    );
+
+    // The example surface specifically: a TypeScript reader must be shown the
+    // examples rewritten, and the Lashlang reader must still get the original.
+    let typescript = crate::dialect::typescript_test_dialect();
+    assert_eq!(
+        typescript.render_tool_example(r#"await web.fetch({ url: "https://example.test/" })?"#),
+        r#"await web.fetch({ url: "https://example.test/" });"#
+    );
+    assert_eq!(
+        typescript.render_tool_example("page = await web.fetch({ url: \"u\" })?\nfinish page"),
+        "const page = await web.fetch({ url: \"u\" });\nfinish(page);"
+    );
+    let lashlang = crate::dialect::lashlang_test_dialect();
+    assert_eq!(
+        lashlang.render_tool_example("finish page"),
+        "finish page",
+        "the authored form is Lashlang's own and must pass through untouched"
+    );
+
     // And the markers themselves must be present in the opposite dialect's
     // real copy, or the walker is looking for strings nothing ever emits.
     assert!(foreign_markers("typescript").contains(&"<lashlang>"));

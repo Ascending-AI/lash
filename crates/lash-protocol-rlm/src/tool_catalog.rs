@@ -37,11 +37,15 @@ pub(crate) fn rlm_prompt_tool_docs(
             let call_path = dialect
                 .tool_call_path(&tool.manifest)
                 .expect("RLM tool catalog registration validates both dialects' bindings");
-            Some(
-                contract
-                    .compact_contract_with_signature_name(&tool.manifest, &call_path)
-                    .render_markdown(),
-            )
+            let mut compact =
+                contract.compact_contract_with_signature_name(&tool.manifest, &call_path);
+            // Authored examples are Lashlang source; the dialect spells them.
+            compact.examples = compact
+                .examples
+                .iter()
+                .map(|example| dialect.render_tool_example(example))
+                .collect();
+            Some(compact.render_markdown())
         })
         .collect::<Vec<_>>()
         .join("\n\n")
