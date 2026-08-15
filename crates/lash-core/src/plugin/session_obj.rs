@@ -316,16 +316,49 @@ impl PluginSession {
 
     pub async fn before_tool_call(
         &self,
-        ctx: ToolCallHookContext,
+        mut ctx: ToolCallHookContext,
     ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
-        collect_owned_async(
-            &self.contributions.before_tool_call_hooks,
-            ctx,
-            "before_tool_call",
-            None,
-            |hook, ctx| hook(ctx),
-        )
-        .await
+        let mut out = Vec::new();
+        for (index, registered) in self.contributions.before_tool_call_hooks.iter().enumerate() {
+            let directives = (registered.hook)(ctx.clone()).await?;
+            for directive in directives {
+                let replaces_args = matches!(directive, PluginDirective::ReplaceToolArgs { .. });
+                if let PluginDirective::ReplaceToolArgs { args } = &directive {
+                    ctx.args = args.clone();
+                }
+                out.push(PluginOwned {
+                    plugin_id: registered.plugin_id.clone(),
+                    value: directive,
+                });
+                if replaces_args {
+                    for earlier in &self.contributions.before_tool_call_hooks[..index] {
+                        let repeated = (earlier.hook)(ctx.clone()).await?;
+                        for directive in repeated {
+                            if matches!(directive, PluginDirective::ReplaceToolArgs { .. }) {
+                                return Err(PluginError::BeforeToolCallReplacementConflict {
+                                    replacing_plugin_id: registered.plugin_id.clone(),
+                                    repeated_plugin_id: earlier.plugin_id.clone(),
+                                });
+                            }
+                            let is_terminal_restriction = matches!(
+                                &directive,
+                                PluginDirective::AbortTurn { .. }
+                            ) || matches!(
+                                &directive,
+                                PluginDirective::ShortCircuitTool { output } if !output.is_success()
+                            );
+                            if is_terminal_restriction {
+                                out.push(PluginOwned {
+                                    plugin_id: earlier.plugin_id.clone(),
+                                    value: directive,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub async fn after_tool_call(

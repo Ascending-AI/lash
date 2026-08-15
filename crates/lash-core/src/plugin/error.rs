@@ -7,6 +7,16 @@ pub enum PluginError {
     Snapshot(String),
     #[error("plugin invoke error: {0}")]
     Invoke(String),
+    /// A bounded before-tool-call reinspection attempted to replace arguments again.
+    #[error(
+        "before_tool_call replacement from `{replacing_plugin_id}` was replaced again by `{repeated_plugin_id}` during bounded reinspection"
+    )]
+    BeforeToolCallReplacementConflict {
+        /// Plugin whose replacement caused earlier hooks to be reinspected.
+        replacing_plugin_id: String,
+        /// Earlier plugin that attempted another replacement during reinspection.
+        repeated_plugin_id: String,
+    },
     #[error("plugin session error: {0}")]
     Session(String),
     #[error(transparent)]

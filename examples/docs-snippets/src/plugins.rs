@@ -156,4 +156,28 @@ mod tests {
             .await
             .expect("plugin snippet must build");
     }
+
+    #[test]
+    fn bounded_reinspection_conflict_keeps_plugin_identity() {
+        let error = PluginError::BeforeToolCallReplacementConflict {
+            replacing_plugin_id: "normalizer".to_string(),
+            repeated_plugin_id: "policy".to_string(),
+        };
+        let rendered = error.to_string();
+        let PluginError::BeforeToolCallReplacementConflict {
+            replacing_plugin_id,
+            repeated_plugin_id,
+        } = error
+        else {
+            panic!("expected a typed before-tool replacement conflict");
+        };
+
+        assert_eq!(replacing_plugin_id, "normalizer");
+        assert_eq!(repeated_plugin_id, "policy");
+        assert!(rendered.contains("normalizer") && rendered.contains("policy"));
+        assert_eq!(
+            rendered,
+            "before_tool_call replacement from `normalizer` was replaced again by `policy` during bounded reinspection"
+        );
+    }
 }

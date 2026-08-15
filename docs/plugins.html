@@ -200,6 +200,27 @@ fn update_plan_definition() -&gt; ToolDefinition {
       </div>
     </div>
 
+    <div class="section" id="before-tool-call-composition">
+      <div class="section-header">
+        <h2>Before-tool-call composition</h2>
+        <p>Before-tool-call hooks may only preserve or reduce permission. Argument inspection remains effective on either side of one bounded replacement.</p>
+      </div>
+      <div class="listing">
+        <div class="listing__row">
+          <div class="listing__label">arguments</div>
+          <div class="listing__body"><p>Hooks run in plugin registration order. A <code>ReplaceToolArgs</code> directive takes effect immediately, then every earlier hook runs once on the replacement before the remaining chain advances. That repeated invocation is reinspection only: denials and aborts are re-honored, while side-effecting directives are not re-applied. Another replacement during bounded reinspection is rejected as a typed <code>BeforeToolCallReplacementConflict</code>; therefore two unconditional replacers fail closed, while a conditional normalizer that reaches a fixed point is supported.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">terminal precedence</div>
+          <div class="listing__body"><p>The fold joins terminal directives by restrictiveness: <code>AbortTurn</code> wins over a failed or cancelled <code>ShortCircuitTool</code>, which wins over a successful short-circuit. Equal-strength conflicts use plugin ID as a stable tie-breaker; within one plugin, the first-emitted equal-strength terminal wins. At this seam <code>AbortTurn</code> is a failed tool result rather than an enclosing-turn abort, so a later abort that displaces an earlier structured denial retains the denial's typed code and message.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">conflicts</div>
+          <div class="listing__body"><p>Lash emits each inter-plugin terminal conflict through the awaited session trace seam, carrying the winning and ignored plugin IDs and directive kinds and attributing the event to the actual later plugin. Re-emission of one plugin's own verdict is not a composition conflict. A runtime event named <code>before_tool_call.directive_conflict</code> carries the same identity-bearing payload when that secondary channel can accept it without blocking tool dispatch.</p></div>
+        </div>
+      </div>
+    </div>
+
     <div class="section" id="failure-modes">
       <div class="section-header">
         <h2>Failure Modes</h2>
