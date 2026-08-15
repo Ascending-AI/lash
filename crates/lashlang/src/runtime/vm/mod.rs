@@ -1170,7 +1170,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::BeginIter(binding) => {
                 let iterable = self.pop_stack()?;
-                let values = iterable_values(iterable).await?;
+                let values = self.iterable_values_for_dialect(iterable).await?;
                 if !values.is_empty() {
                     self.slots.ensure_assignable(
                         binding,

@@ -11,7 +11,8 @@ pub use id::HeapId;
 #[cfg(test)]
 pub(crate) use javascript_exotics::RegExpProgramCache;
 pub(crate) use javascript_exotics::{
-    DateObject, MapObject, RegExpObject, SetObject, canonical_regexp_flags, same_value_zero,
+    DateObject, MAX_JAVASCRIPT_LENGTH, MapObject, RegExpObject, SetObject, canonical_regexp_flags,
+    same_value_zero,
 };
 pub(crate) use validation::PersistedRoots;
 
@@ -675,13 +676,13 @@ impl Heap {
             HeapObject::Closure { .. } => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
-            HeapObject::RegExp(_)
+            object @ (HeapObject::RegExp(_)
             | HeapObject::Map(_)
             | HeapObject::Set(_)
-            | HeapObject::Date(_) => {
+            | HeapObject::Date(_)) => {
                 // Exotic values intentionally have no detached `Value` shape:
                 // detaching would destroy identity or expose internal slots.
-                return Err(RuntimeError::FunctionValueAtHostBoundary);
+                return Err(javascript_exotics::host_boundary_error(&object));
             }
         };
         active.remove(id);
@@ -867,7 +868,7 @@ impl Heap {
             | HeapObject::Map(_)
             | HeapObject::Set(_)
             | HeapObject::Date(_) => {
-                return Err(RuntimeError::FunctionValueAtHostBoundary);
+                return Err(javascript_exotics::host_boundary_error(self.get(*id)?));
             }
         };
         active.remove(id);

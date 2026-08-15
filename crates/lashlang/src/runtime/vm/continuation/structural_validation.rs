@@ -143,7 +143,15 @@ pub(super) fn validate_continuation(
                 validate_values(&set.values, &format!("heap Set {}", id.get()))?;
                 validate_heap_references(&continuation.heap.heap, &set.values)?;
             }
-            HeapObject::RegExp(_) | HeapObject::Date(_) => {}
+            HeapObject::RegExp(regexp) => {
+                if regexp.last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
+                    return Err(ContinuationError::UnserializableValue {
+                        location: format!("heap RegExp {}", id.get()),
+                        variant: "lastIndex beyond JavaScript's maximum safe length",
+                    });
+                }
+            }
+            HeapObject::Date(_) => {}
         }
     }
     for (depth, frame) in continuation.frame_stack.iter().enumerate() {
@@ -183,7 +191,7 @@ pub(super) fn validate_continuation(
         {
             let result_cursor_is_valid = match completion {
                 VmCallbackCompletion::Collect => results.len().saturating_add(1) == *next_index,
-                VmCallbackCompletion::Discard => results.is_empty(),
+                VmCallbackCompletion::Discard => *next_index >= 1 && results.is_empty(),
             };
             if *next_index > calls.len() || !result_cursor_is_valid {
                 return Err(ContinuationError::UnserializableValue {

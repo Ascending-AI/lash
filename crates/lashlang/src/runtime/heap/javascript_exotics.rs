@@ -1,4 +1,7 @@
 use super::*;
+use crate::runtime::{javascript_to_number, javascript_to_string};
+
+pub(crate) const MAX_JAVASCRIPT_LENGTH: u64 = 9_007_199_254_740_991;
 
 /// Non-durable slot for WP-C's compiled matcher.
 ///
@@ -80,8 +83,15 @@ impl Heap {
         &mut self,
         entries: Vec<(Value, Value)>,
     ) -> Result<Value, RuntimeError> {
-        let mut normalized = Vec::<(Value, Value)>::with_capacity(entries.len());
-        for (key, value) in entries {
+        let entry_count = entries.len();
+        let values = entries
+            .into_iter()
+            .flat_map(|(key, value)| [key, value])
+            .collect::<Vec<_>>();
+        let mut values = self.import_values(values, 0)?.into_iter();
+        let mut normalized = Vec::<(Value, Value)>::with_capacity(entry_count);
+        while let (Some(key), Some(value)) = (values.next(), values.next()) {
+            let key = normalize_same_value_zero_storage(key);
             if let Some((_, stored)) = normalized
                 .iter_mut()
                 .find(|(candidate, _)| same_value_zero(candidate, &key))
@@ -97,8 +107,10 @@ impl Heap {
     }
 
     pub(crate) fn allocate_set(&mut self, values: Vec<Value>) -> Result<Value, RuntimeError> {
+        let values = self.import_values(values, 0)?;
         let mut normalized = Vec::with_capacity(values.len());
         for value in values {
+            let value = normalize_same_value_zero_storage(value);
             if !normalized
                 .iter()
                 .any(|candidate| same_value_zero(candidate, &value))
@@ -192,6 +204,9 @@ impl Heap {
         key: Value,
         value: Value,
     ) -> Result<(), RuntimeError> {
+        let mut imported = self.import_values(vec![key, value], 0)?.into_iter();
+        let key = normalize_same_value_zero_storage(imported.next().expect("Map key imported"));
+        let value = imported.next().expect("Map value imported");
         self.update_object(id, |object| {
             let HeapObject::Map(map) = object else {
                 return false;
@@ -249,6 +264,8 @@ impl Heap {
     }
 
     pub(crate) fn set_add(&mut self, id: HeapId, value: Value) -> Result<(), RuntimeError> {
+        let value = self.import_values(vec![value], 0)?.remove(0);
+        let value = normalize_same_value_zero_storage(value);
         self.update_object(id, |object| {
             let HeapObject::Set(set) = object else {
                 return false;
@@ -351,6 +368,95 @@ impl Heap {
         object: HeapObject,
     ) -> Result<(), RuntimeError> {
         self.commit_object_update(id, object)
+    }
+
+    /// Applies JavaScript's object-to-primitive conversion without detaching a
+    /// heap object or recursing through `Value::Ref` unchanged.
+    pub(crate) fn javascript_to_primitive_string_or_number(
+        &self,
+        value: &Value,
+    ) -> Result<Value, RuntimeError> {
+        self.javascript_to_primitive_inner(value, &mut BTreeSet::new())
+    }
+
+    pub(crate) fn javascript_to_number(&self, value: &Value) -> Result<f64, RuntimeError> {
+        let primitive = self.javascript_to_primitive_string_or_number(value)?;
+        Ok(javascript_to_number(&primitive))
+    }
+
+    fn javascript_to_primitive_inner(
+        &self,
+        value: &Value,
+        active: &mut BTreeSet<HeapId>,
+    ) -> Result<Value, RuntimeError> {
+        let object = match value {
+            Value::Ref(id) => {
+                if !active.insert(*id) {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: "TS_CYCLIC_COERCION_UNSUPPORTED: cyclic object coercion"
+                            .to_string(),
+                    });
+                }
+                Some((*id, self.get(*id)?))
+            }
+            _ => None,
+        };
+        let primitive = match object.map(|(_, object)| object) {
+            Some(HeapObject::Tuple(values) | HeapObject::List(values)) => {
+                Value::String(self.javascript_sequence_string(values, active)?.into())
+            }
+            Some(HeapObject::Record(_)) => Value::String("[object Object]".into()),
+            Some(HeapObject::Date(date)) => Value::Number(date.milliseconds),
+            Some(HeapObject::Map(_)) => Value::String("[object Map]".into()),
+            Some(HeapObject::Set(_)) => Value::String("[object Set]".into()),
+            Some(HeapObject::RegExp(_)) => Value::String("[object RegExp]".into()),
+            Some(HeapObject::Closure { .. }) => {
+                return Err(RuntimeError::FunctionValueAtHostBoundary);
+            }
+            None => match value {
+                Value::Tuple(values) | Value::List(values) => {
+                    Value::String(self.javascript_sequence_string(values, active)?.into())
+                }
+                Value::Record(_) | Value::Image(_) | Value::Resource(_) => {
+                    Value::String("[object Object]".into())
+                }
+                other => other.clone(),
+            },
+        };
+        if let Value::Ref(id) = value {
+            active.remove(id);
+        }
+        Ok(primitive)
+    }
+
+    fn javascript_sequence_string(
+        &self,
+        values: &[Value],
+        active: &mut BTreeSet<HeapId>,
+    ) -> Result<String, RuntimeError> {
+        values
+            .iter()
+            .map(|value| match value {
+                Value::Null | Value::Undefined => Ok(String::new()),
+                other => self
+                    .javascript_to_primitive_inner(other, active)
+                    .map(|primitive| javascript_to_string(&primitive)),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|items| items.join(","))
+    }
+}
+
+fn normalize_same_value_zero_storage(value: Value) -> Value {
+    match value {
+        Value::Number(number) if number == 0.0 && number.is_sign_negative() => Value::Number(0.0),
+        value => value,
+    }
+}
+
+pub(super) fn host_boundary_error(object: &HeapObject) -> RuntimeError {
+    RuntimeError::JavaScriptExoticAtHostBoundary {
+        kind: object.kind_name().to_string(),
     }
 }
 

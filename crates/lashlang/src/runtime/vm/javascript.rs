@@ -1,6 +1,5 @@
 use super::super::{
-    ensure_javascript_string_size, javascript_string_size_error,
-    javascript_to_primitive_string_or_number, javascript_to_string,
+    ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
 use super::*;
@@ -44,11 +43,41 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
+    pub(super) async fn iterable_values_for_dialect(
+        &mut self,
+        iterable: Value,
+    ) -> Result<ListValue, RuntimeError> {
+        match iterable {
+            Value::Ref(id) if self.reference_semantics => match self.heap.get(id)? {
+                HeapObject::Map(map) => Ok(map
+                    .entries
+                    .iter()
+                    .map(|(key, value)| Value::List(vec![key.clone(), value.clone()].into()))
+                    .collect::<Vec<_>>()
+                    .into()),
+                HeapObject::Set(set) => Ok(set.values.clone().into()),
+                HeapObject::RegExp(_) | HeapObject::Date(_) => {
+                    Err(RuntimeError::ValidationFailed {
+                        reason: format!(
+                            "TS_FOR_OF_EXOTIC_UNSUPPORTED: {} is not iterable",
+                            self.heap.get(id)?.kind_name()
+                        ),
+                    })
+                }
+                _ => {
+                    let exported = self.heap.export_for_instruction(&Value::Ref(id))?;
+                    iterable_values(exported).await
+                }
+            },
+            iterable => iterable_values(iterable).await,
+        }
+    }
+
     pub(super) fn execute_javascript_unary(
         &mut self,
         op: JavaScriptUnaryOp,
     ) -> Result<(), RuntimeError> {
-        let mut value = self.pop_stack()?;
+        let value = self.pop_stack()?;
         if op == JavaScriptUnaryOp::TypeOf
             && let Value::Ref(id) = value
         {
@@ -61,10 +90,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 .into(),
             ));
+        } else if matches!(op, JavaScriptUnaryOp::Plus | JavaScriptUnaryOp::Negate) {
+            let number = self.heap.javascript_to_number(&value)?;
+            self.stack
+                .push(Value::Number(if op == JavaScriptUnaryOp::Negate {
+                    -number
+                } else {
+                    number
+                }));
         } else {
-            if op != JavaScriptUnaryOp::TypeOf && matches!(value, Value::Ref(_)) {
-                value = self.heap.export_for_instruction(&value)?;
-            }
+            // Every JavaScript object is truthy, including an exotic reference.
             self.stack.push(eval_javascript_unary(value, op));
         }
         Ok(())
@@ -76,20 +111,37 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<(), RuntimeError> {
         let mut right = self.pop_stack()?;
         let mut left = self.pop_stack()?;
-        if !matches!(
+        let strict = matches!(
             op,
             JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual
-        ) {
-            if matches!(left, Value::Ref(_)) {
-                left = self.heap.export_for_instruction(&left)?;
-            }
-            if matches!(right, Value::Ref(_)) {
-                right = self.heap.export_for_instruction(&right)?;
+        );
+        let loose = matches!(
+            op,
+            JavaScriptBinaryOp::LooseEqual | JavaScriptBinaryOp::LooseNotEqual
+        );
+        if op == JavaScriptBinaryOp::Add
+            && [&left, &right].into_iter().any(
+                |value| matches!(value, Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::Date(_)))),
+            )
+        {
+            return Err(js_stdlib_error(
+                "TS_DATE_STRING_COERCION_PENDING: Date addition requires Date string semantics",
+            ));
+        }
+        if !strict {
+            let both_objects = matches!(left, Value::Ref(_)) && matches!(right, Value::Ref(_));
+            if !loose || !both_objects {
+                if matches!(left, Value::Ref(_)) {
+                    left = self.heap.javascript_to_primitive_string_or_number(&left)?;
+                }
+                if matches!(right, Value::Ref(_)) {
+                    right = self.heap.javascript_to_primitive_string_or_number(&right)?;
+                }
             }
         }
         if op == JavaScriptBinaryOp::Add {
-            let left_primitive = javascript_to_primitive_string_or_number(&left);
-            let right_primitive = javascript_to_primitive_string_or_number(&right);
+            let left_primitive = self.heap.javascript_to_primitive_string_or_number(&left)?;
+            let right_primitive = self.heap.javascript_to_primitive_string_or_number(&right)?;
             if matches!(left_primitive, Value::String(_))
                 || matches!(right_primitive, Value::String(_))
             {
@@ -155,6 +207,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_heap_new(&mut self, argc: usize) -> Result<(), RuntimeError> {
+        if !self.reference_semantics {
+            return Err(RuntimeError::ValidationFailed {
+                reason: "TYPESCRIPT_REFERENCE_SEMANTICS_REQUIRED: JavaScript heap constructors are unavailable in Lashlang"
+                    .to_string(),
+            });
+        }
         let mut values = Vec::with_capacity(argc);
         for _ in 0..argc {
             values.push(self.pop_stack()?);
@@ -189,9 +247,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let set_values = heap_sequence(&self.heap, values)?;
                 self.heap.allocate_set(set_values)?
             }
-            ("Date", [milliseconds]) => self
-                .heap
-                .allocate_date(super::super::javascript_to_number(milliseconds))?,
+            ("Date", [milliseconds]) => {
+                let milliseconds = self.heap.javascript_to_number(milliseconds)?;
+                self.heap.allocate_date(milliseconds)?
+            }
             _ => {
                 return Err(js_stdlib_error(format!(
                     "TS_CONSTRUCTOR_UNSUPPORTED: {kind} with {} argument(s)",
@@ -266,6 +325,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .into(),
             )),
             ("Map", "forEach", [function]) => {
+                // Durable determinism deliberately snapshots the complete call
+                // sequence here. Entries added during callbacks are not visited,
+                // while an entry deleted before its turn remains in the snapshot.
                 let calls = self
                     .heap
                     .map_entries(receiver)?
@@ -304,6 +366,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 ))
             }
             ("Set", "forEach", [function]) => {
+                // As with Map, the durable callback driver consumes this cloned
+                // snapshot: later additions are not visited and later deletions
+                // do not remove an already-scheduled callback.
                 let calls = self
                     .heap
                     .set_values(receiver)?

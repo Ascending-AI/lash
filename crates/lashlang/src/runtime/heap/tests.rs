@@ -148,6 +148,7 @@ fn map_and_set_use_same_value_zero_without_reordering_updates() {
     assert_eq!(entries.len(), 2);
     assert!(matches!(entries[0].0, Value::Number(value) if value.is_nan()));
     assert_eq!(entries[0].1, Value::String("updated".into()));
+    assert!(matches!(entries[1].0, Value::Number(value) if value.to_bits() == 0.0_f64.to_bits()));
     assert_eq!(entries[1].1, Value::String("same zero".into()));
 
     let Value::Ref(set) = heap.allocate_set(Vec::new()).expect("Set") else {
@@ -160,7 +161,54 @@ fn map_and_set_use_same_value_zero_without_reordering_updates() {
     let values = heap.set_values(set).expect("read Set").expect("Set kind");
     assert_eq!(values.len(), 2);
     assert!(matches!(values[0], Value::Number(value) if value.is_nan()));
-    assert!(matches!(values[1], Value::Number(value) if value == 0.0));
+    assert!(matches!(values[1], Value::Number(value) if value.to_bits() == 0.0_f64.to_bits()));
+}
+
+#[test]
+fn exotic_member_apis_import_inline_compounds_before_storage() {
+    let mut heap = Heap::default();
+    let inline_list = || Value::List(vec![Value::Number(1.0)].into());
+    let inline_record = || {
+        Value::Record(std::sync::Arc::new({
+            let mut record = Record::new();
+            record.insert("nested".to_string(), Value::Bool(true));
+            record
+        }))
+    };
+
+    let Value::Ref(map) = heap
+        .allocate_map(vec![(inline_list(), inline_record())])
+        .expect("Map imports constructor members")
+    else {
+        unreachable!()
+    };
+    let entries = heap.map_entries(map).expect("read Map").expect("Map");
+    assert!(matches!(entries[0], (Value::Ref(_), Value::Ref(_))));
+
+    heap.map_set(map, inline_record(), inline_list())
+        .expect("Map.set imports members");
+    let entries = heap.map_entries(map).expect("read Map").expect("Map");
+    assert!(
+        entries
+            .iter()
+            .all(|(key, value)| matches!(key, Value::Ref(_)) && matches!(value, Value::Ref(_)))
+    );
+
+    let Value::Ref(set) = heap
+        .allocate_set(vec![inline_list()])
+        .expect("Set imports constructor values")
+    else {
+        unreachable!()
+    };
+    heap.set_add(set, inline_record())
+        .expect("Set.add imports values");
+    assert!(
+        heap.set_values(set)
+            .expect("read Set")
+            .expect("Set")
+            .iter()
+            .all(|value| matches!(value, Value::Ref(_)))
+    );
 }
 
 #[test]
@@ -225,4 +273,22 @@ fn exotic_kinds_have_deterministic_logical_byte_charges() {
         date.logical_bytes(),
         OBJECT_HEADER_BYTES + VALUE_SLOT_BYTES + 8
     );
+}
+
+#[test]
+fn exotic_host_boundary_errors_are_not_reported_as_function_values() {
+    let mut heap = Heap::default();
+    let values = [
+        heap.allocate_regexp("a".to_string(), "g".to_string())
+            .expect("RegExp"),
+        heap.allocate_map(Vec::new()).expect("Map"),
+        heap.allocate_set(Vec::new()).expect("Set"),
+        heap.allocate_date(0.0).expect("Date"),
+    ];
+    for value in values {
+        assert!(matches!(
+            heap.export_for_instruction(&value),
+            Err(RuntimeError::JavaScriptExoticAtHostBoundary { .. })
+        ));
+    }
 }

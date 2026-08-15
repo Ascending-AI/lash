@@ -453,12 +453,17 @@ mod continuation_serde {
                 pattern,
                 flags,
                 last_index,
-            } => HeapObject::RegExp(RegExpObject {
-                pattern,
-                flags,
-                last_index,
-                compiled_program: None,
-            }),
+            } => {
+                if last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
+                    return Err("RegExp last_index exceeds JavaScript's maximum safe length");
+                }
+                HeapObject::RegExp(RegExpObject {
+                    pattern,
+                    flags,
+                    last_index,
+                    compiled_program: None,
+                })
+            }
             HeapObjectWire::Map { entries } => HeapObject::Map(MapObject {
                 entries: entries
                     .into_iter()
@@ -1348,6 +1353,23 @@ mod tests {
         };
         assert_eq!(nan.to_bits(), 0x7ff8_0000_0000_0000);
         assert_eq!(negative_zero.to_bits(), (-0.0_f64).to_bits());
+    }
+
+    #[test]
+    fn continuation_decode_rejects_regexp_last_index_above_maximum_safe_length() {
+        let mut heap = Heap::default();
+        let regexp = heap
+            .allocate_regexp("a+".to_string(), "g".to_string())
+            .expect("RegExp");
+        let mut continuation = empty_continuation(heap);
+        continuation.reference_semantics = true;
+        continuation.operand_stack.push(regexp);
+        let mut wire = serde_json::to_value(&continuation).expect("continuation wire");
+        wire["heap"]["objects"][0]["object"]["last_index"] =
+            serde_json::json!(crate::runtime::heap::MAX_JAVASCRIPT_LENGTH + 1);
+        let error = serde_json::from_value::<VmContinuation>(wire)
+            .expect_err("out-of-range lastIndex must not decode");
+        assert!(error.to_string().contains("maximum safe length"), "{error}");
     }
 
     #[test]

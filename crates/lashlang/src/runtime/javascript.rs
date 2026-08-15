@@ -188,6 +188,10 @@ pub(crate) fn javascript_to_number(value: &Value) -> f64 {
         Value::Bool(value) => u8::from(*value).into(),
         Value::Number(value) => *value,
         Value::String(value) => javascript_string_to_number(value),
+        // Heap-aware VM paths resolve references before reaching this scalar
+        // fallback. Keeping the fallback total prevents an accidentally
+        // unhandled reference or projection from recursing unchanged forever.
+        Value::Ref(_) | Value::Projected(_) => f64::NAN,
         value => javascript_to_number(&javascript_to_primitive_string_or_number(value)),
     }
 }

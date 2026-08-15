@@ -63,6 +63,9 @@ pub enum RuntimeError {
     /// Function values cannot cross host-facing value boundaries.
     #[error("function values cannot cross a lashlang host boundary")]
     FunctionValueAtHostBoundary,
+    /// JavaScript exotic objects have no detached host-facing value shape.
+    #[error("JavaScript {kind} values cannot cross a lashlang host boundary")]
+    JavaScriptExoticAtHostBoundary { kind: String },
     /// Effects from callbacks require a resumable builtin protocol not yet present.
     #[error("effects are not supported inside builtin callbacks")]
     EffectInBuiltinCallback,
@@ -450,6 +453,7 @@ impl RuntimeError {
             Self::UnknownFunction { .. } => ErrorTaxonomy::Catchable,
             Self::ClosureCaptureCountMismatch { .. } => ErrorTaxonomy::Catchable,
             Self::FunctionValueAtHostBoundary => ErrorTaxonomy::Catchable,
+            Self::JavaScriptExoticAtHostBoundary { .. } => ErrorTaxonomy::Catchable,
             Self::EffectInBuiltinCallback => ErrorTaxonomy::Catchable,
             Self::InstructionBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::ExecutionDeadlineExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
@@ -573,6 +577,7 @@ impl RuntimeError {
             Self::UnknownFunction { .. } => "UnknownFunction",
             Self::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
             Self::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            Self::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
             Self::EffectInBuiltinCallback => "EffectInBuiltinCallback",
             Self::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
             Self::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
@@ -750,6 +755,7 @@ mod tests {
                 actual: 2,
             },
             RuntimeError::FunctionValueAtHostBoundary,
+            RuntimeError::JavaScriptExoticAtHostBoundary { kind: "Map".into() },
             RuntimeError::EffectInBuiltinCallback,
             RuntimeError::InstructionBudgetExceeded { limit: 10 },
             RuntimeError::ExecutionDeadlineExceeded { limit_ms: 20 },
@@ -1041,6 +1047,9 @@ mod tests {
                 RuntimeError::FunctionValueAtHostBoundary => {
                     "function values cannot cross a lashlang host boundary"
                 }
+                RuntimeError::JavaScriptExoticAtHostBoundary { .. } => {
+                    "JavaScript Map values cannot cross a lashlang host boundary"
+                }
                 RuntimeError::EffectInBuiltinCallback => {
                     "effects are not supported inside builtin callbacks"
                 }
@@ -1293,7 +1302,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 112] = [
+    const RUNTIME_ERROR_CODES: [&str; 113] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1301,6 +1310,7 @@ mod tests {
         "UnknownFunction",
         "ClosureCaptureCountMismatch",
         "FunctionValueAtHostBoundary",
+        "JavaScriptExoticAtHostBoundary",
         "EffectInBuiltinCallback",
         "InstructionBudgetExceeded",
         "ExecutionDeadlineExceeded",
@@ -1423,6 +1433,7 @@ mod tests {
             RuntimeError::UnknownFunction { .. } => "UnknownFunction",
             RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
             RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            RuntimeError::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
             RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
             RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
             RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",

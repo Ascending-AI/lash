@@ -255,7 +255,10 @@ pub(super) fn materialize_runtime_globals(
             }
             // Function values remain VM-private heap objects. A closure at any
             // depth omits the whole global rather than leaking a partial tree.
-            Err(RuntimeError::FunctionValueAtHostBoundary) => {}
+            Err(
+                RuntimeError::FunctionValueAtHostBoundary
+                | RuntimeError::JavaScriptExoticAtHostBoundary { .. },
+            ) => {}
             Err(error) => return Err(error),
         }
     }
@@ -617,7 +620,10 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                         Ok(value) => {
                             globals.insert(name.to_string(), value);
                         }
-                        Err(RuntimeError::FunctionValueAtHostBoundary) => {}
+                        Err(
+                            RuntimeError::FunctionValueAtHostBoundary
+                            | RuntimeError::JavaScriptExoticAtHostBoundary { .. },
+                        ) => {}
                         Err(error) => {
                             return Err(SnapshotDecodeError::InvalidEncoding(error.to_string()));
                         }

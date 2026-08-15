@@ -53,14 +53,28 @@ pub(super) fn validate_program_continuation(
             .return_instruction_pointer
             .checked_sub(1)
             .and_then(|index| chunk.code.get(index));
-        if !matches!(
-            call_instruction,
-            Some(
-                Instruction::Call { .. }
-                    | Instruction::Map
-                    | Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_))
+        let return_site_matches = matches!(
+            (call_instruction, &frame.return_target),
+            (
+                Some(Instruction::Call { .. }),
+                VmFrameReturnContinuation::Direct
+            ) | (
+                Some(Instruction::Map),
+                VmFrameReturnContinuation::Callback {
+                    completion: VmCallbackCompletion::Collect,
+                    allow_effects: false,
+                    ..
+                },
+            ) | (
+                Some(Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_))),
+                VmFrameReturnContinuation::Callback {
+                    completion: VmCallbackCompletion::Discard,
+                    allow_effects: true,
+                    ..
+                },
             )
-        ) {
+        );
+        if !return_site_matches {
             return Err(ContinuationError::InvalidReturnSite {
                 frame: frame_index,
                 instruction_pointer: frame.return_instruction_pointer,

@@ -134,11 +134,10 @@ dialect may write durable state.
 ### Format versions
 
 The substrate layers shipped so far move the durable contracts to bytecode
-format 7, continuation format 5, and `lashlang-vm-abi-v5`. ADR 0055's rollout
-rule applies unchanged: these are clean cutovers, so deployments drain or
-recreate parked Lashlang processes, and older continuations are neither migrated
-nor decoded. There is no migration decoder at any version boundary in this
-programme.
+format 8, continuation format 6, `lashlang-vm-abi-v6`, and snapshot format 5.
+ADR 0055's clean-cutover rule applies unchanged: deployments drain or recreate
+parked Lashlang processes, older bytes are neither migrated nor decoded, and no
+compatibility decoder exists at any of these version boundaries.
 
 ## Consequences
 

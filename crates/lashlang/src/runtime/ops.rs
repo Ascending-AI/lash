@@ -1314,12 +1314,9 @@ pub(crate) fn is_truthy(value: &Value) -> bool {
         Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => true,
         Value::Tuple(values) => !values.is_empty(),
         Value::Projected(value) => futures_executor::block_on(value.truthy()),
-        // A heap object is a tuple, list or record; every one of those is truthy
-        // except an empty tuple, so this is the closest defined answer.
-        Value::Ref(_) => {
-            debug_assert_exported_value("truthiness");
-            true
-        }
+        // Reference-semantic dialect objects are always truthy. Copy-semantic
+        // opcodes still export their values before reaching this predicate.
+        Value::Ref(_) => true,
     }
 }
 

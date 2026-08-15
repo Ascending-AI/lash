@@ -224,18 +224,16 @@ pub(crate) fn read_javascript_heap_index(
     id: HeapId,
     index: &Value,
 ) -> Result<Value, RuntimeError> {
-    let key = javascript_to_string(index);
-    if key == "lastIndex"
-        && let Some(last_index) = heap.regexp_last_index(id)?
-    {
-        return Ok(Value::Number(last_index as f64));
-    }
     Ok(match heap.get(id)? {
         HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index(index)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined),
-        HeapObject::Record(record) => record.get(&key).cloned().unwrap_or(Value::Undefined),
-        HeapObject::RegExp(regexp) => match key.as_str() {
+        HeapObject::Record(record) => record
+            .get(&javascript_to_string(index))
+            .cloned()
+            .unwrap_or(Value::Undefined),
+        HeapObject::RegExp(regexp) => match javascript_to_string(index).as_str() {
+            "lastIndex" => Value::Number(regexp.last_index as f64),
             "source" => Value::String(regexp.pattern.as_str().into()),
             "flags" => Value::String(regexp.flags.as_str().into()),
             "global" => Value::Bool(regexp.flags.contains('g')),
@@ -245,8 +243,12 @@ pub(crate) fn read_javascript_heap_index(
             "unicode" => Value::Bool(regexp.flags.contains('u')),
             _ => Value::Undefined,
         },
-        HeapObject::Map(map) if key == "size" => Value::Number(map.entries.len() as f64),
-        HeapObject::Set(set) if key == "size" => Value::Number(set.values.len() as f64),
+        HeapObject::Map(map) if javascript_to_string(index) == "size" => {
+            Value::Number(map.entries.len() as f64)
+        }
+        HeapObject::Set(set) if javascript_to_string(index) == "size" => {
+            Value::Number(set.values.len() as f64)
+        }
         _ => Value::Undefined,
     })
 }

@@ -96,12 +96,19 @@ impl CanonicalHeapObject {
                 pattern,
                 flags,
                 last_index,
-            } => HeapObject::RegExp(RegExpObject {
-                pattern,
-                flags,
-                last_index,
-                compiled_program: None,
-            }),
+            } => {
+                if last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
+                    return Err(SnapshotDecodeError::InvalidEncoding(
+                        "RegExp last_index exceeds JavaScript's maximum safe length".to_string(),
+                    ));
+                }
+                HeapObject::RegExp(RegExpObject {
+                    pattern,
+                    flags,
+                    last_index,
+                    compiled_program: None,
+                })
+            }
             Self::Map { entries } => HeapObject::Map(MapObject {
                 entries: entries
                     .into_iter()
