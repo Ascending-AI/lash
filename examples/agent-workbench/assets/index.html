@@ -6220,7 +6220,9 @@
     setInterval(refreshQueuedWork, 1400);
     setInterval(loadTriggers, 1400);
     setInterval(loadAccounts, 1500);
-    setInterval(loadSessions, 2500);
+    /* Slower than the other rails: the roster reads each session's recorded
+       dialect from the session itself, so a poll costs one open per session. */
+    setInterval(loadSessions, 5000);
   </script>
 </body>
 </html>
