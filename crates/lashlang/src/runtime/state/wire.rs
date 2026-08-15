@@ -33,6 +33,35 @@ impl CanonicalHeapObject {
                 function: *function,
                 captures: canonical_items(captures, &location, 0)?,
             },
+            HeapObject::RegExp(regexp) => Self::RegExp {
+                pattern: regexp.pattern.clone(),
+                flags: regexp.flags.clone(),
+                last_index: regexp.last_index,
+            },
+            HeapObject::Map(map) => Self::Map {
+                entries: map
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (key, value))| {
+                        let location = format!("{location}.entries[{index}]");
+                        Ok(CanonicalMapEntry {
+                            key: CanonicalValue::from_runtime(key, &format!("{location}.key"), 0)?,
+                            value: CanonicalValue::from_runtime(
+                                value,
+                                &format!("{location}.value"),
+                                0,
+                            )?,
+                        })
+                    })
+                    .collect::<Result<_, ContinuationError>>()?,
+            },
+            HeapObject::Set(set) => Self::Set {
+                values: canonical_items(&set.values, &location, 0)?,
+            },
+            HeapObject::Date(date) => Self::Date {
+                milliseconds: normalize_number(date.milliseconds),
+            },
         })
     }
 
@@ -63,6 +92,31 @@ impl CanonicalHeapObject {
                     .map(CanonicalValue::into_runtime)
                     .collect::<Result<_, _>>()?,
             },
+            Self::RegExp {
+                pattern,
+                flags,
+                last_index,
+            } => HeapObject::RegExp(RegExpObject {
+                pattern,
+                flags,
+                last_index,
+                compiled_program: None,
+            }),
+            Self::Map { entries } => HeapObject::Map(MapObject {
+                entries: entries
+                    .into_iter()
+                    .map(|entry| Ok((entry.key.into_runtime()?, entry.value.into_runtime()?)))
+                    .collect::<Result<_, SnapshotDecodeError>>()?,
+            }),
+            Self::Set { values } => HeapObject::Set(SetObject {
+                values: values
+                    .into_iter()
+                    .map(CanonicalValue::into_runtime)
+                    .collect::<Result<_, _>>()?,
+            }),
+            Self::Date { milliseconds } => HeapObject::Date(DateObject {
+                milliseconds: normalize_number(milliseconds),
+            }),
         })
     }
 }

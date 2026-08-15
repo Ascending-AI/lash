@@ -147,7 +147,8 @@ pub(crate) async fn execute_intrinsic(
         }
         IntrinsicOp::JavaScriptSplit
         | IntrinsicOp::JavaScriptJoin
-        | IntrinsicOp::JavaScriptStdlib(_) => {
+        | IntrinsicOp::JavaScriptStdlib(_)
+        | IntrinsicOp::JavaScriptHeapNew(_) => {
             Err(RuntimeError::ContextDependentIntrinsicMisdispatch {
                 context: "TypeScript container intrinsic".into(),
             })

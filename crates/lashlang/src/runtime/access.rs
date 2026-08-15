@@ -186,6 +186,11 @@ pub(crate) fn read_javascript_heap_field(
     id: HeapId,
     field: &Name,
 ) -> Result<Value, RuntimeError> {
+    if field.text.as_ref() == "lastIndex"
+        && let Some(last_index) = heap.regexp_last_index(id)?
+    {
+        return Ok(Value::Number(last_index as f64));
+    }
     Ok(match heap.get(id)? {
         HeapObject::Record(record) => record
             .get_symbol(field.symbol)
@@ -193,6 +198,22 @@ pub(crate) fn read_javascript_heap_field(
             .unwrap_or(Value::Undefined),
         HeapObject::List(values) | HeapObject::Tuple(values) if field.text.as_ref() == "length" => {
             Value::Number(values.len() as f64)
+        }
+        HeapObject::RegExp(regexp) => match field.text.as_ref() {
+            "source" => Value::String(regexp.pattern.as_str().into()),
+            "flags" => Value::String(regexp.flags.as_str().into()),
+            "global" => Value::Bool(regexp.flags.contains('g')),
+            "ignoreCase" => Value::Bool(regexp.flags.contains('i')),
+            "multiline" => Value::Bool(regexp.flags.contains('m')),
+            "sticky" => Value::Bool(regexp.flags.contains('y')),
+            "unicode" => Value::Bool(regexp.flags.contains('u')),
+            _ => Value::Undefined,
+        },
+        HeapObject::Map(map) if field.text.as_ref() == "size" => {
+            Value::Number(map.entries.len() as f64)
+        }
+        HeapObject::Set(set) if field.text.as_ref() == "size" => {
+            Value::Number(set.values.len() as f64)
         }
         _ => Value::Undefined,
     })
@@ -203,14 +224,29 @@ pub(crate) fn read_javascript_heap_index(
     id: HeapId,
     index: &Value,
 ) -> Result<Value, RuntimeError> {
+    let key = javascript_to_string(index);
+    if key == "lastIndex"
+        && let Some(last_index) = heap.regexp_last_index(id)?
+    {
+        return Ok(Value::Number(last_index as f64));
+    }
     Ok(match heap.get(id)? {
         HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index(index)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined),
-        HeapObject::Record(record) => record
-            .get(&javascript_to_string(index))
-            .cloned()
-            .unwrap_or(Value::Undefined),
+        HeapObject::Record(record) => record.get(&key).cloned().unwrap_or(Value::Undefined),
+        HeapObject::RegExp(regexp) => match key.as_str() {
+            "source" => Value::String(regexp.pattern.as_str().into()),
+            "flags" => Value::String(regexp.flags.as_str().into()),
+            "global" => Value::Bool(regexp.flags.contains('g')),
+            "ignoreCase" => Value::Bool(regexp.flags.contains('i')),
+            "multiline" => Value::Bool(regexp.flags.contains('m')),
+            "sticky" => Value::Bool(regexp.flags.contains('y')),
+            "unicode" => Value::Bool(regexp.flags.contains('u')),
+            _ => Value::Undefined,
+        },
+        HeapObject::Map(map) if key == "size" => Value::Number(map.entries.len() as f64),
+        HeapObject::Set(set) if key == "size" => Value::Number(set.values.len() as f64),
         _ => Value::Undefined,
     })
 }

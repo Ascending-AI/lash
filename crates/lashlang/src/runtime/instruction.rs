@@ -389,6 +389,7 @@ pub(crate) enum IntrinsicOp {
     JavaScriptSplit,
     JavaScriptJoin,
     JavaScriptStdlib(usize),
+    JavaScriptHeapNew(usize),
     Trim,
     Slice,
     ToString,
@@ -569,6 +570,7 @@ impl IntrinsicOp {
             | IntrinsicOp::Format(argc)
             | IntrinsicOp::Range(argc)
             | IntrinsicOp::JavaScriptStdlib(argc)
+            | IntrinsicOp::JavaScriptHeapNew(argc)
             | IntrinsicOp::InvalidArity { argc, .. }
             | IntrinsicOp::Unknown { argc, .. } => argc,
             IntrinsicOp::FormatCompiled(_)
@@ -593,6 +595,7 @@ impl IntrinsicOp {
             IntrinsicOp::JavaScriptSplit => BuiltinProfileTag::Split,
             IntrinsicOp::JavaScriptJoin => BuiltinProfileTag::Join,
             IntrinsicOp::JavaScriptStdlib(_) => BuiltinProfileTag::TypeScriptStdlib,
+            IntrinsicOp::JavaScriptHeapNew(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,

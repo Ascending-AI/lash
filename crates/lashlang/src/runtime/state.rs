@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use super::{
-    CompiledProgram, ContinuationError, Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue,
-    PersistedRoots, ProjectedValue, Record, ResourceHandle, RuntimeError, Value,
-    record_with_capacity,
+    CompiledProgram, ContinuationError, DateObject, Heap, HeapId, HeapObject, HeapRestoreWire,
+    ImageValue, MapObject, PersistedRoots, ProjectedValue, Record, RegExpObject, ResourceHandle,
+    RuntimeError, SetObject, Value, record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,7 +15,7 @@ mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 4;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 5;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the
@@ -395,6 +395,26 @@ enum CanonicalHeapObject {
         function: u32,
         captures: Vec<CanonicalValue>,
     },
+    RegExp {
+        pattern: String,
+        flags: String,
+        last_index: u64,
+    },
+    Map {
+        entries: Vec<CanonicalMapEntry>,
+    },
+    Set {
+        values: Vec<CanonicalValue>,
+    },
+    Date {
+        milliseconds: f64,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CanonicalMapEntry {
+    key: CanonicalValue,
+    value: CanonicalValue,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -715,7 +735,21 @@ const HEAP_FIELDS: &[&str] = &[
 ];
 const BINDING_FIELDS: &[&str] = &["name", "value"];
 const HEAP_ENTRY_FIELDS: &[&str] = &["id", "object"];
-const TAGGED_VALUE_FIELDS: &[&str] = &["kind", "value", "items", "fields", "function", "captures"];
+const TAGGED_VALUE_FIELDS: &[&str] = &[
+    "kind",
+    "value",
+    "items",
+    "fields",
+    "function",
+    "captures",
+    "pattern",
+    "flags",
+    "last_index",
+    "entries",
+    "values",
+    "milliseconds",
+];
+const MAP_ENTRY_FIELDS: &[&str] = &["key", "value"];
 
 fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
     let globals_result = validate_snapshot_globals(bytes);
@@ -744,6 +778,9 @@ fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError
             _ if is_collection_entry(location, "objects") => {
                 CanonicalMapOrder::Declared(HEAP_ENTRY_FIELDS)
             }
+            _ if is_collection_entry(location, "entries") => {
+                CanonicalMapOrder::Declared(MAP_ENTRY_FIELDS)
+            }
             _ if location.ends_with(".value") => CanonicalMapOrder::Unordered,
             _ => CanonicalMapOrder::Unordered,
         },
@@ -755,6 +792,7 @@ fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError
                 || is_collection_entry(location, "roots")
                 || is_collection_entry(location, "objects")
                 || is_collection_entry(location, "fields")
+                || is_collection_entry(location, "entries")
         },
     )?;
     globals_result

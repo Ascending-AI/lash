@@ -1,7 +1,10 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::super::{ExecutionBound, HeapObject, HeapRestoreWire, PersistedRoots};
+use super::super::{
+    DateObject, ExecutionBound, HeapObject, HeapRestoreWire, MapObject, PersistedRoots,
+    RegExpObject, SetObject,
+};
 use super::*;
 
 mod types;
@@ -13,7 +16,7 @@ pub use types::{
 
 use super::exceptions::PendingErrorOrigin;
 
-pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 5;
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
@@ -117,7 +120,7 @@ pub(crate) struct VmFrameContinuation {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum VmFrameReturnContinuation {
     Direct,
-    Map {
+    Callback {
         #[serde(
             serialize_with = "continuation_serde::serialize_value",
             deserialize_with = "continuation_serde::deserialize_value"
@@ -127,14 +130,23 @@ pub(crate) enum VmFrameReturnContinuation {
             serialize_with = "continuation_serde::serialize_values",
             deserialize_with = "continuation_serde::deserialize_values"
         )]
-        items: Vec<Value>,
+        calls: Vec<Value>,
         next_index: usize,
         #[serde(
             serialize_with = "continuation_serde::serialize_values",
             deserialize_with = "continuation_serde::deserialize_values"
         )]
         results: Vec<Value>,
+        completion: VmCallbackCompletion,
+        allow_effects: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum VmCallbackCompletion {
+    Collect,
+    Discard,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -232,6 +244,29 @@ mod continuation_serde {
         bits: u64,
     }
 
+    fn number_to_wire(value: f64) -> NumberWire {
+        NumberWire {
+            version: NUMBER_WIRE_VERSION,
+            bits: if value.is_nan() {
+                CANONICAL_NAN_BITS
+            } else {
+                value.to_bits()
+            },
+        }
+    }
+
+    fn number_from_wire(value: NumberWire) -> Result<f64, &'static str> {
+        if value.version != NUMBER_WIRE_VERSION {
+            return Err("unsupported continuation number wire version");
+        }
+        let number = f64::from_bits(value.bits);
+        Ok(if number.is_nan() {
+            f64::from_bits(CANONICAL_NAN_BITS)
+        } else {
+            number
+        })
+    }
+
     #[derive(Serialize, Deserialize)]
     struct HeapWire {
         next_id: u64,
@@ -263,6 +298,20 @@ mod continuation_serde {
             function: u32,
             captures: Vec<ValueWire>,
         },
+        RegExp {
+            pattern: String,
+            flags: String,
+            last_index: u64,
+        },
+        Map {
+            entries: Vec<(ValueWire, ValueWire)>,
+        },
+        Set {
+            values: Vec<ValueWire>,
+        },
+        Date {
+            milliseconds: NumberWire,
+        },
     }
 
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
@@ -270,14 +319,7 @@ mod continuation_serde {
             Value::Null => ValueWire::Null,
             Value::Undefined => ValueWire::Undefined,
             Value::Bool(value) => ValueWire::Bool(*value),
-            Value::Number(value) => ValueWire::Number(NumberWire {
-                version: NUMBER_WIRE_VERSION,
-                bits: if value.is_nan() {
-                    CANONICAL_NAN_BITS
-                } else {
-                    value.to_bits()
-                },
-            }),
+            Value::Number(value) => ValueWire::Number(number_to_wire(*value)),
             Value::String(value) => ValueWire::String(value.to_string()),
             Value::Image(value) => ValueWire::Image((**value).clone()),
             Value::Resource(value) => ValueWire::Resource(value.clone()),
@@ -298,17 +340,7 @@ mod continuation_serde {
             ValueWire::Null => Value::Null,
             ValueWire::Undefined => Value::Undefined,
             ValueWire::Bool(value) => Value::Bool(value),
-            ValueWire::Number(value) => {
-                if value.version != NUMBER_WIRE_VERSION {
-                    return Err("unsupported continuation number wire version");
-                }
-                let number = f64::from_bits(value.bits);
-                Value::Number(if number.is_nan() {
-                    f64::from_bits(CANONICAL_NAN_BITS)
-                } else {
-                    number
-                })
-            }
+            ValueWire::Number(value) => Value::Number(number_from_wire(value)?),
             ValueWire::String(value) => Value::String(value.into()),
             ValueWire::Image(value) => Value::Image(Box::new(value)),
             ValueWire::Resource(value) => Value::Resource(value),
@@ -368,6 +400,28 @@ mod continuation_serde {
                     .map(value_to_wire)
                     .collect::<Result<_, _>>()?,
             },
+            HeapObject::RegExp(regexp) => HeapObjectWire::RegExp {
+                pattern: regexp.pattern.clone(),
+                flags: regexp.flags.clone(),
+                last_index: regexp.last_index,
+            },
+            HeapObject::Map(map) => HeapObjectWire::Map {
+                entries: map
+                    .entries
+                    .iter()
+                    .map(|(key, value)| Ok((value_to_wire(key)?, value_to_wire(value)?)))
+                    .collect::<Result<_, &'static str>>()?,
+            },
+            HeapObject::Set(set) => HeapObjectWire::Set {
+                values: set
+                    .values
+                    .iter()
+                    .map(value_to_wire)
+                    .collect::<Result<_, _>>()?,
+            },
+            HeapObject::Date(date) => HeapObjectWire::Date {
+                milliseconds: number_to_wire(date.milliseconds),
+            },
         })
     }
 
@@ -395,6 +449,31 @@ mod continuation_serde {
                     .map(value_from_wire)
                     .collect::<Result<_, _>>()?,
             },
+            HeapObjectWire::RegExp {
+                pattern,
+                flags,
+                last_index,
+            } => HeapObject::RegExp(RegExpObject {
+                pattern,
+                flags,
+                last_index,
+                compiled_program: None,
+            }),
+            HeapObjectWire::Map { entries } => HeapObject::Map(MapObject {
+                entries: entries
+                    .into_iter()
+                    .map(|(key, value)| Ok((value_from_wire(key)?, value_from_wire(value)?)))
+                    .collect::<Result<_, &'static str>>()?,
+            }),
+            HeapObjectWire::Set { values } => HeapObject::Set(SetObject {
+                values: values
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<_, _>>()?,
+            }),
+            HeapObjectWire::Date { milliseconds } => HeapObject::Date(DateObject {
+                milliseconds: number_from_wire(milliseconds)?,
+            }),
         })
     }
 
@@ -807,11 +886,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 .collect::<Result<Vec<_>, _>>()?;
             let return_target = match &frame.return_target {
                 ReturnTarget::Direct => VmFrameReturnContinuation::Direct,
-                ReturnTarget::Map(callback) => VmFrameReturnContinuation::Map {
+                ReturnTarget::Callback(callback) => VmFrameReturnContinuation::Callback {
                     function: callback.function.clone(),
-                    items: callback.items.clone(),
+                    calls: callback.calls.clone(),
                     next_index: callback.next_index,
                     results: callback.results.clone(),
+                    completion: match callback.completion {
+                        CallbackCompletion::Collect => VmCallbackCompletion::Collect,
+                        CallbackCompletion::Discard => VmCallbackCompletion::Discard,
+                    },
+                    allow_effects: callback.allow_effects,
                 },
             };
             frame_stack.push(VmFrameContinuation {
@@ -1084,16 +1168,23 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 extras_heapified: false,
                 return_target: match frame.return_target {
                     VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
-                    VmFrameReturnContinuation::Map {
+                    VmFrameReturnContinuation::Callback {
                         function,
-                        items,
+                        calls,
                         next_index,
                         results,
-                    } => ReturnTarget::Map(MapCallback {
+                        completion,
+                        allow_effects,
+                    } => ReturnTarget::Callback(CallbackDriver {
                         function,
-                        items,
+                        calls,
                         next_index,
                         results,
+                        completion: match completion {
+                            VmCallbackCompletion::Collect => CallbackCompletion::Collect,
+                            VmCallbackCompletion::Discard => CallbackCompletion::Discard,
+                        },
+                        allow_effects,
                     }),
                 },
             })

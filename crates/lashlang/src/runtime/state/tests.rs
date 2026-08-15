@@ -341,9 +341,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x46, 0xf4, 0xf9, 0x31, 0x8e, 0x6e, 0x73, 0x76, 0x19, 0xe1, 0xe1, 0xa6, 0x8f, 0x8f,
-            0xf2, 0x15, 0xa3, 0xb0, 0x25, 0x78, 0x44, 0xf4, 0x97, 0xc4, 0x28, 0x24, 0xba, 0xbd,
-            0x96, 0x6e, 0xe3, 0x38,
+            0x51, 0xbf, 0x6b, 0xc6, 0x0c, 0x3d, 0x51, 0xff, 0x81, 0x81, 0x24, 0x1c, 0x01, 0xeb,
+            0xb6, 0x8c, 0x7f, 0xd1, 0xdb, 0xb5, 0x40, 0x24, 0x38, 0x45, 0x89, 0x5c, 0x06, 0x30,
+            0x8e, 0x18, 0x5a, 0x90,
         ]
     );
 }
@@ -357,7 +357,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e04a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e05a7676c6f62616c7390");
 }
 
 #[test]
@@ -789,4 +789,114 @@ fn canonical_decode_rejects_a_heap_chain_deeper_than_the_value_limit() {
             limit: MAX_SNAPSHOT_VALUE_DEPTH
         }
     );
+}
+
+#[test]
+fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() {
+    let mut heap = Heap::default();
+    let shared = heap
+        .allocate_list(vec![Value::String("shared".into())])
+        .expect("shared object");
+    let regexp = heap
+        .allocate_regexp("a+".to_string(), "gim".to_string())
+        .expect("RegExp");
+    let Value::Ref(regexp_id) = regexp else {
+        unreachable!()
+    };
+    heap.set_regexp_last_index(regexp_id, 7)
+        .expect("set lastIndex");
+    let regexp_slot = heap.id_to_slot[&regexp_id];
+    let HeapObject::RegExp(regexp_object) = &mut heap.slots[regexp_slot]
+        .as_mut()
+        .expect("RegExp slot")
+        .object
+    else {
+        unreachable!()
+    };
+    regexp_object.compiled_program = Some(Box::new(super::super::heap::RegExpProgramCache));
+
+    let map = heap
+        .allocate_map(vec![
+            (Value::String("first".into()), shared.clone()),
+            (Value::String("second".into()), Value::Number(f64::NAN)),
+        ])
+        .expect("Map");
+    let set = heap
+        .allocate_set(vec![shared.clone(), Value::Number(-0.0)])
+        .expect("Set");
+    let date = heap.allocate_date(f64::NAN).expect("Date");
+    let mut roots = Record::new();
+    roots.insert("map".to_string(), map.clone());
+    roots.insert("map_alias".to_string(), map);
+    roots.insert("set".to_string(), set);
+    roots.insert("regexp".to_string(), regexp);
+    roots.insert("date".to_string(), date);
+    let snapshot = Snapshot {
+        globals: Record::new(),
+        runtime_globals: roots,
+        heap,
+        reference_semantics: true,
+    };
+
+    let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
+    let restored = Snapshot::from_canonical_bytes(&bytes).expect("decode snapshot");
+    assert_eq!(
+        restored.runtime_globals.get("map"),
+        restored.runtime_globals.get("map_alias"),
+        "two roots to one Map must still alias"
+    );
+    let Value::Ref(map_id) = restored.runtime_globals["map"] else {
+        unreachable!()
+    };
+    let entries = restored
+        .heap
+        .map_entries(map_id)
+        .expect("Map entries")
+        .expect("Map kind");
+    assert_eq!(entries[0].0, Value::String("first".into()));
+    assert_eq!(entries[1].0, Value::String("second".into()));
+    let Value::Ref(restored_regexp) = restored.runtime_globals["regexp"] else {
+        unreachable!()
+    };
+    let regexp_slot = restored.heap.id_to_slot[&restored_regexp];
+    let HeapObject::RegExp(regexp) = &restored.heap.slots[regexp_slot]
+        .as_ref()
+        .expect("restored RegExp slot")
+        .object
+    else {
+        unreachable!()
+    };
+    assert_eq!(regexp.last_index, 7);
+    assert!(
+        regexp.compiled_program.is_none(),
+        "compiled matcher cache must never be serialized"
+    );
+    assert_eq!(restored.to_canonical_bytes().expect("re-encode"), bytes);
+}
+
+#[test]
+fn lashlang_forest_validation_rejects_every_typescript_exotic_kind() {
+    for object in [
+        HeapObject::RegExp(RegExpObject {
+            pattern: String::new(),
+            flags: String::new(),
+            last_index: 0,
+            compiled_program: None,
+        }),
+        HeapObject::Map(MapObject {
+            entries: Vec::new(),
+        }),
+        HeapObject::Set(SetObject { values: Vec::new() }),
+        HeapObject::Date(DateObject { milliseconds: 0.0 }),
+    ] {
+        let mut heap = Heap::default();
+        let root = heap.allocate(object).expect("exotic object");
+        let mut roots = PersistedRoots::default();
+        roots.durable("root", &root);
+        assert!(heap.validate_persisted_graph(&roots).is_ok());
+        let reason = heap
+            .validate_persisted_forest(&roots)
+            .expect_err("Lashlang forest must reject TypeScript exotic kinds");
+        assert!(reason.contains("Lashlang forest"), "{reason}");
+    }
 }

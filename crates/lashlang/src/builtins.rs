@@ -188,6 +188,10 @@ pub(crate) const BUILTINS: &[Builtin] = &[
         name: "__typescript_stdlib",
         arity: Arity::AtLeast(1),
     },
+    Builtin {
+        name: "__typescript_heap_new",
+        arity: Arity::AtLeast(1),
+    },
 ];
 
 /// Looks up a builtin by name.
@@ -206,7 +210,7 @@ pub(crate) fn is_builtin(name: &str) -> bool {
 pub(crate) fn names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
     // Dialect-private entries are deliberately kept at the end of the
     // registry and never advertised as source Lashlang builtins.
-    BUILTINS[..BUILTINS.len() - 3]
+    BUILTINS[..BUILTINS.len() - 4]
         .iter()
         .map(|builtin| builtin.name)
 }

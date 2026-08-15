@@ -41,19 +41,20 @@ use super::schema::{
 };
 use super::value::ProjectedValue;
 use super::{
-    Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap, HeapObject,
-    ImageValue, Instruction, InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
-    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, PersistedRoots,
-    ProfileAccumulator, ProfileReport, ProjectedBindings, ResourceHandle, RuntimeError, State,
-    Value, add_assign_index_number, add_values, as_number, assign_path, eval_binary_values,
-    eval_compare_values, eval_javascript_binary, eval_javascript_unary, eval_number_binary_values,
-    eval_number_compare_values, eval_number_numeric_binary_value, execute_compiled_format,
-    execute_compiled_format_direct, execute_compiled_format_one_number_compact_direct,
-    execute_intrinsic, execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values,
-    javascript_join, javascript_split, materialize_projected_async, materialize_value,
-    range_bounds, range_bounds_async, read_field_direct, read_index_direct,
-    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
-    read_javascript_index_direct, unwrap_tool_result, unwrap_type_value,
+    Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap, HeapId,
+    HeapObject, ImageValue, Instruction, InstructionProfileTag, IntrinsicOp,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name,
+    PersistedRoots, ProfileAccumulator, ProfileReport, ProjectedBindings, ResourceHandle,
+    RuntimeError, State, Value, add_assign_index_number, add_values, as_number, assign_path,
+    eval_binary_values, eval_compare_values, eval_javascript_binary, eval_javascript_unary,
+    eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
+    execute_compiled_format, execute_compiled_format_direct,
+    execute_compiled_format_one_number_compact_direct, execute_intrinsic,
+    execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values, javascript_join,
+    javascript_split, materialize_projected_async, materialize_value, range_bounds,
+    range_bounds_async, read_field_direct, read_index_direct, read_javascript_field_direct,
+    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct,
+    unwrap_tool_result, unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -478,14 +479,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 if items.is_empty() {
                     self.stack.push(Value::List(Vec::new().into()));
                 } else {
-                    let first = items[0].clone();
-                    let callback = MapCallback {
-                        function: function.clone(),
-                        items,
-                        next_index: 1,
-                        results: Vec::new(),
-                    };
-                    self.begin_function_call(function, vec![first], ReturnTarget::Map(callback))?;
+                    self.begin_callback_driver(
+                        function,
+                        items.into_iter().map(|item| vec![item]).collect(),
+                        true,
+                        false,
+                    )?;
                 }
             }
             Instruction::Return => self.return_from_function()?,
@@ -1301,6 +1300,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::JavaScriptSplit => self.execute_javascript_split()?,
             IntrinsicOp::JavaScriptJoin => self.execute_javascript_join()?,
             IntrinsicOp::JavaScriptStdlib(argc) => self.execute_javascript_stdlib(argc)?,
+            IntrinsicOp::JavaScriptHeapNew(argc) => self.execute_javascript_heap_new(argc)?,
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;

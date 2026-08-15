@@ -28,6 +28,7 @@ fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
         "__typescript_split" => IntrinsicOp::JavaScriptSplit,
         "__typescript_join" => IntrinsicOp::JavaScriptJoin,
         "__typescript_stdlib" => IntrinsicOp::JavaScriptStdlib(argc),
+        "__typescript_heap_new" => IntrinsicOp::JavaScriptHeapNew(argc),
         "trim" => IntrinsicOp::Trim,
         "slice" => IntrinsicOp::Slice,
         "to_string" => IntrinsicOp::ToString,

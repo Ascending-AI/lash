@@ -50,7 +50,10 @@ pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
     HeapId,
 };
-pub(crate) use heap::{Heap, HeapObject, HeapRestoreWire, PersistedRoots};
+pub(crate) use heap::{
+    DateObject, Heap, HeapObject, HeapRestoreWire, MapObject, PersistedRoots, RegExpObject,
+    SetObject, canonical_regexp_flags,
+};
 pub use host::{
     AbilityOp, AbilityResult, DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds,
     ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ProcessEvent,

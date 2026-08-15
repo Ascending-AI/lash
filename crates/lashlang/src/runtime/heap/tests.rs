@@ -125,3 +125,104 @@ fn child_mutation_invalidates_materialized_ancestor_cache() {
         )
     );
 }
+
+#[test]
+fn map_and_set_use_same_value_zero_without_reordering_updates() {
+    let mut heap = Heap::default();
+    let Value::Ref(map) = heap.allocate_map(Vec::new()).expect("Map") else {
+        unreachable!()
+    };
+    heap.map_set(map, Value::Number(f64::NAN), Value::String("first".into()))
+        .expect("insert NaN");
+    heap.map_set(map, Value::Number(-0.0), Value::String("zero".into()))
+        .expect("insert negative zero");
+    heap.map_set(
+        map,
+        Value::Number(f64::NAN),
+        Value::String("updated".into()),
+    )
+    .expect("update NaN");
+    heap.map_set(map, Value::Number(0.0), Value::String("same zero".into()))
+        .expect("update zero");
+    let entries = heap.map_entries(map).expect("read Map").expect("Map kind");
+    assert_eq!(entries.len(), 2);
+    assert!(matches!(entries[0].0, Value::Number(value) if value.is_nan()));
+    assert_eq!(entries[0].1, Value::String("updated".into()));
+    assert_eq!(entries[1].1, Value::String("same zero".into()));
+
+    let Value::Ref(set) = heap.allocate_set(Vec::new()).expect("Set") else {
+        unreachable!()
+    };
+    for value in [f64::NAN, f64::NAN, -0.0, 0.0] {
+        heap.set_add(set, Value::Number(value))
+            .expect("add Set value");
+    }
+    let values = heap.set_values(set).expect("read Set").expect("Set kind");
+    assert_eq!(values.len(), 2);
+    assert!(matches!(values[0], Value::Number(value) if value.is_nan()));
+    assert!(matches!(values[1], Value::Number(value) if value == 0.0));
+}
+
+#[test]
+fn map_object_keys_compare_by_heap_identity() {
+    let mut heap = Heap::default();
+    let first = heap.allocate_list(Vec::new()).expect("first key");
+    let second = heap.allocate_list(Vec::new()).expect("second key");
+    let Value::Ref(map) = heap.allocate_map(Vec::new()).expect("Map") else {
+        unreachable!()
+    };
+    heap.map_set(map, first.clone(), Value::Number(1.0))
+        .expect("first object key");
+    heap.map_set(map, second.clone(), Value::Number(2.0))
+        .expect("second object key");
+    assert_eq!(
+        heap.map_get(map, &first).expect("lookup"),
+        Some(Value::Number(1.0))
+    );
+    assert_eq!(
+        heap.map_get(map, &second).expect("lookup"),
+        Some(Value::Number(2.0))
+    );
+    assert_eq!(
+        heap.map_entries(map).expect("entries").expect("Map").len(),
+        2
+    );
+}
+
+#[test]
+fn exotic_kinds_have_deterministic_logical_byte_charges() {
+    let regexp = HeapObject::RegExp(RegExpObject {
+        pattern: "ab".to_string(),
+        flags: "gi".to_string(),
+        last_index: 0,
+        compiled_program: None,
+    });
+    let map = HeapObject::Map(MapObject {
+        entries: vec![(Value::String("k".into()), Value::Number(1.0))],
+    });
+    let set = HeapObject::Set(SetObject {
+        values: vec![Value::String("v".into())],
+    });
+    let date = HeapObject::Date(DateObject { milliseconds: 1.0 });
+    assert_eq!(
+        regexp.logical_bytes(),
+        OBJECT_HEADER_BYTES + 2 + 2 + 3 * VALUE_SLOT_BYTES + 8
+    );
+    assert_eq!(
+        map.logical_bytes(),
+        OBJECT_HEADER_BYTES
+            + COLLECTION_ENTRY_BYTES
+            + value_logical_bytes(&Value::String("k".into()))
+            + value_logical_bytes(&Value::Number(1.0))
+    );
+    assert_eq!(
+        set.logical_bytes(),
+        OBJECT_HEADER_BYTES
+            + COLLECTION_ENTRY_BYTES
+            + value_logical_bytes(&Value::String("v".into()))
+    );
+    assert_eq!(
+        date.logical_bytes(),
+        OBJECT_HEADER_BYTES + VALUE_SLOT_BYTES + 8
+    );
+}

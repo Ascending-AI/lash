@@ -135,6 +135,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             values.push(self.pop_stack()?);
         }
         values.reverse();
+        if let [Value::String(method), Value::Ref(receiver), args @ ..] = values.as_slice()
+            && !method.contains('.')
+            && self.heap.is_javascript_exotic(*receiver)?
+        {
+            return self.execute_javascript_heap_method(method, *receiver, args);
+        }
         for value in &mut values {
             if matches!(value, Value::Ref(_)) {
                 *value = self.heap.export_for_instruction(value)?;
@@ -147,6 +153,208 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.stack.push(result);
         Ok(())
     }
+
+    pub(super) fn execute_javascript_heap_new(&mut self, argc: usize) -> Result<(), RuntimeError> {
+        let mut values = Vec::with_capacity(argc);
+        for _ in 0..argc {
+            values.push(self.pop_stack()?);
+        }
+        values.reverse();
+        let Some((Value::String(kind), args)) = values.split_first() else {
+            return Err(js_stdlib_error("missing heap constructor discriminator"));
+        };
+        let value = match (kind.as_str(), args) {
+            ("RegExp", [pattern, flags]) => {
+                let pattern = scalar_javascript_string(pattern)?;
+                let flags = super::super::canonical_regexp_flags(&scalar_javascript_string(flags)?)
+                    .map_err(js_stdlib_error)?;
+                self.heap.allocate_regexp(pattern, flags)?
+            }
+            ("Map", []) | ("Map", [Value::Undefined]) => self.heap.allocate_map(Vec::new())?,
+            ("Map", [entries]) => {
+                let mut map_entries = Vec::new();
+                for entry in heap_sequence(&self.heap, entries)? {
+                    let pair = heap_sequence(&self.heap, &entry)?;
+                    if pair.len() < 2 {
+                        return Err(js_stdlib_error(
+                            "Map constructor entry has fewer than two values",
+                        ));
+                    }
+                    map_entries.push((pair[0].clone(), pair[1].clone()));
+                }
+                self.heap.allocate_map(map_entries)?
+            }
+            ("Set", []) | ("Set", [Value::Undefined]) => self.heap.allocate_set(Vec::new())?,
+            ("Set", [values]) => {
+                let set_values = heap_sequence(&self.heap, values)?;
+                self.heap.allocate_set(set_values)?
+            }
+            ("Date", [milliseconds]) => self
+                .heap
+                .allocate_date(super::super::javascript_to_number(milliseconds))?,
+            _ => {
+                return Err(js_stdlib_error(format!(
+                    "TS_CONSTRUCTOR_UNSUPPORTED: {kind} with {} argument(s)",
+                    args.len()
+                )));
+            }
+        };
+        self.stack.push(value);
+        Ok(())
+    }
+
+    fn execute_javascript_heap_method(
+        &mut self,
+        method: &str,
+        receiver: HeapId,
+        args: &[Value],
+    ) -> Result<(), RuntimeError> {
+        let kind = self.heap.get(receiver)?.kind_name();
+        let result = match (kind, method, args) {
+            ("RegExp", "valueOf", []) | ("Map", "valueOf", []) | ("Set", "valueOf", []) => {
+                Some(Value::Ref(receiver))
+            }
+            ("RegExp", "toString", []) => Some(Value::String("[object RegExp]".into())),
+            ("Map", "toString", []) => Some(Value::String("[object Map]".into())),
+            ("Set", "toString", []) => Some(Value::String("[object Set]".into())),
+            ("Date", "valueOf" | "getTime", []) => Some(Value::Number(
+                self.heap
+                    .date_milliseconds(receiver)?
+                    .expect("Date receiver was checked"),
+            )),
+            ("Date", "toString", []) => Some(Value::String("[object Date]".into())),
+            ("Map", "get", [key]) => Some(
+                self.heap
+                    .map_get(receiver, key)?
+                    .unwrap_or(Value::Undefined),
+            ),
+            ("Map", "has", [key]) => Some(Value::Bool(self.heap.map_has(receiver, key)?)),
+            ("Map", "set", [key, value]) => {
+                self.heap.map_set(receiver, key.clone(), value.clone())?;
+                Some(Value::Ref(receiver))
+            }
+            ("Map", "delete", [key]) => Some(Value::Bool(self.heap.map_delete(receiver, key)?)),
+            ("Map", "clear", []) => {
+                self.heap.map_clear(receiver)?;
+                Some(Value::Undefined)
+            }
+            ("Map", "keys", []) => Some(Value::List(
+                self.heap
+                    .map_entries(receiver)?
+                    .expect("Map receiver was checked")
+                    .into_iter()
+                    .map(|(key, _)| key)
+                    .collect::<Vec<_>>()
+                    .into(),
+            )),
+            ("Map", "values", []) => Some(Value::List(
+                self.heap
+                    .map_entries(receiver)?
+                    .expect("Map receiver was checked")
+                    .into_iter()
+                    .map(|(_, value)| value)
+                    .collect::<Vec<_>>()
+                    .into(),
+            )),
+            ("Map", "entries", []) => Some(Value::List(
+                self.heap
+                    .map_entries(receiver)?
+                    .expect("Map receiver was checked")
+                    .into_iter()
+                    .map(|(key, value)| Value::List(vec![key, value].into()))
+                    .collect::<Vec<_>>()
+                    .into(),
+            )),
+            ("Map", "forEach", [function]) => {
+                let calls = self
+                    .heap
+                    .map_entries(receiver)?
+                    .expect("Map receiver was checked")
+                    .into_iter()
+                    .map(|(key, value)| vec![value, key, Value::Ref(receiver)])
+                    .collect();
+                self.begin_callback_driver(function.clone(), calls, false, true)?;
+                None
+            }
+            ("Set", "has", [value]) => Some(Value::Bool(self.heap.set_has(receiver, value)?)),
+            ("Set", "add", [value]) => {
+                self.heap.set_add(receiver, value.clone())?;
+                Some(Value::Ref(receiver))
+            }
+            ("Set", "delete", [value]) => Some(Value::Bool(self.heap.set_delete(receiver, value)?)),
+            ("Set", "clear", []) => {
+                self.heap.set_clear(receiver)?;
+                Some(Value::Undefined)
+            }
+            ("Set", "keys" | "values" | "entries", []) => {
+                let values = self
+                    .heap
+                    .set_values(receiver)?
+                    .expect("Set receiver was checked");
+                Some(Value::List(
+                    if method == "entries" {
+                        values
+                            .into_iter()
+                            .map(|value| Value::List(vec![value.clone(), value].into()))
+                            .collect::<Vec<_>>()
+                    } else {
+                        values
+                    }
+                    .into(),
+                ))
+            }
+            ("Set", "forEach", [function]) => {
+                let calls = self
+                    .heap
+                    .set_values(receiver)?
+                    .expect("Set receiver was checked")
+                    .into_iter()
+                    .map(|value| vec![value.clone(), value, Value::Ref(receiver)])
+                    .collect();
+                self.begin_callback_driver(function.clone(), calls, false, true)?;
+                None
+            }
+            _ => {
+                return Err(js_stdlib_error(format!(
+                    "TS_METHOD_UNSUPPORTED: {kind}.{method} with {} argument(s)",
+                    args.len()
+                )));
+            }
+        };
+        if let Some(result) = result {
+            self.stack.push(result);
+        }
+        Ok(())
+    }
+}
+
+fn scalar_javascript_string(value: &Value) -> Result<String, RuntimeError> {
+    if matches!(value, Value::Ref(_)) {
+        return Err(js_stdlib_error(
+            "heap constructor scalar argument cannot be an object",
+        ));
+    }
+    Ok(javascript_to_string(value))
+}
+
+fn heap_sequence(heap: &Heap, value: &Value) -> Result<Vec<Value>, RuntimeError> {
+    Ok(match value {
+        Value::Ref(id) => match heap.get(*id)? {
+            HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+            object => {
+                return Err(js_stdlib_error(format!(
+                    "{} is not an iterable constructor input",
+                    object.kind_name()
+                )));
+            }
+        },
+        Value::List(values) | Value::Tuple(values) => values.to_vec(),
+        _ => {
+            return Err(js_stdlib_error(
+                "constructor input is not an iterable value",
+            ));
+        }
+    })
 }
 
 fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {

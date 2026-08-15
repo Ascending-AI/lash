@@ -968,10 +968,12 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
     .expect("AST-only callback program links");
     let program = crate::compile_linked(&linked);
     let continuation = find_instruction_continuation(&program, |continuation| {
-        continuation
-            .frame_stack
-            .iter()
-            .any(|frame| matches!(frame.return_target, VmFrameReturnContinuation::Map { .. }))
+        continuation.frame_stack.iter().any(|frame| {
+            matches!(
+                frame.return_target,
+                VmFrameReturnContinuation::Callback { .. }
+            )
+        })
     })
     .await;
     let counters = continuation.occurrence_counters.clone();

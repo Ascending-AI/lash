@@ -111,7 +111,8 @@ pub(super) fn instruction_heap_plan(
         | I::Intrinsic(
             IntrinsicOp::JavaScriptSplit
             | IntrinsicOp::JavaScriptJoin
-            | IntrinsicOp::JavaScriptStdlib(_),
+            | IntrinsicOp::JavaScriptStdlib(_)
+            | IntrinsicOp::JavaScriptHeapNew(_),
         )
         | I::IsNullish => InstructionHeapPlan::heap_native(),
         I::StoreName(_) => InstructionHeapPlan::heap_native(),

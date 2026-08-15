@@ -1,5 +1,5 @@
 use super::*;
-use crate::runtime::{javascript_array_index, javascript_to_string};
+use crate::runtime::{javascript_array_index, javascript_to_number, javascript_to_string};
 
 impl Heap {
     pub(crate) fn assign_path_reference(
@@ -21,6 +21,20 @@ impl Heap {
                 field: "path".to_string(),
             });
         };
+        if parents.is_empty() {
+            let is_last_index = match *leaf {
+                CompiledAssignPathStep::Field(field) => names[field].text.as_ref() == "lastIndex",
+                CompiledAssignPathStep::Index => indexes
+                    .first()
+                    .map(coerce_string)
+                    .transpose()?
+                    .is_some_and(|key| key.as_ref() == "lastIndex"),
+            };
+            if is_last_index && matches!(self.get(target_id)?, HeapObject::RegExp(_)) {
+                let imported = self.import_values(vec![value], 1)?.remove(0);
+                return self.set_regexp_last_index(target_id, regexp_last_index(&imported));
+            }
+        }
         let mut index_cursor = 0;
         for step in parents {
             let child = match (self.get(target_id)?.clone(), *step) {
@@ -172,5 +186,21 @@ impl Heap {
         self.invalidate_materialized_reaching(target_id);
         self.debug_assert_byte_accounting();
         Ok(())
+    }
+}
+
+fn regexp_last_index(value: &Value) -> u64 {
+    let number = javascript_to_number(value);
+    if !number.is_finite() {
+        return if number.is_sign_positive() {
+            u64::MAX
+        } else {
+            0
+        };
+    }
+    if number <= 0.0 {
+        0
+    } else {
+        number.trunc() as u64
     }
 }

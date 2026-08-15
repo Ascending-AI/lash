@@ -270,11 +270,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let result = match step {
                 Ok(VmStep::Continue) => Ok(None),
                 Ok(VmStep::Effect(effect)) => {
-                    if self
-                        .frames
-                        .iter()
-                        .any(|frame| matches!(frame.return_target, super::ReturnTarget::Map(_)))
-                    {
+                    if self.frames.iter().any(|frame| {
+                        matches!(
+                            &frame.return_target,
+                            super::ReturnTarget::Callback(callback)
+                                if !callback.allow_effects
+                        )
+                    }) {
                         self.route_runtime_error(
                             RuntimeError::EffectInBuiltinCallback,
                             instruction_ip,

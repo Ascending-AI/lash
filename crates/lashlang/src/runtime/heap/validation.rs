@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Heap, HeapId, Value, value_refs};
+use super::{Heap, HeapId, HeapObject, Value, canonical_regexp_flags, same_value_zero, value_refs};
 
 /// The roots a persisted heap is validated against.
 ///
@@ -169,6 +169,7 @@ impl Heap {
                 let object = self
                     .get(id)
                     .map_err(|_| format!("dangling heap reference {}", id.get()))?;
+                validate_exotic_invariants(id, object)?;
                 colors.insert(id, 1);
                 stack.push((id, true));
                 for child in object.child_refs().into_iter().rev() {
@@ -209,6 +210,21 @@ impl Heap {
         &self,
         roots: &PersistedRoots<'_>,
     ) -> Result<(), String> {
+        if let Some((id, object)) = self.objects_in_id_order().find(|(_, object)| {
+            matches!(
+                object,
+                super::HeapObject::RegExp(_)
+                    | super::HeapObject::Map(_)
+                    | super::HeapObject::Set(_)
+                    | super::HeapObject::Date(_)
+            )
+        }) {
+            return Err(format!(
+                "Lashlang forest cannot contain TypeScript {} object {}",
+                object.kind_name(),
+                id.get()
+            ));
+        }
         let mut owners = BTreeMap::<HeapId, String>::new();
         for (name, root) in &roots.durable {
             for id in value_refs(root) {
@@ -222,6 +238,49 @@ impl Heap {
         }
         self.validate_persisted_graph(roots)
     }
+}
+
+fn validate_exotic_invariants(id: HeapId, object: &HeapObject) -> Result<(), String> {
+    match object {
+        HeapObject::RegExp(regexp) => {
+            let canonical = canonical_regexp_flags(&regexp.flags)
+                .map_err(|reason| format!("RegExp object {} has {reason}", id.get()))?;
+            if canonical != regexp.flags {
+                return Err(format!(
+                    "RegExp object {} flags must be in canonical order",
+                    id.get()
+                ));
+            }
+        }
+        HeapObject::Map(map) => {
+            for (index, (key, _)) in map.entries.iter().enumerate() {
+                if map.entries[..index]
+                    .iter()
+                    .any(|(candidate, _)| same_value_zero(candidate, key))
+                {
+                    return Err(format!(
+                        "Map object {} contains a duplicate SameValueZero key",
+                        id.get()
+                    ));
+                }
+            }
+        }
+        HeapObject::Set(set) => {
+            for (index, value) in set.values.iter().enumerate() {
+                if set.values[..index]
+                    .iter()
+                    .any(|candidate| same_value_zero(candidate, value))
+                {
+                    return Err(format!(
+                        "Set object {} contains a duplicate SameValueZero value",
+                        id.get()
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn claim_owner(

@@ -1042,6 +1042,9 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::JavaScriptStdlib(_) => {
             format!("intrinsic typescript_stdlib argc={argc}")
         }
+        IntrinsicOp::JavaScriptHeapNew(_) => {
+            format!("intrinsic typescript_heap_new argc={argc}")
+        }
         IntrinsicOp::Trim => format!("intrinsic trim argc={argc}"),
         IntrinsicOp::Slice => format!("intrinsic slice argc={argc}"),
         IntrinsicOp::ToString => format!("intrinsic to_string argc={argc}"),
@@ -1278,3 +1281,4 @@ include!("tests/exception_cases.rs");
 include!("tests/exception_control_flow_cases.rs");
 include!("tests/exception_wire_cases.rs");
 include!("tests/exception_review_cases.rs");
+include!("tests/typescript_exotic_cases.rs");

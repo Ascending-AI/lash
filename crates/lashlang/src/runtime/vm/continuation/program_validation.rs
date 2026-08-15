@@ -55,7 +55,11 @@ pub(super) fn validate_program_continuation(
             .and_then(|index| chunk.code.get(index));
         if !matches!(
             call_instruction,
-            Some(Instruction::Call { .. } | Instruction::Map)
+            Some(
+                Instruction::Call { .. }
+                    | Instruction::Map
+                    | Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_))
+            )
         ) {
             return Err(ContinuationError::InvalidReturnSite {
                 frame: frame_index,

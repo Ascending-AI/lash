@@ -982,12 +982,12 @@ fn lashlang_aggregates_still_select_in_input_order() {
 fn settlement_order_does_not_reach_the_continuation_format() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        4,
-        "the snapshot format does not carry batch settlement state"
+        5,
+        "the snapshot format now carries TypeScript exotic heap objects"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v5",
+        "lashlang-vm-abi-v6",
         "the compiled-batch selection rule moved the VM ABI"
     );
 }
