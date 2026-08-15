@@ -296,6 +296,61 @@ Missing-method/rejection hit list:
 []
 ```
 
+## The multi-session workbench (follow-on round)
+
+The Workbench that came out of the rounds above serves one session on one
+process-wide dialect. Choosing TypeScript meant restarting the process with a
+different `LASH_RUNBOOK_DIALECT`, so the two dialects could never be compared
+side by side in the reference host that exists to demonstrate them. This round
+makes the Workbench multi-session, with the dialect chosen at creation.
+
+**The choice has to live where the open path can read it.** A session's dialect
+becomes durable at its *first commit*, not at the open that created it — the
+same fact the F1 fix above turned on. A create route that opened once with the
+chosen dialect and dropped the handle would lose the choice exactly as the first
+version of that fix did: the first real turn would open on the ambient default
+and pin it permanently. So the roster is not a display list. `AppState::
+session_builder`, which every route and every turn goes through, asks the roster
+for the dialect of the session it is opening and falls back to the ambient
+`LASH_RUNBOOK_DIALECT` for a session the roster does not know. That fallback is
+the compatibility contract: the boot session, an ad-hoc `?session_id=` tab, and
+every data directory that predates the roster read exactly as before.
+
+The mutation proof is recorded: replacing the roster lookup with the ambient
+field again fails three fixtures — the created session records `lashlang` where
+`typescript` was chosen, in both directions, and after a restart.
+
+**Durability is two files, not one.** `<data-dir>/session-id` keeps its plain
+text format and its meaning, because the judged runbooks read and write it
+directly; the roster is a sibling `sessions.json`, one row per session with its
+name, its create-time dialect, and its timestamps. A restart reopens both.
+
+**Labels still read what a session recorded.** The badge and the transcript both
+read the dialect out of the session's own read view (`RlmSessionReadViewExt::
+rlm_dialect`), never out of the roster row or the process configuration — the
+roster says what was *asked for*, and those differ exactly in the case a label
+exists to disambiguate. A session that has committed nothing has recorded
+nothing, and is badged with the dialect its next open will ask for rather than
+with the absent-value default it is about to stop reading as.
+
+**The dialect menu is the substrate's.** `RlmDialect::ALL` is the registered
+list, checked in `lash-protocol-rlm` against the dialects the registry can
+actually activate; `/api/sessions` serves it and the page renders it. Neither
+the host nor the browser writes a list of language ids down, and the UI contract
+test fails the page for shipping static dialect options.
+
+Routes: `GET /api/sessions` (roster, recorded dialects, current selection,
+registered ids, ambient default), `POST /api/sessions` (create with a dialect;
+an unregistered id is a typed 400 naming the registered ones), and
+`POST /api/sessions/select` (durable selection; an unrostered id is a 404).
+
+Fixtures, all through the production handlers: create-with-dialect in both
+directions, the ambient session unmoved beside it, unknown-dialect refusal with
+no roster row left behind, switching moving the query-less default and the
+selection file, the roster surviving a rebuilt web process *and still serving
+its dialect on the next turn*, and a reset carrying the slot's dialect to the
+rotated session.
+
 ## Commits
 
 Every hash below is reachable from the branch head.
@@ -334,6 +389,13 @@ Every hash below is reachable from the branch head.
 | `0602c5f4a` | Report the battery-defect round | Internal |
 | `504b92a20` | Assemble the read-only-variables block once, in the session's dialect (**RV-1**) | Fixed |
 | `c5d709bbd` | Close the verification round's low findings (RV-3…RV-8, M4) | Internal |
+| `4ccf012ba` | Publish the registered dialects as a typed menu | Added |
+| `9e7cf4641` | Serve many sessions, each in the dialect it was created with | Added |
+| `8f03be29a` | Choose a dialect when adding a session | Added |
+| `b3abd16f6` | Re-anchor the API coverage evidence after the route split | — |
+| `9361d53ee` | Poll the session roster at a gentler interval | — |
+| `e918b9a80` | Gate session creation and selection on the observe check | Fixed |
+| `eaf8ed9bc` | Parse `LASH_RUNBOOK_DIALECT` through the registered dialect menu | Internal |
 | final report commit | Regenerate this report against the branch as it stands | Internal |
 
 ## Review ledger
@@ -589,6 +651,31 @@ with no other heavy build job running concurrently.
 | `python3 scripts/judged_runbook_matrix.py --shard 1/1` | PASS; 63 validated rows |
 | `python3 scripts/release_notes.py check-pr --range dc191172e..HEAD` | PASS (exit 0) |
 | Live 63-row judged battery | PREPARED / NOT RUN; no provider-cost authorization |
+
+### Gates — multi-session round
+
+Same target directory, run after the round's last code commit (`eaf8ed9bc`).
+The workspace suite was executed alone.
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all --check` | PASS |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0) |
+| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-restate-postgres-workers-e2e --locked` | PASS; 527 run, 527 passed, 13 skipped |
+| `cargo test --workspace --locked` | PASS; **4,508 passed, zero failures**, exit 0 |
+| `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,491 entries. Three new rows — `RlmDialect::ALL`, `from_language_id`, `registered_language_ids` — and a re-anchor after the session routes moved out of `routes.rs` |
+| `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
+| `python3 scripts/check_included_file_formatting.py` | PASS |
+| `bash scripts/check-production-file-size.sh` | PASS. Red once: `routes.rs` crossed the 1,600-line production budget, which is why the session routes have their own file |
+| `python3 scripts/release_notes.py check-pr --range dc191172e..HEAD` | PASS (exit 0) |
+| Live browser round | NOT RUN. The UI is covered by the markup contract test and by the projection harness that executes the page's own snapshot block; no workbench was started against a live provider |
+
+**Red-side proof.** Replacing the roster lookup in `session_builder` with the
+process-wide field again turns three fixtures red — the created TypeScript
+session records `lashlang`, the Lashlang session created on a TypeScript
+deployment records `typescript`, and the restarted process serves the rostered
+session in the wrong dialect. The fixtures fail on the durable read, not on the
+roster, which is the property that matters.
 
 ### Red-side evidence — battery-defect round
 
