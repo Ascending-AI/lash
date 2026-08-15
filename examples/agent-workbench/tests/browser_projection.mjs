@@ -1198,6 +1198,8 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
     const target = { textContent: "" };
     const snapshots = [];
     const scheduledStateRetries = [];
+    const stateRetryDelays = [];
+    let nextStateRetryTimerId = 0;
     let resolveDelayedSnapshot;
     let handledModelCalls = 0;
     const element = () => ({
@@ -1220,10 +1222,17 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
           ? new Promise(resolve => { resolveDelayedSnapshot = resolve; })
           : next;
       },
-      markShellChannel() {},
-      shellAvailability: {},
       renderShellStatus() {},
-      scheduleStateRetry() { scheduledStateRetries.push("scheduled"); },
+      setTimeout(callback, delay) {
+        const timer = { id: ++nextStateRetryTimerId, callback };
+        scheduledStateRetries.push(timer);
+        stateRetryDelays.push(delay);
+        return timer.id;
+      },
+      clearTimeout(timerId) {
+        const index = scheduledStateRetries.findIndex(timer => timer.id === timerId);
+        if (index >= 0) scheduledStateRetries.splice(index, 1);
+      },
       renderError() {},
       snapshotFailureReason(error) { return String(error); },
       __LASH_WORKBENCH_TURN_EVENT_HOOK__(event) {
@@ -1239,24 +1248,28 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       validateModel() {},
       knownWebState: null,
       knownSessionLabel: null,
-      markShellHydrated() {},
       renderUsage() {},
       renderQueuedWork() {},
       renderStateTranscript() {},
       renderIngressReceipt() {},
       recordTurnInputApplications() {},
       busy: false,
+      streamGeneration: 1,
+      restartEventStreams() {},
       setBusy(value) { this.busy = value; },
     };
     vm.runInNewContext(
       `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
        ${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+       ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
        this.executionScorecardState = createExecutionScorecardState();
        this.projectionState = createWorkbenchProjectionState();
+       this.shellAvailability = createShellAvailability();
        this.renderedProductEvents = projectionState.renderedProductEvents;
        this.appliedObservationEvents = projectionState.appliedObservationEvents;
        ${markedSource("WORKBENCH_TURN_EVENT_REDUCER", "WORKBENCH_TURN_EVENT_REDUCER")}
        ${markedSource("WORKBENCH_STATE_SNAPSHOT", "WORKBENCH_STATE_SNAPSHOT")}
+       ${markedSource("WORKBENCH_STATE_RETRY", "WORKBENCH_STATE_RETRY")}
        ${markedSource("WORKBENCH_REMOTE_STREAM_RECOVERY", "WORKBENCH_REMOTE_STREAM_RECOVERY")}`,
       scorecardContext,
     );
@@ -1265,6 +1278,7 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       scenario.first_snapshot,
       true,
     );
+    scorecardContext.markShellHydrated(scorecardContext.shellAvailability);
 
     const firstLine = JSON.stringify(scenario.first_observation_line);
     scorecardContext.handleObservationStreamLine(firstLine);
@@ -1346,14 +1360,46 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       "the overtaken snapshot itself must not erase the newer observation",
     );
 
-    snapshots.push(scenario.final_snapshot);
-    await scorecardContext.recoverFromState(
-      "live updates paused; reload to restore the conversation",
+    snapshots.push("delayed");
+    const firstRetry = scheduledStateRetries.shift();
+    assert.ok(firstRetry, "the stale replay-gap response must arm the production retry");
+    firstRetry.callback();
+    await new Promise(resolve => setImmediate(resolve));
+    const racingObservation = JSON.parse(JSON.stringify(scenario.second_observation_line));
+    racingObservation.event.cursor += "-retry-race";
+    scorecardContext.handleObservationStreamLine(JSON.stringify(racingObservation));
+    resolveDelayedSnapshot(scenario.final_snapshot);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(
+      scheduledStateRetries.length,
+      1,
+      "a second stale response must keep the bounded production retry chain alive",
     );
+    assert.equal(
+      scorecardContext.shellAvailability.channels.state,
+      false,
+      "a stale retry must keep the state channel down while the gap row is missing",
+    );
+    assert.equal(
+      scorecardContext.shellStatusModel(scorecardContext.shellAvailability).banner.hidden,
+      false,
+      "a stale retry must keep the reconnecting banner visible",
+    );
+    assert.doesNotMatch(
+      target.textContent,
+      new RegExp(scenario.expected.first_call_id),
+      "the second stale response must not pretend the missing row was repaired",
+    );
+
+    snapshots.push(scenario.final_snapshot);
+    const secondRetry = scheduledStateRetries.shift();
+    assert.ok(secondRetry, "the second stale response must arm the next bounded retry");
+    secondRetry.callback();
+    await new Promise(resolve => setImmediate(resolve));
     assert.match(
       target.textContent,
       new RegExp(scenario.expected.first_call_id),
-      "the scheduled fresh snapshot must backfill the scorecard row lost in the replay gap",
+      "the armed production retry must backfill the scorecard row after a quiet window",
     );
     assert.match(
       target.textContent,
@@ -1368,6 +1414,18 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       ["#1", "#2"],
       "gap recovery must restore retry attempt identity and order",
     );
+    assert.deepEqual(
+      stateRetryDelays,
+      [900, 1800],
+      "stale recovery must retain the production retry backoff",
+    );
+    assert.equal(scorecardContext.shellAvailability.channels.state, true);
+    assert.equal(
+      scorecardContext.shellStatusModel(scorecardContext.shellAvailability).banner.hidden,
+      true,
+      "the successful retry must clear the reconnecting banner",
+    );
+    assert.equal(scheduledStateRetries.length, 0);
 
     snapshots.push(scenario.final_snapshot);
     scorecardContext.handleObservationStreamLine(

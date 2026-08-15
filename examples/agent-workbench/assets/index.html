@@ -4766,6 +4766,7 @@
       return cleanErrorText(error?.message || "the workbench did not answer");
     }
 
+    // BEGIN WORKBENCH_STATE_RETRY
     let stateRetryTimer = 0;
     let stateRetryDelay = 900;
 
@@ -4792,17 +4793,25 @@
       const token = beginStateRecovery(projectionState);
       try {
         const state = await fetchStateSnapshot();
-        markShellChannel(shellAvailability, "state", true);
+        const isLatestRequest = token.generation === projectionState.recoveryGeneration;
+        const responseIsCurrent = recoveryResponseIsCurrent(projectionState, token, state);
         const application = snapshotApplication(shellAvailability, {
-          isLatestRequest: token.generation === projectionState.recoveryGeneration,
+          isLatestRequest,
           streamsStarted: streamGeneration > 0,
-          responseIsCurrent: recoveryResponseIsCurrent(projectionState, token, state)
+          responseIsCurrent
         });
         if (application === "ignore") {
-          /* a dropped response must not cancel a newer request's retry */
+          /* A superseded response has a newer recovery owner. A latest response
+             overtaken by live observations does not, so keep the channel down
+             and advance the existing bounded retry ladder. */
+          if (isLatestRequest) {
+            markShellChannel(shellAvailability, "state", false);
+            scheduleStateRetry();
+          }
           renderShellStatus();
           return;
         }
+        markShellChannel(shellAvailability, "state", true);
         cancelStateRetry();
         if (application === "initial") {
           applyStateSnapshot(state);
@@ -4818,6 +4827,7 @@
         throw new Error("state unavailable");
       }
     }
+    // END WORKBENCH_STATE_RETRY
 
     function formatTime(ms) {
       if (!ms) return "";
