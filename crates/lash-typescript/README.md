@@ -20,7 +20,8 @@ reference rules. TypeScript type annotations, aliases, and interfaces are
 erased after parsing or used for signature/type work.
 
 Cells are scripts and may use top-level `await` for tools, process handles,
-`sleep`, `waitSignal`, `Promise.all`, and `Promise.allSettled`. General async
+`sleep`, `Promise.all`, and `Promise.allSettled`; `waitSignal` is
+process-only and rejects at the cell top level by name. General async
 function authoring remains a named rejection; the one async function literal
 surface is the `run` field of a top-level literal `defineProcess` definition.
 Tool calls require `await` and use explicit `typescript.tool` module paths;
