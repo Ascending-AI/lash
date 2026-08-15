@@ -54,6 +54,7 @@ pub(crate) fn emit_llm_trace_completed(
     call_record: Option<&crate::LlmCallRecord>,
     clock: &dyn crate::Clock,
 ) {
+    emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
     crate::trace::emit_trace(
         trace_sink,
         base_context,
@@ -116,6 +117,7 @@ pub(crate) fn emit_llm_trace_failed(
     call_record: Option<&crate::LlmCallRecord>,
     clock: &dyn crate::Clock,
 ) {
+    emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
     crate::trace::emit_trace(
         trace_sink,
         base_context,
@@ -133,6 +135,55 @@ pub(crate) fn emit_llm_trace_failed(
         },
         clock,
     );
+}
+
+pub(crate) fn emit_provider_replay_drops(
+    trace_sink: &Option<Arc<dyn lash_trace::TraceSink>>,
+    base_context: &lash_trace::TraceContext,
+    context: &lash_trace::TraceContext,
+    call_record: Option<&crate::LlmCallRecord>,
+    clock: &dyn crate::Clock,
+) {
+    let Some(call_record) = call_record else {
+        return;
+    };
+    for drop in &call_record.replay_drops {
+        let route = |route: &crate::ProviderRouteIdentity| lash_trace::TraceProviderRouteIdentity {
+            provider: route.provider.to_string(),
+            endpoint: route.endpoint.to_string(),
+            model: route.model.to_string(),
+        };
+        let event = lash_trace::TraceProviderReplayDropEvent {
+            replay_kind: match drop.kind {
+                crate::llm::types::ProviderReplayKind::ResponseText => {
+                    lash_trace::TraceProviderReplayKind::ResponseText
+                }
+                crate::llm::types::ProviderReplayKind::Reasoning => {
+                    lash_trace::TraceProviderReplayKind::Reasoning
+                }
+                crate::llm::types::ProviderReplayKind::ToolCall => {
+                    lash_trace::TraceProviderReplayKind::ToolCall
+                }
+            },
+            reason: match drop.reason {
+                crate::llm::types::ProviderReplayDropReason::Unstamped => {
+                    lash_trace::TraceProviderReplayDropReason::Unstamped
+                }
+                crate::llm::types::ProviderReplayDropReason::ForeignRoute => {
+                    lash_trace::TraceProviderReplayDropReason::ForeignRoute
+                }
+            },
+            minting_route: drop.minting_route.as_ref().map(route),
+            serving_route: route(&drop.serving_route),
+        };
+        crate::trace::emit_trace(
+            trace_sink,
+            base_context,
+            context.clone(),
+            lash_trace::TraceEvent::ProviderReplayDropped { event },
+            clock,
+        );
+    }
 }
 
 pub(crate) fn llm_call_error_from_transport(err: LlmTransportError) -> LlmCallError {

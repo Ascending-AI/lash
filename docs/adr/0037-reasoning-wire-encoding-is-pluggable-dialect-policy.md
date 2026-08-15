@@ -32,3 +32,8 @@ programmatically. A name is the encoder's equality identity, so hosts must assig
 This follows ADR 0026 and ADR 0034: model capability is host-supplied data and providers consume
 it rather than rediscovering it. It also follows ADR 0036: wire-protocol differences are
 explicit dialect policy, not inference or optimistic fallback.
+
+This dialect choice is separate from LLM Provider replay ownership. A host may select the same
+reasoning dialect for several endpoints, but opaque reasoning, tool-call, and response-item state
+is reusable only on the exact minting route: provider kind, normalized configured endpoint, and
+model id. Both decisions are host-selected; dialect equality never makes two replay routes equal.

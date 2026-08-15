@@ -43,7 +43,7 @@ impl RuntimeTurnDriver<'_> {
             let replay = call.replay.clone();
             match prepare_context.prepare_tool_call(call).await {
                 crate::tool_dispatch::ToolPreparationOutcome::Prepared(prepared) => {
-                    prepared_entries.push((index, prepared));
+                    prepared_entries.push((index, *prepared));
                 }
                 crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
                     let completed = prepare_context

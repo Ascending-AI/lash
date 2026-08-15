@@ -1351,3 +1351,112 @@ mod asserted_tool_examples {
         ));
     }
 }
+
+#[cfg(test)]
+mod replay_provenance_examples {
+    use lash::remote::llm::{
+        RemoteLlmRequest, RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
+        RemoteProviderReplayDropReason, RemoteProviderReplayKind, RemoteProviderReplayMeta,
+        RemoteProviderRouteIdentity, RemoteResponseTextMeta,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn replay_metadata_preserves_its_minting_route_on_the_wire() {
+        let request_wire = serde_json::to_vec(&json!({
+            "protocol_version": lash::remote::REMOTE_PROTOCOL_VERSION,
+            "request_id": "request-version-first",
+            "scope": {
+                "session_id": "session-docs",
+                "agent_frame_id": "session-docs:frame:root",
+                "request_id": "request-version-first"
+            },
+            "model_intent": { "model": "gpt-5.4" }
+        }))
+        .expect("request serializes");
+        let decoded =
+            RemoteLlmRequest::decode_json(&request_wire).expect("current request decodes");
+        assert_eq!(decoded.request_id, "request-version-first");
+
+        let reasoning = RemoteProviderReasoningReplay {
+            origin: Some(RemoteProviderRouteIdentity {
+                provider: "anthropic".to_string(),
+                endpoint: "https://api.anthropic.com".to_string(),
+                model: "claude-sonnet-4-6".to_string(),
+            }),
+            ..RemoteProviderReasoningReplay::default()
+        };
+
+        let tool = RemoteProviderReplayMeta {
+            origin: Some(RemoteProviderRouteIdentity {
+                provider: "google_oauth".to_string(),
+                endpoint: "https://cloudcode-pa.googleapis.com/v1internal".to_string(),
+                model: "gemini-2.5-pro".to_string(),
+            }),
+            ..RemoteProviderReplayMeta::default()
+        };
+
+        let response = RemoteResponseTextMeta {
+            id: Some("response-item".to_string()),
+            origin: Some(RemoteProviderRouteIdentity {
+                provider: "openai".to_string(),
+                endpoint: "https://api.openai.com/v1".to_string(),
+                model: "gpt-5.4".to_string(),
+            }),
+            ..RemoteResponseTextMeta::default()
+        };
+
+        let reasoning_route = reasoning.origin.as_ref().expect("reasoning route");
+        assert_eq!(reasoning_route.provider, "anthropic");
+        assert_eq!(reasoning_route.endpoint, "https://api.anthropic.com");
+        assert_eq!(reasoning_route.model, "claude-sonnet-4-6");
+        let tool_route = tool.origin.as_ref().expect("tool route");
+        assert_eq!(tool_route.provider, "google_oauth");
+        let response_route = response.origin.as_ref().expect("response route");
+        assert_eq!(response_route.model, "gpt-5.4");
+
+        let drops = [
+            RemoteProviderReplayDrop {
+                kind: RemoteProviderReplayKind::ResponseText,
+                reason: RemoteProviderReplayDropReason::Unstamped,
+                minting_route: None,
+                serving_route: response_route.clone(),
+            },
+            RemoteProviderReplayDrop {
+                kind: RemoteProviderReplayKind::Reasoning,
+                reason: RemoteProviderReplayDropReason::ForeignRoute,
+                minting_route: reasoning.origin.clone(),
+                serving_route: response_route.clone(),
+            },
+            RemoteProviderReplayDrop {
+                kind: RemoteProviderReplayKind::ToolCall,
+                reason: RemoteProviderReplayDropReason::ForeignRoute,
+                minting_route: tool.origin.clone(),
+                serving_route: response_route.clone(),
+            },
+        ];
+        let drop_wire = serde_json::to_value(&drops).expect("replay drops serialize");
+        assert_eq!(drop_wire[0]["kind"], "response_text");
+        assert_eq!(drop_wire[0]["reason"], "unstamped");
+        assert_eq!(drop_wire[0]["serving_route"]["provider"], "openai");
+        assert_eq!(drop_wire[1]["kind"], "reasoning");
+        assert_eq!(drop_wire[1]["reason"], "foreign_route");
+        assert_eq!(drop_wire[1]["minting_route"]["provider"], "anthropic");
+        assert_eq!(drop_wire[2]["kind"], "tool_call");
+
+        let wire = serde_json::to_value((&reasoning, &tool, &response))
+            .expect("replay metadata serializes");
+        assert_eq!(wire[0]["origin"]["endpoint"], "https://api.anthropic.com");
+        assert_eq!(
+            wire[1]["origin"]["endpoint"],
+            "https://cloudcode-pa.googleapis.com/v1internal"
+        );
+        assert_eq!(wire[2]["origin"]["provider"], "openai");
+
+        let mut stripped = wire[0].clone();
+        stripped.as_object_mut().expect("object").remove("origin");
+        let legacy: RemoteProviderReasoningReplay =
+            serde_json::from_value(stripped).expect("legacy metadata remains readable");
+        assert!(legacy.origin.is_none());
+    }
+}

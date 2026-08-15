@@ -2,7 +2,10 @@ use super::support::*;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::llm::types::{LlmToolChoice, LlmUsage};
+use crate::llm::types::{
+    LlmContentBlock, LlmMessage, LlmOutputPart, LlmRole, LlmToolChoice, LlmUsage,
+    ProviderReasoningReplay,
+};
 use crate::{GenerationOptions, NonNegativeFiniteF64};
 
 #[derive(Clone, Debug, Default)]
@@ -33,10 +36,197 @@ struct CountedPartialStreamFailureProvider {
     attempts: Arc<AtomicUsize>,
 }
 
+#[derive(Clone, Debug)]
+struct ReplayCaptureProvider;
+
+#[derive(Clone, Debug)]
+struct ContradictoryReplayProvider;
+
+#[derive(Clone, Debug)]
+struct ContradictoryPartialFailureProvider;
+
+#[async_trait::async_trait]
+impl Provider for ContradictoryReplayProvider {
+    fn kind(&self) -> &'static str {
+        "openai-compatible"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::for_endpoint(self.kind(), "https://gateway-b.example/v1", model)
+    }
+
+    fn options(&self) -> ProviderOptions {
+        ProviderOptions::default()
+    }
+
+    fn set_options(&mut self, _options: ProviderOptions) {}
+
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
+    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        Ok(LlmResponse {
+            parts: vec![LlmOutputPart::Reasoning {
+                text: "summary".to_string(),
+                replay: Some(ProviderReasoningReplay {
+                    signature: Some("opaque".to_string()),
+                    origin: Some(ProviderRouteIdentity::for_endpoint(
+                        self.kind(),
+                        "https://gateway-a.example/v1",
+                        "model",
+                    )),
+                    ..ProviderReasoningReplay::default()
+                }),
+            }],
+            ..LlmResponse::default()
+        })
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for ContradictoryPartialFailureProvider {
+    fn kind(&self) -> &'static str {
+        "openai-compatible"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::for_endpoint(self.kind(), "https://gateway-b.example/v1", model)
+    }
+
+    fn options(&self) -> ProviderOptions {
+        ProviderOptions::default()
+    }
+
+    fn set_options(&mut self, _options: ProviderOptions) {}
+
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
+    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        Err(LlmTransportError::new("original partial provider failure")
+            .with_kind(ProviderFailureKind::Stream)
+            .with_status(502)
+            .with_code("original_partial_code")
+            .with_raw("original raw provider evidence")
+            .with_headers([("x-request-id", "original-request")])
+            .with_request_body("original request body")
+            .with_output_started(true)
+            .with_partial_response(LlmResponse {
+                parts: vec![LlmOutputPart::Reasoning {
+                    text: "partial summary".to_string(),
+                    replay: Some(ProviderReasoningReplay {
+                        signature: Some("opaque".to_string()),
+                        origin: Some(ProviderRouteIdentity::for_endpoint(
+                            self.kind(),
+                            "https://gateway-a.example/v1",
+                            "model",
+                        )),
+                        ..ProviderReasoningReplay::default()
+                    }),
+                }],
+                ..LlmResponse::default()
+            }))
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct GatewayReplayCaptureProvider {
+    endpoint: &'static str,
+}
+
+#[async_trait::async_trait]
+impl Provider for GatewayReplayCaptureProvider {
+    fn kind(&self) -> &'static str {
+        "openai-compatible"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::for_endpoint(self.kind(), self.endpoint, model)
+    }
+
+    fn options(&self) -> ProviderOptions {
+        ProviderOptions::default()
+    }
+
+    fn set_options(&mut self, _options: ProviderOptions) {}
+
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
+    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        assert!(matches!(
+            request.messages[0].blocks[0],
+            LlmContentBlock::Text { ref text, .. } if text.as_ref() == "portable summary"
+        ));
+        Ok(LlmResponse::default())
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for ReplayCaptureProvider {
+    fn kind(&self) -> &'static str {
+        "serving-provider"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+
+    fn options(&self) -> ProviderOptions {
+        ProviderOptions::default()
+    }
+
+    fn set_options(&mut self, _options: ProviderOptions) {}
+
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
+    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        assert!(matches!(
+            request.messages[0].blocks[0],
+            LlmContentBlock::Text { ref text, .. } if text.as_ref() == "neutral summary"
+        ));
+        Ok(LlmResponse {
+            parts: vec![LlmOutputPart::Reasoning {
+                text: "new summary".to_string(),
+                replay: Some(ProviderReasoningReplay {
+                    signature: Some("new-signature".to_string()),
+                    ..ProviderReasoningReplay::default()
+                }),
+            }],
+            ..LlmResponse::default()
+        })
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
 #[async_trait::async_trait]
 impl Provider for PartialStreamFailureProvider {
     fn kind(&self) -> &'static str {
         "partial-stream-failure"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -88,6 +278,10 @@ impl Provider for CountedPartialStreamFailureProvider {
         "counted-partial-stream-failure"
     }
 
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+
     fn options(&self) -> ProviderOptions {
         ProviderOptions {
             reliability: ProviderReliability::default().max_attempts(1),
@@ -122,6 +316,10 @@ impl Provider for CountedPartialStreamFailureProvider {
 impl Provider for TerminalProvider {
     fn kind(&self) -> &'static str {
         "terminal"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -166,6 +364,10 @@ impl Provider for MutatingProvider {
         "mutating"
     }
 
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+
     fn options(&self) -> ProviderOptions {
         self.options.clone()
     }
@@ -204,6 +406,10 @@ impl Provider for MutatingProvider {
 impl Provider for FailingProvider {
     fn kind(&self) -> &'static str {
         "failing"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -273,6 +479,10 @@ impl StatusFailingProvider {
 impl Provider for StatusFailingProvider {
     fn kind(&self) -> &'static str {
         "status-failing"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -385,6 +595,10 @@ impl Provider for MetricsTransport {
         self.inner.kind()
     }
 
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        self.inner.route_identity(model)
+    }
+
     fn options(&self) -> ProviderOptions {
         self.inner.options()
     }
@@ -431,6 +645,248 @@ fn empty_request() -> LlmRequest {
         generation: GenerationOptions::default(),
         provider_trace: None,
     }
+}
+
+#[tokio::test]
+async fn provider_handle_records_drop_without_provider_trace_and_stamps_fresh_state() {
+    let mut request = empty_request();
+    request.model = "serving-model".to_string();
+    request.messages = vec![LlmMessage::new(
+        LlmRole::Assistant,
+        vec![LlmContentBlock::Reasoning {
+            text: "neutral summary".to_string(),
+            replay: Some(ProviderReasoningReplay {
+                signature: Some("foreign-signature".to_string()),
+                origin: Some(ProviderRouteIdentity::new(
+                    "minting-provider",
+                    "minting-route",
+                    "minting-model",
+                )),
+                ..ProviderReasoningReplay::default()
+            }),
+        }],
+    )];
+    assert!(request.provider_trace.is_none());
+    let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(ReplayCaptureProvider)));
+
+    let completion = handle.complete(request).await.expect("provider succeeds");
+
+    let replay = match &completion.response.parts[0] {
+        LlmOutputPart::Reasoning {
+            replay: Some(replay),
+            ..
+        } => replay,
+        other => panic!("expected stamped reasoning replay, got {other:?}"),
+    };
+    assert_eq!(
+        replay.origin.as_ref(),
+        Some(&ProviderRouteIdentity::new(
+            "serving-provider",
+            "serving-provider",
+            "serving-model",
+        ))
+    );
+    let drop = &completion.call_record.replay_drops[0];
+    assert_eq!(
+        drop.minting_route.clone(),
+        Some(ProviderRouteIdentity::new(
+            "minting-provider",
+            "minting-route",
+            "minting-model",
+        ))
+    );
+    assert_eq!(
+        drop.serving_route,
+        ProviderRouteIdentity::new("serving-provider", "serving-provider", "serving-model")
+    );
+}
+
+#[tokio::test]
+async fn same_provider_and_model_on_distinct_gateways_are_foreign_routes() {
+    let mut request = empty_request();
+    request.model = "shared-model".to_string();
+    request.messages = vec![LlmMessage::new(
+        LlmRole::Assistant,
+        vec![LlmContentBlock::Reasoning {
+            text: "portable summary".to_string(),
+            replay: Some(ProviderReasoningReplay {
+                signature: Some("gateway-a-signature".to_string()),
+                origin: Some(ProviderRouteIdentity::new(
+                    "openai-compatible",
+                    "https://gateway-a.example/v1",
+                    "shared-model",
+                )),
+                ..ProviderReasoningReplay::default()
+            }),
+        }],
+    )];
+    let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(
+        GatewayReplayCaptureProvider {
+            endpoint: "https://gateway-b.example/v1/",
+        },
+    )));
+
+    let completion = handle.complete(request).await.expect("provider succeeds");
+    assert_eq!(completion.call_record.replay_drops.len(), 1);
+    let drop = &completion.call_record.replay_drops[0];
+    assert_eq!(drop.reason, crate::ProviderReplayDropReason::ForeignRoute);
+    assert_eq!(
+        drop.serving_route,
+        ProviderRouteIdentity::for_endpoint(
+            "openai-compatible",
+            "https://gateway-b.example/v1",
+            "shared-model",
+        )
+    );
+}
+
+#[tokio::test]
+async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
+    let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(
+        GatewayReplayCaptureProvider {
+            endpoint: "https://user:secret@gateway.example/v1",
+        },
+    )));
+
+    let failure = handle
+        .complete(empty_request())
+        .await
+        .expect_err("endpoint userinfo is rejected before transport");
+
+    assert_eq!(
+        failure.error.code.as_deref(),
+        Some("invalid_provider_endpoint")
+    );
+    assert_eq!(failure.call_record.attempts.len(), 1);
+    assert_eq!(
+        failure.call_record.attempts[0].outcome,
+        AttemptOutcome::Failed
+    );
+    assert_eq!(
+        failure.call_record.attempts[0].protocol_position,
+        ProtocolPosition::NoResponse
+    );
+}
+
+#[test]
+fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
+    let failure = LlmTransportError::new("internal task failed: cancelled")
+        .with_kind(ProviderFailureKind::Unknown)
+        .with_code("task_join_failed")
+        .retryable(false);
+    let record = synthetic_terminal_call_record(
+        7,
+        Duration::from_millis(11),
+        AttemptOutcome::Interrupted,
+        &failure,
+        true,
+        ProtocolPosition::OutputStarted,
+        Vec::new(),
+    );
+
+    assert_eq!(record.attempts.len(), 1);
+    assert_eq!(record.attempts[0].ordinal, 1);
+    assert_eq!(record.attempts[0].outcome, AttemptOutcome::Interrupted);
+    assert_eq!(
+        record.attempts[0].protocol_position,
+        ProtocolPosition::OutputStarted
+    );
+    assert_eq!(
+        record.attempts[0]
+            .error
+            .as_ref()
+            .and_then(|error| error.provider_code.as_deref()),
+        Some("task_join_failed")
+    );
+}
+
+#[tokio::test]
+async fn provider_handle_rejects_instead_of_recertifying_foreign_stamped_output() {
+    let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(
+        ContradictoryReplayProvider,
+    )));
+
+    let failure = handle
+        .complete(empty_request())
+        .await
+        .expect_err("foreign-stamped output is a provider contract violation");
+
+    assert_eq!(
+        failure.error.code.as_deref(),
+        Some("provider_replay_origin_conflict")
+    );
+    assert!(!failure.error.retryable);
+    assert!(failure.error.message.contains("gateway-a.example"));
+    assert!(failure.error.message.contains("gateway-b.example"));
+}
+
+#[tokio::test]
+async fn partial_response_origin_conflict_retains_original_provider_failure_evidence() {
+    let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(
+        ContradictoryPartialFailureProvider,
+    )));
+
+    let failure = handle
+        .complete(empty_request())
+        .await
+        .expect_err("foreign-stamped partial output is a provider contract violation");
+
+    assert_eq!(
+        failure.error.code.as_deref(),
+        Some("provider_replay_origin_conflict")
+    );
+    assert_eq!(failure.error.kind, ProviderFailureKind::Validation);
+    assert!(!failure.error.retryable);
+    assert!(
+        failure
+            .error
+            .message
+            .contains("original partial provider failure")
+    );
+    assert_eq!(failure.error.status, Some(502));
+    assert_eq!(
+        failure.error.raw.as_deref().map(String::as_str),
+        Some("original raw provider evidence")
+    );
+    assert_eq!(
+        failure.error.headers.as_slice(),
+        &[("x-request-id".to_string(), "original-request".to_string())]
+    );
+    assert_eq!(
+        failure.error.request_body.as_deref(),
+        Some("original request body")
+    );
+    let original = failure.call_record.attempts[0]
+        .error
+        .as_ref()
+        .expect("original provider failure evidence remains attached");
+    assert_eq!(original.class, ProviderFailureKind::Stream.code());
+    assert_eq!(
+        original.provider_code.as_deref(),
+        Some("original_partial_code")
+    );
+    assert_eq!(original.http_status, Some(502));
+    assert!(
+        original
+            .diagnostic
+            .as_deref()
+            .is_some_and(|message| message.contains("original partial provider failure"))
+    );
+    let partial = failure
+        .error
+        .partial_response
+        .expect("partial response retained");
+    let LlmOutputPart::Reasoning { replay, .. } = &partial.parts[0] else {
+        panic!("expected reasoning partial")
+    };
+    assert_eq!(
+        replay.as_ref().and_then(|replay| replay.origin.as_ref()),
+        Some(&ProviderRouteIdentity::for_endpoint(
+            "openai-compatible",
+            "https://gateway-a.example/v1",
+            "model",
+        ))
+    );
 }
 
 #[test]
@@ -998,6 +1454,10 @@ struct ReportingProvider;
 impl Provider for ReportingProvider {
     fn kind(&self) -> &'static str {
         "reporting-vendor"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {

@@ -853,6 +853,9 @@ impl Provider for SeamProvider {
     fn kind(&self) -> &'static str {
         self.inner.kind()
     }
+    fn route_identity(&self, model: &str) -> crate::ProviderRouteIdentity {
+        self.inner.route_identity(model)
+    }
     fn options(&self) -> crate::ProviderOptions {
         self.inner.options()
     }
@@ -899,6 +902,9 @@ impl std::fmt::Debug for ScriptedProvider {
 impl Provider for ScriptedProvider {
     fn kind(&self) -> &'static str {
         "turn-crash-script"
+    }
+    fn route_identity(&self, model: &str) -> crate::ProviderRouteIdentity {
+        crate::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
     fn options(&self) -> crate::ProviderOptions {
         crate::ProviderOptions::default()

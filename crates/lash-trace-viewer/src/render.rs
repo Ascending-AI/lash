@@ -44,6 +44,18 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
             ),
             false,
         ),
+        TraceEvent::ProviderReplayDropped { event } => (
+            format!("dropped {} replay", event.replay_kind.code()),
+            format!(
+                "{}: {:?} -> {}/{}/{}",
+                event.reason.code(),
+                event.minting_route,
+                event.serving_route.provider,
+                event.serving_route.endpoint,
+                event.serving_route.model
+            ),
+            false,
+        ),
         TraceEvent::ToolCallStarted { name, args, .. } => (name.clone(), json_compact(args), false),
         TraceEvent::ToolCallCompleted {
             name,

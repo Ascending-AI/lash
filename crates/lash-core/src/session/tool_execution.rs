@@ -1065,7 +1065,7 @@ impl RuntimeExecutionContext<'_> {
                 ToolPreparationOutcome::Prepared(prepared) => {
                     prepared_entries.push((
                         index,
-                        prepared,
+                        *prepared,
                         execution_grant,
                         call.child_execution_trace_hook,
                     ));
@@ -1327,7 +1327,7 @@ impl RuntimeExecutionContext<'_> {
                         ToolCallLaunch::Done(Box::new(
                             crate::tool_dispatch::execute_orchestrating_tool(
                                 &dispatch,
-                                prepared,
+                                *prepared,
                                 tool_context,
                             )
                             .await,
@@ -1346,7 +1346,7 @@ impl RuntimeExecutionContext<'_> {
                                 .unwrap_or_default();
                         let coordinated = coordinate_tool_invocation(
                             &dispatch,
-                            prepared,
+                            *prepared,
                             None,
                             retry_policy,
                             ToolAttemptEffectIdentity::Scalar {
@@ -1547,7 +1547,7 @@ impl RuntimeExecutionContext<'_> {
                         .unwrap_or_default();
                 let coordinated = coordinate_tool_invocation(
                     &dispatch,
-                    prepared,
+                    *prepared,
                     Some(Box::new(grant.clone())),
                     grant.manifest.retry_policy,
                     ToolAttemptEffectIdentity::Scalar {

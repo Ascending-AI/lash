@@ -67,6 +67,7 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
                 signature: None,
                 redacted: false,
                 summary: Vec::new(),
+                ..Default::default()
             }),
         }])),
     });

@@ -903,7 +903,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Session"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:989#let error = AppError::session_open(lash::EmbedError::Session("
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1024#let error = AppError::session_open(lash::EmbedError::Session("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -967,8 +967,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:982#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:982#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1017#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1017#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -1547,7 +1547,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::session"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1419#.session(session_id.clone())"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1420#.session(session_id.clone())"
 reason = "Syntax-only evidence: the recorded example anchor inherits a closure operand that can observe an unrelated callback; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -2096,8 +2096,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::close"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1440#session.close().await.expect(\"close canonical session\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1462#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1441#session.close().await.expect(\"close canonical session\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1463#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::LashSession::commands"
@@ -2230,7 +2230,7 @@ aliases = ["lash::prelude::LashSession::read_view"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1041#.read_view()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2459#assistant_events.len(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2460#assistant_events.len(),"
 
 [[api]]
 symbol = "lash::LashSession::refresh_background_graph"
@@ -2276,8 +2276,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2228#crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2234#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2229#crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2235#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::LashSession::set_turn_phase_probe"
@@ -2315,8 +2315,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::turn"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2209#.turn(lash::TurnInput::text(turn_text))"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2236#\"the first provider call must be blocked before the mid-turn read\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2210#.turn(lash::TurnInput::text(turn_text))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2237#\"the first provider call must be blocked before the mid-turn read\""
 
 [[api]]
 symbol = "lash::LashSession::turn_address"
@@ -3112,7 +3112,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1131#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1134#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -4196,7 +4196,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:913#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:948#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -4359,7 +4359,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:913#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:948#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -4369,8 +4369,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::context"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:991#context: format!(\"failed to bind session `{session_id}` to its store\"),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:999#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1026#context: format!(\"failed to bind session `{session_id}` to its store\"),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1034#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionError::Store::source"
@@ -4379,8 +4379,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::source"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:992#source: lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:999#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1027#source: lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1034#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionSpec"
@@ -5094,8 +5094,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::run", "lash::turn::TurnBuilder::run"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2365#.run()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2374#receipts.as_slice(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2366#.run()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2375#receipts.as_slice(),"
 
 [[api]]
 symbol = "lash::TurnBuilder::stream"
@@ -5113,8 +5113,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::stream_to", "lash::turn::TurnBuilder::stream_to"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1719#.stream_to(&ChannelTurnEvents {"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2234#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1720#.stream_to(&ChannelTurnEvents {"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2235#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::TurnBuilder::turn_id"
@@ -5123,8 +5123,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::turn_id", "lash::turn::TurnBuilder::turn_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2210#.turn_id(run_turn_id.clone())"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2234#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2211#.turn_id(run_turn_id.clone())"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2235#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::TurnBuilder::with_plugin_input"
@@ -5165,7 +5165,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2376#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2377#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5198,7 +5198,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2375#[TurnCancelReceipt {"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2376#[TurnCancelReceipt {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5207,8 +5207,8 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2376#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2392#done_ids.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2377#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2393#done_ids.len(),"
 
 [[api]]
 symbol = "lash::TurnCancelRequest"
@@ -6160,7 +6160,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnInput::text", "lash_core::TurnInput::text"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2209#.turn(lash::TurnInput::text(turn_text))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2210#.turn(lash::TurnInput::text(turn_text))"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -8687,7 +8687,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:313#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:381#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -8704,7 +8704,7 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:313#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:381#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -8724,7 +8724,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2155#lash::direct::LlmOutputPart::Reasoning {"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2156#lash::direct::LlmOutputPart::Reasoning {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -8734,8 +8734,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning::replay"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2157#replay: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2301#&& text == \"durable reasoning disclosure\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2158#replay: None,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2302#&& text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Reasoning::text"
@@ -8744,8 +8744,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning::text"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2156#text: \"durable reasoning disclosure\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2301#&& text == \"durable reasoning disclosure\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2157#text: \"durable reasoning disclosure\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2302#&& text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Text"
@@ -8842,7 +8842,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:313#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:381#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -10166,7 +10166,7 @@ aliases = ["lash_core::Message::id"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1213#id: committed_id.to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1311#if message.id == workbench_turn_user_message_id(\"reconciled-turn\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1312#if message.id == workbench_turn_user_message_id(\"reconciled-turn\")"
 
 [[api]]
 symbol = "lash::messages::Message::is_transient"
@@ -10185,7 +10185,7 @@ aliases = ["lash_core::Message::origin"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:68#message.origin.as_ref()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1540#\"the UI-owned row renders once and the committed copy stays provenance\""
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::Message::parts"
@@ -10204,7 +10204,7 @@ aliases = ["lash_core::Message::role"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1214#role: \"user\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2277#.map(|message| (message.role.as_str(), message.text.as_str()))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2278#.map(|message| (message.role.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::messages::MessageOrigin"
@@ -10314,8 +10314,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageOrigin::TurnInput::input_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1506#input_id: Some(\"workbench-input-1\".to_string()),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1540#\"the UI-owned row renders once and the committed copy stays provenance\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1507#input_id: Some(\"workbench-input-1\".to_string()),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::MessageOrigin::TurnInput::turn_id"
@@ -10325,7 +10325,7 @@ aliases = ["lash_core::MessageOrigin::TurnInput::turn_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:67#let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) ="
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1540#\"the UI-owned row renders once and the committed copy stays provenance\""
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::MessageRole"
@@ -10334,7 +10334,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageRole"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1433#lash::messages::MessageRole::Assistant,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1434#lash::messages::MessageRole::Assistant,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -10344,7 +10344,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageRole::Assistant"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1433#lash::messages::MessageRole::Assistant,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1434#lash::messages::MessageRole::Assistant,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -10381,8 +10381,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:103#committed_sequence.len(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:103#committed_sequence.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:105#committed_sequence.len(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:105#committed_sequence.len(),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -11712,8 +11712,8 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalEntry"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:123#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:123#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:125#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:125#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -11723,8 +11723,8 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalEntry::index"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:123#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:123#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:125#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:125#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
 
 [[api]]
 symbol = "lash::persistence::ChronologicalEntry::payload"
@@ -11733,8 +11733,8 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalEntry::payload"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:128#.map(|entry| match &entry.payload {"
-assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:148#projected_kinds,"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:130#.map(|entry| match &entry.payload {"
+assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:150#projected_kinds,"
 reason = "Assertion relationship: the recorded assertion is in the exercised example flow and observes the value or externally meaningful outcome produced through this fluent call."
 
 [[api]]
@@ -11744,7 +11744,7 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalPayload"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:129#lash::persistence::ChronologicalPayload::Message(message) => match message.role {"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:131#lash::persistence::ChronologicalPayload::Message(message) => match message.role {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -11754,7 +11754,7 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalPayload::Message"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:129#lash::persistence::ChronologicalPayload::Message(message) => match message.role {"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:131#lash::persistence::ChronologicalPayload::Message(message) => match message.role {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -11764,8 +11764,8 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalPayload::Message::0"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:129#lash::persistence::ChronologicalPayload::Message(message) => match message.role {"
-assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:123#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:131#lash::persistence::ChronologicalPayload::Message(message) => match message.role {"
+assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:125#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
 
 [[api]]
 symbol = "lash::persistence::ChronologicalPayload::ProtocolEvent"
@@ -11774,8 +11774,8 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalPayload::ProtocolEvent"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:136#assert_eq!(event.plugin_id, \"rlm_protocol\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:136#assert_eq!(event.plugin_id, \"rlm_protocol\");"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:138#assert_eq!(event.plugin_id, \"rlm_protocol\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:138#assert_eq!(event.plugin_id, \"rlm_protocol\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -11785,8 +11785,8 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalPayload::ProtocolEvent::0"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:135#lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:136#assert_eq!(event.plugin_id, \"rlm_protocol\");"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:137#lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {"
+assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:138#assert_eq!(event.plugin_id, \"rlm_protocol\");"
 
 [[api]]
 symbol = "lash::persistence::ChronologicalProjection"
@@ -11795,7 +11795,7 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalProjection"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:119#let projection: lash::persistence::ChronologicalProjection ="
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:121#let projection: lash::persistence::ChronologicalProjection ="
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -11805,8 +11805,8 @@ availability = "default+all-features"
 aliases = ["lash_core::chronological::ChronologicalProjection::entries"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:123#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:123#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
+usage = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:125#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/session_resume.rs:125#entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -16130,7 +16130,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::chronological_projection"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:199#.chronological_projection()"
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:209#.chronological_projection()"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:238, inside `transcript_rows_from_committed`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1121 asserts an unrelated expression in `send_turn_state_projection_stays_readable_and_settles_to_durable_truth`, and `transcript_rows_from_committed` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -16177,7 +16177,7 @@ aliases = ["lash_core::SessionReadView::messages"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1042#.messages()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2459#assistant_events.len(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2460#assistant_events.len(),"
 
 [[api]]
 symbol = "lash::persistence::SessionReadView::policy"
@@ -17557,8 +17557,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:982#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:982#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1017#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1017#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -17568,8 +17568,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:979#session_id: \"retired-session\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:982#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1014#session_id: \"retired-session\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1017#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionExecutionLeaseExpired"
@@ -20478,8 +20478,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::text"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1462#.map(|message| (message.id.as_str(), message.text.as_str()))"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1462#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1463#.map(|message| (message.id.as_str(), message.text.as_str()))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1463#.map(|message| (message.id.as_str(), message.text.as_str()))"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -20489,7 +20489,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::with_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1431#.with_id(\"canonical-user\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1432#.with_id(\"canonical-user\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -29045,8 +29045,8 @@ availability = "default+all-features"
 aliases = ["lash_core::CacheControlDialect"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:184#capability_variants,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:184#capability_variants,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:188#capability_variants,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:188#capability_variants,"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -29056,7 +29056,7 @@ availability = "default+all-features"
 aliases = ["lash_core::CacheControlDialect::Anthropic"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:129#cache_control: Some(CacheControlDialect::Anthropic),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:133#cache_control: Some(CacheControlDialect::Anthropic),"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -29066,8 +29066,8 @@ availability = "default+all-features"
 aliases = ["lash_core::CacheControlDialect::Gemini"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:185#serde_json::json!([\"anthropic\", \"gemini\"])"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:185#serde_json::json!([\"anthropic\", \"gemini\"])"
+usage = "examples/docs-snippets/src/architecture_providers.rs:189#serde_json::json!([\"anthropic\", \"gemini\"])"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:189#serde_json::json!([\"anthropic\", \"gemini\"])"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -29683,8 +29683,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::LlmTimeouts"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:253#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:253#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
+usage = "examples/docs-snippets/src/architecture_providers.rs:257#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:257#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -29694,8 +29694,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::LlmTimeouts::chunk_timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:253#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:253#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
+usage = "examples/docs-snippets/src/architecture_providers.rs:257#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:257#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:253; the assertion at examples/docs-snippets/src/architecture_providers.rs:253 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `timeouts.chunk_timeout` equals `Duration::from_millis(7_500)`."
 
 [[api]]
@@ -29705,8 +29705,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::LlmTimeouts::request_timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:252#assert_eq!(timeouts.request_timeout, Some(Duration::from_secs(45)));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:253#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
+usage = "examples/docs-snippets/src/architecture_providers.rs:256#assert_eq!(timeouts.request_timeout, Some(Duration::from_secs(45)));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:257#assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:252; the assertion at examples/docs-snippets/src/architecture_providers.rs:253 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `timeouts.chunk_timeout` equals `Duration::from_millis(7_500)`."
 
 [[api]]
@@ -29725,8 +29725,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:134#assert!(!ModelCapability::allows_caller_temperature(&capability));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:134#assert!(!ModelCapability::allows_caller_temperature(&capability));"
+usage = "examples/docs-snippets/src/architecture_providers.rs:138#assert!(!ModelCapability::allows_caller_temperature(&capability));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:138#assert!(!ModelCapability::allows_caller_temperature(&capability));"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -29736,8 +29736,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability::allows_caller_temperature"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:107#assert!(ModelCapability::allows_caller_temperature("
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:111#assert!(ModelCapability::allows_caller_temperature("
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:107; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -29747,8 +29747,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability::cache_control"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:129#cache_control: Some(CacheControlDialect::Anthropic),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:133#cache_control: Some(CacheControlDialect::Anthropic),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:129; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -29758,8 +29758,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability::is_empty"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:106#assert!(ModelCapability::is_empty(&empty_capability));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:110#assert!(ModelCapability::is_empty(&empty_capability));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:106; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -29769,8 +29769,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability::reasoning"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:128#reasoning: Some(reasoning),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:132#reasoning: Some(reasoning),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:128; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -29780,8 +29780,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability::resolve_effort"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:136#ModelCapability::resolve_effort(&capability, \" XHIGH \").as_deref(),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:140#ModelCapability::resolve_effort(&capability, \" XHIGH \").as_deref(),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:136; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -29791,8 +29791,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability::sampling"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:131#sampling: SamplingCapability::Pinned,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:135#sampling: SamplingCapability::Pinned,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:131; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -29802,8 +29802,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability::stream_termination"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:130#stream_termination: Some(StreamTermination::RequireTerminalEvidence),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:134#stream_termination: Some(StreamTermination::RequireTerminalEvidence),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:130; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -29813,7 +29813,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ModelCapability::validate_selection"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:139#let resolved = ModelCapability::validate_selection("
+usage = "examples/docs-snippets/src/architecture_providers.rs:143#let resolved = ModelCapability::validate_selection("
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30035,7 +30035,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderComponents::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:77#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
+usage = "examples/agent-workbench/src/failure_provider.rs:91#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -30125,8 +30125,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30136,8 +30136,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Auth"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30147,8 +30147,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Http"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30158,8 +30158,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Quota"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30169,8 +30169,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Stream"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30180,8 +30180,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30191,8 +30191,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Transport"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30202,8 +30202,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Unknown"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30213,8 +30213,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Unsupported"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30224,8 +30224,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Validation"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30235,8 +30235,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::code"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:343#failure_kinds.map(ProviderFailureKind::code),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:339; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
@@ -30282,7 +30282,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderHandle::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:77#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
+usage = "examples/agent-workbench/src/failure_provider.rs:91#ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -30346,7 +30346,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:277#let options = ProviderOptions {"
+usage = "examples/docs-snippets/src/architecture_providers.rs:281#let options = ProviderOptions {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30356,8 +30356,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::cache_retention"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:296#serde_json::to_value(options.cache_retention).unwrap(),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:300#serde_json::to_value(options.cache_retention).unwrap(),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:296; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30367,8 +30367,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::expose_thinking"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:284#expose_thinking: true,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:288#expose_thinking: true,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:284; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30378,8 +30378,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::is_default"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:290#assert!(!ProviderOptions::is_default(&options));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:294#assert!(!ProviderOptions::is_default(&options));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:290; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30389,8 +30389,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::llm_timeouts"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:300#ProviderOptions::llm_timeouts(&options).request_timeout,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:304#ProviderOptions::llm_timeouts(&options).request_timeout,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:300; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30400,8 +30400,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::max_output_tokens"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:285#max_output_tokens: Some(4_096),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:289#max_output_tokens: Some(4_096),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:285; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30411,7 +30411,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::reliability"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:81#reliability: ProviderReliability::default()"
+usage = "examples/agent-workbench/src/failure_provider.rs:95#reliability: ProviderReliability::default()"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:64, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -30421,8 +30421,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::response_metadata_body_paths"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:287#response_metadata_body_paths: vec![\"/usage/cost\".to_string()],"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:294#assert_eq!(options.response_metadata_body_paths, [\"/usage/cost\"]);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:291#response_metadata_body_paths: vec![\"/usage/cost\".to_string()],"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:298#assert_eq!(options.response_metadata_body_paths, [\"/usage/cost\"]);"
 reason = "Exercised by the docs-snippets provider-policy example; the assertion observes the exact JSON-pointer allowlist exposed to hosts."
 
 [[api]]
@@ -30432,8 +30432,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::response_metadata_headers"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:286#response_metadata_headers: vec![\"X-Request-Cost\".to_string()],"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:293#assert_eq!(options.response_metadata_headers, [\"X-Request-Cost\"]);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:290#response_metadata_headers: vec![\"X-Request-Cost\".to_string()],"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:297#assert_eq!(options.response_metadata_headers, [\"X-Request-Cost\"]);"
 reason = "Exercised by the docs-snippets provider-policy example; the assertion observes the exact response-header allowlist exposed to hosts."
 
 [[api]]
@@ -30461,7 +30461,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRateLimitPolicy"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:270#let rate_limits = ProviderRateLimitPolicy {"
+usage = "examples/docs-snippets/src/architecture_providers.rs:274#let rate_limits = ProviderRateLimitPolicy {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30471,8 +30471,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::max_concurrency"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:231#.max_concurrency(Some(8))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:235#.max_concurrency(Some(8))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:231; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30482,8 +30482,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::request_window_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:248#assert_eq!(reliability.rate_limits.request_window_ms, Some(60_000));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:252#assert_eq!(reliability.rate_limits.request_window_ms, Some(60_000));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:248; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30493,8 +30493,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::requests_per_window"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:232#.requests_per_window(Some(120), Some(60_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:236#.requests_per_window(Some(120), Some(60_000))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:232; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30504,8 +30504,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::token_window_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:250#assert_eq!(reliability.rate_limits.token_window_ms, Some(60_000));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:254#assert_eq!(reliability.rate_limits.token_window_ms, Some(60_000));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:250; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30515,8 +30515,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::tokens_per_window"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:233#.tokens_per_window(Some(200_000), Some(60_000));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:237#.tokens_per_window(Some(200_000), Some(60_000));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:233; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30526,8 +30526,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30537,8 +30537,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::base_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:227#.base_delay_ms(125)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:231#.base_delay_ms(125)"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:227; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30548,8 +30548,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::chunk_timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:238#assert_eq!(reliability.chunk_timeout, Some(7_500));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:242#assert_eq!(reliability.chunk_timeout, Some(7_500));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:238; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30559,8 +30559,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::codex"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -30570,8 +30570,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::disabled"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:256#ProviderReliability::disabled().request_timeout(Some(RequestTimeout::Disabled));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:260#ProviderReliability::disabled().request_timeout(Some(RequestTimeout::Disabled));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:256; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30581,7 +30581,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::llm_timeouts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:251#let timeouts = ProviderReliability::llm_timeouts(&reliability);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:255#let timeouts = ProviderReliability::llm_timeouts(&reliability);"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30591,7 +30591,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::max_attempts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:82#.max_attempts(2)"
+usage = "examples/agent-workbench/src/failure_provider.rs:96#.max_attempts(2)"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:65, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -30601,8 +30601,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::max_concurrency"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:231#.max_concurrency(Some(8))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:235#.max_concurrency(Some(8))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:231; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30612,8 +30612,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::max_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:228#.max_delay_ms(2_000)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:232#.max_delay_ms(2_000)"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:228; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30623,8 +30623,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::rate_limits"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:246#assert_eq!(reliability.rate_limits.max_concurrency, Some(8));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:250#assert_eq!(reliability.rate_limits.max_concurrency, Some(8));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:246; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30634,8 +30634,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::request_timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:224#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:228#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30645,8 +30645,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::requests_per_window"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:232#.requests_per_window(Some(120), Some(60_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:236#.requests_per_window(Some(120), Some(60_000))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:232; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30656,8 +30656,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::retry"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:229#.retry_after_cap_ms(Some(15_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:233#.retry_after_cap_ms(Some(15_000))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30667,8 +30667,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::retry_after_cap_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:229#.retry_after_cap_ms(Some(15_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:233#.retry_after_cap_ms(Some(15_000))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30678,8 +30678,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::stream_chunk_timeout_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:225#.stream_chunk_timeout_ms(Some(7_500))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:229#.stream_chunk_timeout_ms(Some(7_500))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:225; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30689,8 +30689,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::throttle_wait_budget_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:230#.throttle_wait_budget_ms(30_000)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:234#.throttle_wait_budget_ms(30_000)"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:230; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30700,8 +30700,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::tokens_per_window"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:233#.tokens_per_window(Some(200_000), Some(60_000));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:237#.tokens_per_window(Some(200_000), Some(60_000));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:233; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30711,8 +30711,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:259#assert_eq!(ProviderRetryPolicy::disabled().max_attempts, 1);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:263#assert_eq!(ProviderRetryPolicy::disabled().max_attempts, 1);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:259; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30722,8 +30722,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy::base_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:227#.base_delay_ms(125)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:231#.base_delay_ms(125)"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:227; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30733,8 +30733,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy::disabled"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:259#assert_eq!(ProviderRetryPolicy::disabled().max_attempts, 1);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:263#assert_eq!(ProviderRetryPolicy::disabled().max_attempts, 1);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:259; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30744,8 +30744,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy::enabled"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:245#assert!(reliability.retry.enabled);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:249#assert!(reliability.retry.enabled);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:245; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30755,8 +30755,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy::jitter_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:242#assert_eq!(reliability.retry.jitter_ms, 0);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:246#assert_eq!(reliability.retry.jitter_ms, 0);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:242; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30766,8 +30766,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy::max_attempts"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:226#.max_attempts(6)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:230#.max_attempts(6)"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:226; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30777,8 +30777,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy::max_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:228#.max_delay_ms(2_000)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:232#.max_delay_ms(2_000)"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:228; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30788,8 +30788,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy::retry_after_cap_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:229#.retry_after_cap_ms(Some(15_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:233#.retry_after_cap_ms(Some(15_000))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30799,8 +30799,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderRetryPolicy::throttle_wait_budget_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:230#.throttle_wait_budget_ms(30_000)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:234#.throttle_wait_budget_ms(30_000)"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:230; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -30837,8 +30837,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningCapability"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:122#assert_eq!(reasoning.default_effort.as_deref(), Some(\"low\"));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:122#assert_eq!(reasoning.default_effort.as_deref(), Some(\"low\"));"
+usage = "examples/docs-snippets/src/architecture_providers.rs:126#assert_eq!(reasoning.default_effort.as_deref(), Some(\"low\"));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:126#assert_eq!(reasoning.default_effort.as_deref(), Some(\"low\"));"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30848,8 +30848,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningCapability::aliases"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:124#assert_eq!(reasoning.aliases[\"xhigh\"], \"high\");"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:128#assert_eq!(reasoning.aliases[\"xhigh\"], \"high\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:124; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -30859,8 +30859,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningCapability::default_effort"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:122#assert_eq!(reasoning.default_effort.as_deref(), Some(\"low\"));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:126#assert_eq!(reasoning.default_effort.as_deref(), Some(\"low\"));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:122; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -30870,8 +30870,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningCapability::disable"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:119#disable: Some(ReasoningDisableEncoding::Budget(0)),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:123#disable: Some(ReasoningDisableEncoding::Budget(0)),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:119; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -30881,8 +30881,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningCapability::efforts"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:123#assert_eq!(reasoning.efforts, [\"low\", \"high\"]);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:127#assert_eq!(reasoning.efforts, [\"low\", \"high\"]);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:123; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -30892,8 +30892,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningCapability::encoding"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:115#encoding: ReasoningEncoding::Budget(BTreeMap::from(["
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:119#encoding: ReasoningEncoding::Budget(BTreeMap::from(["
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:115; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -30903,8 +30903,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningCapability::mandatory"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:125#assert!(reasoning.mandatory);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:129#assert!(reasoning.mandatory);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:125; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -30914,8 +30914,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningDisableEncoding"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30925,8 +30925,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningDisableEncoding::Budget"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -30936,8 +30936,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningDisableEncoding::Budget::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:119#disable: Some(ReasoningDisableEncoding::Budget(0)),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:123#disable: Some(ReasoningDisableEncoding::Budget(0)),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:119; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -30947,7 +30947,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningDisableEncoding::Effort"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:207#ReasoningDisableEncoding::Effort(\"none\".to_string()),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:211#ReasoningDisableEncoding::Effort(\"none\".to_string()),"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30957,8 +30957,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningDisableEncoding::Effort::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:207#ReasoningDisableEncoding::Effort(\"none\".to_string()),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:212#serde_json::json!([\"native\", \"omit\", { \"effort\": \"none\" }, { \"budget\": 0 }, \"toggle_false\"])"
+usage = "examples/docs-snippets/src/architecture_providers.rs:211#ReasoningDisableEncoding::Effort(\"none\".to_string()),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:216#serde_json::json!([\"native\", \"omit\", { \"effort\": \"none\" }, { \"budget\": 0 }, \"toggle_false\"])"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:207; the assertion at examples/docs-snippets/src/architecture_providers.rs:212 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `serde_json::to_value([ ReasoningDisableEncoding::Native, ReasoningDisableEncoding::Omit...` equals `serde_json::json!([\"native\", \"omit\", { \"effort\": \"none\" }, { \"budget\": 0 }, \"toggle_fal...`."
 
 [[api]]
@@ -30968,7 +30968,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningDisableEncoding::Native"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:205#ReasoningDisableEncoding::Native,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:209#ReasoningDisableEncoding::Native,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30978,7 +30978,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningDisableEncoding::Omit"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:206#ReasoningDisableEncoding::Omit,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:210#ReasoningDisableEncoding::Omit,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30988,7 +30988,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningDisableEncoding::ToggleFalse"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:209#ReasoningDisableEncoding::ToggleFalse,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:213#ReasoningDisableEncoding::ToggleFalse,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30998,8 +30998,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningEncoding"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:175#capability_wire[\"reasoning\"][\"encoding\"][\"budget\"][\"high\"],"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:175#capability_wire[\"reasoning\"][\"encoding\"][\"budget\"][\"high\"],"
+usage = "examples/docs-snippets/src/architecture_providers.rs:179#capability_wire[\"reasoning\"][\"encoding\"][\"budget\"][\"high\"],"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:179#capability_wire[\"reasoning\"][\"encoding\"][\"budget\"][\"high\"],"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -31009,8 +31009,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningEncoding::Budget"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -31020,8 +31020,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningEncoding::Budget::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:115#encoding: ReasoningEncoding::Budget(BTreeMap::from(["
-assertion = "examples/docs-snippets/src/architecture_providers.rs:175#capability_wire[\"reasoning\"][\"encoding\"][\"budget\"][\"high\"],"
+usage = "examples/docs-snippets/src/architecture_providers.rs:119#encoding: ReasoningEncoding::Budget(BTreeMap::from(["
+assertion = "examples/docs-snippets/src/architecture_providers.rs:179#capability_wire[\"reasoning\"][\"encoding\"][\"budget\"][\"high\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:115; the assertion at examples/docs-snippets/src/architecture_providers.rs:175 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"encoding\"][\"budget\"][\"high\"]` equals `8_192`."
 
 [[api]]
@@ -31031,7 +31031,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningEncoding::Effort"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:216#ReasoningEncoding::Effort,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:220#ReasoningEncoding::Effort,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31041,8 +31041,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningSelection"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:146#assert_eq!(ReasoningSelection::effort(&resolved), Some(\"high\"));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:146#assert_eq!(ReasoningSelection::effort(&resolved), Some(\"high\"));"
+usage = "examples/docs-snippets/src/architecture_providers.rs:150#assert_eq!(ReasoningSelection::effort(&resolved), Some(\"high\"));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:150#assert_eq!(ReasoningSelection::effort(&resolved), Some(\"high\"));"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -31052,7 +31052,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningSelection::Disabled"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:161#&ReasoningSelection::Disabled,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:165#&ReasoningSelection::Disabled,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31062,7 +31062,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningSelection::Effort"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:143#&ReasoningSelection::Effort(\"xhigh\".to_string()),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:147#&ReasoningSelection::Effort(\"xhigh\".to_string()),"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31072,8 +31072,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningSelection::Effort::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:143#&ReasoningSelection::Effort(\"xhigh\".to_string()),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:146#assert_eq!(ReasoningSelection::effort(&resolved), Some(\"high\"));"
+usage = "examples/docs-snippets/src/architecture_providers.rs:147#&ReasoningSelection::Effort(\"xhigh\".to_string()),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:150#assert_eq!(ReasoningSelection::effort(&resolved), Some(\"high\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:143; the assertion at examples/docs-snippets/src/architecture_providers.rs:146 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `ReasoningSelection::effort(&resolved)` equals `Some(\"high\")`."
 
 [[api]]
@@ -31083,7 +31083,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningSelection::ProviderDefault"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:152#&ReasoningSelection::ProviderDefault,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:156#&ReasoningSelection::ProviderDefault,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31093,8 +31093,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ReasoningSelection::effort"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:146#assert_eq!(ReasoningSelection::effort(&resolved), Some(\"high\"));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:150#assert_eq!(ReasoningSelection::effort(&resolved), Some(\"high\"));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:146; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -31104,8 +31104,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::RequestTimeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -31115,7 +31115,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::RequestTimeout::Disabled"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:256#ProviderReliability::disabled().request_timeout(Some(RequestTimeout::Disabled));"
+usage = "examples/docs-snippets/src/architecture_providers.rs:260#ProviderReliability::disabled().request_timeout(Some(RequestTimeout::Disabled));"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31125,8 +31125,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::RequestTimeout::Millis"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -31136,8 +31136,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::RequestTimeout::Millis::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:224#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:228#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -31147,7 +31147,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SamplingCapability"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:131#sampling: SamplingCapability::Pinned,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:135#sampling: SamplingCapability::Pinned,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31157,7 +31157,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SamplingCapability::Configurable"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:188#serde_json::to_value([SamplingCapability::Configurable, SamplingCapability::Pinned,])"
+usage = "examples/docs-snippets/src/architecture_providers.rs:192#serde_json::to_value([SamplingCapability::Configurable, SamplingCapability::Pinned,])"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31167,7 +31167,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SamplingCapability::Pinned"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:131#sampling: SamplingCapability::Pinned,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:135#sampling: SamplingCapability::Pinned,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31177,8 +31177,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SamplingCapability::is_default"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:192#assert!(SamplingCapability::is_default("
-assertion = "examples/docs-snippets/src/architecture_providers.rs:178#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:196#assert!(SamplingCapability::is_default("
+assertion = "examples/docs-snippets/src/architecture_providers.rs:182#assert_eq!(capability_wire[\"reasoning\"][\"disable\"][\"budget\"], 0);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:192; the assertion at examples/docs-snippets/src/architecture_providers.rs:178 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `capability_wire[\"reasoning\"][\"disable\"][\"budget\"]` equals `0`."
 
 [[api]]
@@ -31188,7 +31188,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StreamTermination"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:130#stream_termination: Some(StreamTermination::RequireTerminalEvidence),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:134#stream_termination: Some(StreamTermination::RequireTerminalEvidence),"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31198,7 +31198,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StreamTermination::EofTolerated"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:198#StreamTermination::EofTolerated,"
+usage = "examples/docs-snippets/src/architecture_providers.rs:202#StreamTermination::EofTolerated,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31208,7 +31208,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StreamTermination::RequireTerminalEvidence"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:130#stream_termination: Some(StreamTermination::RequireTerminalEvidence),"
+usage = "examples/docs-snippets/src/architecture_providers.rs:134#stream_termination: Some(StreamTermination::RequireTerminalEvidence),"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -32000,8 +32000,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptOutcome::Aborted"
@@ -32009,8 +32009,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:222#assert_eq!(aborted.outcome, RemoteAttemptOutcome::Aborted);"
-assertion = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:222#assert_eq!(aborted.outcome, RemoteAttemptOutcome::Aborted);"
+usage = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:223#assert_eq!(aborted.outcome, RemoteAttemptOutcome::Aborted);"
+assertion = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:223#assert_eq!(aborted.outcome, RemoteAttemptOutcome::Aborted);"
 reason = "A persisted product-event boundary round trip asserts the complete non-default record containing the aborted attempt."
 
 [[api]]
@@ -32019,8 +32019,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptOutcome::Failed"
@@ -32028,8 +32028,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptOutcome::Interrupted"
@@ -32037,8 +32037,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:242#assert_eq!(interrupted.outcome, RemoteAttemptOutcome::Interrupted);"
-assertion = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:242#assert_eq!(interrupted.outcome, RemoteAttemptOutcome::Interrupted);"
+usage = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:243#assert_eq!(interrupted.outcome, RemoteAttemptOutcome::Interrupted);"
+assertion = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:243#assert_eq!(interrupted.outcome, RemoteAttemptOutcome::Interrupted);"
 reason = "A persisted product-event boundary round trip asserts the complete non-default record containing the interrupted attempt."
 
 [[api]]
@@ -32047,8 +32047,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::duration_ms"
@@ -32056,8 +32056,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::error"
@@ -32065,8 +32065,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::evidence"
@@ -32074,8 +32074,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::generation_disposition"
@@ -32083,8 +32083,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::ordinal"
@@ -32092,8 +32092,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::outcome"
@@ -32101,8 +32101,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::protocol_position"
@@ -32110,8 +32110,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::retry_budget_consumed"
@@ -32119,8 +32119,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::retry_decision"
@@ -32128,8 +32128,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::started_at_ms"
@@ -32137,8 +32137,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttemptRecord::usage"
@@ -32146,8 +32146,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmCallRecord"
@@ -32155,8 +32155,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmCallRecord::attempts"
@@ -32164,8 +32164,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmCallRecord::call_id"
@@ -32173,8 +32173,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmCallRecord::label"
@@ -32182,8 +32182,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError"
@@ -32191,8 +32191,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::class"
@@ -32200,8 +32200,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::http_status"
@@ -32209,8 +32209,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::provider_code"
@@ -32218,8 +32218,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::provider_request_id"
@@ -32227,8 +32227,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteNormalizedError::retry_after_ms"
@@ -32236,8 +32236,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProtocolPosition"
@@ -32245,8 +32245,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProtocolPosition::NoResponse"
@@ -32254,8 +32254,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProtocolPosition::OutputStarted"
@@ -32263,8 +32263,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:244#assert_eq!(interrupted_position, RemoteProtocolPosition::OutputStarted);"
-assertion = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:244#assert_eq!(interrupted_position, RemoteProtocolPosition::OutputStarted);"
+usage = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:245#assert_eq!(interrupted_position, RemoteProtocolPosition::OutputStarted);"
+assertion = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:245#assert_eq!(interrupted_position, RemoteProtocolPosition::OutputStarted);"
 reason = "A persisted product-event boundary round trip asserts the complete non-default record containing the output-started position."
 
 [[api]]
@@ -32273,8 +32273,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:224#assert_eq!(aborted_position, RemoteProtocolPosition::ResponseObserved);"
-assertion = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:224#assert_eq!(aborted_position, RemoteProtocolPosition::ResponseObserved);"
+usage = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:225#assert_eq!(aborted_position, RemoteProtocolPosition::ResponseObserved);"
+assertion = "examples/agent-workbench/src/main_sections/tests/product_event_persistence.rs:225#assert_eq!(aborted_position, RemoteProtocolPosition::ResponseObserved);"
 reason = "A persisted product-event boundary round trip asserts the complete non-default record containing the response-observed position."
 
 [[api]]
@@ -32283,8 +32283,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteRetryDecision"
@@ -32292,8 +32292,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteRetryDecision::delay_ms"
@@ -32301,8 +32301,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteRetryDecision::reason"
@@ -32310,8 +32310,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteRetryDecision::scheduled"
@@ -32319,8 +32319,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1316#assert_eq!(record, &expected_record);"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteDiagnostic"
@@ -32913,6 +32913,15 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteLlmRequest to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteLlmRequest::decode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1378#RemoteLlmRequest::decode_json(&request_wire).expect(\"current request decodes\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1379#assert_eq!(decoded.request_id, \"request-version-first\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmRequest::attachments"
@@ -33873,22 +33882,6 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteResponseTextMeta::id to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::remote::llm::RemoteResponseTextMeta::origin_model"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::llm::RemoteResponseTextMeta::origin_model to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::remote::llm::RemoteResponseTextMeta::origin_provider"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::remote::llm::RemoteResponseTextMeta::origin_provider to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteResponseTextMeta::phase"
@@ -43356,8 +43349,8 @@ kind = "function"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1717#.require_finish()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2234#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1718#.require_finish()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2235#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::rlm::RlmTurnBuilderExt::require_finish_schema"
@@ -47173,8 +47166,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:917#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:982#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:952#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1017#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::cause"
@@ -47202,8 +47195,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::deleted_session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:917#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:982#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:952#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1017#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::is_retryable"
@@ -48704,7 +48697,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::as_str"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:922#Some((session_id.as_str(), Some(error.code.as_str())))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:957#Some((session_id.as_str(), Some(error.code.as_str())))"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::from_wire_code"
@@ -70979,8 +70972,8 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderReliability::request_timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:224#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+usage = "examples/docs-snippets/src/architecture_providers.rs:228#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
@@ -71963,7 +71956,7 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::effects"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:746#.effects(controller)"
+usage = "examples/agent-workbench/src/restate.rs:747#.effects(controller)"
 reason = "The Restate selected-drain workflow binds its durable effect controller before streaming; controller ownership is verified by the workflow integration tests rather than at this call site."
 
 [[api]]
@@ -72192,7 +72185,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:746#.effects(controller)"
+usage = "examples/agent-workbench/src/restate.rs:747#.effects(controller)"
 reason = "The Restate workbench selected drain uses the controller-scoped builder; its workflow outcome is checked by higher-level integration coverage."
 
 [[api]]
@@ -72233,7 +72226,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:747#.stream_to(&ui_events)"
+usage = "examples/agent-workbench/src/restate.rs:748#.stream_to(&ui_events)"
 reason = "The Restate workbench streams a controller-scoped selected drain into its UI sink; higher-level workflow tests validate the emitted reply."
 
 [[api]]
@@ -75149,3 +75142,634 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Closure-required process-registry seam implemented by persistent stores; facade hosts settle through ToolIntentIngress."
+[[api]]
+symbol = "lash::LlmCallRecord::replay_drops"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::LlmCallRecord::replay_drops"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: the compiled trace example demonstrates the public replay-drop evidence projected from this sealed call-record field; hosts normally observe the trace rather than construct call records."
+
+[[api]]
+symbol = "lash::direct::ProviderReplayDrop"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayDrop"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:449#assert_eq!(wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:449#assert_eq!(wire[0][\"kind\"], \"response_text\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayDrop::kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayDrop::kind"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:449#assert_eq!(wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:449#assert_eq!(wire[0][\"kind\"], \"response_text\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayDrop::minting_route"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayDrop::minting_route"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:438#minting_route: Some(opaque.clone()),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:455#assert_eq!(wire[1][\"minting_route\"][\"endpoint\"], \"eu-west\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayDrop::reason"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayDrop::reason"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:431#reason: ProviderReplayDropReason::Unstamped,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:450#assert_eq!(wire[0][\"reason\"], \"unstamped\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayDrop::serving_route"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayDrop::serving_route"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:433#serving_route: normalized.clone(),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:452#assert_eq!(serving_endpoint, \"https://gateway.example/v1\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayDropReason"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayDropReason"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:450#assert_eq!(wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:450#assert_eq!(wire[0][\"reason\"], \"unstamped\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayDropReason::ForeignRoute"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayDropReason::ForeignRoute"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:454#assert_eq!(wire[1][\"reason\"], \"foreign_route\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:454#assert_eq!(wire[1][\"reason\"], \"foreign_route\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayDropReason::Unstamped"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayDropReason::Unstamped"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:450#assert_eq!(wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:450#assert_eq!(wire[0][\"reason\"], \"unstamped\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayKind"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayKind"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:449#assert_eq!(wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:449#assert_eq!(wire[0][\"kind\"], \"response_text\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayKind::Reasoning"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayKind::Reasoning"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:453#assert_eq!(wire[1][\"kind\"], \"reasoning\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:453#assert_eq!(wire[1][\"kind\"], \"reasoning\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayKind::ResponseText"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayKind::ResponseText"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:449#assert_eq!(wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:449#assert_eq!(wire[0][\"kind\"], \"response_text\");"
+
+[[api]]
+symbol = "lash::direct::ProviderReplayKind::ToolCall"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderReplayKind::ToolCall"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:456#assert_eq!(wire[2][\"kind\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:456#assert_eq!(wire[2][\"kind\"], \"tool_call\");"
+
+[[api]]
+symbol = "lash::direct::ProviderRouteIdentity"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderRouteIdentity"]
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:411#assert_eq!(normalized.endpoint.as_ref(), \"https://gateway.example/v1\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:411#assert_eq!(normalized.endpoint.as_ref(), \"https://gateway.example/v1\");"
+
+[[api]]
+symbol = "lash::direct::ProviderRouteIdentity::endpoint"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderRouteIdentity::endpoint"]
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:411#assert_eq!(normalized.endpoint.as_ref(), \"https://gateway.example/v1\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:411#assert_eq!(normalized.endpoint.as_ref(), \"https://gateway.example/v1\");"
+
+[[api]]
+symbol = "lash::direct::ProviderRouteIdentity::for_endpoint"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderRouteIdentity::for_endpoint"]
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:411#assert_eq!(normalized.endpoint.as_ref(), \"https://gateway.example/v1\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:411#assert_eq!(normalized.endpoint.as_ref(), \"https://gateway.example/v1\");"
+
+[[api]]
+symbol = "lash::direct::ProviderRouteIdentity::model"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderRouteIdentity::model"]
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:412#assert_eq!(normalized.model.as_ref(), \"gpt-5.4\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:412#assert_eq!(normalized.model.as_ref(), \"gpt-5.4\");"
+
+[[api]]
+symbol = "lash::direct::ProviderRouteIdentity::new"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderRouteIdentity::new"]
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:455#assert_eq!(wire[1][\"minting_route\"][\"endpoint\"], \"eu-west\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:455#assert_eq!(wire[1][\"minting_route\"][\"endpoint\"], \"eu-west\");"
+
+[[api]]
+symbol = "lash::direct::ProviderRouteIdentity::provider"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderRouteIdentity::provider"]
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:410#assert_eq!(normalized.provider.as_ref(), \"openai_compatible\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:410#assert_eq!(normalized.provider.as_ref(), \"openai_compatible\");"
+
+[[api]]
+symbol = "lash::direct::ProviderRouteIdentity::validate_endpoint"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProviderRouteIdentity::validate_endpoint"]
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:423#.validate_endpoint()"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
+
+[[api]]
+symbol = "lash_core::ProviderEndpointError"
+kind = "enum"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
+
+[[api]]
+symbol = "lash_core::ProviderEndpointError::UserinfoNotAllowed"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
+
+[[api]]
+symbol = "lash::provider::Provider::route_identity"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:60#self.inner.route_identity(model)"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:463#assert_eq!(handle_route.endpoint.as_ref(), \"eu-docs\");"
+
+[[api]]
+symbol = "lash::provider::ProviderHandle::route_identity"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::provider::handle::ProviderHandle::route_identity"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:464#assert_eq!(handle_route.model.as_ref(), \"test-model\");"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:464#assert_eq!(handle_route.model.as_ref(), \"test-model\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteLlmCallRecord::replay_drops"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1224#replay_drops: Vec::new(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1317#assert_eq!(record, &expected_record);"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReasoningReplay::origin"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1409#let reasoning_route = reasoning.origin.as_ref().expect(\"reasoning route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1410#assert_eq!(reasoning_route.provider, \"anthropic\");"
+reason = "The compiled remote-protocol example observes the complete typed minting route."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayDrop"
+kind = "struct"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1439#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1439#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayDrop::kind"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1439#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1439#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayDrop::minting_route"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayDrop::reason"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1440#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1440#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayDrop::serving_route"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1441#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1441#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayDropReason"
+kind = "enum"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1440#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1440#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayDropReason::ForeignRoute"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayDropReason::Unstamped"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1440#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1440#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayKind"
+kind = "enum"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1439#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1439#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayKind::Reasoning"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayKind::ResponseText"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1439#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1439#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayKind::ToolCall"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderReplayMeta::origin"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(tool_route.provider, \"google_oauth\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(tool_route.provider, \"google_oauth\");"
+reason = "The compiled remote-protocol example observes the tool replay minting route."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderRouteIdentity"
+kind = "struct"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1411#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1411#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderRouteIdentity::endpoint"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1384#endpoint: \"https://api.anthropic.com\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1411#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+reason = "The compiled remote-protocol example observes the normalized route endpoint."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderRouteIdentity::model"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1385#model: \"claude-sonnet-4-6\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1412#assert_eq!(reasoning_route.model, \"claude-sonnet-4-6\");"
+reason = "The compiled remote-protocol example observes the route model."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteProviderRouteIdentity::provider"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1383#provider: \"anthropic\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1410#assert_eq!(reasoning_route.provider, \"anthropic\");"
+reason = "The compiled remote-protocol example observes the route provider."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteResponseTextMeta::origin"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1415#let response_route = response.origin.as_ref().expect(\"response route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1416#assert_eq!(response_route.model, \"gpt-5.4\");"
+reason = "The compiled remote-protocol example observes the response-item minting route."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::ProviderReplayDropped"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::ProviderReplayDropped"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:554#assert_eq!(wire[\"type\"], \"provider_replay_dropped\");"
+assertion = "examples/docs-snippets/src/tracing.rs:554#assert_eq!(wire[\"type\"], \"provider_replay_dropped\");"
+reason = "The compiled tracing example serializes the typed replay-drop variant and observes its stable event tag."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::ProviderReplayDropped::event"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::ProviderReplayDropped::event"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:555#assert_eq!(wire[\"event\"][\"reason\"], \"foreign_route\");"
+assertion = "examples/docs-snippets/src/tracing.rs:555#assert_eq!(wire[\"event\"][\"reason\"], \"foreign_route\");"
+reason = "The compiled tracing example observes the replay-drop payload nested under the event field."
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropEvent"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropEvent"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:554#assert_eq!(wire[\"type\"], \"provider_replay_dropped\");"
+assertion = "examples/docs-snippets/src/tracing.rs:555#assert_eq!(wire[\"event\"][\"reason\"], \"foreign_route\");"
+reason = "The compiled tracing example serializes the typed payload through TraceEvent and observes its drop reason."
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropEvent::minting_route"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropEvent::minting_route"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:546#let minting_route = replay_drop.minting_route.as_ref().expect(\"minting route\");"
+assertion = "examples/docs-snippets/src/tracing.rs:547#assert_eq!(minting_route.provider, \"anthropic\");"
+reason = "The compiled tracing example observes the optional typed route that minted the rejected replay state."
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropEvent::reason"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropEvent::reason"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:545#assert_eq!(foreign_route_code, \"foreign_route\");"
+assertion = "examples/docs-snippets/src/tracing.rs:555#assert_eq!(wire[\"event\"][\"reason\"], \"foreign_route\");"
+reason = "The compiled tracing example observes the typed drop reason directly and in the serialized event."
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropEvent::replay_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropEvent::replay_kind"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:540#assert_eq!(reasoning_code, \"reasoning\");"
+assertion = "examples/docs-snippets/src/tracing.rs:540#assert_eq!(reasoning_code, \"reasoning\");"
+reason = "The compiled tracing example observes which replay-state kind the shared gate rejected."
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropEvent::serving_route"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropEvent::serving_route"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:549#assert_eq!(replay_drop.serving_route.provider, \"google_oauth\");"
+assertion = "examples/docs-snippets/src/tracing.rs:549#assert_eq!(replay_drop.serving_route.provider, \"google_oauth\");"
+reason = "The compiled tracing example observes the typed serving route."
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropReason"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropReason"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:543#let foreign_route_code = replay_drop.reason.code();"
+assertion = "examples/docs-snippets/src/tracing.rs:545#assert_eq!(foreign_route_code, \"foreign_route\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropReason::ForeignRoute"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropReason::ForeignRoute"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:543#let foreign_route_code = replay_drop.reason.code();"
+assertion = "examples/docs-snippets/src/tracing.rs:545#assert_eq!(foreign_route_code, \"foreign_route\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropReason::Unstamped"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropReason::Unstamped"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:544#assert_eq!(unstamped_code, \"unstamped\");"
+assertion = "examples/docs-snippets/src/tracing.rs:544#assert_eq!(unstamped_code, \"unstamped\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayDropReason::code"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayDropReason::code"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:544#assert_eq!(unstamped_code, \"unstamped\");"
+assertion = "examples/docs-snippets/src/tracing.rs:544#assert_eq!(unstamped_code, \"unstamped\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayKind"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayKind"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:537#let reasoning_code = replay_drop.replay_kind.code();"
+assertion = "examples/docs-snippets/src/tracing.rs:540#assert_eq!(reasoning_code, \"reasoning\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayKind::Reasoning"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayKind::Reasoning"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:537#let reasoning_code = replay_drop.replay_kind.code();"
+assertion = "examples/docs-snippets/src/tracing.rs:540#assert_eq!(reasoning_code, \"reasoning\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayKind::ResponseText"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayKind::ResponseText"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:539#assert_eq!(response_text_code, \"response_text\");"
+assertion = "examples/docs-snippets/src/tracing.rs:539#assert_eq!(response_text_code, \"response_text\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayKind::ToolCall"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayKind::ToolCall"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:541#assert_eq!(tool_call_code, \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:541#assert_eq!(tool_call_code, \"tool_call\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderReplayKind::code"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderReplayKind::code"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:539#assert_eq!(response_text_code, \"response_text\");"
+assertion = "examples/docs-snippets/src/tracing.rs:539#assert_eq!(response_text_code, \"response_text\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderRouteIdentity"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderRouteIdentity"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:547#assert_eq!(minting_route.provider, \"anthropic\");"
+assertion = "examples/docs-snippets/src/tracing.rs:547#assert_eq!(minting_route.provider, \"anthropic\");"
+
+[[api]]
+symbol = "lash::tracing::TraceProviderRouteIdentity::endpoint"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderRouteIdentity::endpoint"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:531#endpoint: \"https://cloudcode-pa.googleapis.com/v1internal\".to_string(),"
+assertion = "examples/docs-snippets/src/tracing.rs:557#wire[\"event\"][\"serving_route\"][\"endpoint\"],"
+reason = "The compiled tracing example observes the normalized route endpoint on the serialized typed event."
+
+[[api]]
+symbol = "lash::tracing::TraceProviderRouteIdentity::model"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderRouteIdentity::model"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:550#assert_eq!(replay_drop.serving_route.model, \"gemini-2.5-pro\");"
+assertion = "examples/docs-snippets/src/tracing.rs:550#assert_eq!(replay_drop.serving_route.model, \"gemini-2.5-pro\");"
+reason = "The compiled tracing example observes the route model."
+
+[[api]]
+symbol = "lash::tracing::TraceProviderRouteIdentity::provider"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceProviderRouteIdentity::provider"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:547#assert_eq!(minting_route.provider, \"anthropic\");"
+assertion = "examples/docs-snippets/src/tracing.rs:547#assert_eq!(minting_route.provider, \"anthropic\");"
+reason = "The compiled tracing example observes the route provider."

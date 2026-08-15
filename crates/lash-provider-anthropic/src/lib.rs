@@ -3,6 +3,8 @@ mod policy;
 mod provider;
 #[cfg(test)]
 mod provider_trace_tests;
+#[cfg(test)]
+mod replay_provenance_tests;
 mod request;
 mod stream;
 mod support;
@@ -21,7 +23,7 @@ mod tests {
     use lash_core::llm::types::{
         AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage,
         LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole, LlmStreamEvent, LlmTerminalReason,
-        LlmToolChoice, LlmToolSpec, LlmUsage, NonNegativeFiniteF64,
+        LlmToolChoice, LlmToolSpec, LlmUsage, NonNegativeFiniteF64, ProviderRouteIdentity,
     };
     use lash_core::provider::{
         CacheRetention, ModelCapability, Provider, ProviderOptions, ReasoningCapability,
@@ -142,6 +144,126 @@ mod tests {
             generation: lash_core::GenerationOptions::default(),
             provider_trace: None,
         }
+    }
+
+    #[test]
+    fn foreign_google_reasoning_signature_is_not_forwarded_to_anthropic() {
+        let provider = AnthropicProvider::new("key");
+        let req = request(vec![LlmMessage::new(
+            LlmRole::Assistant,
+            vec![LlmContentBlock::Reasoning {
+                text: "neutral summary".to_string(),
+                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                    signature: Some("google-thought-signature".to_string()),
+                    origin: Some(ProviderRouteIdentity::for_endpoint(
+                        "google_oauth",
+                        "https://cloudcode-pa.googleapis.com/v1internal",
+                        "gemini-2.5-pro",
+                    )),
+                    ..Default::default()
+                }),
+            }],
+        )]);
+
+        let body = provider.build_request_body(&req).expect("body");
+
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            json!({"type": "text", "text": "neutral summary"})
+        );
+    }
+
+    #[test]
+    fn raw_anthropic_builder_drops_unstamped_reasoning_replay() {
+        let provider = AnthropicProvider::new("key");
+        let req = request(vec![LlmMessage::new(
+            LlmRole::Assistant,
+            vec![LlmContentBlock::Reasoning {
+                text: "portable summary".to_string(),
+                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                    signature: Some("unstamped-signature".to_string()),
+                    ..Default::default()
+                }),
+            }],
+        )]);
+
+        let body = provider.build_request_body(&req).expect("body");
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            json!({"type": "text", "text": "portable summary"})
+        );
+        assert!(!body.to_string().contains("unstamped-signature"));
+    }
+
+    #[test]
+    fn same_route_reasoning_replay_is_forwarded_to_anthropic() {
+        let provider = AnthropicProvider::new("key");
+        let req = request(vec![LlmMessage::new(
+            LlmRole::Assistant,
+            vec![LlmContentBlock::Reasoning {
+                text: "native summary".to_string(),
+                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                    signature: Some("native-anthropic-signature".to_string()),
+                    origin: Some(provider.route_identity("claude-sonnet-4-6")),
+                    ..Default::default()
+                }),
+            }],
+        )]);
+
+        let body = provider.build_request_body(&req).expect("body");
+
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            json!({
+                "type": "thinking",
+                "thinking": "native summary",
+                "signature": "native-anthropic-signature"
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_reasoning_parts_are_stamped_at_the_anthropic_boundary() {
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"summary\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"native-signature\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        req.stream_events = Some(LlmEventSender::new(move |event| {
+            event_sink.lock_recover().push(event);
+        }));
+        let mut provider =
+            AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(body)));
+        let expected_route = provider.route_identity("claude-sonnet-4-6");
+
+        let response = provider
+            .complete(req)
+            .await
+            .expect("thinking stream completes");
+        let replay = match &response.parts[0] {
+            LlmOutputPart::Reasoning {
+                replay: Some(replay),
+                ..
+            } => replay,
+            other => panic!("expected reasoning replay, got {other:?}"),
+        };
+        assert_eq!(replay.origin.as_ref(), Some(&expected_route));
+        assert!(events.lock_recover().iter().any(|event| {
+            matches!(
+                event,
+                LlmStreamEvent::Part(LlmOutputPart::Reasoning {
+                    replay: Some(replay),
+                    ..
+                }) if replay.origin.as_ref() == Some(&expected_route)
+            )
+        }));
     }
 
     #[tokio::test]
@@ -377,7 +499,7 @@ mod tests {
             .iter()
             .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
             .count();
-        let (finalized, _, _, _) = AnthropicProvider::finalize(state);
+        let (finalized, _, _, _) = AnthropicProvider::finalize(state, "claude-test");
         let finalized_tool_calls = finalized
             .iter()
             .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
@@ -730,7 +852,7 @@ mod tests {
             ..StreamState::default()
         };
 
-        let (_, _, _, terminal_reason) = AnthropicProvider::finalize(state);
+        let (_, _, _, terminal_reason) = AnthropicProvider::finalize(state, "claude-test");
 
         assert_eq!(terminal_reason, LlmTerminalReason::Stop);
     }
@@ -742,7 +864,7 @@ mod tests {
             ..StreamState::default()
         };
 
-        let (_, _, _, terminal_reason) = AnthropicProvider::finalize(state);
+        let (_, _, _, terminal_reason) = AnthropicProvider::finalize(state, "claude-test");
 
         assert_eq!(terminal_reason, LlmTerminalReason::ProviderError);
     }
@@ -1233,7 +1355,7 @@ mod tests {
                         .expect("anthropic sse event parses");
                 }
             }
-            let (parts, _text, usage, terminal) = AnthropicProvider::finalize(state);
+            let (parts, _text, usage, terminal) = AnthropicProvider::finalize(state, "claude-test");
             (parts, usage, terminal)
         }
 
@@ -1396,11 +1518,7 @@ mod tests {
                 replay(body).2
             }
 
-            fn assemble_stream(
-                &self,
-                _scenario: Scenario,
-                sse_events: &[String],
-            ) -> StreamAssembly {
+            fn assemble_stream(&self, scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
                 let mut state = StreamState::default();
                 let stream_events = Arc::new(std::sync::Mutex::new(Vec::new()));
                 let event_sink = Arc::clone(&stream_events);
@@ -1411,7 +1529,15 @@ mod tests {
                     AnthropicProvider::process_sse_event(raw, &mut state, Some(&sender), true)
                         .expect("anthropic sse event parses");
                 }
-                let (parts, _text, usage, _terminal) = AnthropicProvider::finalize(state);
+                let (mut parts, _text, usage, _terminal) =
+                    AnthropicProvider::finalize(state, "claude-test");
+                if matches!(scenario, Scenario::ReasoningReplayRoundTrip) {
+                    let route = AnthropicProvider::new("test").route_identity("claude-sonnet-4-6");
+                    for part in &mut parts {
+                        part.stamp_replay_origin(&route)
+                            .expect("conformance output accepts its minting route");
+                    }
+                }
                 let stream_events = stream_events.lock_recover().clone();
                 StreamAssembly {
                     parts,

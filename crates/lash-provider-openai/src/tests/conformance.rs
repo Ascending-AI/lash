@@ -13,6 +13,7 @@ use crate::{OpenAiCompatibleProvider, OpenAiProvider};
 use lash_core::llm::types::{
     LlmMessage, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
 };
+use lash_core::provider::Provider;
 use lash_llm_transport::conformance::{
     CanonicalUsage as U, ProviderNormalizer, ProviderWire, Scenario, StreamAssembly,
     provider_conformance, strong_replay_payload,
@@ -170,8 +171,15 @@ impl ProviderNormalizer for OpenAiNormalizer {
                 shared::process_sse_event("OpenAI", raw, &mut state, None)
                     .expect("responses SSE event parses");
             }
+            let provider = OpenAiProvider::new("key");
+            let route = provider.route_identity("openai/gpt-5.4");
+            let mut parts = state.response_parts();
+            for part in &mut parts {
+                part.stamp_replay_origin(&route)
+                    .expect("conformance output accepts its minting route");
+            }
             return StreamAssembly {
-                parts: state.response_parts(),
+                parts,
                 usage: state.usage.clone(),
                 stream_events: Vec::new(),
             };

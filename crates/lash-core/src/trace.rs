@@ -169,6 +169,7 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
             set_span(context, self_id, turn_node);
         }
         TraceEvent::ProviderRequest { .. }
+        | TraceEvent::ProviderReplayDropped { .. }
         | TraceEvent::ProviderStreamEvent { .. }
         | TraceEvent::RuntimeStreamEvent { .. } => {
             let parent = context
@@ -874,6 +875,7 @@ mod span_identity_tests {
         let record = crate::LlmCallRecord {
             call_id: crate::LlmCallId("llm-ladder".to_string()),
             label: None,
+            replay_drops: Vec::new(),
             attempts: vec![
                 crate::AttemptRecord {
                     ordinal: 1,

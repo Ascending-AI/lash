@@ -15,7 +15,7 @@ pub(crate) use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, GenerationDisposition, GenerationOptionDisposition,
     LlmContentBlock, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole,
     LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
-    ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta,
+    ProviderReasoningReplay, ProviderReplayMeta, ProviderRouteIdentity, ResponseTextMeta,
 };
 pub(crate) use lash_core::provider::{
     Provider, ProviderComponents, ProviderFactory, ProviderOptions, ReasoningDisableEncoding,

@@ -238,6 +238,11 @@ where
                     self.emit_instant(record, "lash.provider_request", None);
                 }
             }
+            TraceEvent::ProviderReplayDropped { .. } => {
+                if !self.add_llm_event(record, "lash.provider_replay_dropped") {
+                    self.emit_instant(record, "lash.provider_replay_dropped", None);
+                }
+            }
             TraceEvent::EffectEnvelopeDiff { .. } => {
                 self.emit_instant(record, "lash.effect_envelope_diff", None)
             }
@@ -637,6 +642,39 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 "lash.request.body_json_omitted_reason",
                 &event.body_json_omitted_reason,
             );
+        }
+        TraceEvent::ProviderReplayDropped { event } => {
+            attrs.push(KeyValue::new("lash.replay.kind", event.replay_kind.code()));
+            attrs.push(KeyValue::new(
+                "lash.replay.drop_reason",
+                event.reason.code(),
+            ));
+            if let Some(route) = &event.minting_route {
+                attrs.push(KeyValue::new(
+                    "lash.replay.minting_provider",
+                    route.provider.clone(),
+                ));
+                attrs.push(KeyValue::new(
+                    "lash.replay.minting_endpoint",
+                    route.endpoint.clone(),
+                ));
+                attrs.push(KeyValue::new(
+                    "lash.replay.minting_model",
+                    route.model.clone(),
+                ));
+            }
+            attrs.push(KeyValue::new(
+                "lash.replay.serving_provider",
+                event.serving_route.provider.clone(),
+            ));
+            attrs.push(KeyValue::new(
+                "lash.replay.serving_endpoint",
+                event.serving_route.endpoint.clone(),
+            ));
+            attrs.push(KeyValue::new(
+                "lash.replay.serving_model",
+                event.serving_route.model.clone(),
+            ));
         }
         TraceEvent::EffectEnvelopeDiff { event } => {
             attrs.push(KeyValue::new(

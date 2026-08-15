@@ -28,6 +28,13 @@ pub enum GenerationRetryGuarantee {
 pub trait Provider: Send + Sync + std::fmt::Debug {
     fn kind(&self) -> &'static str;
 
+    /// Identity of the exact configured LLM Provider route serving `model`.
+    ///
+    /// Every implementation must make this decision explicitly. Decorators
+    /// must forward the wrapped LLM Provider's identity; transports must use a
+    /// normalized endpoint identity or another host-owned stable route id.
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity;
+
     fn options(&self) -> ProviderOptions;
     fn set_options(&mut self, options: ProviderOptions);
 
@@ -36,6 +43,12 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// `Serialize` impl layers that on top.
     fn serialize_config(&self) -> serde_json::Value;
 
+    /// Execute one request.
+    ///
+    /// Implementations must apply [`LlmRequest::replay_safe_for`] for their
+    /// exact [`Provider::route_identity`] before serializing any raw wire body.
+    /// `ProviderHandle` applies the semantic gate too; this raw-trait
+    /// obligation is the structural backstop for direct callers.
     async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError>;
 
     /// Return the guarantee, if any, that makes retrying this logical request

@@ -12,6 +12,7 @@ fn replay(item_id: &str, encrypted_content: &str) -> ProviderReasoningReplay {
         signature: None,
         redacted: false,
         summary: Vec::new(),
+        ..Default::default()
     }
 }
 

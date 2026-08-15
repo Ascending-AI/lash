@@ -1117,7 +1117,8 @@ pub fn evaluate_trigger_prune(
     Ok(TriggerCommandOutcome::Prune { receipts })
 }
 
-const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 2;
+const LEGACY_TRIGGER_COMMAND_FAMILY_VERSION: u8 = 2;
+const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 3;
 const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 
 /// Fingerprint one trigger command independently of its caller-supplied
@@ -1127,11 +1128,26 @@ const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 /// 6 delete, 7 revive, 8 prune. Retired tags remain burned. Nested owner,
 /// actor, draft, and JSON tags are registered beside the trigger-definition
 /// projection they share; nested projections carry no version of their own.
+fn trigger_command_family_version(command: &TriggerCommand) -> u8 {
+    let draft = match command {
+        TriggerCommand::Register { draft, .. }
+        | TriggerCommand::Update { draft, .. }
+        | TriggerCommand::Revive { draft, .. } => Some(draft),
+        _ => None,
+    };
+    if draft.is_some_and(|draft| {
+        router::trigger_definition_family_version(draft) == TRIGGER_COMMAND_FAMILY_VERSION
+    }) {
+        TRIGGER_COMMAND_FAMILY_VERSION
+    } else {
+        LEGACY_TRIGGER_COMMAND_FAMILY_VERSION
+    }
+}
+
 fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
-    let mut fingerprint = crate::stable_identity::IdentityEncoder::new(
-        "lash.trigger-command",
-        TRIGGER_COMMAND_FAMILY_VERSION,
-    );
+    let family_version = trigger_command_family_version(command);
+    let mut fingerprint =
+        crate::stable_identity::IdentityEncoder::new("lash.trigger-command", family_version);
     match command {
         TriggerCommand::Register {
             owner_scope,
@@ -1141,7 +1157,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             fingerprint.tag(1);
             project_trigger_owner(&mut fingerprint, owner_scope);
             project_trigger_actor(&mut fingerprint, actor);
-            project_trigger_draft(&mut fingerprint, draft);
+            project_trigger_draft(&mut fingerprint, draft, family_version);
         }
         TriggerCommand::List {
             owner_scope,
@@ -1185,7 +1201,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             project_trigger_owner(&mut fingerprint, owner_scope);
             project_trigger_actor(&mut fingerprint, actor);
             fingerprint.string(subscription_key);
-            project_trigger_draft(&mut fingerprint, draft);
+            project_trigger_draft(&mut fingerprint, draft, family_version);
             fingerprint.u64(*expected_revision);
         }
         TriggerCommand::Enable {
@@ -1235,7 +1251,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             project_trigger_owner(&mut fingerprint, owner_scope);
             project_trigger_actor(&mut fingerprint, actor);
             fingerprint.string(subscription_key);
-            project_trigger_draft(&mut fingerprint, draft);
+            project_trigger_draft(&mut fingerprint, draft, family_version);
             fingerprint.u64(*expected_revision);
         }
         TriggerCommand::Prune {
@@ -1255,12 +1271,9 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
 }
 
 pub fn trigger_command_fingerprint(command: &TriggerCommand) -> String {
+    let family_version = trigger_command_family_version(command);
     let preimage = trigger_command_preimage(command);
-    crate::stable_identity::rendered_hash(
-        "trigger-command",
-        TRIGGER_COMMAND_FAMILY_VERSION,
-        &preimage,
-    )
+    crate::stable_identity::rendered_hash("trigger-command", family_version, &preimage)
 }
 
 pub fn trigger_operation_receipt_id(owner_scope: &TriggerOwnerScope, operation_id: &str) -> String {

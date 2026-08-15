@@ -351,6 +351,10 @@ impl Provider for MeteredProvider {
         self.inner.kind()
     }
 
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        self.inner.route_identity(model)
+    }
+
     fn options(&self) -> ProviderOptions {
         self.inner.options()
     }

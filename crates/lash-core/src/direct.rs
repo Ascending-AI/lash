@@ -208,6 +208,22 @@ impl DirectLlmClient {
         &mut self.provider
     }
 
+    fn terminal_trace_context(
+        &self,
+        llm_call_id: String,
+        call_record: &crate::LlmCallRecord,
+    ) -> TraceContext {
+        let context = TraceContext::default().for_llm_call(llm_call_id);
+        crate::runtime::effect::emit_provider_replay_drops(
+            &self.trace_sink,
+            &self.trace_context,
+            &context,
+            Some(call_record),
+            self.clock.as_ref(),
+        );
+        context
+    }
+
     pub async fn complete(
         &mut self,
         mut request: DirectRequest,
@@ -256,10 +272,15 @@ impl DirectLlmClient {
                         result: Box::new(result),
                     };
                     if let Some(llm_call_id) = llm_call_id {
+                        let call_record = match &error {
+                            DirectLlmError::InvalidResponse { result, .. } => &result.llm_call,
+                            _ => unreachable!("constructed InvalidResponse above"),
+                        };
+                        let context = self.terminal_trace_context(llm_call_id, call_record);
                         crate::trace::emit_trace(
                             &self.trace_sink,
                             &self.trace_context,
-                            TraceContext::default().for_llm_call(llm_call_id),
+                            context,
                             TraceEvent::LlmCallFailed {
                                 error: TraceError {
                                     message: error.to_string(),
@@ -279,10 +300,11 @@ impl DirectLlmClient {
                     return Err(error);
                 }
                 if let Some(llm_call_id) = llm_call_id {
+                    let context = self.terminal_trace_context(llm_call_id, &result.llm_call);
                     crate::trace::emit_trace(
                         &self.trace_sink,
                         &self.trace_context,
-                        TraceContext::default().for_llm_call(llm_call_id),
+                        context,
                         TraceEvent::LlmCallCompleted {
                             response: crate::trace::trace_llm_response(
                                 result.full_text.clone(),
@@ -303,10 +325,11 @@ impl DirectLlmClient {
             }
             Err(error) => {
                 if let Some(llm_call_id) = llm_call_id {
+                    let context = self.terminal_trace_context(llm_call_id, &error.call_record);
                     crate::trace::emit_trace(
                         &self.trace_sink,
                         &self.trace_context,
-                        TraceContext::default().for_llm_call(llm_call_id),
+                        context,
                         TraceEvent::LlmCallFailed {
                             error: TraceError {
                                 message: error.message.clone(),

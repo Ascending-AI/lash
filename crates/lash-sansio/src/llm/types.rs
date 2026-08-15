@@ -99,13 +99,41 @@ pub struct ResponseTextMeta {
     /// is valid for their next wire request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_payload: Option<String>,
+    /// Exact LLM Provider route that minted this provider-owned response
+    /// metadata. Missing on sessions persisted before replay provenance was
+    /// introduced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_model: Option<String>,
+    pub origin: Option<ProviderRouteIdentity>,
+    /// LLM Provider kind decoded from the pre-route-identity JSON vocabulary.
+    ///
+    /// This is identity-compatibility material only. Because the legacy pair
+    /// has no endpoint, it never certifies replay for a current route.
+    #[doc(hidden)]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "origin_provider"
+    )]
+    pub legacy_origin_provider: Option<String>,
+    /// Model decoded from the pre-route-identity JSON vocabulary. See
+    /// [`ResponseTextMeta::legacy_origin_provider`].
+    #[doc(hidden)]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "origin_model"
+    )]
+    pub legacy_origin_model: Option<String>,
 }
 
 impl ResponseTextMeta {
+    pub fn is_empty(&self) -> bool {
+        self.id.is_none()
+            && self.status.is_none()
+            && self.phase.is_none()
+            && self.provider_payload.is_none()
+    }
+
     pub fn phase_is(&self, expected: &str) -> bool {
         self.phase
             .as_deref()
@@ -120,6 +148,25 @@ impl ResponseTextMeta {
         self.phase_is("commentary")
     }
 }
+
+/// Stable identity of one configured LLM Provider route.
+///
+/// `endpoint` is either a normalized base URL or a host-supplied opaque route
+/// id. Together with the LLM Provider kind and requested model it is the replay
+/// contract. Model aliases behind one endpoint are intentionally out of scope:
+/// hosts must use the exact model string they want included in route equality.
+/// HTTP(S) endpoints reject userinfo because credentials are neither route
+/// identity nor safe trace metadata. Explicit default ports remain distinct
+/// from implicit ports. Scheme and host case, plus an empty path versus `/`,
+/// normalize; path case and query strings remain identity-significant.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ProviderRouteIdentity {
+    pub provider: Box<str>,
+    pub endpoint: Box<str>,
+    pub model: Box<str>,
+}
+
+pub use super::provider_route::ProviderEndpointError;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LlmToolSpec {
@@ -143,6 +190,10 @@ pub struct ProviderReplayMeta {
     pub item_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opaque: Option<String>,
+    /// Exact LLM Provider route that minted this opaque replay state. Missing
+    /// on sessions persisted before replay provenance was introduced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<ProviderRouteIdentity>,
 }
 
 impl ProviderReplayMeta {
@@ -163,6 +214,10 @@ pub struct ProviderReasoningReplay {
     pub redacted: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub summary: Vec<String>,
+    /// Exact LLM Provider route that minted this reasoning replay state.
+    /// Missing on sessions persisted before replay provenance was introduced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<ProviderRouteIdentity>,
 }
 
 impl ProviderReasoningReplay {
@@ -174,6 +229,54 @@ impl ProviderReasoningReplay {
             && self.summary.is_empty()
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderReplayKind {
+    ResponseText,
+    Reasoning,
+    ToolCall,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderReplayDropReason {
+    Unstamped,
+    ForeignRoute,
+}
+
+/// Typed evidence produced when provider-owned replay state cannot safely be
+/// served on the selected route. The surrounding neutral content remains in
+/// the request; only the opaque provider state is removed.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderReplayDrop {
+    pub kind: ProviderReplayKind,
+    pub reason: ProviderReplayDropReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minting_route: Option<ProviderRouteIdentity>,
+    pub serving_route: ProviderRouteIdentity,
+}
+
+/// Typed contract violation returned when an LLM Provider attempts to
+/// recertify replay state already stamped by another route.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderReplayOriginConflict {
+    pub kind: ProviderReplayKind,
+    pub actual: ProviderRouteIdentity,
+    pub expected: ProviderRouteIdentity,
+}
+
+impl std::fmt::Display for ProviderReplayOriginConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{:?} replay origin conflict: minted by {:?}, returned by {:?}",
+            self.kind, self.actual, self.expected
+        )
+    }
+}
+
+impl std::error::Error for ProviderReplayOriginConflict {}
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LlmOutputPart {
@@ -199,6 +302,65 @@ pub enum LlmOutputPart {
         /// correlation, but provider crates own the wire semantics.
         replay: Option<ProviderReplayMeta>,
     },
+}
+
+impl LlmOutputPart {
+    #[doc(hidden)]
+    pub fn stamp_replay_origin(
+        &mut self,
+        route: &ProviderRouteIdentity,
+    ) -> Result<(), ProviderReplayOriginConflict> {
+        if let Some(conflict) = self.replay_origin_conflict(route) {
+            return Err(conflict);
+        }
+        match self {
+            Self::Text {
+                response_meta: Some(meta),
+                ..
+            } if !meta.is_empty() => {
+                meta.origin = Some(route.clone());
+            }
+            Self::Reasoning {
+                replay: Some(meta), ..
+            } if !meta.is_empty() => {
+                meta.origin = Some(route.clone());
+            }
+            Self::ToolCall {
+                replay: Some(meta), ..
+            } if !meta.is_empty() => {
+                meta.origin = Some(route.clone());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn replay_origin_conflict(
+        &self,
+        expected: &ProviderRouteIdentity,
+    ) -> Option<ProviderReplayOriginConflict> {
+        let (kind, actual) = match self {
+            Self::Text {
+                response_meta: Some(meta),
+                ..
+            } if !meta.is_empty() => (ProviderReplayKind::ResponseText, meta.origin.as_ref()),
+            Self::Reasoning {
+                replay: Some(meta), ..
+            } if !meta.is_empty() => (ProviderReplayKind::Reasoning, meta.origin.as_ref()),
+            Self::ToolCall {
+                replay: Some(meta), ..
+            } if !meta.is_empty() => (ProviderReplayKind::ToolCall, meta.origin.as_ref()),
+            _ => return None,
+        };
+        actual
+            .filter(|actual| *actual != expected)
+            .cloned()
+            .map(|actual| ProviderReplayOriginConflict {
+                kind,
+                actual,
+                expected: expected.clone(),
+            })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -780,6 +942,126 @@ pub struct LlmRequest {
 }
 
 impl LlmRequest {
+    /// Remove opaque replay state that was not minted by the exact LLM
+    /// Provider route serving this request.
+    ///
+    /// The immutable scan preserves shared prompt block allocations on the
+    /// no-drop path. Only messages containing foreign or unstamped replay are
+    /// copied. Reasoning keeps non-empty neutral text (falling back to its
+    /// non-empty summary), tool-call content remains, and empty reasoning is
+    /// removed instead of manufacturing an empty text block.
+    #[doc(hidden)]
+    pub fn drop_foreign_replay(
+        &mut self,
+        serving_route: &ProviderRouteIdentity,
+    ) -> Vec<ProviderReplayDrop> {
+        let mut drops = Vec::new();
+        for message in &mut self.messages {
+            if !message
+                .blocks
+                .iter()
+                .any(|block| replay_drop_for_block(block, serving_route).is_some())
+            {
+                continue;
+            }
+            Arc::make_mut(&mut message.blocks).retain_mut(|block| {
+                match block {
+                    LlmContentBlock::Text { response_meta, .. } => {
+                        let Some(meta) = response_meta.as_ref() else {
+                            return true;
+                        };
+                        let Some(reason) = replay_drop_reason(meta.origin.as_ref(), serving_route)
+                        else {
+                            return true;
+                        };
+                        if meta.is_empty() {
+                            return true;
+                        }
+                        drops.push(ProviderReplayDrop {
+                            kind: ProviderReplayKind::ResponseText,
+                            reason,
+                            minting_route: meta.origin.clone(),
+                            serving_route: serving_route.clone(),
+                        });
+                        *response_meta = None;
+                    }
+                    LlmContentBlock::Reasoning { text, replay } => {
+                        let Some(meta) = replay.as_ref() else {
+                            return true;
+                        };
+                        if meta.is_empty() {
+                            return true;
+                        }
+                        let reason = replay_drop_reason(meta.origin.as_ref(), serving_route);
+                        if let Some(reason) = reason {
+                            let replay_summary = meta.summary.join("\n\n");
+                            drops.push(ProviderReplayDrop {
+                                kind: ProviderReplayKind::Reasoning,
+                                reason,
+                                minting_route: meta.origin.clone(),
+                                serving_route: serving_route.clone(),
+                            });
+                            let mut neutral_text = std::mem::take(text);
+                            if neutral_text.is_empty() {
+                                neutral_text = replay_summary;
+                            }
+                            if neutral_text.is_empty() {
+                                return false;
+                            }
+                            *block = LlmContentBlock::Text {
+                                text: neutral_text.into(),
+                                response_meta: None,
+                                cache_breakpoint: false,
+                            };
+                        }
+                    }
+                    LlmContentBlock::ToolCall { replay, .. } => {
+                        let Some(meta) = replay.as_ref() else {
+                            return true;
+                        };
+                        if meta.is_empty() {
+                            return true;
+                        }
+                        let reason = replay_drop_reason(meta.origin.as_ref(), serving_route);
+                        if let Some(reason) = reason {
+                            drops.push(ProviderReplayDrop {
+                                kind: ProviderReplayKind::ToolCall,
+                                reason,
+                                minting_route: meta.origin.clone(),
+                                serving_route: serving_route.clone(),
+                            });
+                            *replay = None;
+                        }
+                    }
+                    LlmContentBlock::Attachment { .. } | LlmContentBlock::ToolResult { .. } => {}
+                }
+                true
+            });
+        }
+        drops
+    }
+
+    /// Return a serializer-safe request, borrowing the original on the common
+    /// no-drop path and cloning only when the structural replay backstop must
+    /// remove state.
+    #[doc(hidden)]
+    pub fn replay_safe_for<'a>(
+        &'a self,
+        serving_route: &ProviderRouteIdentity,
+    ) -> std::borrow::Cow<'a, Self> {
+        if !self.messages.iter().any(|message| {
+            message
+                .blocks
+                .iter()
+                .any(|block| replay_drop_for_block(block, serving_route).is_some())
+        }) {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut safe = self.clone();
+        safe.drop_foreign_replay(serving_route);
+        std::borrow::Cow::Owned(safe)
+    }
+
     pub fn attachment_bytes<'a>(&'a self, source: &'a AttachmentSource) -> Option<&'a [u8]> {
         match source {
             AttachmentSource::Inline { bytes, .. } => Some(bytes),
@@ -805,6 +1087,36 @@ impl LlmRequest {
 
     pub fn continuation_key(&self) -> String {
         self.scope.continuation_key()
+    }
+}
+
+fn replay_drop_for_block(
+    block: &LlmContentBlock,
+    serving_route: &ProviderRouteIdentity,
+) -> Option<ProviderReplayDropReason> {
+    match block {
+        LlmContentBlock::Text {
+            response_meta: Some(meta),
+            ..
+        } if !meta.is_empty() => replay_drop_reason(meta.origin.as_ref(), serving_route),
+        LlmContentBlock::Reasoning {
+            replay: Some(meta), ..
+        } if !meta.is_empty() => replay_drop_reason(meta.origin.as_ref(), serving_route),
+        LlmContentBlock::ToolCall {
+            replay: Some(meta), ..
+        } if !meta.is_empty() => replay_drop_reason(meta.origin.as_ref(), serving_route),
+        _ => None,
+    }
+}
+
+fn replay_drop_reason(
+    origin: Option<&ProviderRouteIdentity>,
+    serving_route: &ProviderRouteIdentity,
+) -> Option<ProviderReplayDropReason> {
+    match origin {
+        Some(origin) if origin == serving_route => None,
+        Some(_) => Some(ProviderReplayDropReason::ForeignRoute),
+        None => Some(ProviderReplayDropReason::Unstamped),
     }
 }
 
@@ -909,87 +1221,6 @@ impl LlmStreamEvidence {
         }
         self.response_metadata.extend(next.response_metadata);
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod stream_evidence_contract_tests {
-    use super::*;
-
-    fn response_started() -> LlmStreamEvidence {
-        LlmStreamEvidence {
-            http_summary: Some("HTTP POST https://provider.test (stream)".to_string()),
-            ..LlmStreamEvidence::default()
-        }
-    }
-
-    #[test]
-    fn execution_identity_and_reasoning_counts_are_monotonic_at_the_shared_seam() {
-        let mut evidence = response_started();
-        evidence
-            .merge(LlmStreamEvidence {
-                execution_evidence: Some(ExecutionEvidence {
-                    served_model: Some("served-a".to_string()),
-                    provider_response_id: Some("response-a".to_string()),
-                    reasoning_output_tokens: Some(17),
-                    ..ExecutionEvidence::default()
-                }),
-                ..LlmStreamEvidence::default()
-            })
-            .expect("first provider facts establish shared evidence");
-        evidence
-            .merge(LlmStreamEvidence {
-                execution_evidence: Some(ExecutionEvidence {
-                    served_model: Some("served-a".to_string()),
-                    provider_response_id: Some("response-a".to_string()),
-                    reasoning_output_tokens: Some(0),
-                    ..ExecutionEvidence::default()
-                }),
-                ..LlmStreamEvidence::default()
-            })
-            .expect("a trailing explicit zero cannot regress a positive count");
-        let conflict = evidence
-            .merge(LlmStreamEvidence {
-                execution_evidence: Some(ExecutionEvidence {
-                    served_model: Some("served-b".to_string()),
-                    provider_response_id: Some("response-b".to_string()),
-                    ..ExecutionEvidence::default()
-                }),
-                ..LlmStreamEvidence::default()
-            })
-            .expect_err("identity drift must fail at the shared seam");
-
-        assert!(matches!(
-            conflict,
-            ExecutionEvidenceMergeError::IdentityConflict {
-                field: "served_model",
-                ..
-            }
-        ));
-        assert_eq!(conflict.code(), "stream_evidence_identity_conflict");
-
-        let merged = evidence.execution_evidence.expect("execution evidence");
-        assert_eq!(merged.served_model.as_deref(), Some("served-a"));
-        assert_eq!(merged.provider_response_id.as_deref(), Some("response-a"));
-        assert_eq!(merged.reasoning_output_tokens, Some(17));
-    }
-
-    #[test]
-    fn execution_evidence_cannot_precede_response_establishment() {
-        let mut evidence = LlmStreamEvidence::default();
-        let error = evidence
-            .merge(LlmStreamEvidence {
-                execution_evidence: Some(ExecutionEvidence {
-                    provider_response_id: Some("too-early".to_string()),
-                    ..ExecutionEvidence::default()
-                }),
-                ..LlmStreamEvidence::default()
-            })
-            .expect_err("provider facts before response start must fail");
-
-        assert_eq!(error, ExecutionEvidenceMergeError::BeforeResponseStart);
-        assert_eq!(error.code(), "stream_evidence_before_response_start");
-        assert_eq!(evidence.execution_evidence, None);
     }
 }
 
@@ -1287,6 +1518,13 @@ pub struct LlmCallRecord {
     pub call_id: LlmCallId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Semantic replay metadata removed before this call reached the wire.
+    ///
+    /// This is part of the sealed call record so evidence survives when
+    /// provider-payload tracing is disabled and across durable runtime-effect
+    /// boundaries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replay_drops: Vec<ProviderReplayDrop>,
     pub attempts: Vec<AttemptRecord>,
 }
 
@@ -1314,6 +1552,28 @@ pub struct LlmResponse {
     pub response_metadata: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
+impl LlmResponse {
+    /// Stamp LLM Provider-owned replay state at the capture boundary without
+    /// ever overwriting an existing, contradictory origin.
+    #[doc(hidden)]
+    pub fn stamp_replay_origin(
+        &mut self,
+        route: &ProviderRouteIdentity,
+    ) -> Result<(), ProviderReplayOriginConflict> {
+        if let Some(conflict) = self
+            .parts
+            .iter()
+            .find_map(|part| part.replay_origin_conflict(route))
+        {
+            return Err(conflict);
+        }
+        for part in &mut self.parts {
+            part.stamp_replay_origin(route)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ModelSelection {
     pub model: &'static str,
@@ -1321,150 +1581,5 @@ pub struct ModelSelection {
 }
 
 #[cfg(test)]
-mod generation_disposition_tests {
-    use super::*;
-
-    #[test]
-    fn only_requested_options_can_be_omitted() {
-        // An adapter reports every option, not only the dropped ones, so a
-        // wire that carries a control the caller never set is not mistaken
-        // for an honored request.
-        let untouched = GenerationDisposition {
-            output_token_cap: GenerationOptionDisposition::applied(false),
-            temperature: GenerationOptionDisposition::sampling_pinned(false),
-            seed: GenerationOptionDisposition::unsupported(false),
-            stop_sequences: GenerationOptionDisposition::unsupported(false),
-            cache: GenerationOptionDisposition::unsupported(false),
-        };
-        assert_eq!(untouched, GenerationDisposition::default());
-        assert!(untouched.nothing_omitted());
-
-        let suppressed = GenerationDisposition {
-            stop_sequences: GenerationOptionDisposition::SuppressedProtocolOwned,
-            ..Default::default()
-        };
-        assert!(!suppressed.nothing_omitted());
-        assert!(!suppressed.fully_honored());
-
-        let dropped = GenerationDisposition {
-            output_token_cap: GenerationOptionDisposition::applied(true),
-            temperature: GenerationOptionDisposition::sampling_pinned(true),
-            seed: GenerationOptionDisposition::unsupported(true),
-            stop_sequences: GenerationOptionDisposition::unsupported(false),
-            cache: GenerationOptionDisposition::unsupported(true),
-        };
-        assert_eq!(
-            dropped.output_token_cap,
-            GenerationOptionDisposition::Applied
-        );
-        assert!(!dropped.output_token_cap.is_omitted());
-        assert!(dropped.temperature.is_omitted());
-        assert!(dropped.seed.is_omitted());
-        assert!(!dropped.nothing_omitted());
-        assert_eq!(
-            serde_json::to_value(dropped).expect("serialize disposition"),
-            serde_json::json!({
-                "output_token_cap": "applied",
-                "temperature": "omitted_sampling_pinned",
-                "seed": "omitted_unsupported",
-                "stop_sequences": "not_requested",
-                "cache": "omitted_unsupported",
-            })
-        );
-    }
-}
-
-#[cfg(test)]
-mod attempt_record_tests {
-    use super::*;
-
-    #[test]
-    fn attempt_contract_round_trips_closed_outcomes_and_preserves_optional_zero() {
-        for (outcome, position) in [
-            (
-                AttemptOutcome::Completed,
-                ProtocolPosition::TerminalObserved,
-            ),
-            (AttemptOutcome::Failed, ProtocolPosition::ResponseObserved),
-            (AttemptOutcome::Aborted, ProtocolPosition::OutputStarted),
-            (AttemptOutcome::Interrupted, ProtocolPosition::NoResponse),
-        ] {
-            let record = LlmCallRecord {
-                call_id: LlmCallId("call-1".to_string()),
-                label: Some("test".to_string()),
-                attempts: vec![AttemptRecord {
-                    ordinal: 1,
-                    started_at: 42,
-                    duration: std::time::Duration::from_millis(7),
-                    outcome,
-                    protocol_position: position,
-                    retry_budget_consumed: true,
-                    retry_decision: None,
-                    error: None,
-                    evidence: Some(ExecutionEvidence {
-                        reasoning_output_tokens: Some(0),
-                        ..ExecutionEvidence::default()
-                    }),
-                    generation_disposition: Some(GenerationDisposition {
-                        output_token_cap: GenerationOptionDisposition::Applied,
-                        temperature: GenerationOptionDisposition::OmittedSamplingPinned,
-                        seed: GenerationOptionDisposition::OmittedUnsupported,
-                        stop_sequences: GenerationOptionDisposition::NotRequested,
-                        cache: GenerationOptionDisposition::Applied,
-                    }),
-                    usage: None,
-                }],
-            };
-            let decoded: LlmCallRecord =
-                serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
-            assert_eq!(decoded, record);
-            assert_eq!(
-                decoded.attempts[0]
-                    .evidence
-                    .as_ref()
-                    .unwrap()
-                    .reasoning_output_tokens,
-                Some(0)
-            );
-        }
-
-        let absent = ExecutionEvidence::default();
-        assert_eq!(absent.reasoning_output_tokens, None);
-    }
-}
-
-#[cfg(test)]
-mod attachment_source_tests {
-    use super::*;
-
-    #[test]
-    fn provider_file_media_type_is_optional_and_omitted_when_absent() {
-        let scope = ProviderFileScope::new("anthropic", "credential");
-        let without_hint = AttachmentSource::provider_file(scope.clone(), "file-1", None);
-        let without_hint_json = serde_json::to_value(&without_hint).unwrap();
-        assert_eq!(
-            without_hint_json,
-            serde_json::json!({
-                "source": "provider_file",
-                "provider_scope": {
-                    "provider": "anthropic",
-                    "credential_scope": "credential"
-                },
-                "id": "file-1"
-            })
-        );
-        assert_eq!(
-            serde_json::from_value::<AttachmentSource>(without_hint_json).unwrap(),
-            without_hint
-        );
-
-        let with_hint = AttachmentSource::provider_file(
-            scope,
-            "file-2",
-            Some(MediaType::parse("image/png").unwrap()),
-        );
-        let with_hint_json = serde_json::to_value(&with_hint).unwrap();
-        assert_eq!(with_hint_json["media_type"], "image/png");
-        assert_eq!(with_hint.media_type().unwrap().as_str(), "image/png");
-    }
-}
+#[path = "types/types_contract_tests.rs"]
+mod types_contract_tests;

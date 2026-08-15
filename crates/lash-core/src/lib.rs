@@ -466,7 +466,9 @@ pub use lash_sansio::llm::types::{
     ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, GenerationDisposition,
     GenerationOptionDisposition, GenerationOptions, LlmCallId, LlmCallRecord, LlmOutputPart,
     LlmRequest, LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTerminalReason,
-    NonNegativeFiniteF64, NormalizedError, ProtocolPosition, ProviderFileScope, RetryDecision,
+    NonNegativeFiniteF64, NormalizedError, ProtocolPosition, ProviderEndpointError,
+    ProviderFileScope, ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind,
+    ProviderRouteIdentity, RetryDecision,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CheckpointDelivery,
@@ -804,8 +806,9 @@ pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
     TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
     TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
-    TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRuntimeStreamEvent, TraceTokenUsage,
-    TraceToolSpec,
+    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
+    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent,
+    TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};

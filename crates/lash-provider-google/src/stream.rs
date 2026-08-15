@@ -98,7 +98,7 @@ impl GoogleOAuthProvider {
         out
     }
 
-    fn tool_call_parts_from_event(event: &Value) -> Vec<LlmOutputPart> {
+    fn tool_call_parts_from_event(event: &Value, origin_model: Option<&str>) -> Vec<LlmOutputPart> {
         let mut out = Vec::new();
         let Some(candidates) = event
             .get("response")
@@ -116,7 +116,7 @@ impl GoogleOAuthProvider {
                 continue;
             };
             for part in parts {
-                if let Some(tool_call) = Self::tool_call_part(part) {
+                if let Some(tool_call) = Self::tool_call_part(part, origin_model) {
                     out.push(tool_call);
                 }
             }
@@ -131,7 +131,7 @@ impl GoogleOAuthProvider {
             .map(str::to_string)
     }
 
-    fn tool_call_part(part: &Value) -> Option<LlmOutputPart> {
+    fn tool_call_part(part: &Value, origin_model: Option<&str>) -> Option<LlmOutputPart> {
         let function_call = part.get("functionCall")?;
         let name = function_call.get("name").and_then(Value::as_str)?;
         let input_json = function_call
@@ -149,17 +149,22 @@ impl GoogleOAuthProvider {
             replay: Self::thought_signature(part).map(|opaque| ProviderReplayMeta {
                 item_id: None,
                 opaque: Some(opaque),
+                origin: origin_model.map(Self::route_identity_for_model),
             }),
         })
     }
 
-    fn reasoning_replay(signature: Option<String>) -> Option<ProviderReasoningReplay> {
+    fn reasoning_replay(
+        signature: Option<String>,
+        origin_model: Option<&str>,
+    ) -> Option<ProviderReasoningReplay> {
         signature.map(|signature| ProviderReasoningReplay {
             item_id: None,
             encrypted_content: None,
             signature: Some(signature),
             redacted: false,
             summary: Vec::new(),
+            origin: origin_model.map(Self::route_identity_for_model),
         })
     }
 
@@ -169,8 +174,9 @@ impl GoogleOAuthProvider {
         piece: String,
         signature: Option<String>,
         reconcile_with_previous_event: bool,
+        origin_model: Option<&str>,
     ) {
-        let replay = Self::reasoning_replay(signature);
+        let replay = Self::reasoning_replay(signature, origin_model);
         if reconcile_with_previous_event
             && let Some(LlmOutputPart::Reasoning {
                 text,
@@ -194,6 +200,7 @@ impl GoogleOAuthProvider {
                     piece,
                     replay.and_then(|replay| replay.signature),
                     false,
+                    origin_model,
                 );
                 return;
             }
@@ -335,6 +342,7 @@ impl GoogleOAuthProvider {
                     piece,
                     signature,
                     !saw_thought_in_event,
+                    origin_model,
                 );
                 saw_thought_in_event = true;
                 continue;
@@ -347,14 +355,13 @@ impl GoogleOAuthProvider {
                     text: delta,
                     response_meta: signature.map(|signature| ResponseTextMeta {
                         provider_payload: Some(signature),
-                        origin_provider: Some(Self::PROVIDER_KIND.to_string()),
-                        origin_model: origin_model.map(str::to_string),
+                        origin: origin_model.map(Self::route_identity_for_model),
                         ..ResponseTextMeta::default()
                     }),
                 });
             }
         }
-        let tool_calls = Self::tool_call_parts_from_event(&event);
+        let tool_calls = Self::tool_call_parts_from_event(&event, origin_model);
         if let Some(parts) = tool_call_parts {
             parts.extend(tool_calls);
         }
@@ -421,21 +428,20 @@ impl GoogleOAuthProvider {
                         // lives on the same part.
                         parts.push(LlmOutputPart::Reasoning {
                             text: text.to_string(),
-                            replay: Self::reasoning_replay(signature.clone()),
+                            replay: Self::reasoning_replay(signature.clone(), origin_model),
                         });
                     } else {
                         parts.push(LlmOutputPart::Text {
                             text: text.to_string(),
                             response_meta: signature.clone().map(|signature| ResponseTextMeta {
                                 provider_payload: Some(signature),
-                                origin_provider: Some(Self::PROVIDER_KIND.to_string()),
-                                origin_model: origin_model.map(str::to_string),
+                                origin: origin_model.map(Self::route_identity_for_model),
                                 ..ResponseTextMeta::default()
                             }),
                         });
                     }
                 }
-                if let Some(tool_call) = Self::tool_call_part(item) {
+                if let Some(tool_call) = Self::tool_call_part(item, origin_model) {
                     parts.push(tool_call);
                 }
             }

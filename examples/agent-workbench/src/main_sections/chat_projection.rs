@@ -123,7 +123,7 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
     ChatMessage {
         id: message.id.clone(),
         role: lash::message_role(message).to_string(),
-        text: lash::message_text(message),
+        text: committed_chat_text(message),
         // The durable session graph records ordering but not a presentation
         // timestamp. The workbench does not render this field, so keep the
         // established wire shape without fabricating a time during resume.
@@ -135,6 +135,16 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
             .map(|attachment| ChatAttachment::from_id(attachment.id.to_string()))
             .collect(),
     }
+}
+
+fn committed_chat_text(message: &lash::messages::Message) -> String {
+    message
+        .parts
+        .iter()
+        .filter(|part| !matches!(part.kind, lash_core::PartKind::Reasoning))
+        .map(|part| part.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {

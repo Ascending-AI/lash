@@ -202,7 +202,8 @@ pub mod direct {
     pub use lash_core::llm::types::{
         AttachmentSource, GenerationDisposition, GenerationOptionDisposition, GenerationOptions,
         LlmEventSender, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
-        NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope,
+        NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope, ProviderReplayDrop,
+        ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
     };
     pub use lash_core::{
         facade_support::DirectCompletion, facade_support::DirectJsonSchema,
@@ -374,9 +375,11 @@ pub mod remote {
             RemoteLlmTerminalReason, RemoteLlmToolChoice, RemoteLlmToolSpec, RemoteModelCapability,
             RemoteModelIntent, RemoteNormalizedError, RemoteProtocolPosition,
             RemoteProviderFailureKind, RemoteProviderFileScope, RemoteProviderMetadata,
-            RemoteProviderReasoningReplay, RemoteProviderReplayMeta, RemoteReasoningCapability,
-            RemoteReasoningDisableEncoding, RemoteReasoningEncoding, RemoteReasoningSelection,
-            RemoteResponseTextMeta, RemoteRetryDecision, RemoteSchemaProjectionOverride,
+            RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
+            RemoteProviderReplayDropReason, RemoteProviderReplayKind, RemoteProviderReplayMeta,
+            RemoteProviderRouteIdentity, RemoteReasoningCapability, RemoteReasoningDisableEncoding,
+            RemoteReasoningEncoding, RemoteReasoningSelection, RemoteResponseTextMeta,
+            RemoteRetryDecision, RemoteSchemaProjectionOverride,
         };
     }
 
@@ -603,8 +606,9 @@ pub mod tracing {
         TraceAttachment, TraceContentBlock, TraceEffectEnvelopeDiffEntry,
         TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
         TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
-        TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRuntimeStreamEvent,
-        TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceSink,
+        TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
+        TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent,
+        TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceSink,
         facade_support::TraceBranchSelection, facade_support::TraceLabelMetadata,
         facade_support::TraceRecord, facade_support::TraceRuntimeScope,
         facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,

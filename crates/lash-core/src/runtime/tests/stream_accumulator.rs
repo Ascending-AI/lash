@@ -49,6 +49,7 @@ fn stream_accumulator_preserves_full_reasoning_replay_metadata() {
             signature: Some("signature".to_string()),
             redacted: true,
             summary: vec!["hidden".to_string()],
+            ..Default::default()
         }),
     );
 
@@ -75,6 +76,7 @@ fn stream_accumulator_preserves_reasoning_when_final_response_has_tool_call() {
         Some(lash_sansio::llm::types::ProviderReplayMeta {
             item_id: Some("item_1".to_string()),
             opaque: Some("sig".to_string()),
+            ..Default::default()
         }),
     );
 
@@ -87,6 +89,7 @@ fn stream_accumulator_preserves_reasoning_when_final_response_has_tool_call() {
             replay: Some(lash_sansio::llm::types::ProviderReplayMeta {
                 item_id: Some("item_1".to_string()),
                 opaque: Some("sig".to_string()),
+                ..Default::default()
             }),
         }],
         response_metadata: Default::default(),

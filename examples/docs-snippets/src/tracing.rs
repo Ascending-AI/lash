@@ -508,3 +508,54 @@ mod builder_tests {
         .expect("OpenTelemetry tracing snippet must build");
     }
 }
+
+#[cfg(test)]
+mod replay_provenance_examples {
+    use lash::tracing::{
+        TraceEvent, TraceProviderReplayDropEvent, TraceProviderReplayDropReason,
+        TraceProviderReplayKind, TraceProviderRouteIdentity,
+    };
+
+    #[test]
+    fn provider_replay_drop_trace_preserves_both_routes() {
+        let replay_drop = TraceProviderReplayDropEvent {
+            replay_kind: TraceProviderReplayKind::Reasoning,
+            reason: TraceProviderReplayDropReason::ForeignRoute,
+            minting_route: Some(TraceProviderRouteIdentity {
+                provider: "anthropic".to_string(),
+                endpoint: "https://api.anthropic.com".to_string(),
+                model: "claude-sonnet-4-6".to_string(),
+            }),
+            serving_route: TraceProviderRouteIdentity {
+                provider: "google_oauth".to_string(),
+                endpoint: "https://cloudcode-pa.googleapis.com/v1internal".to_string(),
+                model: "gemini-2.5-pro".to_string(),
+            },
+        };
+
+        let response_text_code = TraceProviderReplayKind::ResponseText.code();
+        let reasoning_code = replay_drop.replay_kind.code();
+        let tool_call_code = TraceProviderReplayKind::ToolCall.code();
+        assert_eq!(response_text_code, "response_text");
+        assert_eq!(reasoning_code, "reasoning");
+        assert_eq!(tool_call_code, "tool_call");
+        let unstamped_code = TraceProviderReplayDropReason::Unstamped.code();
+        let foreign_route_code = replay_drop.reason.code();
+        assert_eq!(unstamped_code, "unstamped");
+        assert_eq!(foreign_route_code, "foreign_route");
+        let minting_route = replay_drop.minting_route.as_ref().expect("minting route");
+        assert_eq!(minting_route.provider, "anthropic");
+        assert_eq!(minting_route.model, "claude-sonnet-4-6");
+        assert_eq!(replay_drop.serving_route.provider, "google_oauth");
+        assert_eq!(replay_drop.serving_route.model, "gemini-2.5-pro");
+
+        let event = TraceEvent::ProviderReplayDropped { event: replay_drop };
+        let wire = serde_json::to_value(&event).expect("replay drop trace serializes");
+        assert_eq!(wire["type"], "provider_replay_dropped");
+        assert_eq!(wire["event"]["reason"], "foreign_route");
+        assert_eq!(
+            wire["event"]["serving_route"]["endpoint"],
+            "https://cloudcode-pa.googleapis.com/v1internal"
+        );
+    }
+}

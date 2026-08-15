@@ -95,6 +95,10 @@ impl Provider for PanicProvider {
         "panic-provider"
     }
 
+    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+
     fn options(&self) -> ProviderOptions {
         ProviderOptions::default()
     }
@@ -121,6 +125,10 @@ struct ClassifierKeywordPanicProvider;
 impl Provider for ClassifierKeywordPanicProvider {
     fn kind(&self) -> &'static str {
         "classifier-keyword-panic"
+    }
+
+    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -151,6 +159,10 @@ struct PanicOnceProvider {
 impl Provider for PanicOnceProvider {
     fn kind(&self) -> &'static str {
         "panic-once-provider"
+    }
+
+    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -198,6 +210,10 @@ impl ScriptedProvider {
 impl Provider for ScriptedProvider {
     fn kind(&self) -> &'static str {
         "scripted-panic-containment"
+    }
+
+    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {

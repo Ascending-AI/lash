@@ -86,15 +86,7 @@ impl GoogleOAuthProvider {
             .unwrap_or_else(|| json!({ "text": "[Attachment]" }))
     }
 
-    fn valid_same_origin_text_signature(
-        req: &LlmRequest,
-        meta: &ResponseTextMeta,
-    ) -> Option<String> {
-        if meta.origin_provider.as_deref() != Some(Self::PROVIDER_KIND)
-            || meta.origin_model.as_deref() != Some(req.model.as_str())
-        {
-            return None;
-        }
+    fn valid_text_signature(meta: &ResponseTextMeta) -> Option<String> {
         let signature = meta.provider_payload.as_deref()?.trim();
         if signature.is_empty() {
             return None;
@@ -110,6 +102,9 @@ impl GoogleOAuthProvider {
         req: &LlmRequest,
         attachment_parts: &[Value],
     ) -> Vec<Value> {
+        let serving_route = Self::route_identity_for_model(&req.model);
+        let safe_request = req.replay_safe_for(&serving_route);
+        let req = safe_request.as_ref();
         let mut out: Vec<Value> = Vec::new();
         // Wire-protocol dialect fact, not a model-catalog capability fact.
         let is_gemini_3 = req.model.to_ascii_lowercase().contains("gemini-3");
@@ -138,9 +133,8 @@ impl GoogleOAuthProvider {
                         }
                         let mut part = json!({ "text": text });
                         if matches!(msg.role, LlmRole::Assistant)
-                            && let Some(signature) = response_meta
-                                .as_ref()
-                                .and_then(|meta| Self::valid_same_origin_text_signature(req, meta))
+                            && let Some(signature) =
+                                response_meta.as_ref().and_then(Self::valid_text_signature)
                         {
                             part["thoughtSignature"] = Value::String(signature);
                         }

@@ -461,6 +461,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
                     replay: Some(ProviderReplayMeta {
                         item_id: Some("provider-item-2".to_string()),
                         opaque: Some("opaque-provider-state".to_string()),
+                        ..ProviderReplayMeta::default()
                     }),
                 },
             ],

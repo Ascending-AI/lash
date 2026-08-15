@@ -19,6 +19,7 @@ use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmUsage,
+    ProviderRouteIdentity,
 };
 use lash_core::provider::{Provider, ProviderOptions, StreamTermination};
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
@@ -517,10 +518,44 @@ impl CodexProvider {
     }
 }
 
+fn codex_replay_origin_conflict(
+    conflict: lash_core::llm::types::ProviderReplayOriginConflict,
+    original: Option<LlmTransportError>,
+) -> LlmTransportError {
+    let has_original = original.is_some();
+    let mut error = original.unwrap_or_else(|| LlmTransportError::new(conflict.to_string()));
+    if has_original {
+        error.message = format!(
+            "{conflict}; original LLM Provider failure: {}",
+            error.message
+        );
+    }
+    error.kind = ProviderFailureKind::Validation;
+    error.code = Some("provider_replay_origin_conflict".to_string());
+    error.retryable = false;
+    error
+}
+
+fn stamp_codex_partial_or_attach_conflict(
+    mut error: LlmTransportError,
+    route: &ProviderRouteIdentity,
+) -> Result<LlmTransportError, LlmTransportError> {
+    if let Some(partial) = error.partial_response.as_deref_mut()
+        && let Err(conflict) = partial.stamp_replay_origin(route)
+    {
+        return Err(codex_replay_origin_conflict(conflict, Some(error)));
+    }
+    Ok(error)
+}
+
 #[async_trait]
 impl Provider for CodexProvider {
     fn kind(&self) -> &'static str {
         "codex"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::for_endpoint(self.kind(), &self.responses_url, model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -573,22 +608,58 @@ impl Provider for CodexProvider {
         true
     }
 
-    async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn complete(&mut self, mut req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        let route = self.route_identity(&req.model);
+        route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_code("invalid_provider_endpoint")
+        })?;
+        if let Some(downstream) = req.stream_events.take() {
+            let stream_route = route.clone();
+            req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(
+                move |mut event| {
+                    if let LlmStreamEvent::Part(part) = &mut event {
+                        let _ = part.stamp_replay_origin(&stream_route);
+                    }
+                    downstream.send(event);
+                },
+            ));
+        }
         if self.attempt_credential.is_none() {
             let manager = Arc::clone(&self.credentials);
             let provider = self.clone();
+            let minting_route = route.clone();
             return manager
                 .execute(move |lease| {
                     let mut provider = provider.clone();
                     let req = req.clone();
+                    let minting_route = minting_route.clone();
                     provider.attempt_credential = Some(lease);
                     async move {
                         match Box::pin(provider.complete(req)).await {
-                            Ok(response) => Ok(response),
+                            Ok(mut response) => {
+                                response.stamp_replay_origin(&minting_route).map_err(
+                                    |conflict| {
+                                        CredentialCallError::Failed(codex_replay_origin_conflict(
+                                            conflict, None,
+                                        ))
+                                    },
+                                )?;
+                                Ok(response)
+                            }
                             Err(error) if error.status == Some(401) => {
+                                let error =
+                                    stamp_codex_partial_or_attach_conflict(error, &minting_route)
+                                        .map_err(CredentialCallError::Failed)?;
                                 Err(CredentialCallError::PreOutputAuth(error))
                             }
-                            Err(error) => Err(CredentialCallError::Failed(error)),
+                            Err(error) => {
+                                let error =
+                                    stamp_codex_partial_or_attach_conflict(error, &minting_route)
+                                        .map_err(CredentialCallError::Failed)?;
+                                Err(CredentialCallError::Failed(error))
+                            }
                         }
                     }
                 })

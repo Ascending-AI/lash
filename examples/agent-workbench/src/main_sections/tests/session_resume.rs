@@ -3,7 +3,7 @@
         run_async_test_on_stack_budget("workbench-session-resume-test", || {
             committed_transcript_and_provider_history_survive_web_process_reconstruction_inner()
         });
-    }
+}
 
     async fn committed_transcript_and_provider_history_survive_web_process_reconstruction_inner() {
         let data_dir = std::env::temp_dir().join(format!(
@@ -81,6 +81,7 @@
                     .and_then(serde_json::Value::as_str)
                     .expect("string terminal value")
                     .to_string(),
+                None,
             )
             .await
             .expect("commit assistant transcript");
@@ -89,6 +90,7 @@
             &first_session,
             "resume-turn-one",
             "resume answer one".to_string(),
+            None,
         )
         .await
         .expect("replay first assistant transcript after a later turn");
@@ -292,6 +294,7 @@
                 .and_then(serde_json::Value::as_str)
                 .expect("string resumed terminal value")
                 .to_string(),
+            None,
         )
         .await
         .expect("commit resumed assistant transcript");
@@ -324,4 +327,34 @@
         assert_eq!(after.messages[4].text, "resume question three");
         assert_eq!(after.messages[5].text, "resume answer three");
         let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn committed_chat_projection_keeps_provider_reasoning_hidden() {
+        let message = lash::messages::Message {
+            id: "assistant-with-replay".to_string(),
+            role: lash::messages::MessageRole::Assistant,
+            parts: Arc::new(vec![
+                lash_core::Part::text(
+                    "assistant-with-replay.p0".to_string(),
+                    "visible answer".to_string(),
+                    None,
+                ),
+                lash_core::Part::reasoning(
+                    "assistant-with-replay.p1".to_string(),
+                    "hidden portable reasoning".to_string(),
+                    Some(lash_core::llm::types::ProviderReasoningReplay {
+                        signature: Some("opaque".to_string()),
+                        ..Default::default()
+                    }),
+                ),
+            ]),
+            origin: None,
+        };
+
+        assert_eq!(committed_chat_text(&message), "visible answer");
+        assert_eq!(
+            chat_message_from_committed(&message).text,
+            "visible answer"
+        );
     }

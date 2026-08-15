@@ -4,11 +4,24 @@ use crate::support::*;
 const PROVIDER: &str = "OpenAI-compatible";
 
 impl OpenAiCompatibleProvider {
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn build_responses_request_body(
         &self,
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
+        let serving_route = self.route_identity(&req.model);
+        self.build_responses_request_body_for_route(req, stream, &serving_route)
+    }
+
+    pub(crate) fn build_responses_request_body_for_route(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+        serving_route: &ProviderRouteIdentity,
+    ) -> Result<Value, LlmTransportError> {
+        let safe_request = req.replay_safe_for(serving_route);
+        let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Responses")?;
         let compat = self.resolved_compat(CompletionEndpoint::Responses);
         let tools = shared::build_tools_with_capabilities(

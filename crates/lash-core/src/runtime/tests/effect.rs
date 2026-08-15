@@ -410,6 +410,7 @@ impl RuntimeEffectController for RecordingEffectController {
                     call_record: Some(crate::LlmCallRecord {
                         call_id: crate::LlmCallId("direct-effect-test".to_string()),
                         label: None,
+                        replay_drops: Vec::new(),
                         attempts: Vec::new(),
                     }),
                 })

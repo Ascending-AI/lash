@@ -43,6 +43,26 @@ impl StreamBlock {
             replay: None,
         })
     }
+
+    fn reasoning_part(&self) -> Option<LlmOutputPart> {
+        if self.kind != BlockKind::Thinking
+            || (self.text.is_empty() && self.thinking_signature.is_empty())
+        {
+            return None;
+        }
+        let replay = (!self.thinking_signature.is_empty()).then(|| ProviderReasoningReplay {
+            item_id: None,
+            encrypted_content: None,
+            signature: Some(self.thinking_signature.clone()),
+            redacted: self.redacted,
+            summary: Vec::new(),
+            origin: None,
+        });
+        Some(LlmOutputPart::Reasoning {
+            text: self.text.clone(),
+            replay,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -310,7 +330,7 @@ impl AnthropicProvider {
                     && let Some(part) = state
                         .blocks
                         .get(index)
-                        .and_then(StreamBlock::tool_call_part)
+                        .and_then(|block| block.tool_call_part().or_else(|| block.reasoning_part()))
                 {
                     tx.send(LlmStreamEvent::Part(part));
                 }
@@ -383,6 +403,7 @@ impl AnthropicProvider {
 
     pub(crate) fn finalize(
         state: StreamState,
+        _origin_model: &str,
     ) -> (Vec<LlmOutputPart>, String, LlmUsage, LlmTerminalReason) {
         let mut parts: Vec<LlmOutputPart> = Vec::new();
         let mut full_text = String::new();
@@ -399,24 +420,9 @@ impl AnthropicProvider {
                     }
                 }
                 BlockKind::Thinking => {
-                    if block.text.is_empty() && block.thinking_signature.is_empty() {
-                        continue;
+                    if let Some(part) = block.reasoning_part() {
+                        parts.push(part);
                     }
-                    let sig = if block.thinking_signature.is_empty() {
-                        None
-                    } else {
-                        Some(block.thinking_signature)
-                    };
-                    parts.push(LlmOutputPart::Reasoning {
-                        text: block.text,
-                        replay: sig.map(|signature| ProviderReasoningReplay {
-                            item_id: None,
-                            encrypted_content: None,
-                            signature: Some(signature),
-                            redacted: block.redacted,
-                            summary: Vec::new(),
-                        }),
-                    });
                 }
                 BlockKind::ToolUse => {
                     if let Some(part) = block.tool_call_part() {

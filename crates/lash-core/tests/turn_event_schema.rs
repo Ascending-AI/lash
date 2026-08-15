@@ -164,6 +164,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 record: LlmCallRecord {
                     call_id: LlmCallId("llm-call-1".to_string()),
                     label: Some("primary".to_string()),
+                    replay_drops: Vec::new(),
                     attempts: vec![AttemptRecord {
                         ordinal: 1,
                         started_at: 7,

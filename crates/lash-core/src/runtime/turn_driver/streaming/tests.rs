@@ -4,6 +4,32 @@ use std::task::{Context, Poll};
 
 use super::*;
 
+#[test]
+fn terminal_attempt_position_tracks_observed_stream_state() {
+    let empty = LlmStreamAccumulator::default();
+    let no_evidence = crate::LlmStreamEvidence::default();
+    assert_eq!(
+        observed_stream_protocol_position(false, &empty, &no_evidence),
+        crate::ProtocolPosition::NoResponse
+    );
+
+    let response_observed = crate::LlmStreamEvidence {
+        http_summary: Some("HTTP 502".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(
+        observed_stream_protocol_position(false, &empty, &response_observed),
+        crate::ProtocolPosition::ResponseObserved
+    );
+
+    let mut output_started = LlmStreamAccumulator::default();
+    output_started.push_text("partial output");
+    assert_eq!(
+        observed_stream_protocol_position(false, &output_started, &no_evidence),
+        crate::ProtocolPosition::OutputStarted
+    );
+}
+
 fn projected_delta(event: &RuntimeStreamEvent) -> Option<(&'static str, &str)> {
     match event {
         RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content }) => {

@@ -59,7 +59,9 @@ pub use lashlang_graph::{
 ///   diagnostic's `tool_calls` payload was purely additive.)
 ///
 /// Version 5 adds the `composition_changed` event.
-pub const TRACE_SCHEMA_VERSION: u32 = 5;
+/// Version 6 adds the `provider_replay_dropped` event with typed minting and
+/// serving LLM Provider routes.
+pub const TRACE_SCHEMA_VERSION: u32 = 6;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -318,6 +320,9 @@ pub enum TraceEvent {
     ProviderRequest {
         event: TraceProviderRequestEvent,
     },
+    ProviderReplayDropped {
+        event: TraceProviderReplayDropEvent,
+    },
     EffectEnvelopeDiff {
         event: TraceEffectEnvelopeDiffEvent,
     },
@@ -461,6 +466,7 @@ impl TraceEvent {
             Self::LlmCallCompleted { .. } => "llm_call_completed",
             Self::LlmCallFailed { .. } => "llm_call_failed",
             Self::ProviderRequest { .. } => "provider_request",
+            Self::ProviderReplayDropped { .. } => "provider_replay_dropped",
             Self::EffectEnvelopeDiff { .. } => "effect_envelope_diff",
             Self::ProviderStreamEvent { .. } => "provider_stream_event",
             Self::RuntimeStreamEvent { .. } => "runtime_stream_event",
@@ -647,6 +653,60 @@ pub struct TraceProviderRequestEvent {
     /// Why `body_json` is absent when the request body itself was observed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_json_omitted_reason: Option<String>,
+}
+
+/// Opaque replay state rejected before an LLM Provider request was serialized.
+/// A missing minting route identifies a session written before provenance was
+/// introduced (or another unstamped producer); it is intentionally not
+/// inferred from the currently selected route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceProviderReplayKind {
+    ResponseText,
+    Reasoning,
+    ToolCall,
+}
+
+impl TraceProviderReplayKind {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::ResponseText => "response_text",
+            Self::Reasoning => "reasoning",
+            Self::ToolCall => "tool_call",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceProviderReplayDropReason {
+    Unstamped,
+    ForeignRoute,
+}
+
+impl TraceProviderReplayDropReason {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Unstamped => "unstamped",
+            Self::ForeignRoute => "foreign_route",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceProviderRouteIdentity {
+    pub provider: String,
+    pub endpoint: String,
+    pub model: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceProviderReplayDropEvent {
+    pub replay_kind: TraceProviderReplayKind,
+    pub reason: TraceProviderReplayDropReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minting_route: Option<TraceProviderRouteIdentity>,
+    pub serving_route: TraceProviderRouteIdentity,
 }
 
 /// Structural differences between the canonical envelopes on a failed durable

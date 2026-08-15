@@ -30,8 +30,8 @@ use lash_core::llm::types::{
     GenerationDisposition, GenerationOptionDisposition, LlmOutputSpec, LlmRequest,
 };
 use lash_core::provider::{
-    CacheRetention, ProviderComponents, ProviderFactory, ProviderOptions, ProviderReliability,
-    resolve_generation_policy,
+    CacheRetention, Provider, ProviderComponents, ProviderFactory, ProviderOptions,
+    ProviderReliability, resolve_generation_policy,
 };
 use lash_core::{facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose};
 use lash_llm_transport::LlmHttpTransport;
@@ -221,6 +221,9 @@ impl CodexProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
+        let serving_route = self.route_identity(&req.model);
+        let safe_request = req.replay_safe_for(&serving_route);
+        let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Codex")?;
         let tools = Self::build_tools(req)?;
         let (instructions, input) =

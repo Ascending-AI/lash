@@ -97,6 +97,7 @@ pub(crate) fn stream_accumulator_preserves_reasoning_when_final_response_has_too
         Some(lash_sansio::llm::types::ProviderReplayMeta {
             item_id: Some("item_1".to_string()),
             opaque: Some("sig".to_string()),
+            ..Default::default()
         }),
     );
 
@@ -109,6 +110,7 @@ pub(crate) fn stream_accumulator_preserves_reasoning_when_final_response_has_too
             replay: Some(lash_sansio::llm::types::ProviderReplayMeta {
                 item_id: Some("item_1".to_string()),
                 opaque: Some("sig".to_string()),
+                ..Default::default()
             }),
         }],
         response_metadata: Default::default(),
