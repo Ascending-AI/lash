@@ -72,6 +72,24 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         typescript.read_view().protocol_turn_options().payload["dialect"],
         serde_json::json!("typescript")
     );
+
+    // A host that offers the choice — a create form, a flag, an environment
+    // variable — reads the menu from the registered dialects rather than
+    // writing its own list, and refuses an unregistered id instead of quietly
+    // defaulting it: the dialect is pinned for the session's whole life.
+    assert_eq!(
+        RlmDialect::ALL.map(RlmDialect::language_id),
+        ["lashlang", "typescript"]
+    );
+    assert_eq!(
+        RlmDialect::from_language_id("typescript"),
+        Some(RlmDialect::Typescript)
+    );
+    assert_eq!(RlmDialect::from_language_id("lashscript"), None);
+    assert_eq!(
+        RlmDialect::registered_language_ids(),
+        "`lashlang`, `typescript`"
+    );
     // docs:end:rlm-core
     Ok(())
 }

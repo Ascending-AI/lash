@@ -177,12 +177,46 @@ pub enum RlmDialect {
 }
 
 impl RlmDialect {
+    /// Every dialect the first-party registry can activate, in id order.
+    ///
+    /// A host that offers a dialect choice — a create form, a CLI flag, an
+    /// environment variable — must offer *these*, not a list it writes itself:
+    /// a hand-written list is a second source of truth that goes stale the day
+    /// a dialect is added, and the failure it produces is an operator being
+    /// unable to select a dialect the substrate runs.
+    /// `lash-protocol-rlm` checks this array against the registry's own
+    /// dialects, so adding one that is not listed here fails that crate's
+    /// tests rather than shipping a menu with a hole in it.
+    pub const ALL: [Self; 2] = [Self::Lashlang, Self::Typescript];
+
     /// Return the registered code-execution language id for this dialect.
     pub const fn language_id(self) -> &'static str {
         match self {
             Self::Lashlang => "lashlang",
             Self::Typescript => "typescript",
         }
+    }
+
+    /// Resolve a registered language id, refusing an unknown one.
+    ///
+    /// This is the typed create-contract refusal in the shape a host receives
+    /// the choice in: a string off a form, a flag, or an environment variable.
+    /// Returning `None` rather than defaulting is the whole point — a typo that
+    /// silently selected Lashlang would pin the wrong dialect for the session's
+    /// durable lifetime.
+    pub fn from_language_id(language_id: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|dialect| dialect.language_id() == language_id)
+    }
+
+    /// The registered language ids, comma-separated, for a refusal message.
+    pub fn registered_language_ids() -> String {
+        Self::ALL
+            .iter()
+            .map(|dialect| format!("`{}`", dialect.language_id()))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 

@@ -297,6 +297,43 @@ mod tests {
             "typescript"
         );
     }
+
+    /// `RlmDialect::ALL` is what every host offers a dialect choice from, so it
+    /// has to name exactly the dialects this registry can activate. Checked
+    /// against the dialect implementations themselves rather than against a
+    /// second list of names: a dialect the registry gains and the array lacks
+    /// is a create form that cannot select it, and a name the array gains
+    /// without a dialect is a create form that offers one the executor refuses.
+    #[test]
+    fn the_public_dialect_array_names_every_registered_dialect() {
+        let registry = RlmDialectRegistry::new([
+            Arc::new(lashlang_test_dialect()) as Arc<dyn RlmDialect>,
+            Arc::new(typescript_test_dialect()) as Arc<dyn RlmDialect>,
+        ]);
+
+        let mut registered = registry.dialects.keys().copied().collect::<Vec<_>>();
+        registered.sort_unstable();
+        let mut published = lash_rlm_types::RlmDialect::ALL
+            .iter()
+            .map(|dialect| dialect.language_id())
+            .collect::<Vec<_>>();
+        published.sort_unstable();
+
+        assert_eq!(published, registered);
+        for language_id in registered {
+            assert_eq!(
+                lash_rlm_types::RlmDialect::from_language_id(language_id)
+                    .expect("a registered language id resolves to a typed dialect")
+                    .language_id(),
+                language_id
+            );
+        }
+        assert_eq!(
+            lash_rlm_types::RlmDialect::from_language_id("lashscript"),
+            None,
+            "an unregistered language id must refuse rather than default"
+        );
+    }
 }
 
 #[cfg(test)]
