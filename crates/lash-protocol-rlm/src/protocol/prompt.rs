@@ -60,6 +60,28 @@ pub fn rlm_execution_section_for_host_environment(
     sections.join("\n\n")
 }
 
+/// Modules the substrate binds for its own lowering, never for a reader.
+///
+/// The leading double underscore is the repository's reserved-namespace marker
+/// (the TypeScript lowerer's generated bindings share it), so this is a rule
+/// about a namespace rather than a list of names to keep in sync. It exists
+/// because `lashlang_host_environment_from_tool_catalog` binds
+/// `__typescript_runtime` — how the TypeScript lowerer reaches journaled
+/// `Date.now()`/`Math.random()` — into *every* Lashlang host, and this section
+/// advertised it: a Lashlang reader was handed
+/// `await __typescript_runtime.now(any)? -> float`, an internal name in another
+/// dialect's vocabulary.
+///
+/// Hiding rather than renaming is deliberate. The module path is a durable
+/// link-time identifier: it is embedded in every lowered TypeScript program,
+/// including the persisted bodies of durable processes that must still resolve
+/// when a worker wakes them after a restart. ADR 0060 records the rule and the
+/// carve-out list.
+fn module_is_runtime_internal(path: &[String]) -> bool {
+    path.first()
+        .is_some_and(|segment| segment.starts_with("__"))
+}
+
 fn render_host_environment_section(surface: &lashlang::LashlangHostEnvironment) -> Option<String> {
     // Operations with real Lashlang types (trigger and other host primitives)
     // are listed here. Tool-catalog operations are bridged with placeholder
@@ -67,6 +89,9 @@ fn render_host_environment_section(surface: &lashlang::LashlangHostEnvironment) 
     // avoid an uninformative `any -> any` duplicate of that section.
     let mut operation_lines = Vec::new();
     for (_, module) in surface.resources.module_instances() {
+        if module_is_runtime_internal(&module.path) {
+            continue;
+        }
         if let Some(resource_type) =
             surface
                 .resources

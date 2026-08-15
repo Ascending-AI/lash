@@ -1052,7 +1052,7 @@ mod tests {
         let projector = projector(10);
         let history = projector.format_history(&[user_event("u1", "abcdefghijklmnopqrstuvwxyz")]);
 
-        assert!(history.contains("re-print history[0].content"));
+        assert!(history.contains("re-run `print history[0].content`"));
         assert!(history.contains("... (16 characters omitted) ..."));
         assert!(!history.contains("user_input_"));
     }
@@ -1068,7 +1068,7 @@ mod tests {
         let output = "x".repeat(60 * 1024);
         let history = projector.format_history(&[step_event(0, "print big", &output)]);
 
-        assert!(history.contains("re-print history[0].output[0]"));
+        assert!(history.contains("re-run `print history[0].output[0]`"));
         assert!(history.contains("full value retained"));
         assert!(history.contains("...truncated..."));
     }
@@ -1078,14 +1078,15 @@ mod tests {
         // A truncated preview must read as display-only, not lost state — the
         // inference gpt-5.5 got wrong when it stopped a /spring-cleaning
         // mid-task ("I can't continue from the previous tool state"). The note
-        // names the re-print handle and states the value is retained.
+        // names the re-read handle, in this dialect's own print call, and
+        // states the value is retained.
         let projector = projector(10);
         let output = "x".repeat(60 * 1024);
         let history = projector.format_history(&[step_event(0, "print big", &output)]);
 
         assert!(history.contains("full value retained"), "{history}");
         assert!(
-            history.contains("re-print history[0].output[0]"),
+            history.contains("re-run `print history[0].output[0]`"),
             "{history}"
         );
         // The bare, easily-misread "chars, full: <ref>" framing is gone.
@@ -1106,7 +1107,7 @@ mod tests {
         let history = projector.format_history(&[step_event(0, "print result", &raw)]);
 
         assert!(
-            history.contains("re-print history[0].output[0]"),
+            history.contains("re-run `print history[0].output[0]`"),
             "{history}"
         );
         let status = history.find(r#""status":"failed""#).expect("status field");

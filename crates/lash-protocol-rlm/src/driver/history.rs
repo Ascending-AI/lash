@@ -604,10 +604,13 @@ fn message_history_reasoning_blocks(parts: &[lash_core::Part]) -> Vec<LlmContent
 /// full value is still live and re-readable. Models otherwise misread a short
 /// preview as lost state and stop mid-task.
 pub(crate) fn preview_retained_copy(
-    _vocabulary: crate::dialect::DialectPromptVocabulary,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
     reference: &str,
 ) -> String {
-    format!("preview only — full value retained; re-print {reference} for the rest")
+    format!(
+        "preview only — full value retained; re-run `{}` for the rest",
+        vocabulary.print_statement(reference)
+    )
 }
 
 fn projected_ref(

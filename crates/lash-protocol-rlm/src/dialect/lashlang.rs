@@ -194,7 +194,7 @@ Done. I inspected the value and summarized the result."#
             .map(|cap| format!(" The request cap was {cap} tokens."))
             .unwrap_or_default();
         format!(
-            "Model output limit truncated the `<lashlang>` block before `</lashlang>`.{cap} Retry with a shorter block; do less per cell and continue in a later step."
+            "Model output limit truncated the `<lashlang>` block before `</lashlang>`.{cap} Retry with a shorter block; do less per block and continue in a later step."
         )
     }
 

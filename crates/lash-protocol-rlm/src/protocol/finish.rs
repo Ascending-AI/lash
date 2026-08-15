@@ -123,14 +123,15 @@ pub(super) fn invalid_cell_message(
 /// is TypeScript's noun for a unit of code, and a Lashlang reader has only ever
 /// been shown blocks.
 pub(crate) fn output_limit_retry_copy(
-    _vocabulary: crate::dialect::DialectPromptVocabulary,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
     output_token_cap: Option<usize>,
 ) -> String {
     let cap = output_token_cap
         .map(|cap| format!(" (the request cap was {cap} tokens)"))
         .unwrap_or_default();
+    let noun = vocabulary.cell_noun;
     format!(
-        "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per cell and continue in a later step."
+        "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per {noun} and continue in a later step."
     )
 }
 
