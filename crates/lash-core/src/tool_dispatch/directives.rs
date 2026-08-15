@@ -9,13 +9,13 @@ pub(super) struct BeforeToolDirectiveOutcome {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum BeforeToolTerminalKind {
+enum ToolTerminalKind {
     SuccessfulShortCircuit,
     DeniedShortCircuit,
     AbortTurn,
 }
 
-impl BeforeToolTerminalKind {
+impl ToolTerminalKind {
     fn as_str(self) -> &'static str {
         match self {
             Self::SuccessfulShortCircuit => "successful_short_circuit",
@@ -25,15 +25,21 @@ impl BeforeToolTerminalKind {
     }
 }
 
-struct BeforeToolTerminal {
+struct ToolTerminal {
     plugin_id: String,
-    kind: BeforeToolTerminalKind,
+    kind: ToolTerminalKind,
     result: ToolResult,
+}
+
+#[derive(Clone, Copy)]
+enum EqualStrengthResolution {
+    PluginId,
+    FirstEmitted,
 }
 
 pub(super) struct BeforeToolDirectiveFold {
     args: serde_json::Value,
-    terminal: Option<BeforeToolTerminal>,
+    terminal: Option<ToolTerminal>,
 }
 
 impl BeforeToolDirectiveFold {
@@ -56,9 +62,9 @@ impl BeforeToolDirectiveFold {
                     if let Err(err) = context.session_lifecycle.create_session(*request).await {
                         self.fold_terminal(
                             context,
-                            BeforeToolTerminal {
+                            ToolTerminal {
                                 plugin_id,
-                                kind: BeforeToolTerminalKind::DeniedShortCircuit,
+                                kind: ToolTerminalKind::DeniedShortCircuit,
                                 result: ToolResult::err_fmt(err.to_string()),
                             },
                         )
@@ -70,13 +76,13 @@ impl BeforeToolDirectiveFold {
                 }
                 PluginDirective::ShortCircuitTool { output } => {
                     let kind = if output.is_success() {
-                        BeforeToolTerminalKind::SuccessfulShortCircuit
+                        ToolTerminalKind::SuccessfulShortCircuit
                     } else {
-                        BeforeToolTerminalKind::DeniedShortCircuit
+                        ToolTerminalKind::DeniedShortCircuit
                     };
                     self.fold_terminal(
                         context,
-                        BeforeToolTerminal {
+                        ToolTerminal {
                             plugin_id,
                             kind,
                             result: ToolResult::from_output(output),
@@ -87,9 +93,9 @@ impl BeforeToolDirectiveFold {
                 PluginDirective::AbortTurn { message, .. } => {
                     self.fold_terminal(
                         context,
-                        BeforeToolTerminal {
+                        ToolTerminal {
                             plugin_id,
-                            kind: BeforeToolTerminalKind::AbortTurn,
+                            kind: ToolTerminalKind::AbortTurn,
                             result: ToolResult::err_fmt(message),
                         },
                     )
@@ -108,9 +114,9 @@ impl BeforeToolDirectiveFold {
                     {
                         self.fold_terminal(
                             context,
-                            BeforeToolTerminal {
+                            ToolTerminal {
                                 plugin_id,
-                                kind: BeforeToolTerminalKind::DeniedShortCircuit,
+                                kind: ToolTerminalKind::DeniedShortCircuit,
                                 result: ToolResult::err_fmt(err),
                             },
                         )
@@ -120,9 +126,9 @@ impl BeforeToolDirectiveFold {
                 PluginDirective::EnqueueMessages { .. } => {
                     self.fold_terminal(
                         context,
-                        BeforeToolTerminal {
+                        ToolTerminal {
                             plugin_id,
-                            kind: BeforeToolTerminalKind::DeniedShortCircuit,
+                            kind: ToolTerminalKind::DeniedShortCircuit,
                             result: ToolResult::err_fmt(
                                 "before_tool_call does not support message injection",
                             ),
@@ -134,33 +140,15 @@ impl BeforeToolDirectiveFold {
         }
     }
 
-    async fn fold_terminal(
-        &mut self,
-        context: &ToolDispatchContext<'_>,
-        candidate: BeforeToolTerminal,
-    ) {
-        let Some(current) = self.terminal.take() else {
-            self.terminal = Some(candidate);
-            return;
-        };
-        let later_plugin_id = candidate.plugin_id.clone();
-        let candidate_wins = candidate.kind > current.kind
-            || (candidate.kind == current.kind && candidate.plugin_id < current.plugin_id);
-        let displaced_denial = (current.kind == BeforeToolTerminalKind::DeniedShortCircuit
-            && candidate.kind == BeforeToolTerminalKind::AbortTurn)
-            .then(|| current.result.clone());
-        let (mut winner, ignored) = if candidate_wins {
-            (candidate, current)
-        } else {
-            (current, candidate)
-        };
-        if winner.plugin_id != ignored.plugin_id {
-            emit_terminal_conflict(context, &later_plugin_id, &winner, &ignored).await;
-        }
-        if let Some(denial) = displaced_denial {
-            winner.result = denial;
-        }
-        self.terminal = Some(winner);
+    async fn fold_terminal(&mut self, context: &ToolDispatchContext<'_>, candidate: ToolTerminal) {
+        fold_tool_terminal(
+            context,
+            "before_tool_call",
+            &mut self.terminal,
+            candidate,
+            EqualStrengthResolution::PluginId,
+        )
+        .await;
     }
 
     pub(super) fn finish(self) -> BeforeToolDirectiveOutcome {
@@ -183,9 +171,10 @@ pub(super) async fn apply_before_tool_directives(
 
 async fn emit_terminal_conflict(
     context: &ToolDispatchContext<'_>,
+    hook_name: &'static str,
     later_plugin_id: &str,
-    winner: &BeforeToolTerminal,
-    ignored: &BeforeToolTerminal,
+    winner: &ToolTerminal,
+    ignored: &ToolTerminal,
 ) {
     let payload = serde_json::json!({
         "winner_plugin_id": winner.plugin_id,
@@ -196,7 +185,7 @@ async fn emit_terminal_conflict(
     if let Err(err) = emit_trace(
         context,
         later_plugin_id,
-        "before_tool_call.directive_conflict".to_string(),
+        format!("{hook_name}.directive_conflict"),
         payload.clone(),
         lash_trace::TraceContext::default().for_session(context.session_id.clone()),
     )
@@ -206,7 +195,8 @@ async fn emit_terminal_conflict(
             target: "lash::plugin_composition",
             later_plugin_id,
             error = %err,
-            "failed to emit before_tool_call directive conflict trace"
+            hook_name,
+            "failed to emit tool-call directive conflict trace"
         );
     }
     let _ = context
@@ -214,7 +204,7 @@ async fn emit_terminal_conflict(
         .try_send(crate::SessionStreamEvent::PluginEvent {
             plugin_id: later_plugin_id.to_string(),
             event: crate::PluginRuntimeEvent::Custom {
-                name: "before_tool_call.directive_conflict".to_string(),
+                name: format!("{hook_name}.directive_conflict"),
                 payload,
             },
         });
@@ -222,27 +212,59 @@ async fn emit_terminal_conflict(
 
 pub(super) async fn apply_after_tool_directives(
     context: &ToolDispatchContext<'_>,
-    mut result: ToolResult,
+    result: ToolResult,
     directives: Vec<PluginOwned<PluginDirective>>,
 ) -> ToolResult {
+    let mut terminal = None;
     for emitted in directives {
         let plugin_id = emitted.plugin_id;
         match emitted.value {
             PluginDirective::CreateSession { request } => {
                 if let Err(err) = context.session_lifecycle.create_session(*request).await {
-                    result = ToolResult::failure(ToolFailure::runtime(
-                        ToolFailureClass::Internal,
-                        "plugin_session_create_failed",
-                        err.to_string(),
-                    ));
-                    break;
+                    fold_after_tool_terminal(
+                        context,
+                        &mut terminal,
+                        ToolTerminal {
+                            plugin_id,
+                            kind: ToolTerminalKind::DeniedShortCircuit,
+                            result: ToolResult::failure(ToolFailure::runtime(
+                                ToolFailureClass::Internal,
+                                "plugin_session_create_failed",
+                                err.to_string(),
+                            )),
+                        },
+                    )
+                    .await;
                 }
             }
             PluginDirective::ShortCircuitTool { output } => {
-                result = ToolResult::from_output(output);
+                let kind = if output.is_success() {
+                    ToolTerminalKind::SuccessfulShortCircuit
+                } else {
+                    ToolTerminalKind::DeniedShortCircuit
+                };
+                fold_after_tool_terminal(
+                    context,
+                    &mut terminal,
+                    ToolTerminal {
+                        plugin_id,
+                        kind,
+                        result: ToolResult::from_output(output),
+                    },
+                )
+                .await;
             }
             PluginDirective::AbortTurn { message, .. } => {
-                result = ToolResult::err_fmt(message);
+                fold_after_tool_terminal(
+                    context,
+                    &mut terminal,
+                    ToolTerminal {
+                        plugin_id,
+                        kind: ToolTerminalKind::AbortTurn,
+                        result: ToolResult::err_fmt(message),
+                    },
+                )
+                .await;
             }
             PluginDirective::EmitRuntimeEvents { events } => {
                 emit_plugin_runtime_events(&context.event_tx, &plugin_id, events).await;
@@ -255,21 +277,86 @@ pub(super) async fn apply_after_tool_directives(
                 if let Err(err) =
                     emit_trace(context, &plugin_id, name, payload, *trace_context).await
                 {
-                    result = ToolResult::err_fmt(err);
-                    break;
+                    fold_after_tool_terminal(
+                        context,
+                        &mut terminal,
+                        ToolTerminal {
+                            plugin_id,
+                            kind: ToolTerminalKind::DeniedShortCircuit,
+                            result: ToolResult::err_fmt(err),
+                        },
+                    )
+                    .await;
                 }
             }
             PluginDirective::EnqueueMessages { messages } => {
                 context.checkpoint_messages.enqueue(messages);
             }
             PluginDirective::ReplaceToolArgs { .. } => {
-                result = ToolResult::err_fmt(
-                    "after_tool_call only supports abort, short-circuit, session creation, events, and message injection",
-                );
+                fold_after_tool_terminal(
+                    context,
+                    &mut terminal,
+                    ToolTerminal {
+                        plugin_id,
+                        kind: ToolTerminalKind::DeniedShortCircuit,
+                        result: ToolResult::err_fmt(
+                            "after_tool_call only supports abort, short-circuit, session creation, events, and message injection",
+                        ),
+                    },
+                )
+                .await;
             }
         }
     }
-    result
+    terminal.map_or(result, |terminal| terminal.result)
+}
+
+async fn fold_after_tool_terminal(
+    context: &ToolDispatchContext<'_>,
+    terminal: &mut Option<ToolTerminal>,
+    candidate: ToolTerminal,
+) {
+    fold_tool_terminal(
+        context,
+        "after_tool_call",
+        terminal,
+        candidate,
+        EqualStrengthResolution::FirstEmitted,
+    )
+    .await;
+}
+
+async fn fold_tool_terminal(
+    context: &ToolDispatchContext<'_>,
+    hook_name: &'static str,
+    terminal: &mut Option<ToolTerminal>,
+    candidate: ToolTerminal,
+    equal_strength: EqualStrengthResolution,
+) {
+    let Some(current) = terminal.take() else {
+        *terminal = Some(candidate);
+        return;
+    };
+    let later_plugin_id = candidate.plugin_id.clone();
+    let candidate_wins = candidate.kind > current.kind
+        || (candidate.kind == current.kind
+            && matches!(equal_strength, EqualStrengthResolution::PluginId)
+            && candidate.plugin_id < current.plugin_id);
+    let displaced_denial = (current.kind == ToolTerminalKind::DeniedShortCircuit
+        && candidate.kind == ToolTerminalKind::AbortTurn)
+        .then(|| current.result.clone());
+    let (mut winner, ignored) = if candidate_wins {
+        (candidate, current)
+    } else {
+        (current, candidate)
+    };
+    if winner.plugin_id != ignored.plugin_id {
+        emit_terminal_conflict(context, hook_name, &later_plugin_id, &winner, &ignored).await;
+    }
+    if let Some(denial) = displaced_denial {
+        winner.result = denial;
+    }
+    *terminal = Some(winner);
 }
 
 async fn emit_trace(

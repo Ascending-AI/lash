@@ -179,5 +179,26 @@ mod tests {
             rendered,
             "before_tool_call replacement from `normalizer` was replaced again by `policy` during bounded reinspection"
         );
+
+        let error = PluginError::AfterToolCallReplacementConflict {
+            replacing_plugin_id: "injector".to_string(),
+            repeated_plugin_id: "output_policy".to_string(),
+        };
+        let rendered = error.to_string();
+        let PluginError::AfterToolCallReplacementConflict {
+            replacing_plugin_id,
+            repeated_plugin_id,
+        } = error
+        else {
+            panic!("expected a typed after-tool replacement conflict");
+        };
+
+        assert_eq!(replacing_plugin_id, "injector");
+        assert_eq!(repeated_plugin_id, "output_policy");
+        assert!(rendered.contains("injector") && rendered.contains("output_policy"));
+        assert_eq!(
+            rendered,
+            "after_tool_call replacement from `injector` was replaced again by `output_policy` during bounded reinspection"
+        );
     }
 }

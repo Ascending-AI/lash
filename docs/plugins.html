@@ -200,10 +200,10 @@ fn update_plan_definition() -&gt; ToolDefinition {
       </div>
     </div>
 
-    <div class="section" id="before-tool-call-composition">
+    <div class="section" id="tool-call-composition">
       <div class="section-header">
-        <h2>Before-tool-call composition</h2>
-        <p>Before-tool-call hooks may only preserve or reduce permission. Argument inspection remains effective on either side of one bounded replacement.</p>
+        <h2>Tool-call composition</h2>
+        <p>Plugin terminal directives join restrictively at both seams, while the tool's original outcome sits outside that join and may be replaced. Argument and result inspection remain effective on either side of one bounded replacement.</p>
       </div>
       <div class="listing">
         <div class="listing__row">
@@ -212,11 +212,15 @@ fn update_plan_definition() -&gt; ToolDefinition {
         </div>
         <div class="listing__row">
           <div class="listing__label">terminal precedence</div>
-          <div class="listing__body"><p>The fold joins terminal directives by restrictiveness: <code>AbortTurn</code> wins over a failed or cancelled <code>ShortCircuitTool</code>, which wins over a successful short-circuit. Equal-strength conflicts use plugin ID as a stable tie-breaker; within one plugin, the first-emitted equal-strength terminal wins. At this seam <code>AbortTurn</code> is a failed tool result rather than an enclosing-turn abort, so a later abort that displaces an earlier structured denial retains the denial's typed code and message.</p></div>
+          <div class="listing__body"><p>Both folds join plugin terminal directives by restrictiveness: <code>AbortTurn</code> wins over a failed or cancelled <code>ShortCircuitTool</code>, which wins over a successful short-circuit. The original tool outcome is not part of this lattice, so a successful after-tool replacement can replace an original failure. Before-tool equal-strength conflicts use plugin ID as a stable tie-breaker. After-tool result replacements are first-emitted-wins after bounded reinspection. Within one plugin, the first-emitted equal-strength terminal wins. At either seam <code>AbortTurn</code> is a failed tool result rather than an enclosing-turn abort, so a later abort that displaces an earlier structured denial retains the denial's typed code and message.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">after-tool results</div>
+          <div class="listing__body"><p>Hooks run in plugin registration order. A successful <code>ShortCircuitTool</code> result replacement is shown once to every earlier hook before the chain advances; the first-emitted successful replacement remains effective when a later candidate passes that reinspection. A repeated hook may deny or abort, and that verdict rejoins the terminal fold, but its side-effecting directives are not applied again. Another successful replacement during the bounded pass is rejected as <code>AfterToolCallReplacementConflict</code>, so two unconditional result replacers fail closed. An after-tool hook may therefore run more than once for one result.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">conflicts</div>
-          <div class="listing__body"><p>Lash emits each inter-plugin terminal conflict through the awaited session trace seam, carrying the winning and ignored plugin IDs and directive kinds and attributing the event to the actual later plugin. Re-emission of one plugin's own verdict is not a composition conflict. A runtime event named <code>before_tool_call.directive_conflict</code> carries the same identity-bearing payload when that secondary channel can accept it without blocking tool dispatch.</p></div>
+          <div class="listing__body"><p>Lash emits each inter-plugin terminal conflict through the awaited session trace seam, carrying the winning and ignored plugin IDs and directive kinds and attributing the event to the actual later plugin. One plugin's own repeated or multiple terminals do not manufacture a composition conflict. Runtime events named <code>before_tool_call.directive_conflict</code> and <code>after_tool_call.directive_conflict</code> carry the same identity-bearing payload when that secondary channel can accept it without blocking tool dispatch. <code>CreateSession</code> and <code>EmitTrace</code> errors contribute denials without stopping later directives. Invalid after-tool <code>ReplaceToolArgs</code> also contributes a denial; if another denial displaces its message, the ordinary conflict event still identifies the misusing plugin.</p></div>
         </div>
       </div>
     </div>
