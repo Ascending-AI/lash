@@ -9,6 +9,8 @@ mod reference_assignment;
 mod url_objects;
 mod validation;
 
+use object::compound_identity;
+
 pub use id::HeapId;
 #[cfg(test)]
 pub(crate) use javascript_exotics::RegExpProgramCache;
@@ -1576,34 +1578,6 @@ impl Clone for Heap {
             materialized: FxHashMap::default(),
             logical_byte_limit: self.logical_byte_limit,
         }
-    }
-}
-
-/// Two heaps are equal when they hold the same live objects under the same IDs
-/// and the same meters.
-///
-/// Storage layout — which slot an object occupies, which slots are vacant, and
-/// the free list — is a private allocation detail that a decode/encode round
-/// trip legitimately compacts, so it is deliberately excluded. Including it made
-/// `decode(encode(state)) == state` fail for any program that ever allocated a
-/// temporary.
-impl PartialEq for Heap {
-    fn eq(&self, other: &Self) -> bool {
-        self.next_id == other.next_id
-            && self.allocations == other.allocations
-            && self.live_logical_bytes == other.live_logical_bytes
-            && self.schedule_version == other.schedule_version
-            && self.id_to_slot.len() == other.id_to_slot.len()
-            && self.objects_in_id_order().eq(other.objects_in_id_order())
-    }
-}
-
-fn compound_identity(value: &Value) -> Option<(u8, usize)> {
-    match value {
-        Value::Tuple(values) => Some((0, values.identity())),
-        Value::List(values) => Some((1, values.identity())),
-        Value::Record(record) => Some((2, std::sync::Arc::as_ptr(record) as usize)),
-        _ => None,
     }
 }
 

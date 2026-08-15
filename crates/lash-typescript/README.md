@@ -31,6 +31,14 @@ computed initializers run in declaration order. Const-enum member reads inline
 their constant number or string. Decorators and namespaces/modules remain
 named rejections: `TS_DECORATOR_UNSUPPORTED` and `TS_NAMESPACE_UNSUPPORTED`.
 
+Type-level TypeScript syntax is erased, not executed: annotations, interfaces,
+type aliases, generics, `as`, `satisfies`, and postfix non-null `!` all lower to
+the same runtime program as their untyped form. `enum`, namespaces, and
+decorators are not type-only in this contract and reject as
+`TS_ENUM_UNSUPPORTED`, `TS_NAMESPACE_UNSUPPORTED`, and
+`TS_DECORATOR_UNSUPPORTED`. The checked-in Test262 census records these
+TypeScript-only rulings beside the official ECMAScript inventory.
+
 Cells are scripts and may use top-level `await` for tools, process handles,
 `sleep`, `Promise.all`, and `Promise.allSettled`; `waitSignal` is
 process-only and rejects at the cell top level by name. Async functions and arrows
@@ -147,6 +155,24 @@ The canonical classic `for` lowering rejects a `continue` that crosses a
 resumable iterator protocol exists, a loop body that mutates, aliases, or
 passes the iterable itself rejects with `TS_FOR_OF_UNSUPPORTED`. Calls that do
 not touch the iterable are unaffected.
+
+## Conformance
+
+`cargo test -p lash-typescript` runs an official, commit-pinned Test262 subset
+through the same parse -> normalized AST -> shared AST -> heap VM pipeline as a
+real cell. This proves spec agreement for the selected accepted constructs; it
+does not claim that the bounded dialect accepts all of ECMAScript. The Node
+differential oracle independently pins agreement with the deployed Node
+version, while Test262 pins agreement with ECMA-262.
+
+The inventory/census pair is the exhaustive policy index: every upstream
+feature tag and top-level directory is accepted, rejected by a real `TS_*`
+code, or skipped by an explicit ticket/deviation ruling. The path-level skip
+register accounts for every non-passing upstream test. Counts are pinned by
+area, and executable skips are negative ratchets: a new failure, a changed
+rejection, or an unexpectedly compiling skip fails CI. Tests use no network or
+wall clock. See [`tests/test262/README.md`](tests/test262/README.md) for the
+pinned commit, harness shims, and deliberate inventory-first sync procedure.
 
 ## Deviation register
 

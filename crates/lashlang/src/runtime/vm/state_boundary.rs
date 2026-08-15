@@ -34,3 +34,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
     }
 }
+fn validation_plan_cache_entry(schema: &Value) -> Option<(usize, Arc<Record>)> {
+    match schema {
+        Value::Record(record) => Some((Arc::as_ptr(record) as usize, record.clone())),
+        _ => None,
+    }
+}

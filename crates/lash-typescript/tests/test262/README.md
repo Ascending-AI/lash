@@ -1,20 +1,63 @@
-# Curated test262 slice
+# Test262 conformance data
 
-These executable fixtures are adapted from test262 commit
-`3655e7464de3d52643ecddd4b5f9f4f3e7f62398` and retain the upstream BSD license.
-Each fixture names its source test262 path. Adaptation replaces the test262 harness
-(`assert.sameValue`, `$ERROR`, and `Test262Error`) with one `finish(boolean)` result;
-the semantic expression under test is unchanged. The Rust runner sends every file
-through the real TypeScript parse -> normalized AST -> shared AST -> heap VM path.
+This directory vendors a deliberately small executable subset of
+[tc39/test262](https://github.com/tc39/test262) at commit
+`3655e7464de3d52643ecddd4b5f9f4f3e7f62398`. The selected test files and the
+four upstream harness files are byte-for-byte copies; `LICENSE` is the upstream
+BSD license. Normal tests and CI never access the network.
 
-Selection rule: take at least one positive case for every accepted semantic class
-that does not depend on an explicitly rejected feature. Prefer primitive-only tests
-whose assertion can be represented exactly by `finish(boolean)`. The slice covers
-expressions/statements, coercion, strict and loose equality, template literals,
-closures, exceptions, ternary/logical selection, Number edge display, and the
-accepted String/Array/Object/Number/JSON/Math methods. The native integration suite covers aliasing, host JSON boundaries,
-diagnostics, signatures, and durability, which are Lash-specific rather than test262.
+`inventory.tsv` is generated before selection. It lists every official feature
+tag from the pinned `features.txt`, every top-level test directory, and the
+TypeScript-only syntax decisions required by the dialect contract. Every row
+must have exactly one explicit ruling in `census.tsv`: `accepted`, `rejected`
+with a real `TS_*` diagnostic, or `skip` with a ticket/deviation reason. There
+is no fallback or wildcard row. The Rust harness fails if the two sets differ.
 
-Do not add a test262 case by weakening the dialect. If its dependencies are outside
-the accepted set, add a named rejection test or defer the case until that feature is
-implemented exactly.
+`manifest.tsv` selects 42 executable probes and assigns each an area plus a
+`pass` or ratcheted `skip` disposition. `skip-register.tsv` names every other
+upstream test path and its reason, so the 53,578-test source tree has no silent
+omissions. `expected-counts.tsv` pins 28 passes and 14 executable skips by area.
+A skipped probe is still compiled: if its named rejection changes or it starts
+compiling, the suite fails and requires an explicit promotion/count update.
+For selected tests that Test262 would also synthesize in strict mode, a
+`path#strict` row records `strict-mode-variant:n.a.`: the dialect has one script
+mode and does not silently claim the second variant.
+
+## Harness shims
+
+The upstream `assert.js`, `sta.js`, `compareArray.js`, and `propertyHelper.js`
+are retained under `harness/` for provenance. They use `var`, constructors,
+prototype mutation, descriptors, and other out-of-dialect constructs. The
+runner therefore prepends the small implementations under `harness-shim/`:
+
+- `sta.js` supplies message-valued `Test262Error` and `$DONOTEVALUATE`.
+- `assert.js` supplies SameValue, not-SameValue, and array assertions.
+- `compareArray.js` compares dense arrays through the accepted loop surface.
+- `propertyHelper.js` is an explicit failing stub because descriptors are not
+  accepted; no passing selected test may use it.
+
+The dialect reserves dotted method-call syntax for its method allowlist. At
+ingestion the runner bridges only `assert.sameValue`, `assert.notSameValue`,
+and `assert.compareArray` to equivalent computed-property function calls and
+supplies an omitted diagnostic-message argument. Vendored source remains
+unchanged and the assertion semantics run inside the real VM.
+
+## Deliberate sync
+
+Clone Test262 separately, check out the pinned commit, and run inventory first:
+
+```sh
+node crates/lash-typescript/tests/test262/sync.mjs inventory /path/to/test262
+```
+
+Review `inventory.tsv`, classify every changed row in `census.tsv`, update the
+manifest/count pin, and only then regenerate the vendored data:
+
+```sh
+node crates/lash-typescript/tests/test262/sync.mjs sync /path/to/test262
+node crates/lash-typescript/tests/test262/sync.mjs check /path/to/test262
+```
+
+The script refuses a checkout whose commit differs from the pin. `check` is
+non-mutating and verifies inventory, skip register, count, selected test bytes,
+and upstream harness bytes.

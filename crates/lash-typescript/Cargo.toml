@@ -32,5 +32,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 futures = "0.3"
 lash-typescript = { path = ".", features = ["testing"] }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = "=0.9.34"
 swc_common = { workspace = true }
 swc_ecma_ast = { workspace = true }

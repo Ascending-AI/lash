@@ -265,13 +265,6 @@ pub(super) struct ActiveLashlangExecutionNode {
     pub(super) occurrence: u64,
 }
 
-fn validation_plan_cache_entry(schema: &Value) -> Option<(usize, Arc<Record>)> {
-    match schema {
-        Value::Record(record) => Some((Arc::as_ptr(record) as usize, record.clone())),
-        _ => None,
-    }
-}
-
 impl<'a, H: ExecutionHost> Vm<'a, H> {
     #[cfg(test)]
     pub(crate) fn suspend_after_instructions(&mut self, count: usize) {
