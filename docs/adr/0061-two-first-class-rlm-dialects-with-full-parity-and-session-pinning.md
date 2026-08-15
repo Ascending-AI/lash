@@ -92,7 +92,10 @@ per-turn option cannot re-point a session that has already recorded its choice.
 Subagent sessions inherit their parent's — a session tree is one dialect in v1,
 because a child that silently reverted to the default would make a parity row
 whose evidence contradicts its own label. `docs/rlm.html` documents the host-
-facing surface and is not restated here.
+facing surface and is not restated here. What the pinned dialect then *sounds*
+like — one turn prompted in one dialect, and the carve-outs where a durable
+identifier keeps its substrate spelling — is ADR 0063's subject, not restated
+here either.
 
 A host that wants the same conversation in the other dialect creates a new
 session. ADR 0047 already gives it the move: history is shared and branches are
