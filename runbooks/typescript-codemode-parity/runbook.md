@@ -42,9 +42,10 @@ and `01-promise.png`.
 ## Phase 2 — `for...of` agent loop
 
 Ask the model to fetch one array of three work items, iterate that returned
-array with `for...of`, and finish with an ordered summary. The loop body stays
-pure, as required by the documented v1 iterator guard. Require one tool
-outcome, all three ordered items, and no `TS_FOR_OF_ITERATOR_UNSUPPORTED`. Save
+array with `for...of`, and finish with an ordered summary. The loop body may
+call helpers; what the documented v1 iterator guard forbids is mutating,
+aliasing, or passing the iterable itself. Require one tool outcome, all three
+ordered items, and no `TS_FOR_OF_UNSUPPORTED`. Save
 `02-for-of-{dom,state,trace}.json` and `02-for-of.png`.
 
 ## Phase 3 — Durable process definition and signal

@@ -62,9 +62,22 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
 
 /// Executed form of the first-shot fluency corpus. These are the recurring
 /// shapes the original calculator-only dialect rejected: awaited tools,
-/// aggregate promises, ordinary iteration, common data shaping, and durable
-/// process primitives. Every row now links and runs on the shared VM; a
-/// lowering-only success is not acceptance evidence.
+/// aggregate promises, `for...of` over tool-returned data, `map` with a
+/// callback, ordinary iteration, and common data shaping. Every row links and
+/// runs on the shared VM; a lowering-only success is not acceptance evidence.
+///
+/// The process row is narrower than the others by construction, and the doc
+/// comment used to overstate it. `start` and `await` cross the effect boundary,
+/// so the host answers them and the process *body* runs in a separate durable
+/// execution that a cell-level host cannot drive. This row is therefore
+/// evidence that the primitives lower, link and round-trip through the
+/// boundary — not that `waitSignal`/`sleep`/`wake` execute. Those are executed
+/// under suspension in `dialect.rs::a_process_suspended_inside_for_of_resumes`
+/// and `agent_surface.rs`.
+///
+/// The corpus also carries one row that must be rejected. An empty hit list is
+/// only evidence if the list can fill, and every earlier version of this file
+/// reported an empty list without anything proving the mechanism worked.
 #[test]
 fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
     let programs = [
@@ -92,16 +105,49 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         r#"
         const worker = defineProcess({
           name: "worker", signals: { ready: null },
-          run: async (input: unknown) => {
+          run: async (request: unknown) => {
             const signal = await waitSignal("ready");
             await sleep(10);
             wake(signal);
-            return input;
+            return request;
           }
         });
-        finish(await start(worker, { input: Math.max(1, 2) }));
+        finish(await start(worker, { request: Math.max(1, 2) }));
+        "#,
+        // `for...of` over data a tool returned: the dialect's flagship v1 guard,
+        // and the shape Phase 2 of the parity runbook asks a model to write.
+        // The body calls a helper, which the guard permits — only mutating,
+        // aliasing or passing the iterable is refused.
+        r#"
+        function label(value: unknown): string { return "item:" + value; }
+        const pages = await Promise.all([
+          web.fetch({ url: "https://example.test/a" }),
+          web.fetch({ url: "https://example.test/b" })
+        ]);
+        let summary = "";
+        for (const page of pages) { summary = summary + label(page) + ";"; }
+        finish(summary);
+        "#,
+        // `map` with a callback, which FIG-1305 found advertised but unusable.
+        r#"
+        const rows = await Promise.all([
+          web.fetch({ url: "https://example.test/a" }),
+          web.fetch({ url: "https://example.test/b" })
+        ]);
+        const shouted = rows.map((row) => row.toUpperCase());
+        const indexed = rows.map((row, index) => index + ":" + row);
+        finish(shouted.join(",") + "|" + indexed.join(","));
         "#,
     ];
+
+    // The negative control. Destructuring is one of the shapes the prompt now
+    // names as rejected; if this ever links and runs, the hit list has stopped
+    // measuring anything.
+    let rejected_control = r#"
+        const source = { alpha: 1, beta: 2 };
+        const { alpha, beta } = source;
+        finish(alpha + beta);
+    "#;
 
     let environment = fluency_environment();
     let mut hits = Vec::new();
@@ -127,5 +173,30 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
     assert!(
         hits.is_empty(),
         "first-shot missing-method/rejection hit list: {hits:#?}"
+    );
+
+    let mut control_hits = Vec::new();
+    match lash_typescript::link(rejected_control, &environment) {
+        Ok(linked) => {
+            match futures::executor::block_on(lashlang::execute(
+                &lash_typescript::compile_linked(&linked),
+                &mut State::new(),
+                &FluencyHost,
+            )) {
+                Ok(ExecutionOutcome::Finished(_)) => {}
+                Ok(other) => control_hits.push(format!("control: unexpected {other:?}")),
+                Err(error) => control_hits.push(format!("control: {error}")),
+            }
+        }
+        Err(error) => control_hits.push(format!("control: {error}")),
+    }
+    assert_eq!(
+        control_hits.len(),
+        1,
+        "the control must produce exactly one hit, or the hit list is not measuring"
+    );
+    assert!(
+        control_hits[0].contains("TS_DESTRUCTURING_UNSUPPORTED"),
+        "the control must be rejected for the documented reason: {control_hits:?}"
     );
 }

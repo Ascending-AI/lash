@@ -95,17 +95,17 @@ declare function finish(value: unknown): never;
 declare function sleep(milliseconds: number): Promise<void>;
 declare function waitSignal(name: string): Promise<unknown>;
 declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
-declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: { input?: Input }): ProcessHandle<Output>;
+declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: Record<string, unknown>): ProcessHandle<Output>;
 declare function wake(progress: unknown): void;
 declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: unknown): void;
 declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
 ```
 
-Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
+Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. The keys of `start`'s second argument are the `run` function's own parameter names, not a fixed `input` field — `run: async (request: unknown)` is started as `start(p, { request: value })`, and any other key rejects; `registerTrigger`'s `inputs` keys work the same way. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
 
 ### v1 guardrails
 
-Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), and async functions other than `defineProcess.run` (`TS_ASYNC_UNSUPPORTED`) reject. Capturing a `let` in a function rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; capture an immutable value or mutate through a captured object. `for...of` snapshots arrays/strings, so mutating/aliasing its source or making a user-authored call in its body rejects as `TS_FOR_OF_ITERATOR_UNSUPPORTED`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. Static methods: `Object.keys/values/entries/fromEntries/hasOwn/is`, `Array.isArray/of`, `String.fromCodePoint`, `Number.isFinite/isInteger/isNaN/isSafeInteger/parseFloat/parseInt`, `JSON.parse/stringify`, and `Math.abs/acos/asin/cbrt/ceil/cos/exp/floor/log/log10/log2/round/sin/tan/trunc/max/min/pow/sqrt/sign`. Instance methods: `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, `valueOf`. `Date.now()` and `Math.random()` are journaled; `new Date()` rejects as `TS_NEW_UNSUPPORTED`."#;
+Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), and async functions other than `defineProcess.run` (`TS_ASYNC_UNSUPPORTED`) reject. Capturing a `let` in a function rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; capture an immutable value or mutate through a captured object. `for...of` snapshots arrays/strings, so a body that mutates, aliases, or passes the iterable itself rejects as `TS_FOR_OF_UNSUPPORTED`; calls that do not touch the iterable are fine. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. These common shapes also reject, so write them out longhand: destructuring (`TS_DESTRUCTURING_UNSUPPORTED`), spread in arrays or objects (`TS_SPREAD_UNSUPPORTED`), optional chaining (`TS_OPTIONAL_CHAINING_UNSUPPORTED`), `switch` (`TS_SWITCH_UNSUPPORTED`), and regex literals (`TS_REGEXP_UNSUPPORTED`). Static methods: `Object.keys/values/entries/fromEntries/hasOwn/is`, `Array.isArray/of`, `String.fromCodePoint`, `Number.isFinite/isInteger/isNaN/isSafeInteger/parseFloat/parseInt`, `JSON.parse/stringify`, and `Math.abs/acos/asin/cbrt/ceil/cos/exp/floor/log/log10/log2/round/sin/tan/trunc/max/min/pow/sqrt/sign`. Instance methods: `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, `valueOf`. `Date.now()` and `Math.random()` are journaled; `new Date()` rejects as `TS_NEW_UNSUPPORTED`."#;
         Ok(format!("{host_api}{tools}"))
     }
 
@@ -386,6 +386,66 @@ mod tests {
         );
         assert!(section.contains("TS_FOR_OF_UNSUPPORTED"), "{section}");
         insta::assert_snapshot!("typescript_execution_section", section);
+    }
+
+    /// The prompt's `start` declaration must teach the calling convention the
+    /// lowerer actually implements.
+    ///
+    /// `lower_start` passes the object's keys through verbatim as the process's
+    /// parameter names, so the second argument is a named-parameter record, not
+    /// an options bag with an `input` field. Declaring `{ input?: Input }` is
+    /// true only when the run parameter happens to be called `input`, and false
+    /// for the example this repo ships — a model that names its parameter for
+    /// its domain, which is the natural thing to do, gets a link error the
+    /// prompt gives it no way to read. This pins the rule to the behaviour
+    /// rather than to the sentence, so the sentence cannot drift back.
+    #[test]
+    fn the_prompt_teaches_the_real_process_argument_convention() {
+        let dialect = TypescriptDialect::new(
+            LashlangSurface::default(),
+            LashlangDialectServices {
+                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+        );
+        let prompt = dialect
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+            )
+            .expect("render execution section");
+        assert!(
+            !prompt.contains("args?: { input?: Input }"),
+            "the declaration promises an options bag the lowerer does not accept: {prompt}"
+        );
+        assert!(
+            prompt.contains("parameter name"),
+            "the prompt must state that the keys are the run function's parameter names: {prompt}"
+        );
+
+        // The behaviour the sentence describes, asserted directly.
+        let program = |key: &str| {
+            format!(
+                "const approval = defineProcess({{ name: \"approval\", signals: {{}},                  run: async (request: unknown) => {{ return request; }} }});                  const handle = start(approval, {{ {key}: 1 }}); finish(1);"
+            )
+        };
+        let host = lashlang::LashlangHostEnvironment::new(
+            lashlang::LashlangHostCatalog::default(),
+            lashlang::LashlangAbilities::all(),
+        );
+        lash_typescript::link(&program("request"), &host)
+            .expect("a key matching the run parameter links");
+        let error = lash_typescript::link(&program("input"), &host)
+            .expect_err("a key that is not a parameter name must reject");
+        assert!(
+            error
+                .to_string()
+                .contains("does not accept argument `input`"),
+            "the rejection names the offending key: {error}"
+        );
     }
 
     /// Every `TS_` token the prompt names must be a code the dialect can

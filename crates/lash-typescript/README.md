@@ -76,8 +76,9 @@ and call itself by that name, and self-recursive declarations are unaffected.
 The canonical classic `for` lowering rejects a `continue` that crosses a
 `finally`, because the current loop epilogue would otherwise run before the
 `finally`. `for...of` snapshots arrays and strings before iteration; until a
-resumable iterator protocol exists, loop bodies that mutate the source or make
-user-authored calls reject with `TS_FOR_OF_ITERATOR_UNSUPPORTED`.
+resumable iterator protocol exists, a loop body that mutates, aliases, or
+passes the iterable itself rejects with `TS_FOR_OF_UNSUPPORTED`. Calls that do
+not touch the iterable are unaffected.
 
 ## Deviation register
 
