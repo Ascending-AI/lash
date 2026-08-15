@@ -34,8 +34,8 @@
             lash::ModelSpec::builder("test-model")
                 .context_window_tokens(4096)
                 .build().expect("model spec");
-        let session_ids = WorkbenchSessionIds::fresh();
-        let session_id = session_ids.current();
+        let sessions = WorkbenchSessions::fresh();
+        let session_id = sessions.current();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
@@ -188,7 +188,7 @@
             trigger_store,
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids,
+            sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -238,7 +238,7 @@
 
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         let submitter = WorkbenchQueuedWorkSubmitter {
-            session_ids: state.session_ids.clone(),
+            sessions: state.sessions.clone(),
             store_factory: Arc::clone(&core_store_factory),
             restate_ingress_url,
             restate_http: reqwest::Client::new(),

@@ -42,15 +42,17 @@ async fn async_main() -> AnyhowResult<()> {
 
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
-    let rlm_dialect = match std::env::var("LASH_RUNBOOK_DIALECT")
-        .unwrap_or_else(|_| "lashlang".to_string())
-        .as_str()
-    {
-        "lashlang" => lash::rlm::RlmDialect::Lashlang,
-        "typescript" => lash::rlm::RlmDialect::Typescript,
-        other => anyhow::bail!(
-            "LASH_RUNBOOK_DIALECT must be a registered RLM language id (`lashlang` or `typescript`), got `{other}`"
-        ),
+    // The ambient default for the boot session and for any session the roster
+    // does not know; a per-session choice made in the UI overrides it.
+    let rlm_dialect = {
+        let configured = std::env::var("LASH_RUNBOOK_DIALECT")
+            .unwrap_or_else(|_| lash::rlm::RlmDialect::default().language_id().to_string());
+        lash::rlm::RlmDialect::from_language_id(&configured).ok_or_else(|| {
+            anyhow!(
+                "LASH_RUNBOOK_DIALECT must be a registered RLM language id ({}), got `{configured}`",
+                lash::rlm::RlmDialect::registered_language_ids()
+            )
+        })?
     };
     validate_provider_credentials(dev_provider_scenario, &api_key)?;
 
@@ -141,7 +143,12 @@ async fn async_main() -> AnyhowResult<()> {
     let artifact_store = Arc::clone(&stores.artifact_store);
     let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
     let mail_world = mail::MailWorld::new();
-    let session_ids = WorkbenchSessionIds::persistent(data_dir.join("session-id"))?;
+    let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))?;
+    // The boot session joins the roster on the ambient dialect, so the selector
+    // lists it and every later open asks for the same dialect it was created
+    // with. A roster row that already exists wins: it is what the session's
+    // durable pin was created from.
+    sessions.ensure(&sessions.current(), rlm_dialect);
     let event_tx =
         SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
     let restate_http = lash_http_transport::build_http_client();
@@ -185,7 +192,7 @@ async fn async_main() -> AnyhowResult<()> {
     let process_work_driver = process_deployment.process_work_driver();
     let queued_work_driver =
         lash::runtime::QueuedWorkDriver::new(Arc::new(WorkbenchQueuedWorkSubmitter {
-            session_ids: session_ids.clone(),
+            sessions: sessions.clone(),
             store_factory: Arc::clone(&core_store_factory),
             restate_ingress_url: restate_ingress_url.clone(),
             restate_http: restate_http.clone(),
@@ -268,7 +275,7 @@ async fn async_main() -> AnyhowResult<()> {
         trigger_store,
         process_observer,
         process_work_driver,
-        session_ids,
+        sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
         selected_model: Arc::new(Mutex::new(ModelSelection {
             model,
@@ -325,6 +332,8 @@ async fn async_main() -> AnyhowResult<()> {
         .route("/api/turn/cancel", post(cancel_turn))
         .route("/api/session", delete(reset_chat))
         .route("/api/reset", post(reset_chat))
+        .route("/api/sessions", get(list_sessions).post(create_session))
+        .route("/api/sessions/select", post(select_session))
         .route("/api/button-trigger", post(button_trigger))
         .route("/api/triggers", get(list_triggers))
         .route(

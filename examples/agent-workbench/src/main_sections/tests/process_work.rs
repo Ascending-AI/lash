@@ -77,7 +77,7 @@ mod process_work_tests {
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: driver.clone(),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -268,7 +268,7 @@ mod process_work_tests {
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -315,7 +315,7 @@ mod process_work_tests {
             .await
             .expect("delete session process edges");
         assert_eq!(deletion.removed_observer_count, 1);
-        let (_, current_session_id) = state.session_ids.rotate();
+        let (_, current_session_id) = state.sessions.rotate();
         assert_ne!(current_session_id, session_id);
 
         let Json(work) = list_work(State(state.clone()), Query(SessionQuery::default()))
@@ -935,7 +935,7 @@ mod process_work_tests {
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),

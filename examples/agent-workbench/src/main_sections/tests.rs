@@ -46,6 +46,7 @@ mod tests {
     include!("tests/recoverable_chat_bare_prose.rs");
     include!("tests/recoverable_chat_failures.rs");
     include!("tests/typescript_dialect.rs");
+    include!("tests/multi_session.rs");
     include!("tests/continue_as_projection.rs");
     include!("tests/tool_catalog.rs");
     include!("tests/deferred_tools.rs");
@@ -193,7 +194,7 @@ mod tests {
 
     #[test]
     fn reset_session_rotation_replaces_workbench_session_id() {
-        let ids = WorkbenchSessionIds::fresh();
+        let ids = WorkbenchSessions::fresh();
         let original = ids.current();
         let (old, new) = ids.rotate();
         assert_eq!(old, original);
@@ -208,9 +209,9 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let session_path = temp.path().join("session-id");
         let turns_path = temp.path().join("active-turns.json");
-        let session_ids =
-            WorkbenchSessionIds::persistent(session_path.clone()).expect("session ids");
-        let session_id = session_ids.current();
+        let sessions =
+            WorkbenchSessions::persistent(session_path.clone()).expect("session ids");
+        let session_id = sessions.current();
         let turns = ActiveTurns::persistent(turns_path.clone()).expect("active turns");
         turns.insert_with_prompt(
             &session_id,
@@ -218,9 +219,9 @@ mod tests {
             Some("actual restored prompt".into()),
             None,
         );
-        drop(session_ids);
+        drop(sessions);
         drop(turns);
-        let recovered_ids = WorkbenchSessionIds::persistent(session_path).expect("recover ids");
+        let recovered_ids = WorkbenchSessions::persistent(session_path).expect("recover ids");
         let recovered_turns = ActiveTurns::persistent(turns_path).expect("recover turns");
         assert_eq!(recovered_ids.current(), session_id);
         assert_eq!(
@@ -439,7 +440,7 @@ mod tests {
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -519,7 +520,7 @@ mod tests {
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -789,7 +790,7 @@ finish "gap source"
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -902,7 +903,7 @@ finish "gap source"
         mail_world.add_account("test").expect("add test");
         let provider = catalog_lifecycle_provider();
         let model = test_model();
-        let session_id = WorkbenchSessionIds::fresh().current();
+        let session_id = WorkbenchSessions::fresh().current();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
@@ -985,7 +986,7 @@ finish initial
             .build()
             .into_handle();
         let model = test_model();
-        let session_id = WorkbenchSessionIds::fresh().current();
+        let session_id = WorkbenchSessions::fresh().current();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
@@ -1048,7 +1049,7 @@ finish initial
             .build()
             .into_handle();
         let model = test_model();
-        let session_ids = WorkbenchSessionIds::fresh();
+        let sessions = WorkbenchSessions::fresh();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
@@ -1070,7 +1071,7 @@ finish initial
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids,
+            sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -1267,7 +1268,7 @@ finish initial
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -1431,7 +1432,7 @@ finish initial
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(vec![ChatMessage {
                 id: "message".to_string(),
                 role: "user".to_string(),
@@ -1794,14 +1795,14 @@ finish initial
         data_dir: &std::path::Path,
         restate_ingress_url: String,
         provider: ProviderHandle,
-        session_ids: WorkbenchSessionIds,
+        sessions: WorkbenchSessions,
         active_turns: ActiveTurns,
     ) -> LiveWorkbenchRestateHarness {
         live_workbench_restate_state_with_provider_and_database(
             data_dir,
             restate_ingress_url,
             provider,
-            session_ids,
+            sessions,
             active_turns,
             None,
             lash::durability::LeaseTimings::default(),
@@ -1813,7 +1814,7 @@ finish initial
         data_dir: &std::path::Path,
         restate_ingress_url: String,
         provider: ProviderHandle,
-        session_ids: WorkbenchSessionIds,
+        sessions: WorkbenchSessions,
         active_turns: ActiveTurns,
         database_url: Option<&str>,
         lease_timings: lash::durability::LeaseTimings,
@@ -1857,7 +1858,7 @@ finish initial
         );
         let queued_work_driver =
             lash::runtime::QueuedWorkDriver::new(Arc::new(WorkbenchQueuedWorkSubmitter {
-                session_ids: session_ids.clone(),
+                sessions: sessions.clone(),
                 store_factory: Arc::clone(&core_store_factory),
                 restate_ingress_url: restate_ingress_url.clone(),
                 restate_http: restate_http.clone(),
@@ -1910,7 +1911,7 @@ finish initial
             trigger_store,
             process_observer,
             process_work_driver: process_deployment.process_work_driver(),
-            session_ids,
+            sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "mock-model".to_string(),
@@ -2069,7 +2070,7 @@ finish initial
         let trigger_store_path = data_dir.join("triggers.db");
         let artifact_store_path = data_dir.join("artifacts.db");
         let process_env_store_path = data_dir.join("process-env.db");
-        let session_id = WorkbenchSessionIds::fresh().current();
+        let session_id = WorkbenchSessions::fresh().current();
 
         {
             let artifact_store = Arc::new(

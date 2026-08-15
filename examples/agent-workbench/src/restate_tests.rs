@@ -260,7 +260,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         .expect("retire queued-work session");
     let queued_work_driver =
         lash::runtime::QueuedWorkDriver::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {
-            session_ids: crate::WorkbenchSessionIds::fresh(),
+            sessions: crate::WorkbenchSessions::fresh(),
             store_factory,
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_http: reqwest::Client::new(),

@@ -60,6 +60,10 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 
 const SESSION_ID_PREFIX: &str = "workbench";
+/// The durable session roster, beside the current-selection `session-id` file.
+const SESSION_ROSTER_FILE_NAME: &str = "sessions.json";
+/// The longest session name the create form accepts.
+const MAX_SESSION_NAME_CHARS: usize = 80;
 const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 200_000;
 const AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV: &str = "AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS";
 const MIN_CONTEXT_WINDOW_TOKENS: usize = ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS * 2;
@@ -91,6 +95,7 @@ include!("main_sections/state.rs");
 include!("main_sections/attachment_media.rs");
 include!("main_sections/chat_projection.rs");
 include!("main_sections/routes.rs");
+include!("main_sections/session_routes.rs");
 include!("main_sections/turn_ingress.rs");
 include!("main_sections/admin.rs");
 include!("main_sections/app_state.rs");

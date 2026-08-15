@@ -13,7 +13,7 @@ struct AppState {
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     process_observer: lash::process::ProcessWorkObserver,
     process_work_driver: lash::process::ProcessWorkDriver,
-    session_ids: WorkbenchSessionIds,
+    sessions: WorkbenchSessions,
     messages: Arc<Mutex<Vec<ChatMessage>>>,
     selected_model: Arc<Mutex<ModelSelection>>,
     web_configured: bool,
@@ -38,6 +38,10 @@ struct Settings {
     web_configured: bool,
     model_variants: Vec<&'static str>,
     session_id: String,
+    /// The operator's name for this session, or its id when they gave none.
+    session_name: String,
+    /// The language id this session recorded, for the dialect badge.
+    rlm_dialect: &'static str,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -353,6 +357,47 @@ impl SessionQuery {
     fn is_explicit(&self) -> bool {
         self.session_id.is_some()
     }
+}
+
+/// The create-a-session request: a name the operator can read, and the dialect
+/// the session is pinned to for its durable lifetime.
+#[derive(Clone, Debug, Default, Deserialize)]
+struct SessionCreateRequest {
+    #[serde(default)]
+    name: Option<String>,
+    /// A registered RLM language id. Absent means the deployment's ambient
+    /// `LASH_RUNBOOK_DIALECT`; an unregistered id is refused, never defaulted.
+    #[serde(default)]
+    dialect: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SessionSelectRequest {
+    session_id: String,
+}
+
+/// One session as the selector renders it.
+#[derive(Clone, Debug, Serialize)]
+struct SessionSummary {
+    session_id: String,
+    name: String,
+    /// The dialect this session recorded, read back from the session itself.
+    dialect: &'static str,
+    created_at_ms: i64,
+    last_active_ms: i64,
+    current: bool,
+}
+
+/// The session list, with the menu a create form has to offer.
+#[derive(Clone, Debug, Serialize)]
+struct SessionListResponse {
+    sessions: Vec<SessionSummary>,
+    current_session_id: String,
+    /// Every registered RLM language id, from the substrate's own dialect
+    /// enumeration rather than a list this host writes down.
+    dialects: Vec<&'static str>,
+    /// The dialect a session gets when the create form offers no choice.
+    default_dialect: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -1164,7 +1209,7 @@ impl lash::process::ProcessEventSink for ChannelProcessEventSink {
 
 #[derive(Clone)]
 struct WorkbenchQueuedWorkSubmitter {
-    session_ids: WorkbenchSessionIds,
+    sessions: WorkbenchSessions,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     restate_ingress_url: String,
     restate_http: reqwest::Client,
@@ -1179,7 +1224,7 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
     ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
         let session_id = request
             .session_id
-            .unwrap_or_else(|| self.session_ids.current());
+            .unwrap_or_else(|| self.sessions.current());
         // A trigger process may finish while a foreground turn still owns this
         // session's ingress. Its wake stays in the durable queued-work store;
         // terminalization calls `claim_and_run_pending` again after releasing

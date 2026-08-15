@@ -137,7 +137,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         trigger_store,
         process_observer,
         process_work_driver: inert_process_work_driver(process_registry),
-        session_ids: WorkbenchSessionIds::fresh(),
+        sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
         selected_model: Arc::new(Mutex::new(ModelSelection {
             model: "test-model".to_string(),
