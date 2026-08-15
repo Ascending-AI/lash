@@ -338,3 +338,8 @@ findings	49	accept	"JSON.stringify([1,2].map((v, i) => [i, v]))"	"[[0,1],[1,2]]"
 findings	50	accept	"'5'.padStart(3, '0')"	"005"	-
 findings	51	accept	"'5'.padEnd(3, '*')"	"5**"	-
 findings	52	accept	"'abcd'.padStart(2, '0')"	"abcd"	-
+findings	53	accept	"'abc'.replaceAll('', '-')"	"-a-b-c-"	-
+findings	54	accept	"''.replaceAll('', '-')"	"-"	-
+findings	55	accept	"'abc'.replace('', '-')"	"-abc"	-
+findings	56	accept	"'café'.replaceAll('', '.')"	".c.a.f.é."	-
+findings	57	accept	"'ab'.replaceAll('', '[$`|$\\']')"	"[|ab]a[a|b]b[ab|]"	-
