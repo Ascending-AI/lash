@@ -26,6 +26,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 #[cfg(test)]
+mod composition_change_tests;
+#[cfg(test)]
 mod execution_evidence_tests;
 mod render;
 use render::interpret_typed;
@@ -1150,6 +1152,7 @@ mod tests {
                 prompt_chars: 42,
                 components: Vec::new(),
             },
+            composition_change_tests::sample(),
             TraceEvent::RollingHistoryCompactionNeeded {
                 context_budget_tokens: 30_000,
                 max_context_tokens: 40_000,

@@ -47,10 +47,10 @@ pub use lashlang_graph::{
 /// Bump rules (the normative reporting-schema policy lives in
 /// `docs/reporting.html`):
 ///
-/// - Adding a new [`TraceEvent`] variant, or adding an optional
-///   (`skip_serializing_if`) field to an existing payload, is **additive**:
-///   older readers skip the unknown variant or field, so this version does
-///   **not** change.
+/// - Adding a new [`TraceEvent`] variant is breaking for closed-enum readers
+///   and **does** bump this version. Adding an optional
+///   (`skip_serializing_if`) field is additive only for readers that ignore
+///   unknown fields.
 /// - Renaming a field, removing a field, or changing the meaning of an existing
 ///   field is a breaking change and **does** bump this version.
 /// - The free-form [`TraceEvent::Custom`] and [`TraceEvent::ProtocolStep`]
@@ -58,8 +58,8 @@ pub use lashlang_graph::{
 ///   inside them never forces a bump. (This is why the `exec_code_completed`
 ///   diagnostic's `tool_calls` payload was purely additive.)
 ///
-/// Version 4 renames `TraceAgentFrameSwitch.frame_id` to `frame_key`.
-pub const TRACE_SCHEMA_VERSION: u32 = 4;
+/// Version 5 adds the `composition_changed` event.
+pub const TRACE_SCHEMA_VERSION: u32 = 5;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -265,6 +265,17 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         components: Vec<TracePromptComponent>,
     },
+    /// Complete model-facing composition captured only when its fingerprint
+    /// changes for a resident session.
+    CompositionChanged {
+        /// SHA-256 of the rendered system prompt plus ordered fingerprints of
+        /// the model-facing tool contracts.
+        fingerprint: String,
+        rendered_system_prompt: String,
+        /// Full model-facing tool contracts in request order. This is kept
+        /// even when empty so the event is a self-contained snapshot.
+        tool_schemas: Vec<TraceToolSpec>,
+    },
     RollingHistoryCompactionNeeded {
         context_budget_tokens: usize,
         max_context_tokens: usize,
@@ -439,6 +450,7 @@ impl TraceEvent {
             Self::SessionStarted { .. } => "session_started",
             Self::TurnStarted { .. } => "turn_started",
             Self::PromptBuilt { .. } => "prompt_built",
+            Self::CompositionChanged { .. } => "composition_changed",
             Self::RollingHistoryCompactionNeeded { .. } => "rolling_history_compaction_needed",
             Self::RollingHistoryCompactionStarted { .. } => "rolling_history_compaction_started",
             Self::RollingHistoryCompactionCompleted { .. } => {

@@ -1352,6 +1352,43 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
 }
 
 #[tokio::test]
+async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
+    let expected_prompt = lash_core::PromptLayer::new().with_contribution(
+        lash_core::PromptContribution::guidance(
+            "Committed policy",
+            "Continue with the committed prompt configuration.",
+        ),
+    );
+    let mut persisted_policy =
+        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+    persisted_policy.provider_id = mock_provider().kind().to_string();
+    persisted_policy.model = mock_model_spec();
+    persisted_policy.prompt = expected_prompt.clone();
+    let persisted = RuntimeSessionState {
+        session_id: "committed-session".to_string(),
+        policy: persisted_policy,
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(SnapshotStore::with_state(persisted));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let reopened = core
+        .session("committed-session")
+        .store(store)
+        .open()
+        .await?;
+
+    assert_eq!(reopened.policy_snapshot().prompt, expected_prompt);
+    Ok(())
+}
+
+#[tokio::test]
 async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
@@ -1621,7 +1658,7 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
 }
 
 #[tokio::test]
-async fn refreshed_head_provider_id_mismatch_fails_before_turn() -> Result<()> {
+async fn refreshed_head_provider_id_does_not_override_live_provider_before_commit() -> Result<()> {
     let mut state = RuntimeSessionState {
         session_id: "refresh-provider-mismatch".to_string(),
         policy: lash_core::SessionPolicy {
@@ -1647,19 +1684,14 @@ async fn refreshed_head_provider_id_mismatch_fails_before_turn() -> Result<()> {
         .await?;
 
     store.set_head_provider_id("other-provider");
-    let err = match session.turn(TurnInput::text("must not run")).run().await {
-        Ok(_) => panic!("head-refresh provider mismatch should fail before turn"),
-        Err(err) => err,
-    };
-
-    assert!(matches!(
-        err,
-        EmbedError::Runtime(lash_core::RuntimeError {
-            code: lash_core::RuntimeErrorCode::LlmProvider,
-            message,
-            ..
-        }) if message.contains("other-provider")
-    ));
+    session
+        .turn(TurnInput::text("runs with the live provider"))
+        .run()
+        .await?;
+    assert_eq!(
+        session.policy_snapshot().recorded_provider_id(),
+        "embed-test"
+    );
     Ok(())
 }
 

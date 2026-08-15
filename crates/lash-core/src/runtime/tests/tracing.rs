@@ -1,9 +1,285 @@
 use super::*;
+use crate::facade_support::ToolStateFacadeOps;
 use ::tracing::Instrument;
 use lash_sansio::sync::MutexExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
+
+fn composition_change_entries(path: &std::path::Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(path)
+        .expect("read composition trace")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace record"))
+        .filter(|entry| {
+            entry.get("type").and_then(serde_json::Value::as_str) == Some("composition_changed")
+        })
+        .collect()
+}
+
+fn composition_tool_contract<'a>(
+    entry: &'a serde_json::Value,
+    name: &str,
+) -> &'a serde_json::Value {
+    entry["tool_schemas"]
+        .as_array()
+        .expect("ordered tool schemas")
+        .iter()
+        .find(|tool| tool["name"] == name)
+        .expect("named tool contract remains present")
+}
+
+fn completed_text_call(text: &str) -> MockCall {
+    MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: text.to_string(),
+                response_meta: None,
+            }],
+            ..LlmResponse::default()
+        }),
+    }
+}
+
+async fn run_composition_probe_turn(runtime: &mut LashRuntime, turn_id: &str) {
+    runtime
+        .run_turn_assembled(
+            TurnInput::text(turn_id),
+            CancellationToken::new(),
+            named_turn_scope("root", turn_id),
+        )
+        .await
+        .expect("composition probe turn");
+}
+
+#[tokio::test]
+async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise() {
+    let transport = mock_provider(vec![
+        completed_text_call("first"),
+        completed_text_call("unchanged"),
+        completed_text_call("route noise"),
+        completed_text_call("prompt changed"),
+    ]);
+    let trace_path = std::env::temp_dir().join(format!(
+        "lash-composition-trace-{}-{}.jsonl",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let mut runtime = standard_runtime_with_transport_and_host(
+        transport,
+        test_host_config_with_trace_path(trace_path.clone()),
+    )
+    .await;
+
+    let serializations_before = crate::trace::composition_schema_serialization_count();
+    run_composition_probe_turn(&mut runtime, "first-composition").await;
+    let serializations_after_first = crate::trace::composition_schema_serialization_count();
+    assert!(
+        serializations_after_first > serializations_before,
+        "the first composition fingerprints and materializes its tool contracts"
+    );
+    run_composition_probe_turn(&mut runtime, "same-composition").await;
+    assert_eq!(
+        crate::trace::composition_schema_serialization_count(),
+        serializations_after_first,
+        "an identical composition must not serialize schemas or allocate a fresh schema Vec"
+    );
+    runtime.set_model(
+        crate::ModelSpec::builder("different-route")
+            .context_window_tokens(150_000)
+            .build()
+            .expect("route-noise model"),
+    );
+    run_composition_probe_turn(&mut runtime, "route-capacity-noise").await;
+    runtime
+        .add_prompt_contribution(crate::PromptContribution::guidance(
+            "Changed policy",
+            "This text proves the rendered prompt changed.",
+        ))
+        .await
+        .expect("change session prompt layer");
+    run_composition_probe_turn(&mut runtime, "changed-prompt").await;
+
+    let entries = composition_change_entries(&trace_path);
+    assert_eq!(
+        entries.len(),
+        2,
+        "initial composition and one genuine prompt change emit exactly once: {entries:?}"
+    );
+    assert_ne!(entries[0]["fingerprint"], entries[1]["fingerprint"]);
+    assert!(
+        entries[1]["rendered_system_prompt"]
+            .as_str()
+            .is_some_and(|prompt| prompt.contains("This text proves the rendered prompt changed."))
+    );
+    assert_eq!(
+        entries[0]["tool_schemas"], entries[1]["tool_schemas"],
+        "a prompt-only change retains the complete ordered tool schemas"
+    );
+
+    let _ = std::fs::remove_file(trace_path);
+}
+
+#[tokio::test]
+async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas() {
+    let transport = mock_provider(vec![
+        completed_text_call("tool present"),
+        completed_text_call("tool absent"),
+        completed_text_call("still absent"),
+    ]);
+    let trace_path = std::env::temp_dir().join(format!(
+        "lash-tool-composition-trace-{}-{}.jsonl",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EchoTool),
+        transport,
+        test_host_config_with_trace_path(trace_path.clone()),
+    )
+    .await;
+
+    run_composition_probe_turn(&mut runtime, "tool-member").await;
+    let mut tool_state = runtime.tool_state().expect("live tool state");
+    tool_state
+        .set_membership(&crate::ToolId::from("tool:echo_tool"), false)
+        .expect("hide echo tool");
+    runtime
+        .apply_tool_state(tool_state)
+        .await
+        .expect("apply tool membership change");
+    run_composition_probe_turn(&mut runtime, "tool-removed").await;
+    run_composition_probe_turn(&mut runtime, "tool-still-removed").await;
+
+    let entries = composition_change_entries(&trace_path);
+    assert_eq!(
+        entries.len(),
+        2,
+        "initial membership and one genuine removal emit exactly once: {entries:?}"
+    );
+    let initial_tools = entries[0]["tool_schemas"]
+        .as_array()
+        .expect("initial ordered tool schemas");
+    let echo = initial_tools
+        .iter()
+        .find(|tool| tool["name"] == "echo_tool")
+        .expect("echo tool has a full schema snapshot");
+    assert_eq!(echo["input_schema"]["canonical"]["required"][0], "value");
+    assert!(echo["output_schema"]["canonical"].is_object());
+    let changed_tools = entries[1]["tool_schemas"]
+        .as_array()
+        .expect("changed ordered tool schemas");
+    assert_eq!(initial_tools.len(), changed_tools.len() + 1);
+    assert!(
+        changed_tools.iter().all(|tool| tool["name"] != "echo_tool"),
+        "the changed snapshot must carry the complete catalog without the removed member"
+    );
+    assert_ne!(entries[0]["fingerprint"], entries[1]["fingerprint"]);
+
+    let _ = std::fs::remove_file(trace_path);
+}
+
+struct SchemaChangingTool {
+    revision: Mutex<u64>,
+}
+
+impl SchemaChangingTool {
+    fn definition(&self) -> crate::ToolDefinition {
+        let field = if *self.revision.lock_recover() == 1 {
+            "first_value"
+        } else {
+            "second_value"
+        };
+        crate::ToolDefinition::raw(
+            "tool:schema_changing",
+            "schema_changing",
+            "A stable member whose contract can refresh",
+            serde_json::json!({
+                "type": "object",
+                "properties": { field: { "type": "string" } },
+                "required": [field],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "object", "additionalProperties": true }),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for SchemaChangingTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![self.definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "schema_changing").then(|| Arc::new(self.definition().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+        crate::ToolResult::ok(serde_json::Value::Null)
+    }
+}
+
+#[tokio::test]
+async fn composition_trace_fires_once_when_same_member_tool_schema_changes() {
+    let transport = mock_provider(vec![
+        completed_text_call("first schema"),
+        completed_text_call("second schema"),
+        completed_text_call("unchanged second schema"),
+    ]);
+    let trace_path = std::env::temp_dir().join(format!(
+        "lash-tool-schema-composition-trace-{}-{}.jsonl",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let tool = Arc::new(SchemaChangingTool {
+        revision: Mutex::new(1),
+    });
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        tool.clone() as Arc<dyn crate::ToolProvider>,
+        transport,
+        test_host_config_with_trace_path(trace_path.clone()),
+    )
+    .await;
+
+    run_composition_probe_turn(&mut runtime, "schema-one").await;
+    *tool.revision.lock_recover() = 2;
+    runtime
+        .refresh_session_tool_catalog()
+        .await
+        .expect("refresh changed tool schema");
+    run_composition_probe_turn(&mut runtime, "schema-two").await;
+    run_composition_probe_turn(&mut runtime, "schema-two-unchanged").await;
+
+    let entries = composition_change_entries(&trace_path);
+    assert_eq!(entries.len(), 2, "one schema change emits exactly once");
+    assert_eq!(
+        composition_tool_contract(&entries[0], "schema_changing")["input_schema"]["canonical"]["required"]
+            [0],
+        "first_value"
+    );
+    assert_eq!(
+        composition_tool_contract(&entries[1], "schema_changing")["input_schema"]["canonical"]["required"]
+            [0],
+        "second_value"
+    );
+    assert_ne!(entries[0]["fingerprint"], entries[1]["fingerprint"]);
+
+    let _ = std::fs::remove_file(trace_path);
+}
 
 #[derive(Clone, Debug, Default)]
 struct SpanCapture {

@@ -258,7 +258,7 @@ impl TraceSink for FanoutTraceSink {
         <div class="section" id="what-is-emitted">
           <div class="section-header">
             <h2>What Is Emitted</h2>
-            <p>Tagged enums on <code>TraceEvent</code>. <code>TraceEvent::kind()</code> is the single source of truth for each variant's <code>type</code> tag — consumers such as the trace viewer match on the enum and read the kind from there rather than re-deriving tag strings. New variants and optional fields are additive; renames and removals bump the schema. The full rule set lives in <a href="./reporting.html#schema-evolution">Reporting channels → Schema evolution</a>.</p>
+            <p>Tagged enums on <code>TraceEvent</code>. <code>TraceEvent::kind()</code> is the single source of truth for each variant's <code>type</code> tag — consumers such as the trace viewer match on the enum and read the kind from there rather than re-deriving tag strings. A new variant is breaking for closed-enum readers and bumps the schema; an optional field is additive only for readers that ignore unknown fields. The full rule set lives in <a href="./reporting.html#schema-evolution">Reporting channels → Schema evolution</a>.</p>
           </div>
           <div class="def-list-grid">
             <article class="panel">
@@ -267,7 +267,7 @@ impl TraceSink for FanoutTraceSink {
             </article>
             <article class="panel">
               <h3>Prompt</h3>
-              <p><code>PromptBuilt</code>: combined <code>prompt_hash</code>, <code>prompt_chars</code>, per-component fingerprints. The runtime caches rendered prompts by fingerprint; an unexpected hash change flags a drifting plugin contribution, tool list, or template entry.</p>
+              <p><code>PromptBuilt</code>: combined <code>prompt_hash</code>, <code>prompt_chars</code>, per-component fingerprints. <code>CompositionChanged</code>: one complete snapshot of the rendered system prompt and ordered model-facing tool schemas when that request composition differs from the last snapshot emitted by the resident session. Its SHA-256 key is built from cached rendered-prompt bytes and ordered cached tool-contract fingerprints, so prompt, membership, or same-member schema changes emit once while routing, model-capacity, and provider noise do not. An identical request performs no composition schema serialization and allocates no snapshot schema vector. A cold reopen is a new resident session, so its first request emits a fresh snapshot even when it matches the prior process's final composition. This is trace-only operational evidence, not a session observation shown to the model or user.</p>
             </article>
             <article class="panel">
               <h3>Rolling history</h3>
@@ -303,12 +303,12 @@ impl TraceSink for FanoutTraceSink {
         <div class="section" id="jsonl-schema">
           <div class="section-header">
             <h2>The JSONL Schema</h2>
-            <p>One line of UTF-8 JSON per record. <code>TRACE_SCHEMA_VERSION = 4</code>. Typed decoding requires that exact version and returns <code>TraceSchemaVersionError</code> for any other version before interpreting the event payload. When to bump it — and when an additive change (a new variant, an optional field, a reshaped <code>Custom</code> / <code>ProtocolStep</code> payload) does not — is the <a href="./reporting.html#schema-evolution">schema-evolution policy</a>.</p>
+            <p>One line of UTF-8 JSON per record. <code>TRACE_SCHEMA_VERSION = 5</code>. Version 5 adds <code>CompositionChanged</code>. Typed decoding requires that exact version and returns <code>TraceSchemaVersionError</code> for any other version before interpreting the event payload. The <a href="./reporting.html#schema-evolution">schema-evolution policy</a> distinguishes closed-enum variants from optional fields and opaque payloads.</p>
             <p>Restate-hosted turns can attach the same sink to <code>RestateRuntimeEffectController::with_trace_sink</code>. The viewer then shows journaled-effect start/settle, durable-wait park/resolve, durable timers, and segment boundaries alongside the ordinary session-manager turn, LLM, and tool records. The controller retains only a weak sink reference: an absent or dropped sink is a no-op. These records are live observations, may be emitted again during handler redrive, and never issue a Restate command or replace the durable journal.</p>
             <p>Completed or failed LLM and tool events may also carry an additive <code>attempts</code> ladder projected from the retry owner's existing records. The viewer shows the attempt count plus each attempt's outcome, duration, retry reason, and scheduled delay, so a throttling or transient-failure storm remains visible instead of collapsing into the final clean outcome.</p>
           </div>
           <pre data-lang="json"><code>{
-  "schema_version": 4,
+  "schema_version": 5,
   "id": "6621dfa7-2cd0-4296-ac20-15c0f2d3cec1",
   "timestamp": "2026-05-11T11:42:01.234+00:00",
   "context": {
@@ -375,7 +375,7 @@ let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
     .trace_level(TraceLevel::Extended)
     .build(crate::example_process_owner())?;</code></pre>
           <p><code>OtelTraceSink::flush</code> is deliberately a no-op: the sink only starts and ends spans on your tracer, while the buffering that risks span loss on exit lives in your <code>BatchSpanProcessor</code> / exporter. Flushing it is the host's duty — call <code>force_flush()</code> (or <code>shutdown()</code>) on your <code>TracerProvider</code> before the process exits. Lash never owns the provider, so it cannot do this for you; <code>LashCore::flush_trace_sink</code> flushes the sink only.</p>
-          <p>Span names are derived from the typed event. Turn, LLM, and tool lifecycles become nested spans (<code>lash.turn</code>, <code>lash.llm</code>, <code>lash.tool</code>); a tool produces one <code>lash.tool</code> span whether it was a standard native call or ran inside a code block, because both flow through the same emission seam. Runtime exec diagnostics collapse into a <code>lash.exec_code</code> family, with the precise phase (<code>exec_code_started</code> / <code>exec_code_completed</code> / <code>exec_code_failed</code>) on the <code>lash.protocol.diagnostic_phase</code> attribute; observation-projection diagnostics get <code>lash.observation_projection</code>, and other protocol steps stay <code>lash.protocol_step</code>. The channel map that ties these span names back to the other reporting surfaces is <a href="./reporting.html">Reporting channels</a>.</p>
+          <p>Span names are derived from the typed event. Turn, LLM, and tool lifecycles become nested spans (<code>lash.turn</code>, <code>lash.llm</code>, <code>lash.tool</code>); a tool produces one <code>lash.tool</code> span whether it was a standard native call or ran inside a code block, because both flow through the same emission seam. Composition snapshots become <code>lash.composition.changed</code> events with the fingerprint, prompt-character count, and tool count. Set <code>include_payload_json</code> only when the exporter should also receive the complete rendered prompt and ordered tool schemas. Runtime exec diagnostics collapse into a <code>lash.exec_code</code> family, with the precise phase (<code>exec_code_started</code> / <code>exec_code_completed</code> / <code>exec_code_failed</code>) on the <code>lash.protocol.diagnostic_phase</code> attribute; observation-projection diagnostics get <code>lash.observation_projection</code>, and other protocol steps stay <code>lash.protocol_step</code>. The channel map that ties these span names back to the other reporting surfaces is <a href="./reporting.html">Reporting channels</a>.</p>
         </div>
   </main>
 

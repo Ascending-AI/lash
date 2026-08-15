@@ -102,7 +102,7 @@ impl SessionBuilder {
         let state = self
             .load_or_default_state(&policy, store.as_deref())
             .await?;
-        Box::pin(self.open_resolved(policy, state, store)).await
+        Box::pin(self.open_resolved(state, store)).await
     }
 
     async fn reconcile_process_observer_intents(
@@ -137,8 +137,14 @@ impl SessionBuilder {
                 requested: self.session_id,
             });
         }
-        reconcile_loaded_state_policy(&mut state, &policy);
-        Box::pin(self.open_resolved(policy, state, store)).await
+        let supplied_prompt = state.policy.prompt.clone();
+        reconcile_loaded_state_policy(
+            &mut state,
+            &policy,
+            self.spec.prompt.is_some(),
+            Some(&supplied_prompt),
+        );
+        Box::pin(self.open_resolved(state, store)).await
     }
 
     fn session_policy(&self) -> SessionPolicy {
@@ -155,16 +161,25 @@ impl SessionBuilder {
         let state = match store {
             Some(store) => {
                 let loaded = self.load_persisted_state(store).await?;
-                let mut state = loaded.unwrap_or_else(|| {
-                    RuntimeSessionState::empty_for(self.session_id.clone(), policy.clone())
-                });
+                let Some(loaded) = loaded else {
+                    return Ok(RuntimeSessionState::empty_for(
+                        self.session_id.clone(),
+                        policy.clone(),
+                    ));
+                };
+                let mut state = loaded.state;
                 if state.session_id != self.session_id {
                     return Err(EmbedError::StoreSessionMismatch {
                         loaded: state.session_id,
                         requested: self.session_id.clone(),
                     });
                 }
-                reconcile_loaded_state_policy(&mut state, policy);
+                reconcile_loaded_state_policy(
+                    &mut state,
+                    policy,
+                    self.spec.prompt.is_some(),
+                    loaded.config.prompt.as_ref(),
+                );
                 state
             }
             None => RuntimeSessionState::empty_for(self.session_id.clone(), policy.clone()),
@@ -175,16 +190,16 @@ impl SessionBuilder {
     async fn load_persisted_state(
         &self,
         store: &dyn RuntimePersistence,
-    ) -> Result<Option<RuntimeSessionState>> {
+    ) -> Result<Option<lash_core::store::LoadedPersistedSession>> {
         load_persisted_state(store).await
     }
 
     async fn open_resolved(
         self,
-        policy: SessionPolicy,
         state: RuntimeSessionState,
         store: Option<Arc<dyn RuntimePersistence>>,
     ) -> Result<LashSession> {
+        let policy = state.effective_policy().clone();
         let storeless = store.is_none();
         let session_id = state.session_id.clone();
         let mut env = self.core.env.clone();
@@ -290,46 +305,55 @@ pub(crate) async fn load_state_from_store(
     policy: &SessionPolicy,
     store: &dyn RuntimePersistence,
 ) -> Result<RuntimeSessionState> {
-    let mut state = load_persisted_state(store)
-        .await?
-        .unwrap_or_else(|| RuntimeSessionState::empty_for(session_id, policy.clone()));
+    let loaded = load_persisted_state(store).await?.unwrap_or_else(|| {
+        lash_core::store::LoadedPersistedSession {
+            state: RuntimeSessionState::empty_for(session_id, policy.clone()),
+            config: lash_core::PersistedSessionConfig::new(policy.turn_budget),
+        }
+    });
+    let mut state = loaded.state;
     if state.session_id != session_id {
         return Err(EmbedError::StoreSessionMismatch {
             loaded: state.session_id,
             requested: session_id.to_string(),
         });
     }
-    reconcile_loaded_state_policy(&mut state, policy);
+    reconcile_loaded_state_policy(&mut state, policy, false, loaded.config.prompt.as_ref());
     Ok(state)
 }
 
-/// Stamp the host's freshly resolved policy over the loaded one.
+/// Reconcile the host's freshly resolved policy with presence-aware durable facts.
 ///
 /// ADR 0030's single resolution point: the host supplies the session's
 /// configuration when it constructs *or reopens* a session, and that value is
-/// reconciled before the runtime starts. So this is deliberately wholesale —
-/// model, prompt, turn budget and generation options all come from the host,
-/// and a mid-run
+/// reconciled before the runtime starts. Model, turn budget, and generation
+/// options come from the host, and a mid-run
 /// [`LashRuntime::update_session_config`](lash_core::facade_support::LashRuntime::update_session_config)
 /// change lasts until the host reopens with a spec that says otherwise, for
-/// every one of them alike. A session opened at a fork point is a reopen like
-/// any other; branching history does not branch configuration.
+/// every one of them alike.
 ///
-/// `provider_id` is the exception, and stays the recorded one: it names which
-/// provider produced the history rather than which provider the host is
-/// configured with now. It is also the only configuration a store keeps
-/// besides the model — `PersistedSessionConfig` is those
-/// two facts — so there is no third opinion here to reconcile against.
-fn reconcile_loaded_state_policy(state: &mut RuntimeSessionState, policy: &SessionPolicy) {
+/// The recorded `provider_id` always survives. A present host prompt wins;
+/// otherwise a present persisted prompt fills the gap. Legacy heads with no
+/// prompt field keep the host/core reconstruction, and explicit persisted
+/// empty layers remain authoritative when the host supplies no replacement.
+fn reconcile_loaded_state_policy(
+    state: &mut RuntimeSessionState,
+    policy: &SessionPolicy,
+    host_prompt_is_present: bool,
+    persisted_prompt: Option<&PromptLayer>,
+) {
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
     state.policy = policy.clone();
     state.policy.provider_id = recorded_provider_id;
+    if !host_prompt_is_present && let Some(persisted_prompt) = persisted_prompt {
+        state.policy.prompt = persisted_prompt.clone();
+    }
 }
 
 async fn load_persisted_state(
     store: &dyn RuntimePersistence,
-) -> Result<Option<RuntimeSessionState>> {
-    Ok(lash_core::store::load_persisted_session_state(store)
+) -> Result<Option<lash_core::store::LoadedPersistedSession>> {
+    Ok(lash_core::store::load_persisted_session(store)
         .await
         .map_err(|err| SessionError::Protocol(format!("failed to load store: {err}")))?)
 }
@@ -1243,17 +1267,21 @@ mod reconcile_tests {
             .expect("valid test model")
     }
 
-    /// The host's policy wins for every configured field alike, including
-    /// generation options: ADR 0030 resolves the whole session model at open,
-    /// so a reopen cannot pair the host's new model with the store's old
-    /// sampling. Only the recorded provider id survives from the store.
+    /// The host's policy wins for reopen-selected fields, including generation
+    /// options: ADR 0030 resolves the session model at open, so a reopen cannot
+    /// pair the host's new model with the store's old sampling. The recorded
+    /// provider id survives from the store. Prompt authority is presence-aware.
     #[test]
     fn host_policy_wins_over_loaded_state_including_generation() {
+        let persisted_prompt = lash_core::PromptLayer::new().with_contribution(
+            lash_core::PromptContribution::guidance("Persisted", "persisted prompt"),
+        );
         let mut state = RuntimeSessionState {
             session_id: "session".to_string(),
             policy: SessionPolicy {
                 provider_id: "recorded-provider".to_string(),
                 model: model("recorded-model"),
+                prompt: persisted_prompt.clone(),
                 generation: lash_core::GenerationOptions {
                     seed: Some(7),
                     ..Default::default()
@@ -1267,6 +1295,9 @@ mod reconcile_tests {
         let host = SessionPolicy {
             provider_id: "host-provider".to_string(),
             model: model("host-model"),
+            prompt: lash_core::PromptLayer::new().with_contribution(
+                lash_core::PromptContribution::guidance("Host", "host prompt"),
+            ),
             generation: lash_core::GenerationOptions {
                 seed: Some(11),
                 ..Default::default()
@@ -1274,10 +1305,11 @@ mod reconcile_tests {
             ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
 
-        reconcile_loaded_state_policy(&mut state, &host);
+        reconcile_loaded_state_policy(&mut state, &host, true, Some(&persisted_prompt));
 
         assert_eq!(state.policy.provider_id, "recorded-provider");
         assert_eq!(state.policy.model.id, "host-model");
         assert_eq!(state.policy.generation, host.generation);
+        assert_eq!(state.policy.prompt, host.prompt);
     }
 }

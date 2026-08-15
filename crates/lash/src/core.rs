@@ -1238,7 +1238,6 @@ impl LashCoreBuilder {
             .session_spec
             .turn_budget
             .ok_or(EmbedError::MissingTurnBudget)?;
-
         let base_policy = SessionPolicy {
             provider_id,
             model,

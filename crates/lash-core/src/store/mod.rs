@@ -34,7 +34,10 @@ pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 #[doc(hidden)]
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
-pub use load::{load_persisted_session_state, refresh_persisted_session_state};
+pub use load::{
+    LoadedPersistedSession, load_persisted_session, load_persisted_session_state,
+    refresh_persisted_session_state,
+};
 pub use queued_work::{QueuedWorkClass, SelectedQueuedWorkClaimOutcome};
 pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
@@ -64,6 +67,9 @@ fn default_root_session_id() -> String {
 pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 3;
 
 #[cfg(test)]
+mod prompt_persistence_compat_tests;
+
+#[cfg(test)]
 mod persisted_state_tests {
     use super::*;
 
@@ -79,6 +85,7 @@ mod persisted_state_tests {
                     provider_id: "stored-provider".to_string(),
                     model: crate::ModelSpec::default(),
                     turn_budget: crate::TurnBudget::Unbounded,
+                    prompt: Some(crate::PromptLayer::new()),
                 },
                 checkpoint_ref: None,
                 token_ledger: Vec::new(),
@@ -441,11 +448,7 @@ impl SessionHeadMeta {
 fn persisted_session_config_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::PersistedSessionConfig {
-    crate::PersistedSessionConfig {
-        provider_id: state.policy.recorded_provider_id().to_string(),
-        model: state.policy.model.clone(),
-        turn_budget: state.policy.turn_budget,
-    }
+    crate::PersistedSessionConfig::from(&state.policy)
 }
 
 #[derive(Clone, Debug)]
@@ -984,6 +987,9 @@ fn persisted_session_state_from_head(
     };
     state.policy.model = head.config.model.clone();
     state.policy.provider_id = head.config.provider_id.clone();
+    if let Some(prompt) = head.config.prompt.as_ref() {
+        state.policy.prompt = prompt.clone();
+    }
     crate::runtime::state::apply_session_checkpoint(&mut state, checkpoint)?;
     Ok(state)
 }

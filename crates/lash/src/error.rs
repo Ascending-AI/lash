@@ -337,6 +337,7 @@ mod tests {
                 max_nodes: 1,
             }),
             EmbedError::Store(StoreError::CommitByteBudgetExceeded {
+                session_config_bytes: 0,
                 graph_delta_bytes: 2,
                 checkpoint_bytes: 3,
                 attachment_manifest_bytes: 5,

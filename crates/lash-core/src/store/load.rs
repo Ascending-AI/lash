@@ -17,9 +17,18 @@ fn persisted_session_state_from_read(
     )
 }
 
-pub async fn load_persisted_session_state(
+/// Presence-aware durable session load used by the facade's reopen authority
+/// reconciliation.
+#[doc(hidden)]
+pub struct LoadedPersistedSession {
+    pub state: crate::RuntimeSessionState,
+    pub config: crate::PersistedSessionConfig,
+}
+
+#[doc(hidden)]
+pub async fn load_persisted_session(
     store: &(dyn RuntimePersistence + '_),
-) -> Result<Option<crate::RuntimeSessionState>, StoreError> {
+) -> Result<Option<LoadedPersistedSession>, StoreError> {
     let read = store.load_session().await?;
     let Some(read) = read else {
         return Ok(None);
@@ -32,7 +41,19 @@ pub async fn load_persisted_session_state(
             read.session_id
         ))
     })?;
-    Ok(Some(persisted_session_state_from_read(read)?))
+    let config = read.config.clone();
+    Ok(Some(LoadedPersistedSession {
+        state: persisted_session_state_from_read(read)?,
+        config,
+    }))
+}
+
+pub async fn load_persisted_session_state(
+    store: &(dyn RuntimePersistence + '_),
+) -> Result<Option<crate::RuntimeSessionState>, StoreError> {
+    Ok(load_persisted_session(store)
+        .await?
+        .map(|loaded| loaded.state))
 }
 
 pub async fn refresh_persisted_session_state(

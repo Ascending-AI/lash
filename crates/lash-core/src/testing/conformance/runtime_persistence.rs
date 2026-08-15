@@ -516,6 +516,7 @@ where
     .await;
     checkpoint_rejects_unknown_component_ref(make("checkpoint-unknown-ref")).await;
     session_read_loads_persisted_history(make("branchy")).await;
+    session_prompt_layer_round_trips_through_the_committed_head(make("session-prompt-layer")).await;
     session_metadata_round_trips(make("root")).await;
     attachment_manifest_records_intent_and_commit_stamps(make("root")).await;
     attachment_manifest_keeps_same_content_ownership_per_session(make("root")).await;
@@ -617,6 +618,43 @@ where
         .await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make("root")).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make("root")).await;
+}
+
+async fn session_prompt_layer_round_trips_through_the_committed_head(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let expected_prompt =
+        crate::PromptLayer::new().with_contribution(crate::PromptContribution::guidance(
+            "Session policy",
+            "Continue with the persisted session-specific instructions.",
+        ));
+    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    policy.prompt = expected_prompt.clone();
+    let state = RuntimeSessionState {
+        session_id: "session-prompt-layer".to_string(),
+        policy,
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "session-prompt-layer",
+    )
+    .await
+    .expect("commit session prompt layer");
+
+    let head = store
+        .load_session_head_meta()
+        .await
+        .expect("load session head")
+        .expect("committed session head");
+    assert_eq!(head.config.prompt, Some(expected_prompt.clone()));
+    let restored = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load persisted session state")
+        .expect("committed session state");
+    assert_eq!(restored.policy.prompt, expected_prompt);
 }
 
 async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(

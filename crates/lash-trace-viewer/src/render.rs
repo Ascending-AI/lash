@@ -193,6 +193,22 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
                 .join("\n");
             (format!("{prompt_chars} prompt chars"), summary, false)
         }
+        TraceEvent::CompositionChanged {
+            fingerprint,
+            rendered_system_prompt,
+            tool_schemas,
+        } => (
+            format!(
+                "{} prompt chars, {} tools",
+                rendered_system_prompt.chars().count(),
+                tool_schemas.len()
+            ),
+            format!(
+                "fingerprint {fingerprint}\n\nsystem prompt:\n{rendered_system_prompt}\n\nordered tool schemas:\n{}",
+                json_compact(tool_schemas)
+            ),
+            false,
+        ),
         TraceEvent::RollingHistoryCompactionNeeded {
             context_budget_tokens,
             max_context_tokens,

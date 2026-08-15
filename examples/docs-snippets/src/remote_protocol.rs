@@ -1330,8 +1330,14 @@ mod asserted_tool_examples {
             provider_id: String::new(),
             model: lash::ModelSpec::default(),
             turn_budget: core_budget,
+            prompt: Some(lash::prompt::PromptLayer::new()),
         };
         assert_eq!(persisted.turn_budget, core_budget);
+        let encoded = serde_json::to_value(&persisted).expect("serialize persisted config");
+        assert!(encoded.get("prompt").is_some());
+        let round_tripped: lash::persistence::PersistedSessionConfig =
+            serde_json::from_value(encoded).expect("deserialize persisted config");
+        assert_eq!(round_tripped.prompt, persisted.prompt);
 
         let cap_code = lash::runtime::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded;
         assert!(cap_code.is_retryable());

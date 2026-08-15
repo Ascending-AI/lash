@@ -26,8 +26,9 @@ impl CommitBudgetLimit {
 
 /// Host-owned limits on one atomic runtime commit.
 ///
-/// Bytes cover the graph delta, hydrated checkpoint, and attachment-manifest
-/// ids. Nodes cover the graph delta. Hosts must choose bounded or unbounded
+/// Bytes cover the persisted session configuration, graph delta, hydrated
+/// checkpoint, and attachment-manifest ids. Nodes cover the graph delta. Hosts
+/// must choose bounded or unbounded
 /// behavior for both dimensions; this type deliberately has no `Default`.
 /// A 1 MiB byte limit and 512-node limit are the documented recommended
 /// starting point; hosts should tune them for their backend latency envelope.
@@ -60,6 +61,7 @@ impl CommitBudget {
 }
 
 pub(crate) struct RuntimeCommitBudgetMeasurement {
+    pub(crate) session_config_bytes: usize,
     pub(crate) graph_delta_bytes: usize,
     pub(crate) checkpoint_bytes: usize,
     pub(crate) attachment_manifest_bytes: usize,
@@ -75,8 +77,8 @@ impl RuntimeCommit {
     #[doc(hidden)]
     pub const MAX_COMMIT_BUDGET_BYTES: usize = 1024 * 1024;
 
-    /// Bound the graph, hydrated checkpoint, and attachment-adoption payloads
-    /// before a backend transaction starts.
+    /// Bound the session configuration, graph, hydrated checkpoint, and
+    /// attachment-adoption payloads before a backend transaction starts.
     ///
     /// This is not a bound on the complete [`RuntimeCommit`]: queue batches,
     /// agent frames, usage deltas, and the durable turn result are currently
@@ -137,6 +139,7 @@ impl RuntimeCommit {
                 target: "lash.runtime_commit.budget",
                 session_id = %self.session_id,
                 dimension = "bytes",
+                session_config_bytes = measurement.session_config_bytes,
                 graph_delta_bytes = measurement.graph_delta_bytes,
                 checkpoint_bytes = measurement.checkpoint_bytes,
                 attachment_manifest_bytes = measurement.attachment_manifest_bytes,
@@ -146,6 +149,7 @@ impl RuntimeCommit {
                 "runtime commit budget decision"
             );
             return Err(StoreError::CommitByteBudgetExceeded {
+                session_config_bytes: measurement.session_config_bytes,
                 graph_delta_bytes: measurement.graph_delta_bytes,
                 checkpoint_bytes: measurement.checkpoint_bytes,
                 attachment_manifest_bytes: measurement.attachment_manifest_bytes,
@@ -157,6 +161,7 @@ impl RuntimeCommit {
             target: "lash.runtime_commit.budget",
             session_id = %self.session_id,
             dimension = "bytes",
+            session_config_bytes = measurement.session_config_bytes,
             graph_delta_bytes = measurement.graph_delta_bytes,
             checkpoint_bytes = measurement.checkpoint_bytes,
             attachment_manifest_bytes = measurement.attachment_manifest_bytes,
@@ -176,6 +181,7 @@ impl RuntimeCommit {
                 ))
             })
         };
+        let session_config_bytes = measure_json(serde_json::to_vec(&self.config))?;
         let graph_delta_bytes = self.graph.nodes.iter().try_fold(
             0usize,
             |total, node| -> Result<usize, StoreError> {
@@ -200,10 +206,12 @@ impl RuntimeCommit {
             .committed_attachment_ids
             .iter()
             .fold(0usize, |total, id| total.saturating_add(id.as_str().len()));
-        let total_bytes = graph_delta_bytes
+        let total_bytes = session_config_bytes
+            .saturating_add(graph_delta_bytes)
             .saturating_add(checkpoint_bytes)
             .saturating_add(attachment_manifest_bytes);
         Ok(RuntimeCommitBudgetMeasurement {
+            session_config_bytes,
             graph_delta_bytes,
             checkpoint_bytes,
             attachment_manifest_bytes,
@@ -298,6 +306,9 @@ mod tests {
         commit.committed_attachment_ids = vec![crate::AttachmentId::new("budget-attachment")];
 
         let expected_graph_bytes = serde_json::to_vec(&node).expect("encode graph node").len();
+        let expected_session_config_bytes = serde_json::to_vec(&commit.config)
+            .expect("encode session config")
+            .len();
         let expected_root_bytes = rmp_serde::to_vec_named(
             &commit
                 .checkpoint
@@ -312,19 +323,50 @@ mod tests {
         assert!(matches!(
             commit.validate_budget(),
             Err(StoreError::CommitByteBudgetExceeded {
+                session_config_bytes,
                 graph_delta_bytes,
                 checkpoint_bytes,
                 attachment_manifest_bytes,
                 total_bytes,
                 max_bytes,
-            }) if graph_delta_bytes == expected_graph_bytes
+            }) if session_config_bytes == expected_session_config_bytes
+                && graph_delta_bytes == expected_graph_bytes
                 && checkpoint_bytes == expected_checkpoint_bytes
                 && attachment_manifest_bytes == expected_attachment_bytes
                 && total_bytes
-                    == expected_graph_bytes
+                    == expected_session_config_bytes
+                        + expected_graph_bytes
                         + expected_checkpoint_bytes
                         + expected_attachment_bytes
                 && max_bytes == 128
+        ));
+    }
+
+    #[test]
+    fn large_head_prompt_is_included_in_commit_byte_budget() {
+        let prompt = crate::PromptLayer::new().with_contribution(
+            crate::PromptContribution::guidance("large", "x".repeat(4_096)),
+        );
+        let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+        policy.prompt = prompt;
+        let state = crate::RuntimeSessionState {
+            session_id: "budget-head-prompt".to_string(),
+            policy,
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.commit_budget = CommitBudget::bounded(512, 512);
+
+        assert!(matches!(
+            commit.validate_budget(),
+            Err(StoreError::CommitByteBudgetExceeded {
+                session_config_bytes,
+                graph_delta_bytes: 0,
+                max_bytes: 512,
+                ..
+            }) if session_config_bytes > 4_096
         ));
     }
 

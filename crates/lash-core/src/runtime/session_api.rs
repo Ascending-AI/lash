@@ -228,7 +228,16 @@ impl LashRuntime {
             checkpoint_ref: read.checkpoint_ref.clone(),
             token_ledger: read.token_ledger,
         };
+        // A resident refresh reconciles durable graph/checkpoint progress. It
+        // must not undo live-owned policy mutations in this process before
+        // they reach the next commit boundary. Preserve prompt, model, and
+        // provider id as one authority unit; the provider resolver is already
+        // live-owned and is not part of the durable head.
+        let live_policy = self.policy.clone();
         apply_session_head(&mut self.state, &head);
+        self.state.policy.prompt = live_policy.prompt;
+        self.state.policy.model = live_policy.model;
+        self.state.policy.provider_id = live_policy.provider_id;
         apply_session_checkpoint(&mut self.state, read.checkpoint).map_err(|source| {
             SessionError::Store {
                 context: "failed to restore session checkpoint".to_string(),

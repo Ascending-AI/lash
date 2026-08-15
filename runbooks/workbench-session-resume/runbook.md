@@ -30,6 +30,10 @@ committed row counts, request history, and cross-surface agreement—not on pros
    provider-request evidence.
 5. **No local-cache credit.** The pass is invalid unless the workbench PID changes while
    the rendered session id and `<data-dir>/session-id` remain unchanged.
+6. **Composition re-emits after cold reconstruction.** Save the final pre-restart
+   `composition_changed` snapshot. The first post-restart model request must emit another
+   `composition_changed`; its exact `rendered_system_prompt` and ordered `tool_schemas`
+   must match the saved snapshot when the host changed neither input.
 
 ## Working material
 
@@ -92,6 +96,8 @@ Save `/api/state` as `01-before-restart-state.json`. Extract the active-path mes
 records from `graph_nodes` and save them as `01-before-restart-store.json`; require the
 two exact user markers and the exact assistant texts returned by `/api/state`, in the
 same order. Screenshot the fully scrolled transcript as `01-committed-transcript.png`.
+Save the final pre-restart `composition_changed` record as
+`01-final-composition.json`.
 
 ## Phase 2 — Replace the web process and reconstruct the transcript
 
@@ -121,6 +127,11 @@ serialized request messages to contain:
 - the exact two pre-restart assistant texts from `01-before-restart-state.json`;
 - the third user marker.
 
+Extract the first post-restart `composition_changed` record to
+`03-composition-reopen.json`. Require exact equality of its
+`rendered_system_prompt` and ordered `tool_schemas` with
+`01-final-composition.json`; compare those fields directly, not only the fingerprint.
+
 Finally require the store's active path and `/api/state.messages` to contain all six
 committed rows in identical order. Save them as `03-continuity-state.json` and
 `03-continuity-store.json`; screenshot the fully scrolled transcript as
@@ -137,6 +148,7 @@ container are gone.
 | Pre-restart commits | four ordered rows agree in UI, API, and store | | `01-committed-transcript.png`, `01-before-restart-*.json` |
 | Cold reconstruction | PID changed; session id and all four rows survived | | `02-reconstructed-transcript.png`, `02-resumed-*.json` |
 | Provider continuity | post-restart provider request contains five required history/input markers | | `03-provider-request.json` |
+| Composition continuity | cold reopen re-emits and exact prompt plus ordered schemas match | | `01-final-composition.json`, `03-composition-reopen.json` |
 | Continued commit | six ordered rows agree in UI, API, and store | | `03-continuity-transcript.png`, `03-continuity-*.json` |
 | No local-cache credit | replacement PID plus unchanged durable identity recorded | | command log, state artifacts |
 
