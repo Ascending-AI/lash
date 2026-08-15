@@ -50,6 +50,7 @@ description = "incident 2 PostgreSQL schema surface"
 [[surface.guard]]
 kind = "file"
 paths = ["schema.sql"]
+must_cover = ["lash_session_execution_leases"]
 """
 
 TRACE_CONFIG = """
@@ -203,6 +204,52 @@ class VersionBumpFixtureTest(unittest.TestCase):
         surfaces = MODULE.load_config(fixture.root / "surface.toml")
         return MODULE.check_surfaces(fixture.root, base, head, surfaces)
 
+    def check_cli(
+        self, fixture: FixtureRepository, base: str, head: str
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--repo",
+                str(fixture.root),
+                "--config",
+                str(fixture.root / "surface.toml"),
+                "--base",
+                base,
+                "--head",
+                head,
+            ],
+            cwd=fixture.root,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_cli_exit_contract(self) -> None:
+        cases = (
+            (
+                "surface error",
+                2,
+                LIB_V1,
+                WIRE_BASE.replace(
+                    "#[derive(Serialize, Deserialize)]", "#[derive(Clone, Debug)]"
+                ),
+            ),
+            ("bump violation", 1, LIB_V1, WIRE_CHANGED),
+            ("clean", 0, LIB_V2, WIRE_CHANGED),
+        )
+        for name, expected_exit, head_version, head_wire in cases:
+            with self.subTest(name=name):
+                fixture = self.fixture()
+                fixture.write(LIB_V1, WIRE_BASE)
+                base = fixture.commit("base")
+                fixture.write(head_version, head_wire)
+                head = fixture.commit(name)
+
+                result = self.check_cli(fixture, base, head)
+
+                self.assertEqual(result.returncode, expected_exit, result.stderr)
+
     def test_wire_variant_without_bump_fails(self) -> None:
         fixture = self.fixture()
         fixture.write(LIB_V1, WIRE_BASE)
@@ -332,6 +379,25 @@ class VersionBumpFixtureTest(unittest.TestCase):
         self.assertEqual(result.failures, ())
         self.assertEqual(len(result.errors), 1)
         self.assertIn("WireMessage", result.errors[0].detail)
+
+    def test_missing_file_must_cover_marker_at_head_is_an_error(self) -> None:
+        fixture = FixtureRepository(POSTGRES_CONFIG)
+        self.addCleanup(fixture.close)
+        fixture.write_file("src/lib.rs", "const SCHEMA_VERSION: i32 = 50;\n")
+        fixture.write_file("schema.sql", POSTGRES_SCHEMA_BASE)
+        base = fixture.commit("base with required file marker")
+        fixture.write_file(
+            "schema.sql", POSTGRES_SCHEMA_BASE.replace(
+                "lash_session_execution_leases", "unrelated_table"
+            )
+        )
+        head = fixture.commit("remove required file marker")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.failures, ())
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("lash_session_execution_leases", result.errors[0].detail)
 
     def test_missing_guarded_symbol_at_base_requires_bump_without_error(self) -> None:
         config = """
