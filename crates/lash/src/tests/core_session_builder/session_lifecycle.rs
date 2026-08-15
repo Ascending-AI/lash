@@ -1,7 +1,9 @@
 use lash_sansio::sync::MutexExt;
 use super::*;
 #[cfg(feature = "rlm")]
-use crate::rlm::{RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _};
+use crate::rlm::{
+    RlmDialect, RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _,
+};
 #[cfg(feature = "rlm")]
 use lash_lashlang_runtime::LashlangArtifactStore as _;
 
@@ -874,6 +876,107 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
     assert!(prompts[0].contains("process definition"));
     assert!(prompts[0].contains("triggers.list({})"));
     assert!(!prompts[0].contains("TRIGGER."));
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn typescript_dialect_is_selected_on_the_production_session_path_and_survives_resume()
+-> Result<()> {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("rlm-typescript-production-path")
+        .complete({
+            let seen = Arc::clone(&seen);
+            let calls = Arc::clone(&calls);
+            move |request| {
+                let seen = Arc::clone(&seen);
+                let calls = Arc::clone(&calls);
+                async move {
+                    seen.lock_recover().push(system_text(&request));
+                    let value = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 42;
+                    Ok(text_response(&format!(
+                        "<typescript>\nfinish({value});\n</typescript>"
+                    )))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let session = core
+        .session("rlm-typescript-production")
+        .rlm_dialect(RlmDialect::Typescript)?
+        .open()
+        .await?;
+    let first = session
+        .turn(TurnInput::text("compute"))
+        .require_finish()?
+        .run()
+        .await?;
+    assert!(matches!(
+        first.result.outcome,
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
+            value: serde_json::Value::Number(ref number),
+            ..
+        }) if number.as_u64() == Some(42)
+    ));
+
+    let parked = session.park().await?;
+    let resumed = Box::pin(core.resume(parked)).await?;
+    let second = resumed
+        .turn(TurnInput::text("compute again"))
+        .require_finish()?
+        .run()
+        .await?;
+    assert!(matches!(
+        second.result.outcome,
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
+            value: serde_json::Value::Number(ref number),
+            ..
+        }) if number.as_u64() == Some(43)
+    ));
+
+    let prompts = seen.lock_recover();
+    assert_eq!(prompts.len(), 2);
+    assert!(prompts.iter().all(|prompt| prompt.contains("## TypeScript execution")));
+    assert!(prompts.iter().all(|prompt| prompt.contains("<typescript>")));
+    assert!(prompts.iter().all(|prompt| !prompt.contains("<lashlang>")));
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn unknown_rlm_dialect_fails_during_session_creation() -> Result<()> {
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let mut options = lash_core::PluginOptions::default();
+    options.plugins.insert(
+        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+        serde_json::json!({ "dialect": "python" }),
+    );
+
+    let error = match core
+        .session("rlm-unknown-dialect")
+        .plugin_options(options)
+        .open()
+        .await
+    {
+        Ok(_) => panic!("an unregistered dialect must fail at session creation"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("invalid RLM create options"));
+    assert!(error.to_string().contains("python"));
     Ok(())
 }
 

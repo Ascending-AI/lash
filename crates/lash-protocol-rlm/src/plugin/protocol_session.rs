@@ -6,7 +6,7 @@ use lash_core::plugin::{
     ProtocolSessionContext, ProtocolSessionMaterialization, ProtocolSessionPlugin,
 };
 use lash_core::{CheckpointKind, PluginOptions, ProtocolTurnOptions, SessionError};
-use lash_rlm_types::{RlmCreateExtras, RlmFinalAnswerFormat};
+use lash_rlm_types::{RlmCreateExtras, RlmDialect, RlmFinalAnswerFormat};
 
 use super::budget_warning::BUDGET_WARNING_STATUS;
 use super::runtime_state::RlmRuntimeState;
@@ -137,6 +137,7 @@ pub(crate) fn resolve_rlm_session_options(
     plugin_options: &PluginOptions,
     is_root_session: bool,
 ) -> Result<ProtocolTurnOptions, SessionError> {
+    let dialect = resolve_rlm_session_dialect(existing, plugin_options)?;
     let explicit = plugin_options
         .decode::<RlmCreateExtras>(RLM_PROTOCOL_PLUGIN_ID)
         .map_err(|err| SessionError::Protocol(format!("invalid RLM create options: {err}")))?;
@@ -162,9 +163,47 @@ pub(crate) fn resolve_rlm_session_options(
     } else {
         RlmFinalAnswerFormat::RawFinalValue
     };
+    extras.dialect = Some(dialect);
     extras.final_answer_format = Some(explicit_format.unwrap_or(default_format));
 
     Ok(ProtocolTurnOptions::typed(extras)?)
+}
+
+/// Resolve the one language a session is allowed to use. A recorded choice is
+/// authoritative on rebuild; create-time options may select a language only
+/// while no durable protocol options exist yet.
+pub(super) fn resolve_rlm_session_dialect(
+    existing: &ProtocolTurnOptions,
+    plugin_options: &PluginOptions,
+) -> Result<RlmDialect, SessionError> {
+    let durable = if existing.is_empty() {
+        None
+    } else {
+        Some(
+            existing
+                .decode::<RlmCreateExtras>()
+                .map_err(|err| SessionError::Protocol(err.to_string()))?
+                .dialect
+                .unwrap_or_default(),
+        )
+    };
+    let requested = plugin_options
+        .decode::<RlmCreateExtras>(RLM_PROTOCOL_PLUGIN_ID)
+        .map_err(|err| SessionError::Protocol(format!("invalid RLM create options: {err}")))?
+        .and_then(|extras| extras.dialect);
+
+    match (durable, requested) {
+        (Some(recorded), Some(requested)) if recorded != requested => {
+            Err(SessionError::Protocol(format!(
+                "RLM dialect is durably pinned to `{}` and cannot be reopened as `{}`",
+                recorded.language_id(),
+                requested.language_id()
+            )))
+        }
+        (Some(recorded), _) => Ok(recorded),
+        (None, Some(requested)) => Ok(requested),
+        (None, None) => Ok(RlmDialect::default()),
+    }
 }
 
 #[cfg(test)]
@@ -230,6 +269,7 @@ mod tests {
     #[test]
     fn resolve_rlm_session_options_preserves_existing_termination() {
         let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
+            dialect: None,
             termination: lash_rlm_types::RlmTermination::Natural,
             final_answer_format: None,
         })
@@ -238,6 +278,7 @@ mod tests {
         let options = resolve_rlm_session_options(&existing, &PluginOptions::default(), true)
             .expect("resolve options");
         let extras: RlmCreateExtras = options.decode().expect("decode options");
+        assert_eq!(extras.dialect, Some(RlmDialect::Lashlang));
         assert_eq!(extras.termination, lash_rlm_types::RlmTermination::Natural);
         assert_eq!(
             extras.final_answer_format,
@@ -254,6 +295,7 @@ mod tests {
         )
         .expect("resolve options");
         let extras: RlmCreateExtras = options.decode().expect("decode options");
+        assert_eq!(extras.dialect, Some(RlmDialect::Lashlang));
         assert_eq!(
             extras.final_answer_format,
             Some(RlmFinalAnswerFormat::RawFinalValue)
@@ -265,6 +307,7 @@ mod tests {
         let plugin_options = PluginOptions::typed(
             RLM_PROTOCOL_PLUGIN_ID,
             RlmCreateExtras {
+                dialect: None,
                 termination: lash_rlm_types::RlmTermination::FinishRequired { schema: None },
                 final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
             },
@@ -296,6 +339,34 @@ mod tests {
             resolve_rlm_session_options(&ProtocolTurnOptions::empty(), &plugin_options, false)
                 .expect_err("malformed extras should error");
         assert!(err.to_string().contains("invalid RLM create options"));
+    }
+
+    #[test]
+    fn create_time_typescript_choice_is_recorded_and_cannot_change_on_reopen() {
+        let requested = PluginOptions::typed(
+            RLM_PROTOCOL_PLUGIN_ID,
+            RlmCreateExtras {
+                dialect: Some(RlmDialect::Typescript),
+                ..RlmCreateExtras::default()
+            },
+        )
+        .expect("typescript options");
+        let recorded = resolve_rlm_session_options(&ProtocolTurnOptions::empty(), &requested, true)
+            .expect("record TypeScript");
+        let extras: RlmCreateExtras = recorded.decode().expect("decode recorded options");
+        assert_eq!(extras.dialect, Some(RlmDialect::Typescript));
+
+        let mismatch = PluginOptions::typed(
+            RLM_PROTOCOL_PLUGIN_ID,
+            RlmCreateExtras {
+                dialect: Some(RlmDialect::Lashlang),
+                ..RlmCreateExtras::default()
+            },
+        )
+        .expect("lashlang options");
+        let error = resolve_rlm_session_options(&recorded, &mismatch, true)
+            .expect_err("a durable dialect cannot change on reopen");
+        assert!(error.to_string().contains("durably pinned to `typescript`"));
     }
 
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {

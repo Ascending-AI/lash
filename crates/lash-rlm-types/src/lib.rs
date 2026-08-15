@@ -161,14 +161,42 @@ pub enum RlmFinalAnswerFormat {
     RawFinalValue,
 }
 
+/// Source language pinned to an RLM session for its entire durable lifetime.
+///
+/// The serialized names are the language ids registered by the first-party RLM
+/// dialect registry. Keeping this an enum makes an unknown language a typed
+/// create-contract error instead of a late execution failure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RlmDialect {
+    /// The default RLM language when a host omits the field.
+    #[default]
+    Lashlang,
+    /// The ECMA-exact TypeScript dialect.
+    Typescript,
+}
+
+impl RlmDialect {
+    /// Return the registered code-execution language id for this dialect.
+    pub const fn language_id(self) -> &'static str {
+        match self {
+            Self::Lashlang => "lashlang",
+            Self::Typescript => "typescript",
+        }
+    }
+}
+
 /// RLM protocol session config. Natural turns finish with prose-only model
-/// responses or explicit `finish <value>` from lashlang. Programmatic turns can
-/// require an explicit finish value, optionally validated against a schema.
+/// responses or the active dialect's explicit `finish` operation. Programmatic
+/// turns can require an explicit finish value, optionally validated against a schema.
 /// `final_answer_format` is a session presentation preference; schema-required
 /// turns ignore it.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmCreateExtras {
+    /// Session-wide language choice. Absence is the ratified Lashlang default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialect: Option<RlmDialect>,
     #[serde(default)]
     pub termination: RlmTermination,
     #[serde(default, skip_serializing_if = "Option::is_none")]

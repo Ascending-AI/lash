@@ -324,13 +324,22 @@ impl PluginFactory for RlmProtocolPluginFactory {
             execution_trace_config: self.lashlang_execution_trace_config.clone(),
             execution_bounds: config.execution_bounds(),
         };
-        let dialect: Arc<dyn RlmDialect> = Arc::new(LashlangDialect::new(
+        let lashlang: Arc<dyn RlmDialect> = Arc::new(LashlangDialect::new(
             lashlang_surface.clone(),
             services.clone(),
         ));
         let typescript: Arc<dyn RlmDialect> =
             Arc::new(TypescriptDialect::new(lashlang_surface, services));
-        let dialect_registry = RlmDialectRegistry::new([Arc::clone(&dialect), typescript]);
+        let dialect_registry =
+            RlmDialectRegistry::new([Arc::clone(&lashlang), Arc::clone(&typescript)]);
+        let selected = super::protocol_session::resolve_rlm_session_dialect(
+            &ctx.protocol_turn_options,
+            &ctx.plugin_options,
+        )
+        .map_err(|error| PluginError::Session(error.to_string()))?;
+        let dialect = dialect_registry
+            .resolve(selected.language_id())
+            .map_err(|error| PluginError::Session(error.to_string()))?;
         Ok(Arc::new(RlmProtocolPlugin {
             config,
             dialect,

@@ -39,11 +39,26 @@ impl RlmTurnBuilderExt for TurnBuilder {
 /// same key.
 #[cfg(feature = "rlm")]
 pub trait RlmSessionBuilderExt: Sized {
+    /// Pin the RLM source dialect for the durable lifetime of this session.
+    fn rlm_dialect(self, dialect: lash_rlm_types::RlmDialect) -> Result<Self>;
+
     fn final_answer_format(self, format: lash_rlm_types::RlmFinalAnswerFormat) -> Result<Self>;
 }
 
 #[cfg(feature = "rlm")]
 impl RlmSessionBuilderExt for SessionBuilder {
+    fn rlm_dialect(mut self, dialect: lash_rlm_types::RlmDialect) -> Result<Self> {
+        let mut extras = self
+            .plugin_options
+            .decode::<lash_rlm_types::RlmCreateExtras>(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        extras.dialect = Some(dialect);
+        self = self.plugin_option(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID, extras)?;
+        Ok(self)
+    }
+
     fn final_answer_format(mut self, format: lash_rlm_types::RlmFinalAnswerFormat) -> Result<Self> {
         let mut extras = self
             .plugin_options
@@ -75,7 +90,7 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{
     ProjectionRegistry, RlmProjectedBindings, RlmTurnInputExt, rlm_session_projection_extension,
 };
-pub use lash_rlm_types::RlmFinalAnswerFormat;
+pub use lash_rlm_types::{RlmDialect, RlmFinalAnswerFormat};
 
 /// The Lashlang compile APIs are operations over an
 /// [`RlmProtocolPluginFactory`] and a plugin host; they live in
@@ -92,6 +107,7 @@ fn rlm_termination(
     termination: lash_rlm_types::RlmTermination,
 ) -> Result<TurnBuilder> {
     let override_options = ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+        dialect: None,
         termination,
         final_answer_format: None,
     })?;

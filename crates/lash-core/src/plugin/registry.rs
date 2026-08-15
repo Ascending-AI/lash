@@ -404,6 +404,8 @@ pub struct PluginSessionContext {
     pub tool_access: SessionToolAccess,
     pub subagent: Option<SubagentSessionContext>,
     pub plugin_options: PluginOptions,
+    /// Protocol-owned options loaded from durable session state, when any.
+    pub protocol_turn_options: crate::ProtocolTurnOptions,
     pub extensions: PluginExtensions,
     /// Session id of the caller that created this one. `None` identifies
     /// a root session; any subagent / compaction / forked-child session

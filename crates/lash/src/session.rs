@@ -222,11 +222,12 @@ impl SessionBuilder {
         let drivers = self.core.work_driver.drivers().await;
         env.process_work_driver = drivers.process.clone();
         env.queued_work_driver = drivers.queued.clone();
-        let mut runtime = LashRuntime::from_environment(
+        let mut runtime = LashRuntime::from_environment_with_plugin_options(
             &env,
             policy,
             state,
             store,
+            self.plugin_options.clone(),
             self.core.session_execution_owner.clone(),
         )
         .await?;

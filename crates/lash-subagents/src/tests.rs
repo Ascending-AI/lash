@@ -1011,6 +1011,7 @@ async fn subagents_plugin_builds_without_mode_context() {
         subagent: None,
         extensions: Default::default(),
         plugin_options: Default::default(),
+        protocol_turn_options: Default::default(),
         parent_session_id: None,
     };
     let plugin = factory.build(&ctx).expect("plugin");
@@ -1041,6 +1042,7 @@ async fn rlm_provider_does_not_require_process_support() {
         subagent: None,
         extensions: Default::default(),
         plugin_options: Default::default(),
+        protocol_turn_options: Default::default(),
         parent_session_id: None,
     };
 

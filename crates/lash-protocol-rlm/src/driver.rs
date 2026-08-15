@@ -1453,6 +1453,7 @@ mod tests {
     #[test]
     fn final_answer_format_guidance_renders_markdown_for_unstructured_turns() {
         let guidance = final_answer_format_prompt(&RlmCreateExtras {
+            dialect: None,
             termination: RlmTermination::FinishRequired { schema: None },
             final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
         })
@@ -1465,6 +1466,7 @@ mod tests {
     #[test]
     fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
         let custom = final_answer_format_prompt(&RlmCreateExtras {
+            dialect: None,
             termination: RlmTermination::Natural,
             final_answer_format: Some(RlmFinalAnswerFormat::Custom {
                 guidance: "  Finish concise release-note Markdown.  ".to_string(),
@@ -1475,6 +1477,7 @@ mod tests {
 
         assert!(
             final_answer_format_prompt(&RlmCreateExtras {
+                dialect: None,
                 termination: RlmTermination::FinishRequired { schema: None },
                 final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
             })
@@ -1485,6 +1488,7 @@ mod tests {
     #[test]
     fn required_output_schema_suppresses_final_answer_format_guidance() {
         let guidance = final_answer_format_prompt(&RlmCreateExtras {
+            dialect: None,
             termination: RlmTermination::FinishRequired {
                 schema: Some(serde_json::json!({ "type": "object" })),
             },

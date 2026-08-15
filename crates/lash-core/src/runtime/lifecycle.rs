@@ -501,11 +501,33 @@ impl LashRuntime {
         store: Option<Arc<dyn crate::store::RuntimePersistence>>,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
+        Self::from_environment_with_plugin_options(
+            env,
+            policy,
+            state,
+            store,
+            crate::PluginOptions::default(),
+            runtime_lease_owner,
+        )
+        .await
+    }
+
+    /// Build from an environment while applying create-time plugin options to
+    /// the session-scoped plugin factories.
+    pub async fn from_environment_with_plugin_options(
+        env: &RuntimeEnvironment,
+        policy: SessionPolicy,
+        state: RuntimeSessionState,
+        store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+        plugin_options: crate::PluginOptions,
+        runtime_lease_owner: crate::LeaseOwnerIdentity,
+    ) -> Result<Self, SessionError> {
         Self::from_environment_for_executor(
             env,
             policy,
             state,
             store,
+            plugin_options,
             runtime_lease_owner,
             uuid::Uuid::new_v4().to_string(),
         )
@@ -517,6 +539,7 @@ impl LashRuntime {
         policy: SessionPolicy,
         state: RuntimeSessionState,
         store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+        plugin_options: crate::PluginOptions,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
     ) -> Result<Self, SessionError> {
@@ -526,7 +549,16 @@ impl LashRuntime {
             )
         })?;
         let plugin_session = plugin_host
-            .build_session(state.session_id.as_str(), state.plugin_snapshot())
+            .build_session_with_parent(
+                state.session_id.as_str(),
+                None,
+                state.plugin_snapshot(),
+                crate::plugin::SessionAuthorityContext {
+                    plugin_options,
+                    protocol_turn_options: state.protocol_turn_options.clone(),
+                    ..crate::plugin::SessionAuthorityContext::default()
+                },
+            )
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
         let mut embedded = EmbeddedRuntimeHost::new(env.core.clone());
         if let Some(factory) = env.session_store_factory.as_ref() {
@@ -644,6 +676,7 @@ impl LashRuntime {
             parked.policy,
             state,
             Some(parked.store),
+            crate::PluginOptions::default(),
             runtime_lease_owner,
             parked.runtime_lease_executor_id,
         )

@@ -69,6 +69,7 @@ impl SubagentSpawnContext<'_> {
         let plugin_options = PluginOptions::typed(
             lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
             lash_rlm_types::RlmCreateExtras {
+                dialect: None,
                 termination,
                 final_answer_format: Some(self.final_answer_format.clone()),
             },
