@@ -10,6 +10,7 @@ jobs:
   live-model-swap:
     name: OpenRouter two-agent nonce swap
     runs-on: ubuntu-24.04
+    environment: main
     timeout-minutes: 30
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
