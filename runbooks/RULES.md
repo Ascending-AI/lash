@@ -46,7 +46,17 @@ Set `LASH_RUNBOOK_DIALECT` to the row's language id and make the host pass that 
 the RLM session-creation contract. Absence is allowed only for a Lashlang row and must be
 recorded as the default substitution. A TypeScript row that receives a Lashlang prompt,
 cell tag, execution event, or restored engine id is a contract violation and triggers the
-normal Abort/RCA rule.
+normal Abort/RCA rule. This includes a subagent's prompt: a session tree is one dialect in
+v1, and children inherit the parent's, so a TypeScript row whose child session reads a
+Lashlang prompt is the same violation. Letting a host pick a different dialect per child
+is future work.
+
+The data directory must be fresh per row, not merely per scenario. A session's dialect is
+durably pinned at its first commit, so reopening one under a different `LASH_RUNBOOK_DIALECT`
+is refused — a store carried over from the other row's dialect fails every route that opens
+a session, and carrying one over in the other direction keeps serving the recorded dialect
+while the environment claims otherwise. Neither is a battery result; both are a dirty
+harness.
 
 Runbook prose predating the parity matrix may say “Lashlang cell/program/source.” Read
 that as “the active dialect's cell/program/source” unless it names a stable product API,
