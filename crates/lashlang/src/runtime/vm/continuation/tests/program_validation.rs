@@ -53,6 +53,17 @@ fn callback_program() -> CompiledProgram {
                 }),
                 else_block: Box::new(Expr::Undefined),
             },
+            Expr::If {
+                condition: Box::new(Expr::Bool(false)),
+                then_block: Box::new(private_builtin(
+                    "__typescript_async_map",
+                    vec![
+                        Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
+                        Expr::Variable("callback".into()),
+                    ],
+                )),
+                else_block: Box::new(Expr::Undefined),
+            },
             private_builtin(
                 "__typescript_stdlib",
                 vec![
@@ -72,6 +83,35 @@ fn callback_program() -> CompiledProgram {
         crate::CompilationDialect::Typescript,
     )
     .expect("compile callback driver program")
+}
+
+fn dynamic_call_program() -> CompiledProgram {
+    let callback = Expr::Function(Box::new(FunctionExpr {
+        name: None,
+        params: vec!["value".into()],
+        captures: Vec::new(),
+        body: Box::new(Expr::Block(vec![
+            Expr::Print(Box::new(Expr::Variable("value".into()))),
+            Expr::Return(Box::new(Expr::Variable("value".into()))),
+        ])),
+    }));
+    crate::runtime::entry_points::compile_ast_with_dialect(
+        &Program::block(vec![
+            Expr::Assign {
+                target: AssignTarget::variable("callback".into()),
+                expr: Box::new(callback),
+            },
+            Expr::Finish(Box::new(private_builtin(
+                "__typescript_call_dynamic",
+                vec![
+                    Expr::Variable("callback".into()),
+                    Expr::List(vec![Expr::Number(1.0)]),
+                ],
+            ))),
+        ]),
+        crate::CompilationDialect::Typescript,
+    )
+    .expect("compile dynamic call program")
 }
 
 fn suspend_inside_first_callback(program: &CompiledProgram) -> VmContinuation {
@@ -259,6 +299,40 @@ fn callback_continuations_validate_cursor_effect_policy_and_return_site_mode() {
     Vm::resume_from(map.clone(), &program, &CallbackHost)
         .expect("authentic Map callback continuation resumes");
 
+    let async_map_return_ip = program
+        .chunk
+        .code
+        .iter()
+        .position(|instruction| matches!(instruction, Instruction::AsyncMap))
+        .expect("program contains an AsyncMap return site")
+        + 1;
+    let mut async_map = foreach.clone();
+    async_map.frame_stack[0].return_instruction_pointer = async_map_return_ip;
+    let VmFrameReturnContinuation::Callback {
+        completion,
+        allow_effects,
+        ..
+    } = &mut async_map.frame_stack[0].return_target
+    else {
+        panic!("async map must use callback return target")
+    };
+    *completion = VmCallbackCompletion::Collect;
+    *allow_effects = true;
+    Vm::resume_from(async_map.clone(), &program, &CallbackHost)
+        .expect("authentic AsyncMap callback continuation resumes");
+
+    let mut async_map_sync_policy = async_map;
+    let VmFrameReturnContinuation::Callback { allow_effects, .. } =
+        &mut async_map_sync_policy.frame_stack[0].return_target
+    else {
+        panic!("async map must use callback return target")
+    };
+    *allow_effects = false;
+    assert!(matches!(
+        Vm::resume_from(async_map_sync_policy, &program, &CallbackHost),
+        Err(ContinuationError::InvalidReturnSite { .. })
+    ));
+
     let mut map_effects = map.clone();
     let VmFrameReturnContinuation::Callback { allow_effects, .. } =
         &mut map_effects.frame_stack[0].return_target
@@ -318,6 +392,34 @@ fn callback_continuations_validate_cursor_effect_policy_and_return_site_mode() {
     *completion = VmCallbackCompletion::Collect;
     assert!(matches!(
         Vm::resume_from(foreach_mode, &program, &CallbackHost),
+        Err(ContinuationError::InvalidReturnSite { .. })
+    ));
+}
+
+#[test]
+fn dynamic_call_continuation_accepts_only_a_dynamic_or_static_direct_return_site() {
+    let program = dynamic_call_program();
+    let mut state = State::new();
+    let mut vm = Vm::from_state(&program, &mut state, &CallbackHost).expect("start dynamic call");
+    assert_eq!(
+        futures_executor::block_on(vm.run_process_until_effect()).expect("park in dynamic callee"),
+        VmRunOutcome::EffectCompleted
+    );
+    let continuation = vm.suspend().expect("suspend dynamic callee");
+    Vm::resume_from(continuation.clone(), &program, &CallbackHost)
+        .expect("authentic dynamic call frame resumes");
+
+    let forged_return_ip = program
+        .chunk
+        .code
+        .iter()
+        .position(|instruction| matches!(instruction, Instruction::MakeClosure { .. }))
+        .expect("program creates a closure")
+        + 1;
+    let mut forged = continuation;
+    forged.frame_stack[0].return_instruction_pointer = forged_return_ip;
+    assert!(matches!(
+        Vm::resume_from(forged, &program, &CallbackHost),
         Err(ContinuationError::InvalidReturnSite { .. })
     ));
 }

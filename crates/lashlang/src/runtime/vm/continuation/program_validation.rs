@@ -56,8 +56,15 @@ pub(super) fn validate_program_continuation(
         let return_site_matches = matches!(
             (call_instruction, &frame.return_target),
             (
-                Some(Instruction::Call { .. }),
+                Some(Instruction::Call { .. } | Instruction::CallDynamic),
                 VmFrameReturnContinuation::Direct
+            ) | (
+                Some(Instruction::AsyncMap),
+                VmFrameReturnContinuation::Callback {
+                    completion: VmCallbackCompletion::Collect,
+                    allow_effects: true,
+                    ..
+                },
             ) | (
                 Some(Instruction::Map),
                 VmFrameReturnContinuation::Callback {

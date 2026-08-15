@@ -82,11 +82,27 @@ pub(crate) struct CompiledFunction {
     pub(crate) entry_ip: usize,
     pub(crate) end_ip: usize,
     pub(crate) parameter_count: usize,
+    pub(crate) parameter_model: ClosureParameterModel,
     pub(crate) capture_count: usize,
     pub(crate) self_slot: Option<usize>,
     pub(crate) parameter_slots: Box<[usize]>,
     pub(crate) capture_slots: Box<[usize]>,
     pub(crate) slot_names: Box<[Name]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClosureParameterModel {
+    /// Lashlang closures retain the language's declared-count-is-exact rule.
+    Exact,
+    /// TypeScript closures follow ECMA call entry: absent fixed arguments are
+    /// `undefined`, surplus arguments are ignored, and an optional final rest
+    /// slot receives a fresh list. `required_count` is emitted by the lowerer
+    /// for the declaration's pre-default prefix (and therefore Function.length
+    /// semantics); it does not make missing arguments a call-time error.
+    TypeScript {
+        required_count: usize,
+        accepts_rest: bool,
+    },
 }
 
 #[derive(Clone)]
@@ -309,7 +325,9 @@ pub(crate) enum Instruction {
     Call {
         argc: usize,
     },
+    CallDynamic,
     Map,
+    AsyncMap,
     Return,
     PushHandler {
         handler: usize,
@@ -390,6 +408,9 @@ pub(crate) enum IntrinsicOp {
     JavaScriptJoin,
     JavaScriptStdlib(usize),
     JavaScriptHeapNew(usize),
+    JavaScriptHeapInstanceOf,
+    JavaScriptGlobalDelete,
+    JavaScriptGlobalHas,
     Trim,
     Slice,
     ToString,
@@ -494,8 +515,8 @@ impl Instruction {
             Instruction::CancelHandle => InstructionProfileTag::CancelHandle,
             Instruction::Intrinsic(_) => InstructionProfileTag::Intrinsic,
             Instruction::MakeClosure { .. } => InstructionProfileTag::MakeClosure,
-            Instruction::Call { .. } => InstructionProfileTag::Call,
-            Instruction::Map => InstructionProfileTag::Callback,
+            Instruction::Call { .. } | Instruction::CallDynamic => InstructionProfileTag::Call,
+            Instruction::Map | Instruction::AsyncMap => InstructionProfileTag::Callback,
             Instruction::Return => InstructionProfileTag::Return,
             Instruction::PushHandler { .. }
             | Instruction::PopHandler
@@ -551,7 +572,9 @@ impl IntrinsicOp {
             | IntrinsicOp::Unique
             | IntrinsicOp::Reverse
             | IntrinsicOp::ValidateCompiled(_)
-            | IntrinsicOp::PushAssign(_) => 1,
+            | IntrinsicOp::PushAssign(_)
+            | IntrinsicOp::JavaScriptGlobalDelete
+            | IntrinsicOp::JavaScriptGlobalHas => 1,
             IntrinsicOp::Contains
             | IntrinsicOp::GrepText
             | IntrinsicOp::StartsWith
@@ -560,6 +583,7 @@ impl IntrinsicOp {
             | IntrinsicOp::Join
             | IntrinsicOp::JavaScriptSplit
             | IntrinsicOp::JavaScriptJoin
+            | IntrinsicOp::JavaScriptHeapInstanceOf
             | IntrinsicOp::Validate
             | IntrinsicOp::CeilDiv
             | IntrinsicOp::FloorDiv
@@ -596,6 +620,9 @@ impl IntrinsicOp {
             IntrinsicOp::JavaScriptJoin => BuiltinProfileTag::Join,
             IntrinsicOp::JavaScriptStdlib(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::JavaScriptHeapNew(_) => BuiltinProfileTag::TypeScriptStdlib,
+            IntrinsicOp::JavaScriptHeapInstanceOf
+            | IntrinsicOp::JavaScriptGlobalDelete
+            | IntrinsicOp::JavaScriptGlobalHas => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,

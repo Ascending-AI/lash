@@ -1,0 +1,377 @@
+use std::collections::BTreeSet;
+
+use super::super::{ErrorKind, canonical_regexp_flags, javascript_to_string};
+use super::javascript::{ecma_record_entries, js_stdlib_error};
+use super::javascript_json::javascript_json_stringify;
+use super::*;
+
+impl<H: ExecutionHost> Vm<'_, H> {
+    fn require_typescript_intrinsic(&self, operation: &str) -> Result<(), RuntimeError> {
+        if self.reference_semantics {
+            Ok(())
+        } else {
+            Err(RuntimeError::ValidationFailed {
+                reason: format!(
+                    "TYPESCRIPT_REFERENCE_SEMANTICS_REQUIRED: {operation} is unavailable in Lashlang"
+                ),
+            })
+        }
+    }
+
+    pub(super) fn execute_dynamic_call(&mut self) -> Result<(), RuntimeError> {
+        self.require_typescript_intrinsic("dynamic calls")?;
+        let arguments = self.pop_stack()?;
+        let function = self.pop_stack()?;
+        let arguments = match arguments {
+            Value::Ref(id) => match self.heap.get(id)? {
+                HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                object => {
+                    return Err(RuntimeError::ShapingListRequired {
+                        builtin: "dynamic call".into(),
+                        actual: object.kind_name().to_string(),
+                    });
+                }
+            },
+            Value::List(values) | Value::Tuple(values) => values.to_vec(),
+            value => {
+                return Err(RuntimeError::ShapingListRequired {
+                    builtin: "dynamic call".into(),
+                    actual: super::super::value_type_name(&value).to_string(),
+                });
+            }
+        };
+        self.begin_direct_function_call(function, arguments)
+    }
+
+    pub(super) fn execute_async_map(&mut self) -> Result<(), RuntimeError> {
+        self.require_typescript_intrinsic("async map")?;
+        let function = self.pop_stack()?;
+        let receiver = self.pop_stack()?;
+        let items = match &receiver {
+            Value::Ref(id) => match self.heap.get(*id)? {
+                HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                object => {
+                    return Err(RuntimeError::ShapingListRequired {
+                        builtin: "async map".into(),
+                        actual: object.kind_name().to_string(),
+                    });
+                }
+            },
+            Value::List(values) | Value::Tuple(values) => values.to_vec(),
+            value => {
+                return Err(RuntimeError::ShapingListRequired {
+                    builtin: "async map".into(),
+                    actual: super::super::value_type_name(value).to_string(),
+                });
+            }
+        };
+        // Deliberately schedule one callback body to completion before starting
+        // the next. Every effect boundary remains resumable and journaled; WP-A
+        // consumes the settled results in input order. This deterministic v1
+        // policy differs from JavaScript's interleaving of async callbacks.
+        let calls = items
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| vec![value, Value::Number(index as f64), receiver.clone()])
+            .collect();
+        self.begin_callback_driver(function, calls, true, true)
+    }
+
+    pub(super) fn execute_javascript_heap_new(&mut self, argc: usize) -> Result<(), RuntimeError> {
+        self.require_typescript_intrinsic("JavaScript heap constructors")?;
+        let mut values = Vec::with_capacity(argc);
+        for _ in 0..argc {
+            values.push(self.pop_stack()?);
+        }
+        values.reverse();
+        let Some((Value::String(kind), args)) = values.split_first() else {
+            return Err(js_stdlib_error("missing heap constructor discriminator"));
+        };
+        if let Some(error_kind) = ErrorKind::from_name(kind) {
+            let (errors, message_index) = if error_kind == ErrorKind::AggregateError {
+                let Some(errors) = args.first() else {
+                    return Err(js_stdlib_error(
+                        "AggregateError requires an errors iterable",
+                    ));
+                };
+                let errors = self
+                    .heap
+                    .allocate_list(heap_sequence(&self.heap, errors)?)?;
+                (Some(errors), 1)
+            } else {
+                (None, 0)
+            };
+            let message = match args.get(message_index) {
+                None | Some(Value::Undefined) => String::new(),
+                Some(value) => {
+                    let primitive = self.heap.javascript_to_primitive_string_or_number(value)?;
+                    javascript_to_string(&primitive)
+                }
+            };
+            let cause = args
+                .get(message_index + 1)
+                .and_then(|options| javascript_error_cause(&self.heap, options));
+            let value = self
+                .heap
+                .allocate_error(error_kind, message, cause, errors)?;
+            self.stack.push(value);
+            return Ok(());
+        }
+        let value = match (kind.as_str(), args) {
+            ("RegExp", [pattern, flags]) => {
+                let pattern = scalar_javascript_string(pattern)?;
+                let flags = canonical_regexp_flags(&scalar_javascript_string(flags)?)
+                    .map_err(js_stdlib_error)?;
+                self.heap.allocate_regexp(pattern, flags)?
+            }
+            ("Map", []) | ("Map", [Value::Undefined]) => self.heap.allocate_map(Vec::new())?,
+            ("Map", [entries]) => {
+                let mut map_entries = Vec::new();
+                for entry in heap_sequence(&self.heap, entries)? {
+                    let pair = heap_sequence(&self.heap, &entry)?;
+                    if pair.len() < 2 {
+                        return Err(js_stdlib_error(
+                            "Map constructor entry has fewer than two values",
+                        ));
+                    }
+                    map_entries.push((pair[0].clone(), pair[1].clone()));
+                }
+                self.heap.allocate_map(map_entries)?
+            }
+            ("Set", []) | ("Set", [Value::Undefined]) => self.heap.allocate_set(Vec::new())?,
+            ("Set", [values]) => self.heap.allocate_set(heap_sequence(&self.heap, values)?)?,
+            ("Date", [milliseconds]) => {
+                let milliseconds = self.heap.javascript_to_number(milliseconds)?;
+                self.heap.allocate_date(milliseconds)?
+            }
+            _ => {
+                return Err(js_stdlib_error(format!(
+                    "TS_CONSTRUCTOR_UNSUPPORTED: {kind} with {} argument(s)",
+                    args.len()
+                )));
+            }
+        };
+        self.stack.push(value);
+        Ok(())
+    }
+
+    pub(super) fn execute_javascript_instanceof(&mut self) -> Result<(), RuntimeError> {
+        self.require_typescript_intrinsic("JavaScript instanceof")?;
+        let constructor = self.pop_stack()?;
+        let value = self.pop_stack()?;
+        let Value::String(constructor) = constructor else {
+            return Err(js_stdlib_error(
+                "instanceof constructor discriminator must be a string",
+            ));
+        };
+        self.stack.push(Value::Bool(
+            self.heap.javascript_instanceof(&value, &constructor)?,
+        ));
+        Ok(())
+    }
+
+    pub(super) fn execute_javascript_global_delete(&mut self) -> Result<(), RuntimeError> {
+        self.require_typescript_intrinsic("global deletion")?;
+        let name = self.pop_stack()?;
+        let Value::String(name) = name else {
+            return Err(js_stdlib_error("global deletion name must be a string"));
+        };
+        reject_reserved_global_name(&name)?;
+        let slot = self
+            .chunk
+            .slot_names
+            .iter()
+            .position(|candidate| candidate.text.as_ref() == name.as_str());
+        let slots = if self.active_function.is_some() {
+            &mut self
+                .frames
+                .first_mut()
+                .expect("an active function has a root caller frame")
+                .slots
+        } else {
+            &mut self.slots
+        };
+        let deleted = if let Some(slot) = slot {
+            slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+            slots.values[slot].take().is_some()
+        } else {
+            slots.extras.remove(name.as_str()).is_some()
+        };
+        self.assigned_globals.insert(name.to_string());
+        self.stack.push(Value::Bool(deleted));
+        Ok(())
+    }
+
+    pub(super) fn execute_javascript_global_has(&mut self) -> Result<(), RuntimeError> {
+        self.require_typescript_intrinsic("global presence query")?;
+        let name = self.pop_stack()?;
+        let Value::String(name) = name else {
+            return Err(js_stdlib_error("global presence name must be a string"));
+        };
+        reject_reserved_global_name(&name)?;
+        let slot = self
+            .chunk
+            .slot_names
+            .iter()
+            .position(|candidate| candidate.text.as_ref() == name.as_str());
+        let slots = if self.active_function.is_some() {
+            &self
+                .frames
+                .first()
+                .expect("an active function has a root caller frame")
+                .slots
+        } else {
+            &self.slots
+        };
+        let present = slot.map_or_else(
+            || slots.extras.get(name.as_str()).is_some(),
+            |slot| slots.values[slot].is_some(),
+        );
+        self.stack.push(Value::Bool(present));
+        Ok(())
+    }
+}
+
+fn scalar_javascript_string(value: &Value) -> Result<String, RuntimeError> {
+    if matches!(value, Value::Ref(_)) {
+        return Err(js_stdlib_error(
+            "heap constructor scalar argument cannot be an object",
+        ));
+    }
+    Ok(javascript_to_string(value))
+}
+
+fn heap_sequence(heap: &Heap, value: &Value) -> Result<Vec<Value>, RuntimeError> {
+    Ok(match value {
+        Value::Ref(id) => match heap.get(*id)? {
+            HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+            object => {
+                return Err(js_stdlib_error(format!(
+                    "{} is not an iterable constructor input",
+                    object.kind_name()
+                )));
+            }
+        },
+        Value::List(values) | Value::Tuple(values) => values.to_vec(),
+        _ => {
+            return Err(js_stdlib_error(
+                "constructor input is not an iterable value",
+            ));
+        }
+    })
+}
+
+fn javascript_error_cause(heap: &Heap, options: &Value) -> Option<Value> {
+    match options {
+        Value::Record(record) => record.get("cause").cloned(),
+        Value::Ref(id) => match heap.get(*id).ok()? {
+            HeapObject::Record(record) => record.get("cause").cloned(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn reject_reserved_global_name(name: &str) -> Result<(), RuntimeError> {
+    if matches!(name, "undefined" | "NaN" | "Infinity") {
+        return Err(js_stdlib_error(format!(
+            "TS_RESERVED_GLOBAL_NAME: `{name}` cannot be queried or deleted as session state"
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn stringify_if_contains_error(
+    heap: &Heap,
+    value: &Value,
+) -> Result<Option<String>, RuntimeError> {
+    if !value_contains_error(heap, value)? {
+        return Ok(None);
+    }
+    javascript_json_stringify_with_errors(heap, value, &mut BTreeSet::new()).map(Some)
+}
+
+fn value_contains_error(heap: &Heap, value: &Value) -> Result<bool, RuntimeError> {
+    let mut pending = vec![value];
+    let mut visited = BTreeSet::new();
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Ref(id) if visited.insert(*id) => match heap.get(*id)? {
+                HeapObject::Error(_) => return Ok(true),
+                HeapObject::Tuple(values) | HeapObject::List(values) => {
+                    pending.extend(values.iter())
+                }
+                HeapObject::Record(record) => pending.extend(record.values()),
+                HeapObject::Closure { captures, .. } => pending.extend(captures.iter()),
+                HeapObject::Map(map) => {
+                    pending.extend(map.entries.iter().flat_map(|(key, value)| [key, value]))
+                }
+                HeapObject::Set(set) => pending.extend(set.values.iter()),
+                HeapObject::RegExp(_) | HeapObject::Date(_) => {}
+            },
+            Value::Tuple(values) | Value::List(values) => pending.extend(values.iter()),
+            Value::Record(record) => pending.extend(record.values()),
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+fn javascript_json_stringify_with_errors(
+    heap: &Heap,
+    value: &Value,
+    active: &mut BTreeSet<HeapId>,
+) -> Result<String, RuntimeError> {
+    match value {
+        Value::Ref(id) => {
+            if !active.insert(*id) {
+                return Err(js_stdlib_error("JSON.stringify received a cyclic value"));
+            }
+            let result = match heap.get(*id)? {
+                HeapObject::Error(_) => Ok("{}".to_string()),
+                HeapObject::List(values) | HeapObject::Tuple(values) => {
+                    let values = values
+                        .iter()
+                        .map(|value| javascript_json_stringify_with_errors(heap, value, active))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(format!("[{}]", values.join(",")))
+                }
+                HeapObject::Record(record) => stringify_heap_record(heap, record, active),
+                object => Err(js_stdlib_error(format!(
+                    "JSON.stringify received unsupported {} object",
+                    object.kind_name()
+                ))),
+            };
+            active.remove(id);
+            result
+        }
+        Value::Tuple(values) | Value::List(values) => {
+            let values = values
+                .iter()
+                .map(|value| javascript_json_stringify_with_errors(heap, value, active))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(format!("[{}]", values.join(",")))
+        }
+        Value::Record(record) => stringify_heap_record(heap, record, active),
+        value => javascript_json_stringify(value),
+    }
+}
+
+fn stringify_heap_record(
+    heap: &Heap,
+    record: &Record,
+    active: &mut BTreeSet<HeapId>,
+) -> Result<String, RuntimeError> {
+    let entries = ecma_record_entries(record)
+        .into_iter()
+        .filter(|(_, value)| !matches!(value, Value::Undefined))
+        .map(|(key, value)| {
+            Ok(format!(
+                "{}:{}",
+                serde_json::to_string(key).expect("record keys are JSON strings"),
+                javascript_json_stringify_with_errors(heap, value, active)?
+            ))
+        })
+        .collect::<Result<Vec<_>, RuntimeError>>()?;
+    Ok(format!("{{{}}}", entries.join(",")))
+}

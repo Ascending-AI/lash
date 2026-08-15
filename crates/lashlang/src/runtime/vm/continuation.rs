@@ -2,8 +2,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use super::super::{
-    DateObject, ExecutionBound, HeapObject, HeapRestoreWire, MapObject, PersistedRoots,
-    RegExpObject, SetObject,
+    DateObject, ErrorKind, ErrorObject, ExecutionBound, HeapObject, HeapRestoreWire, MapObject,
+    PersistedRoots, RegExpObject, SetObject,
 };
 use super::*;
 
@@ -312,6 +312,12 @@ mod continuation_serde {
         Date {
             milliseconds: NumberWire,
         },
+        Error {
+            error_kind: ErrorKind,
+            message: String,
+            cause: Option<ValueWire>,
+            errors: Option<ValueWire>,
+        },
     }
 
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
@@ -422,6 +428,12 @@ mod continuation_serde {
             HeapObject::Date(date) => HeapObjectWire::Date {
                 milliseconds: number_to_wire(date.milliseconds),
             },
+            HeapObject::Error(error) => HeapObjectWire::Error {
+                error_kind: error.kind,
+                message: error.message.clone(),
+                cause: error.cause.as_ref().map(value_to_wire).transpose()?,
+                errors: error.errors.as_ref().map(value_to_wire).transpose()?,
+            },
         })
     }
 
@@ -478,6 +490,17 @@ mod continuation_serde {
             }),
             HeapObjectWire::Date { milliseconds } => HeapObject::Date(DateObject {
                 milliseconds: number_from_wire(milliseconds)?,
+            }),
+            HeapObjectWire::Error {
+                error_kind,
+                message,
+                cause,
+                errors,
+            } => HeapObject::Error(ErrorObject {
+                kind: error_kind,
+                message,
+                cause: cause.map(value_from_wire).transpose()?,
+                errors: errors.map(value_from_wire).transpose()?,
             }),
         })
     }

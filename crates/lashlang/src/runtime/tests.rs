@@ -955,7 +955,9 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             format!("make_closure {function} captures={captures}")
         }
         Instruction::Call { argc } => format!("call argc={argc}"),
+        Instruction::CallDynamic => "call_dynamic".to_string(),
         Instruction::Map => "map_callback".to_string(),
+        Instruction::AsyncMap => "async_map_callback".to_string(),
         Instruction::Return => "return".to_string(),
         Instruction::PushHandler { .. } => "push_handler".to_string(),
         Instruction::PopHandler => "pop_handler".to_string(),
@@ -1044,6 +1046,15 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         }
         IntrinsicOp::JavaScriptHeapNew(_) => {
             format!("intrinsic typescript_heap_new argc={argc}")
+        }
+        IntrinsicOp::JavaScriptHeapInstanceOf => {
+            format!("intrinsic typescript_heap_instanceof argc={argc}")
+        }
+        IntrinsicOp::JavaScriptGlobalDelete => {
+            format!("intrinsic typescript_global_delete argc={argc}")
+        }
+        IntrinsicOp::JavaScriptGlobalHas => {
+            format!("intrinsic typescript_global_has argc={argc}")
         }
         IntrinsicOp::Trim => format!("intrinsic trim argc={argc}"),
         IntrinsicOp::Slice => format!("intrinsic slice argc={argc}"),

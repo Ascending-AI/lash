@@ -97,7 +97,9 @@ pub(super) fn instruction_heap_plan(
         | I::Intrinsic(IntrinsicOp::PushAssign(_))
         | I::MakeClosure { .. }
         | I::Call { .. }
+        | I::CallDynamic
         | I::Map
+        | I::AsyncMap
         | I::Return
         | I::Throw
         | I::BuildTuple(_)
@@ -112,7 +114,10 @@ pub(super) fn instruction_heap_plan(
             IntrinsicOp::JavaScriptSplit
             | IntrinsicOp::JavaScriptJoin
             | IntrinsicOp::JavaScriptStdlib(_)
-            | IntrinsicOp::JavaScriptHeapNew(_),
+            | IntrinsicOp::JavaScriptHeapNew(_)
+            | IntrinsicOp::JavaScriptHeapInstanceOf
+            | IntrinsicOp::JavaScriptGlobalDelete
+            | IntrinsicOp::JavaScriptGlobalHas,
         )
         | I::IsNullish => InstructionHeapPlan::heap_native(),
         I::StoreName(_) => InstructionHeapPlan::heap_native(),
@@ -252,7 +257,9 @@ mod tests {
                 captures: 1,
             },
             I::Call { argc: 1 },
+            I::CallDynamic,
             I::Map,
+            I::AsyncMap,
             I::Return,
         ];
         for (index, instruction) in function_opcodes.into_iter().enumerate() {

@@ -825,12 +825,21 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
         .allocate_set(vec![shared.clone(), Value::Number(-0.0)])
         .expect("Set");
     let date = heap.allocate_date(f64::NAN).expect("Date");
+    let error = heap
+        .allocate_error(
+            ErrorKind::TypeError,
+            "bad".to_string(),
+            Some(shared.clone()),
+            None,
+        )
+        .expect("Error");
     let mut roots = Record::new();
     roots.insert("map".to_string(), map.clone());
     roots.insert("map_alias".to_string(), map);
     roots.insert("set".to_string(), set);
     roots.insert("regexp".to_string(), regexp);
     roots.insert("date".to_string(), date);
+    roots.insert("error".to_string(), error);
     let snapshot = Snapshot {
         globals: Record::new(),
         runtime_globals: roots,
@@ -920,6 +929,12 @@ fn lashlang_forest_validation_rejects_every_typescript_exotic_kind() {
         }),
         HeapObject::Set(SetObject { values: Vec::new() }),
         HeapObject::Date(DateObject { milliseconds: 0.0 }),
+        HeapObject::Error(ErrorObject {
+            kind: ErrorKind::Error,
+            message: String::new(),
+            cause: None,
+            errors: None,
+        }),
     ] {
         let mut heap = Heap::default();
         let root = heap.allocate(object).expect("exotic object");

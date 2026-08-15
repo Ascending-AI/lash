@@ -431,6 +431,450 @@ async fn map_for_each_callback_parks_and_resumes_through_the_shared_driver() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn error_family_observables_are_node_shaped_and_durable() {
+    let program = Program::block(vec![
+        ts_assign(
+            "error",
+            heap_new(
+                "TypeError",
+                vec![
+                    Expr::String("bad".into()),
+                    Expr::Record(vec![("cause".into(), Expr::List(vec![Expr::Number(7.0)]))]),
+                ],
+            ),
+        ),
+        Expr::Print(Box::new(Expr::String("park with the Error rooted".into()))),
+        Expr::Finish(Box::new(Expr::List(vec![
+            field("error", "name"),
+            field("error", "message"),
+            Expr::Index {
+                target: Box::new(field("error", "cause")),
+                index: Box::new(Expr::Number(0.0)),
+            },
+            private_builtin(
+                "__typescript_heap_instanceof",
+                vec![
+                    Expr::Variable("error".into()),
+                    Expr::String("TypeError".into()),
+                ],
+            ),
+            private_builtin(
+                "__typescript_heap_instanceof",
+                vec![Expr::Variable("error".into()), Expr::String("Error".into())],
+            ),
+            private_builtin(
+                "__typescript_heap_instanceof",
+                vec![
+                    Expr::Variable("error".into()),
+                    Expr::String("RangeError".into()),
+                ],
+            ),
+            heap_method("toString", "error", Vec::new()),
+            Expr::JavaScriptUnary {
+                op: crate::JavaScriptUnaryOp::Plus,
+                expr: Box::new(Expr::Variable("error".into())),
+            },
+            private_builtin(
+                "__typescript_stdlib",
+                vec![
+                    Expr::String("Object.keys".into()),
+                    Expr::Variable("error".into()),
+                ],
+            ),
+            private_builtin(
+                "__typescript_stdlib",
+                vec![
+                    Expr::String("JSON.stringify".into()),
+                    Expr::Record(vec![("error".into(), Expr::Variable("error".into()))]),
+                ],
+            ),
+            private_builtin(
+                "__typescript_stdlib",
+                vec![
+                    Expr::String("JSON.stringify".into()),
+                    Expr::Variable("error".into()),
+                ],
+            ),
+        ]))),
+    ]);
+    let ExecutionOutcome::Finished(Value::List(values)) =
+        run_typescript_ast_across_every_effect(program).await
+    else {
+        panic!("Error observables should finish as a list")
+    };
+    assert_eq!(values[0], Value::String("TypeError".into()));
+    assert_eq!(values[1], Value::String("bad".into()));
+    assert_eq!(values[2], Value::Number(7.0));
+    assert_eq!(
+        &values[3..6],
+        &[Value::Bool(true), Value::Bool(true), Value::Bool(false)]
+    );
+    assert_eq!(values[6], Value::String("TypeError: bad".into()));
+    assert!(matches!(values[7], Value::Number(value) if value.is_nan()));
+    assert_eq!(values[8], Value::List(Vec::new().into()));
+    assert_eq!(values[9], Value::String("{\"error\":{}}".into()));
+    assert_eq!(values[10], Value::String("{}".into()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn every_error_kind_has_exact_own_and_error_ancestry() {
+    let kinds = [
+        "Error",
+        "TypeError",
+        "RangeError",
+        "SyntaxError",
+        "ReferenceError",
+        "URIError",
+        "EvalError",
+        "AggregateError",
+    ];
+    let mut expressions = Vec::new();
+    let mut checks = Vec::new();
+    for (index, kind) in kinds.into_iter().enumerate() {
+        let name = format!("error_{index}");
+        let args = if kind == "AggregateError" {
+            vec![
+                Expr::List(vec![
+                    Expr::String("first".into()),
+                    Expr::String("second".into()),
+                ]),
+                Expr::String("many".into()),
+            ]
+        } else {
+            vec![Expr::String("one".into())]
+        };
+        expressions.push(ts_assign(&name, heap_new(kind, args)));
+        checks.push(private_builtin(
+            "__typescript_heap_instanceof",
+            vec![
+                Expr::Variable(name.as_str().into()),
+                Expr::String(kind.into()),
+            ],
+        ));
+        checks.push(private_builtin(
+            "__typescript_heap_instanceof",
+            vec![
+                Expr::Variable(name.as_str().into()),
+                Expr::String("Error".into()),
+            ],
+        ));
+        if kind == "AggregateError" {
+            checks.push(Expr::Field {
+                target: Box::new(field(&name, "errors")),
+                field: "length".into(),
+            });
+        }
+    }
+    expressions.push(Expr::Finish(Box::new(Expr::List(checks))));
+    let ExecutionOutcome::Finished(Value::List(values)) =
+        run_typescript_ast_across_every_effect(Program::block(expressions)).await
+    else {
+        panic!("Error ancestry should finish as a list")
+    };
+    assert!(values[..16].iter().all(|value| *value == Value::Bool(true)));
+    assert_eq!(values[16], Value::Number(2.0));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn instanceof_hook_covers_every_javascript_heap_kind() {
+    let cases = [
+        (
+            "RegExp",
+            heap_new(
+                "RegExp",
+                vec![Expr::String("a".into()), Expr::String("".into())],
+            ),
+        ),
+        ("Map", heap_new("Map", Vec::new())),
+        ("Set", heap_new("Set", Vec::new())),
+        ("Date", heap_new("Date", vec![Expr::Number(0.0)])),
+    ];
+    for (kind, value) in cases {
+        let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
+            "__typescript_heap_instanceof",
+            vec![value, Expr::String(kind.into())],
+        )))]);
+        assert_eq!(
+            run_typescript_ast_across_every_effect(program).await,
+            ExecutionOutcome::Finished(Value::Bool(true)),
+            "{kind} instanceof {kind}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn thrown_error_keeps_identity_and_internal_exotic_assignment_throws_type_error() {
+    let identity = Program::block(vec![
+        ts_assign("error", heap_new("Error", vec![Expr::String("x".into())])),
+        Expr::Finish(Box::new(Expr::Try(Box::new(crate::TryExpr {
+            body: Box::new(Expr::Throw(Box::new(Expr::Variable("error".into())))),
+            catch: Some(crate::CatchClause {
+                binding: "caught".into(),
+                body: Box::new(Expr::Block(vec![
+                    Expr::Print(Box::new(Expr::String("park in catch".into()))),
+                    Expr::JavaScriptBinary {
+                        left: Box::new(Expr::Variable("caught".into())),
+                        op: crate::JavaScriptBinaryOp::StrictEqual,
+                        right: Box::new(Expr::Variable("error".into())),
+                    },
+                ])),
+            }),
+            finally: None,
+        })))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(identity).await,
+        ExecutionOutcome::Finished(Value::Bool(true))
+    );
+
+    let internal = Program::block(vec![
+        ts_assign(
+            "regexp",
+            heap_new(
+                "RegExp",
+                vec![Expr::String("a".into()), Expr::String("".into())],
+            ),
+        ),
+        Expr::Finish(Box::new(Expr::Try(Box::new(crate::TryExpr {
+            body: Box::new(Expr::Assign {
+                target: crate::AssignTarget {
+                    root: "regexp".into(),
+                    steps: vec![crate::AssignPathStep::Field("source".into())],
+                },
+                expr: Box::new(Expr::String("b".into())),
+            }),
+            catch: Some(crate::CatchClause {
+                binding: "caught".into(),
+                body: Box::new(private_builtin(
+                    "__typescript_heap_instanceof",
+                    vec![
+                        Expr::Variable("caught".into()),
+                        Expr::String("TypeError".into()),
+                    ],
+                )),
+            }),
+            finally: None,
+        })))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(internal).await,
+        ExecutionOutcome::Finished(Value::Bool(true))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dynamic_calls_apply_ecma_arguments_and_rest_then_resume_inside_the_callee() {
+    let plain = Expr::Function(Box::new(crate::FunctionExpr {
+        name: None,
+        params: vec!["first".into(), "second".into()],
+        captures: Vec::new(),
+        body: Box::new(Expr::Block(vec![
+            Expr::Print(Box::new(Expr::String("callee park".into()))),
+            Expr::Return(Box::new(Expr::JavaScriptBinary {
+                left: Box::new(Expr::Variable("second".into())),
+                op: crate::JavaScriptBinaryOp::StrictEqual,
+                right: Box::new(Expr::Undefined),
+            })),
+        ])),
+    }));
+    let rest = Expr::Function(Box::new(crate::FunctionExpr {
+        name: None,
+        params: vec!["first".into(), "rest".into()],
+        captures: Vec::new(),
+        body: Box::new(Expr::Return(Box::new(Expr::Field {
+            target: Box::new(Expr::Variable("rest".into())),
+            field: "length".into(),
+        }))),
+    }));
+    let program = Program::block(vec![
+        ts_assign("plain", plain),
+        ts_assign(
+            "rest",
+            private_builtin(
+                "__typescript_closure",
+                vec![rest, Expr::Number(1.0), Expr::Bool(true)],
+            ),
+        ),
+        Expr::Finish(Box::new(Expr::List(vec![
+            private_builtin(
+                "__typescript_call_dynamic",
+                vec![
+                    Expr::Variable("plain".into()),
+                    Expr::List(vec![Expr::Number(1.0)]),
+                ],
+            ),
+            private_builtin(
+                "__typescript_call_dynamic",
+                vec![
+                    Expr::Variable("rest".into()),
+                    Expr::List(vec![
+                        Expr::Number(1.0),
+                        Expr::Number(2.0),
+                        Expr::Number(3.0),
+                    ]),
+                ],
+            ),
+            Expr::Call {
+                function: Box::new(Expr::Variable("plain".into())),
+                args: Vec::new(),
+            },
+            Expr::Call {
+                function: Box::new(Expr::Variable("plain".into())),
+                args: vec![Expr::Number(1.0), Expr::Number(2.0), Expr::Number(3.0)],
+            },
+        ]))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![
+                Value::Bool(true),
+                Value::Number(2.0),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_map_callbacks_park_before_and_after_work_and_replay_deterministically() {
+    let callback = Expr::Function(Box::new(crate::FunctionExpr {
+        name: None,
+        params: vec!["value".into(), "index".into(), "array".into()],
+        captures: Vec::new(),
+        body: Box::new(Expr::Block(vec![
+            Expr::Print(Box::new(Expr::String("before await".into()))),
+            Expr::Print(Box::new(Expr::String("after await".into()))),
+            Expr::Return(Box::new(Expr::JavaScriptBinary {
+                left: Box::new(Expr::Variable("value".into())),
+                op: crate::JavaScriptBinaryOp::Multiply,
+                right: Box::new(Expr::Number(2.0)),
+            })),
+        ])),
+    }));
+    let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
+        "__typescript_async_map",
+        vec![
+            Expr::List(vec![Expr::Number(2.0), Expr::Number(4.0)]),
+            callback,
+        ],
+    )))]);
+    let expected = ExecutionOutcome::Finished(Value::List(
+        vec![Value::Number(4.0), Value::Number(8.0)].into(),
+    ));
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program.clone()).await,
+        expected
+    );
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        expected
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart() {
+    let program = Program::block(vec![
+        ts_assign("kept", Expr::Undefined),
+        ts_assign("removed", Expr::Number(1.0)),
+        private_builtin(
+            "__typescript_global_delete",
+            vec![Expr::String("removed".into())],
+        ),
+        Expr::Print(Box::new(Expr::String("park after deletion".into()))),
+        Expr::Finish(Box::new(Expr::List(vec![
+            private_builtin("__typescript_global_has", vec![Expr::String("kept".into())]),
+            private_builtin(
+                "__typescript_global_has",
+                vec![Expr::String("removed".into())],
+            ),
+        ]))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Bool(true), Value::Bool(false)].into()
+        ))
+    );
+
+    let setup = Program::block(vec![
+        ts_assign("kept", Expr::Undefined),
+        ts_assign("removed", Expr::Number(1.0)),
+        Expr::Finish(Box::new(Expr::Null)),
+    ]);
+    let setup = compile_ast_with_dialect(&setup, CompilationDialect::Typescript)
+        .expect("compile global setup");
+    let mut state = State::new();
+    execute(&setup, &mut state, &Host)
+        .await
+        .expect("persist globals before deletion");
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("encode pre-deletion snapshot");
+    let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("decode pre-deletion snapshot");
+    let mut state = State::from_snapshot(snapshot);
+    let deletion = Program::block(vec![
+        private_builtin(
+            "__typescript_global_delete",
+            vec![Expr::String("removed".into())],
+        ),
+        Expr::Finish(Box::new(Expr::Null)),
+    ]);
+    let deletion = compile_ast_with_dialect(&deletion, CompilationDialect::Typescript)
+        .expect("compile persisted-global deletion");
+    execute(&deletion, &mut state, &Host)
+        .await
+        .expect("delete previously persisted global");
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("encode post-deletion snapshot");
+    let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("decode post-deletion snapshot");
+    let mut state = State::from_snapshot(snapshot);
+    let query = Program::block(vec![Expr::Finish(Box::new(Expr::List(vec![
+        private_builtin("__typescript_global_has", vec![Expr::String("kept".into())]),
+        private_builtin(
+            "__typescript_global_has",
+            vec![Expr::String("removed".into())],
+        ),
+    ])))]);
+    let query = compile_ast_with_dialect(&query, CompilationDialect::Typescript)
+        .expect("compile rehydration query");
+    assert_eq!(
+        execute(&query, &mut state, &Host)
+            .await
+            .expect("query rehydrated globals"),
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Bool(true), Value::Bool(false)].into()
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reserved_global_names_are_rejected_by_both_intrinsics() {
+    for intrinsic in ["__typescript_global_delete", "__typescript_global_has"] {
+        for name in ["undefined", "NaN", "Infinity"] {
+            let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
+                intrinsic,
+                vec![Expr::String(name.into())],
+            )))]);
+            let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
+                .expect("compile reserved-name probe");
+            let error = execute(&compiled, &mut State::new(), &Host)
+                .await
+                .expect_err("reserved global name must reject");
+            assert!(
+                error.to_string().contains("TS_RESERVED_GLOBAL_NAME"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn map_and_set_for_each_use_a_durable_cloned_snapshot() {
     fn seen_name(variable: &str) -> Expr {
         Expr::JavaScriptBinary {

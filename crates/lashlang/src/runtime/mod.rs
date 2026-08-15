@@ -51,8 +51,8 @@ pub use heap::{
     HeapId,
 };
 pub(crate) use heap::{
-    DateObject, Heap, HeapObject, HeapRestoreWire, MapObject, PersistedRoots, RegExpObject,
-    SetObject, canonical_regexp_flags,
+    DateObject, ErrorKind, ErrorObject, Heap, HeapObject, HeapRestoreWire, MapObject,
+    PersistedRoots, RegExpObject, SetObject, canonical_regexp_flags,
 };
 pub use host::{
     AbilityOp, AbilityResult, DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds,

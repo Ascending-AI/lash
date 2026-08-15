@@ -1,5 +1,5 @@
 use super::super::{
-    ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
+    ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
 use super::*;
@@ -187,6 +187,30 @@ impl<H: ExecutionHost> Vm<'_, H> {
             values.push(self.pop_stack()?);
         }
         values.reverse();
+        if let [Value::String(method), value] = values.as_slice()
+            && method.as_str() == "JSON.stringify"
+            && let Some(json) =
+                javascript_substrate::stringify_if_contains_error(&self.heap, value)?
+        {
+            self.stack.push(Value::String(json.into()));
+            return Ok(());
+        }
+        if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
+            && matches!(self.heap.get(*receiver)?, HeapObject::Error(_))
+        {
+            let result = match method.as_str() {
+                "Object.keys" | "Object.values" | "Object.entries" => {
+                    Some(Value::List(Vec::new().into()))
+                }
+                "JSON.stringify" => Some(Value::String("{}".into())),
+                "Array.isArray" => Some(Value::Bool(false)),
+                _ => None,
+            };
+            if let Some(result) = result {
+                self.stack.push(result);
+                return Ok(());
+            }
+        }
         if let [Value::String(method), Value::Ref(receiver), args @ ..] = values.as_slice()
             && !method.contains('.')
             && self.heap.is_javascript_exotic(*receiver)?
@@ -203,62 +227,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
             ensure_javascript_string_size(value.len())?;
         }
         self.stack.push(result);
-        Ok(())
-    }
-
-    pub(super) fn execute_javascript_heap_new(&mut self, argc: usize) -> Result<(), RuntimeError> {
-        if !self.reference_semantics {
-            return Err(RuntimeError::ValidationFailed {
-                reason: "TYPESCRIPT_REFERENCE_SEMANTICS_REQUIRED: JavaScript heap constructors are unavailable in Lashlang"
-                    .to_string(),
-            });
-        }
-        let mut values = Vec::with_capacity(argc);
-        for _ in 0..argc {
-            values.push(self.pop_stack()?);
-        }
-        values.reverse();
-        let Some((Value::String(kind), args)) = values.split_first() else {
-            return Err(js_stdlib_error("missing heap constructor discriminator"));
-        };
-        let value = match (kind.as_str(), args) {
-            ("RegExp", [pattern, flags]) => {
-                let pattern = scalar_javascript_string(pattern)?;
-                let flags = super::super::canonical_regexp_flags(&scalar_javascript_string(flags)?)
-                    .map_err(js_stdlib_error)?;
-                self.heap.allocate_regexp(pattern, flags)?
-            }
-            ("Map", []) | ("Map", [Value::Undefined]) => self.heap.allocate_map(Vec::new())?,
-            ("Map", [entries]) => {
-                let mut map_entries = Vec::new();
-                for entry in heap_sequence(&self.heap, entries)? {
-                    let pair = heap_sequence(&self.heap, &entry)?;
-                    if pair.len() < 2 {
-                        return Err(js_stdlib_error(
-                            "Map constructor entry has fewer than two values",
-                        ));
-                    }
-                    map_entries.push((pair[0].clone(), pair[1].clone()));
-                }
-                self.heap.allocate_map(map_entries)?
-            }
-            ("Set", []) | ("Set", [Value::Undefined]) => self.heap.allocate_set(Vec::new())?,
-            ("Set", [values]) => {
-                let set_values = heap_sequence(&self.heap, values)?;
-                self.heap.allocate_set(set_values)?
-            }
-            ("Date", [milliseconds]) => {
-                let milliseconds = self.heap.javascript_to_number(milliseconds)?;
-                self.heap.allocate_date(milliseconds)?
-            }
-            _ => {
-                return Err(js_stdlib_error(format!(
-                    "TS_CONSTRUCTOR_UNSUPPORTED: {kind} with {} argument(s)",
-                    args.len()
-                )));
-            }
-        };
-        self.stack.push(value);
         Ok(())
     }
 
@@ -282,6 +250,22 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .expect("Date receiver was checked"),
             )),
             ("Date", "toString", []) => Some(Value::String("[object Date]".into())),
+            (kind, "toString", []) if ErrorKind::from_name(kind).is_some() => {
+                let HeapObject::Error(error) = self.heap.get(receiver)? else {
+                    unreachable!("Error receiver kind was checked")
+                };
+                Some(Value::String(
+                    if error.message.is_empty() {
+                        error.kind.name().to_string()
+                    } else {
+                        format!("{}: {}", error.kind.name(), error.message)
+                    }
+                    .into(),
+                ))
+            }
+            (kind, "valueOf", []) if ErrorKind::from_name(kind).is_some() => {
+                Some(Value::Ref(receiver))
+            }
             ("Map", "get", [key]) => Some(
                 self.heap
                     .map_get(receiver, key)?
@@ -391,35 +375,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         Ok(())
     }
-}
-
-fn scalar_javascript_string(value: &Value) -> Result<String, RuntimeError> {
-    if matches!(value, Value::Ref(_)) {
-        return Err(js_stdlib_error(
-            "heap constructor scalar argument cannot be an object",
-        ));
-    }
-    Ok(javascript_to_string(value))
-}
-
-fn heap_sequence(heap: &Heap, value: &Value) -> Result<Vec<Value>, RuntimeError> {
-    Ok(match value {
-        Value::Ref(id) => match heap.get(*id)? {
-            HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
-            object => {
-                return Err(js_stdlib_error(format!(
-                    "{} is not an iterable constructor input",
-                    object.kind_name()
-                )));
-            }
-        },
-        Value::List(values) | Value::Tuple(values) => values.to_vec(),
-        _ => {
-            return Err(js_stdlib_error(
-                "constructor input is not an iterable value",
-            ));
-        }
-    })
 }
 
 fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {

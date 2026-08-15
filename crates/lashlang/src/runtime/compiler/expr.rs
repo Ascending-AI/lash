@@ -1,5 +1,64 @@
 impl Compiler {
+    fn emit_function(&mut self, function: &FunctionExpr, parameter_model: ClosureParameterModel) {
+        let function_index = self.pending_functions.len();
+        let cloned = function.clone();
+        self.copy_expression_metadata(&function.body, &cloned.body);
+        self.pending_functions.push(Some(PendingFunction {
+            definition: cloned,
+            parameter_model,
+        }));
+        for capture in &function.captures {
+            let slot = self.push_slot(capture);
+            self.code.push(Instruction::LoadName(slot));
+            self.emit_isolation();
+        }
+        self.code.push(Instruction::MakeClosure {
+            function: function_index,
+            captures: function.captures.len(),
+        });
+    }
+
     fn emit_builtin_call(&mut self, name: &str, args: &[Expr]) {
+        if let ("__typescript_call_dynamic", [function, arguments]) = (name, args) {
+            self.compile_expr(function);
+            self.compile_expr(arguments);
+            self.code.push(Instruction::CallDynamic);
+            return;
+        }
+        if let ("__typescript_async_map", [items, function]) = (name, args) {
+            self.compile_expr(items);
+            self.compile_expr(function);
+            self.code.push(Instruction::AsyncMap);
+            return;
+        }
+        if let (
+            "__typescript_closure",
+            [
+                Expr::Function(function),
+                Expr::Number(required_count),
+                Expr::Bool(accepts_rest),
+            ],
+        ) = (name, args)
+            && required_count.is_finite()
+            && *required_count >= 0.0
+            && required_count.fract() == 0.0
+            && *required_count <= usize::MAX as f64
+            && (!*accepts_rest || !function.params.is_empty())
+            && (*required_count as usize)
+                <= function
+                    .params
+                    .len()
+                    .saturating_sub(usize::from(*accepts_rest))
+        {
+            self.emit_function(
+                function,
+                ClosureParameterModel::TypeScript {
+                    required_count: *required_count as usize,
+                    accepts_rest: *accepts_rest,
+                },
+            );
+            return;
+        }
         if name == "format"
             && let Some((Expr::String(template), value_args)) = args.split_first()
         {
@@ -277,22 +336,16 @@ impl Compiler {
                 self.emit_builtin_call(name, args);
             }
             Expr::Function(function) => {
-                let function_index = self.pending_functions.len();
-                let cloned = (**function).clone();
-                self.copy_expression_metadata(&function.body, &cloned.body);
-                self.pending_functions.push(Some(cloned));
-                for capture in &function.captures {
-                    let slot = self.push_slot(capture);
-                    self.code.push(Instruction::LoadName(slot));
-                    // The lashlang AST lowering chooses by-value capture. The
-                    // VM opcode itself merely stores the values it receives,
-                    // so a later dialect may intentionally pass references.
-                    self.emit_isolation();
-                }
-                self.code.push(Instruction::MakeClosure {
-                    function: function_index,
-                    captures: function.captures.len(),
-                });
+                self.emit_function(
+                    function,
+                    match self.dialect {
+                        CompilationDialect::Lashlang => ClosureParameterModel::Exact,
+                        CompilationDialect::Typescript => ClosureParameterModel::TypeScript {
+                            required_count: function.params.len(),
+                            accepts_rest: false,
+                        },
+                    },
+                );
             }
             Expr::Call { function, args } => {
                 self.compile_expr(function);

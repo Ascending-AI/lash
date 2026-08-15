@@ -41,10 +41,18 @@ fn slot_names_for(chunk: &Chunk, active_function: Option<usize>) -> &[Name] {
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    fn begin_function_call(
+    pub(super) fn begin_direct_function_call(
         &mut self,
         closure: Value,
         args: Vec<Value>,
+    ) -> Result<(), RuntimeError> {
+        self.begin_function_call(closure, args, ReturnTarget::Direct)
+    }
+
+    fn begin_function_call(
+        &mut self,
+        closure: Value,
+        mut args: Vec<Value>,
         return_target: ReturnTarget,
     ) -> Result<(), RuntimeError> {
         let limit = self.host.execution_bounds().max_frame_depth.get();
@@ -71,11 +79,36 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .ok_or(RuntimeError::UnknownFunction {
                     index: function_index as u32,
                 })?;
-        if args.len() != function.parameter_count {
-            return Err(RuntimeError::FunctionArgumentCount {
-                expected: function.parameter_count,
-                actual: args.len(),
-            });
+        match function.parameter_model {
+            ClosureParameterModel::Exact => {
+                if args.len() != function.parameter_count {
+                    return Err(RuntimeError::FunctionArgumentCount {
+                        expected: function.parameter_count,
+                        actual: args.len(),
+                    });
+                }
+            }
+            ClosureParameterModel::TypeScript {
+                required_count,
+                accepts_rest,
+            } => {
+                let fixed_count = function
+                    .parameter_count
+                    .saturating_sub(usize::from(accepts_rest));
+                debug_assert!(required_count <= fixed_count);
+                if accepts_rest {
+                    let rest = if args.len() > fixed_count {
+                        args.split_off(fixed_count)
+                    } else {
+                        Vec::new()
+                    };
+                    args.resize(fixed_count, Value::Undefined);
+                    args.push(self.heap.allocate_list(rest)?);
+                } else {
+                    args.resize(function.parameter_count, Value::Undefined);
+                    args.truncate(function.parameter_count);
+                }
+            }
         }
         if captures.len() != function.capture_count {
             return Err(RuntimeError::ClosureCaptureCountMismatch {

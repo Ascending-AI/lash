@@ -18,6 +18,7 @@ mod exceptions;
 mod heap_plan;
 mod javascript;
 mod javascript_json;
+mod javascript_substrate;
 mod reference_assignment;
 
 #[cfg(test)]
@@ -41,14 +42,14 @@ use super::schema::{
 };
 use super::value::ProjectedValue;
 use super::{
-    Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap, HeapId,
-    HeapObject, ImageValue, Instruction, InstructionProfileTag, IntrinsicOp,
-    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name,
-    PersistedRoots, ProfileAccumulator, ProfileReport, ProjectedBindings, ResourceHandle,
-    RuntimeError, State, Value, add_assign_index_number, add_values, as_number, assign_path,
-    eval_binary_values, eval_compare_values, eval_javascript_binary, eval_javascript_unary,
-    eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
-    execute_compiled_format, execute_compiled_format_direct,
+    Chunk, ClosureParameterModel, CompiledProgram, ExecutionHost, ExecutionOutcome,
+    ExecutionScratch, Heap, HeapId, HeapObject, ImageValue, Instruction, InstructionProfileTag,
+    IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY,
+    ListValue, Name, PersistedRoots, ProfileAccumulator, ProfileReport, ProjectedBindings,
+    ResourceHandle, RuntimeError, State, Value, add_assign_index_number, add_values, as_number,
+    assign_path, eval_binary_values, eval_compare_values, eval_javascript_binary,
+    eval_javascript_unary, eval_number_binary_values, eval_number_compare_values,
+    eval_number_numeric_binary_value, execute_compiled_format, execute_compiled_format_direct,
     execute_compiled_format_one_number_compact_direct, execute_intrinsic,
     execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values, javascript_join,
     javascript_split, materialize_projected_async, materialize_value, range_bounds,
@@ -458,6 +459,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     }
                 }
             }
+            Instruction::CallDynamic => self.execute_dynamic_call()?,
             Instruction::Map => {
                 let function = self.pop_stack()?;
                 let items = self.pop_stack()?;
@@ -487,6 +489,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     )?;
                 }
             }
+            Instruction::AsyncMap => self.execute_async_map()?,
             Instruction::Return => self.return_from_function()?,
             Instruction::PushHandler {
                 handler,
@@ -1276,7 +1279,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::EndIter
             | Instruction::MakeClosure { .. }
             | Instruction::Call { .. }
+            | Instruction::CallDynamic
             | Instruction::Map
+            | Instruction::AsyncMap
             | Instruction::Return
             | Instruction::PushHandler { .. }
             | Instruction::PopHandler
@@ -1301,6 +1306,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::JavaScriptJoin => self.execute_javascript_join()?,
             IntrinsicOp::JavaScriptStdlib(argc) => self.execute_javascript_stdlib(argc)?,
             IntrinsicOp::JavaScriptHeapNew(argc) => self.execute_javascript_heap_new(argc)?,
+            IntrinsicOp::JavaScriptHeapInstanceOf => self.execute_javascript_instanceof()?,
+            IntrinsicOp::JavaScriptGlobalDelete => self.execute_javascript_global_delete()?,
+            IntrinsicOp::JavaScriptGlobalHas => self.execute_javascript_global_has()?,
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;

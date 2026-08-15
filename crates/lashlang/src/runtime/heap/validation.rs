@@ -169,7 +169,7 @@ impl Heap {
                 let object = self
                     .get(id)
                     .map_err(|_| format!("dangling heap reference {}", id.get()))?;
-                validate_exotic_invariants(id, object)?;
+                validate_exotic_invariants(self, id, object)?;
                 colors.insert(id, 1);
                 stack.push((id, true));
                 for child in object.child_refs().into_iter().rev() {
@@ -217,6 +217,7 @@ impl Heap {
                     | super::HeapObject::Map(_)
                     | super::HeapObject::Set(_)
                     | super::HeapObject::Date(_)
+                    | super::HeapObject::Error(_)
             )
         }) {
             return Err(format!(
@@ -240,7 +241,7 @@ impl Heap {
     }
 }
 
-fn validate_exotic_invariants(id: HeapId, object: &HeapObject) -> Result<(), String> {
+fn validate_exotic_invariants(heap: &Heap, id: HeapId, object: &HeapObject) -> Result<(), String> {
     match object {
         HeapObject::RegExp(regexp) => {
             let canonical = canonical_regexp_flags(&regexp.flags)
@@ -276,6 +277,33 @@ fn validate_exotic_invariants(id: HeapId, object: &HeapObject) -> Result<(), Str
                         id.get()
                     ));
                 }
+            }
+        }
+        HeapObject::Error(error) => {
+            if error.kind == super::ErrorKind::AggregateError && error.errors.is_none() {
+                return Err(format!(
+                    "AggregateError object {} is missing its errors list",
+                    id.get()
+                ));
+            }
+            if error.kind != super::ErrorKind::AggregateError && error.errors.is_some() {
+                return Err(format!(
+                    "{} object {} carries AggregateError errors",
+                    error.kind.name(),
+                    id.get()
+                ));
+            }
+            if let Some(errors) = &error.errors
+                && !matches!(
+                    errors,
+                    Value::Ref(errors_id)
+                        if matches!(heap.get(*errors_id), Ok(HeapObject::List(_)))
+                )
+            {
+                return Err(format!(
+                    "AggregateError object {} errors must reference a JavaScript list",
+                    id.get()
+                ));
             }
         }
         _ => {}

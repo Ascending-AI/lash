@@ -252,6 +252,12 @@ fn exotic_kinds_have_deterministic_logical_byte_charges() {
         values: vec![Value::String("v".into())],
     });
     let date = HeapObject::Date(DateObject { milliseconds: 1.0 });
+    let error = HeapObject::Error(ErrorObject {
+        kind: ErrorKind::TypeError,
+        message: "bad".to_string(),
+        cause: Some(Value::Number(1.0)),
+        errors: None,
+    });
     assert_eq!(
         regexp.logical_bytes(),
         OBJECT_HEADER_BYTES + 2 + 2 + 3 * VALUE_SLOT_BYTES + 8
@@ -273,6 +279,10 @@ fn exotic_kinds_have_deterministic_logical_byte_charges() {
         date.logical_bytes(),
         OBJECT_HEADER_BYTES + VALUE_SLOT_BYTES + 8
     );
+    assert_eq!(
+        error.logical_bytes(),
+        OBJECT_HEADER_BYTES + 3 + VALUE_SLOT_BYTES + value_logical_bytes(&Value::Number(1.0))
+    );
 }
 
 #[test]
@@ -284,6 +294,8 @@ fn exotic_host_boundary_errors_are_not_reported_as_function_values() {
         heap.allocate_map(Vec::new()).expect("Map"),
         heap.allocate_set(Vec::new()).expect("Set"),
         heap.allocate_date(0.0).expect("Date"),
+        heap.allocate_error(ErrorKind::Error, String::new(), None, None)
+            .expect("Error"),
     ];
     for value in values {
         assert!(matches!(

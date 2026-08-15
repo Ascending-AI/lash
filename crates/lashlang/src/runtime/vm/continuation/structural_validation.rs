@@ -152,6 +152,16 @@ pub(super) fn validate_continuation(
                 }
             }
             HeapObject::Date(_) => {}
+            HeapObject::Error(error) => {
+                if let Some(cause) = &error.cause {
+                    validate_value(cause, &format!("heap {} error cause", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, cause)?;
+                }
+                if let Some(errors) = &error.errors {
+                    validate_value(errors, &format!("heap {} aggregate errors", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, errors)?;
+                }
+            }
         }
     }
     for (depth, frame) in continuation.frame_stack.iter().enumerate() {

@@ -215,6 +215,15 @@ pub(crate) fn read_javascript_heap_field(
         HeapObject::Set(set) if field.text.as_ref() == "size" => {
             Value::Number(set.values.len() as f64)
         }
+        HeapObject::Error(error) => match field.text.as_ref() {
+            "name" => Value::String(error.kind.name().into()),
+            "message" => Value::String(error.message.as_str().into()),
+            "cause" => error.cause.clone().unwrap_or(Value::Undefined),
+            "errors" if error.kind == ErrorKind::AggregateError => {
+                error.errors.clone().unwrap_or(Value::Undefined)
+            }
+            _ => Value::Undefined,
+        },
         _ => Value::Undefined,
     })
 }
@@ -249,6 +258,15 @@ pub(crate) fn read_javascript_heap_index(
         HeapObject::Set(set) if javascript_to_string(index) == "size" => {
             Value::Number(set.values.len() as f64)
         }
+        HeapObject::Error(error) => match javascript_to_string(index).as_str() {
+            "name" => Value::String(error.kind.name().into()),
+            "message" => Value::String(error.message.as_str().into()),
+            "cause" => error.cause.clone().unwrap_or(Value::Undefined),
+            "errors" if error.kind == ErrorKind::AggregateError => {
+                error.errors.clone().unwrap_or(Value::Undefined)
+            }
+            _ => Value::Undefined,
+        },
         _ => Value::Undefined,
     })
 }

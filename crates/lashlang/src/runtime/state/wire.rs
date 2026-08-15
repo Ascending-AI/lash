@@ -62,6 +62,24 @@ impl CanonicalHeapObject {
             HeapObject::Date(date) => Self::Date {
                 milliseconds: normalize_number(date.milliseconds),
             },
+            HeapObject::Error(error) => Self::Error {
+                error_kind: error.kind,
+                message: error.message.clone(),
+                cause: error
+                    .cause
+                    .as_ref()
+                    .map(|value| {
+                        CanonicalValue::from_runtime(value, &format!("{location}.cause"), 0)
+                    })
+                    .transpose()?,
+                errors: error
+                    .errors
+                    .as_ref()
+                    .map(|value| {
+                        CanonicalValue::from_runtime(value, &format!("{location}.errors"), 0)
+                    })
+                    .transpose()?,
+            },
         })
     }
 
@@ -123,6 +141,17 @@ impl CanonicalHeapObject {
             }),
             Self::Date { milliseconds } => HeapObject::Date(DateObject {
                 milliseconds: normalize_number(milliseconds),
+            }),
+            Self::Error {
+                error_kind,
+                message,
+                cause,
+                errors,
+            } => HeapObject::Error(ErrorObject {
+                kind: error_kind,
+                message,
+                cause: cause.map(CanonicalValue::into_runtime).transpose()?,
+                errors: errors.map(CanonicalValue::into_runtime).transpose()?,
             }),
         })
     }

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use super::{
-    CompiledProgram, ContinuationError, DateObject, Heap, HeapId, HeapObject, HeapRestoreWire,
-    ImageValue, MapObject, PersistedRoots, ProjectedValue, Record, RegExpObject, ResourceHandle,
-    RuntimeError, SetObject, Value, record_with_capacity,
+    CompiledProgram, ContinuationError, DateObject, ErrorKind, ErrorObject, Heap, HeapId,
+    HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots, ProjectedValue, Record,
+    RegExpObject, ResourceHandle, RuntimeError, SetObject, Value, record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -412,6 +412,12 @@ enum CanonicalHeapObject {
     Date {
         milliseconds: f64,
     },
+    Error {
+        error_kind: ErrorKind,
+        message: String,
+        cause: Option<CanonicalValue>,
+        errors: Option<CanonicalValue>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -754,6 +760,10 @@ const TAGGED_VALUE_FIELDS: &[&str] = &[
     "entries",
     "values",
     "milliseconds",
+    "error_kind",
+    "message",
+    "cause",
+    "errors",
 ];
 const MAP_ENTRY_FIELDS: &[&str] = &["key", "value"];
 

@@ -3,6 +3,57 @@ use crate::runtime::{javascript_to_number, javascript_to_string};
 
 pub(crate) const MAX_JAVASCRIPT_LENGTH: u64 = 9_007_199_254_740_991;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub(crate) enum ErrorKind {
+    Error,
+    TypeError,
+    RangeError,
+    SyntaxError,
+    ReferenceError,
+    URIError,
+    EvalError,
+    AggregateError,
+}
+
+impl ErrorKind {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Error => "Error",
+            Self::TypeError => "TypeError",
+            Self::RangeError => "RangeError",
+            Self::SyntaxError => "SyntaxError",
+            Self::ReferenceError => "ReferenceError",
+            Self::URIError => "URIError",
+            Self::EvalError => "EvalError",
+            Self::AggregateError => "AggregateError",
+        }
+    }
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "Error" => Self::Error,
+            "TypeError" => Self::TypeError,
+            "RangeError" => Self::RangeError,
+            "SyntaxError" => Self::SyntaxError,
+            "ReferenceError" => Self::ReferenceError,
+            "URIError" => Self::URIError,
+            "EvalError" => Self::EvalError,
+            "AggregateError" => Self::AggregateError,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ErrorObject {
+    pub(crate) kind: ErrorKind,
+    pub(crate) message: String,
+    pub(crate) cause: Option<Value>,
+    /// Present only for AggregateError and always a JavaScript List value.
+    pub(crate) errors: Option<Value>,
+}
+
 /// Non-durable slot for WP-C's compiled matcher.
 ///
 /// The substrate deliberately carries no regex engine. WP-C replaces the
@@ -125,11 +176,71 @@ impl Heap {
         self.allocate_object(HeapObject::Date(DateObject { milliseconds }))
     }
 
+    pub(crate) fn allocate_error(
+        &mut self,
+        kind: ErrorKind,
+        message: String,
+        cause: Option<Value>,
+        errors: Option<Value>,
+    ) -> Result<Value, RuntimeError> {
+        let has_cause = cause.is_some();
+        let has_errors = errors.is_some();
+        let mut members = cause.into_iter().collect::<Vec<_>>();
+        if let Some(errors) = errors {
+            members.push(errors);
+        }
+        let mut imported = self.import_values(members, 0)?.into_iter();
+        let cause = has_cause.then(|| imported.next().expect("cause member exists"));
+        let errors = if kind == ErrorKind::AggregateError {
+            has_errors.then(|| imported.next().expect("errors member exists"))
+        } else {
+            None
+        };
+        if kind == ErrorKind::AggregateError
+            && !matches!(
+                &errors,
+                Some(Value::Ref(id)) if matches!(self.get(*id)?, HeapObject::List(_))
+            )
+        {
+            return Err(RuntimeError::ValidationFailed {
+                reason: "AggregateError errors must be a JavaScript list".to_string(),
+            });
+        }
+        self.allocate_object(HeapObject::Error(ErrorObject {
+            kind,
+            message,
+            cause,
+            errors,
+        }))
+    }
+
     pub(crate) fn is_javascript_exotic(&self, id: HeapId) -> Result<bool, RuntimeError> {
         Ok(matches!(
             self.get(id)?,
-            HeapObject::RegExp(_) | HeapObject::Map(_) | HeapObject::Set(_) | HeapObject::Date(_)
+            HeapObject::RegExp(_)
+                | HeapObject::Map(_)
+                | HeapObject::Set(_)
+                | HeapObject::Date(_)
+                | HeapObject::Error(_)
         ))
+    }
+
+    pub(crate) fn javascript_instanceof(
+        &self,
+        value: &Value,
+        constructor: &str,
+    ) -> Result<bool, RuntimeError> {
+        let Value::Ref(id) = value else {
+            return Ok(false);
+        };
+        Ok(match self.get(*id)? {
+            HeapObject::RegExp(_) => constructor == "RegExp",
+            HeapObject::Map(_) => constructor == "Map",
+            HeapObject::Set(_) => constructor == "Set",
+            HeapObject::Date(_) => constructor == "Date",
+            HeapObject::Error(error) => constructor == "Error" || constructor == error.kind.name(),
+            _ => false,
+        })
     }
 
     pub(crate) fn regexp_last_index(&self, id: HeapId) -> Result<Option<u64>, RuntimeError> {
@@ -410,6 +521,14 @@ impl Heap {
             Some(HeapObject::Map(_)) => Value::String("[object Map]".into()),
             Some(HeapObject::Set(_)) => Value::String("[object Set]".into()),
             Some(HeapObject::RegExp(_)) => Value::String("[object RegExp]".into()),
+            Some(HeapObject::Error(error)) => Value::String(
+                if error.message.is_empty() {
+                    error.kind.name().to_string()
+                } else {
+                    format!("{}: {}", error.kind.name(), error.message)
+                }
+                .into(),
+            ),
             Some(HeapObject::Closure { .. }) => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
