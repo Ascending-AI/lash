@@ -72644,8 +72644,10 @@ kind = "struct"
 aliases = ["lash_core::AttemptContext"]
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+reason = "The executable FIG-1294 docs-snippet provider uses AttemptContext to emit an intent and asserts that the emitted intent preserves its session identity."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::agent_frame_id"
@@ -72654,7 +72656,7 @@ aliases = ["lash_core::AttemptContext::agent_frame_id"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::async_process_id"
@@ -72663,7 +72665,7 @@ aliases = ["lash_core::AttemptContext::async_process_id"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::attachments"
@@ -72672,7 +72674,7 @@ aliases = ["lash_core::AttemptContext::attachments"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::attempt_number"
@@ -72681,7 +72683,7 @@ aliases = ["lash_core::AttemptContext::attempt_number"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::cancellation_token"
@@ -72690,7 +72692,7 @@ aliases = ["lash_core::AttemptContext::cancellation_token"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::completion_key"
@@ -72699,7 +72701,7 @@ aliases = ["lash_core::AttemptContext::completion_key"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::decode_prepared_payload"
@@ -72708,7 +72710,7 @@ aliases = ["lash_core::AttemptContext::decode_prepared_payload"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::direct_completions"
@@ -72717,7 +72719,7 @@ aliases = ["lash_core::AttemptContext::direct_completions"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::intent_identity"
@@ -72726,7 +72728,7 @@ aliases = ["lash_core::AttemptContext::intent_identity"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::max_attempts"
@@ -72735,7 +72737,7 @@ aliases = ["lash_core::AttemptContext::max_attempts"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::named_phase"
@@ -72744,7 +72746,7 @@ aliases = ["lash_core::AttemptContext::named_phase"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::prepared_payload"
@@ -72753,7 +72755,7 @@ aliases = ["lash_core::AttemptContext::prepared_payload"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::process_execution_env_spec"
@@ -72772,7 +72774,7 @@ aliases = ["lash_core::AttemptContext::processes"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::provider"
@@ -72781,7 +72783,7 @@ aliases = ["lash_core::AttemptContext::provider"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::replay_key"
@@ -72790,7 +72792,7 @@ aliases = ["lash_core::AttemptContext::replay_key"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::runtime_process_id"
@@ -72799,7 +72801,7 @@ aliases = ["lash_core::AttemptContext::runtime_process_id"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::session_id"
@@ -72807,8 +72809,10 @@ kind = "function"
 aliases = ["lash_core::AttemptContext::session_id"]
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+reason = "The executable FIG-1294 attempt provider emits an intent from AttemptContext::session_id(), and its behavioral law asserts that the emitted intent preserves that identity."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::sessions"
@@ -72817,7 +72821,7 @@ aliases = ["lash_core::AttemptContext::sessions"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::tool_call_id"
@@ -72826,7 +72830,7 @@ aliases = ["lash_core::AttemptContext::tool_call_id"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::tool_execution_binding"
@@ -72835,7 +72839,7 @@ aliases = ["lash_core::AttemptContext::tool_execution_binding"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned attempt capability."
 
 [[api]]
 symbol = "lash::tools::AttemptContext::execution_scope_id"
@@ -72844,7 +72848,7 @@ aliases = ["lash_core::AttemptContext::execution_scope_id"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; the Runtime and Standard protocol scenario providers exercise this scope-honest identity while application examples do not implement third-party providers."
+reason = "The executable docs-snippet attempt provider covers session identity and process-environment serialization, but no docs example asserts this runtime-owned execution-scope capability."
 
 [[api]]
 symbol = "lash::tools::AttemptProcessReads"
@@ -73554,8 +73558,10 @@ aliases = ["lash_core::ToolIntentExecutionOutcome"]
 kind = "enum"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:158#assert!(matches!("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#ToolIntentExecutionOutcome::Executed { .. }"
+reason = "The executable FIG-1294 ingress law observes a realized host outcome and asserts that it is the typed Executed result."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Executed"
@@ -73563,8 +73569,10 @@ aliases = ["lash_core::ToolIntentExecutionOutcome::Executed"]
 kind = "variant"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:158#assert!(matches!("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#ToolIntentExecutionOutcome::Executed { .. }"
+reason = "The executable FIG-1294 ingress law matches the realized host outcome and asserts the Executed variant."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Executed::identity"
@@ -73573,7 +73581,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law asserts the Executed variant and its kind, but does not inspect this retained identity field."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Executed::kind"
@@ -73581,8 +73589,10 @@ aliases = ["lash_core::ToolIntentExecutionOutcome::Executed::kind"]
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:508#assert!(matches!("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:512#kind: lash_core::ToolIntentKind::CancelProcess,"
+reason = "The executable FIG-1294 ingress law matches a realized Executed outcome and asserts its concrete CancelProcess kind."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Executed::result"
@@ -73591,7 +73601,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law asserts the Executed variant and its kind, but does not inspect this retained result field."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Refused"
@@ -73600,7 +73610,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law asserts ingress-level refusals, but no docs example observes this runtime execution-outcome variant."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Refused::identity"
@@ -73609,7 +73619,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law does not observe a ToolIntentExecutionOutcome::Refused identity field."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Refused::intent_index"
@@ -73618,7 +73628,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law does not observe a ToolIntentExecutionOutcome::Refused intent index."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Refused::kind"
@@ -73627,7 +73637,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law asserts ingress refusal kinds, but does not observe this execution-outcome refusal kind field."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::Refused::refusal"
@@ -73636,7 +73646,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law asserts ingress refusal details, but does not observe this execution-outcome refusal payload."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::ProtocolRefused"
@@ -73645,7 +73655,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed empty-batch protocol-version refusal evidence; application examples do not fabricate retained protocol records."
+reason = "The executable FIG-1294 ingress law does not fabricate or observe a retained protocol-version refusal outcome."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::ProtocolRefused::refusal"
@@ -73654,7 +73664,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed empty-batch protocol-version refusal evidence; application examples do not fabricate retained protocol records."
+reason = "The executable FIG-1294 ingress law does not fabricate or inspect the retained protocol-version refusal payload."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::kind"
@@ -73663,7 +73673,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law matches the Executed outcome and its kind field, but no docs example calls this outcome accessor."
 
 [[api]]
 symbol = "lash::tools::ToolIntentExecutionOutcome::model_addendum"
@@ -73672,7 +73682,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+reason = "The executable FIG-1294 ingress law does not inspect model addenda on realized execution outcomes."
 
 [[api]]
 symbol = "lash_core::ToolIntentIdentity"
@@ -74099,7 +74109,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Runtime host contract carrying durable StartProcess parent-end evidence; examples do not implement alternative intent hosts."
+reason = "The executable FIG-1294 ingress law configures a parent-end policy on the intent, but does not inspect the Executed outcome's retained parent-end evidence."
 
 [[api]]
 symbol = "lash_core::ToolIntentParentEnd"

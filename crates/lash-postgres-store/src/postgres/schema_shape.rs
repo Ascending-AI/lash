@@ -104,11 +104,15 @@ const ANCHOR_TABLE: &str = "lash_schema_versions";
 /// # What no `SchemaCheck` relaxes
 ///
 /// This governs the catalog comparison and nothing else. Two preconditions sit
-/// outside it and reject an open in every mode:
+/// outside it:
 ///
-/// - **The component version stamp.** It is the reject-and-recreate boundary, and
-///   a valve adopted for a structural false positive must not become a path that
-///   silently runs one build against another schema generation.
+/// - **The component version stamp.** It is normally the reject-and-recreate
+///   boundary. Lash-managed `Enforce` can consume the one explicit migration from
+///   the published component-50 shape to 51 after exact source-shape preflight;
+///   a component-50 stamp over version-51 artifacts is ledger/schema divergence
+///   and is refused with an inspect-and-recreate remedy. Other mismatches remain
+///   fatal, so a valve adopted for a structural false positive cannot silently
+///   run one build against another schema generation.
 /// - **The await-event signing secret row.** Without it there is no key to
 ///   authenticate durable promises with, so there is nothing for open to return:
 ///   no secret, no store.
@@ -1037,9 +1041,11 @@ fn diff_paired_objects<T: PairedObject>(
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SchemaFinding {
-    /// The component version stamp is absent or names another version. Fatal in
-    /// every mode unless Lash-managed `Enforce` consumes an exact explicit
-    /// migration before the ordinary open report is evaluated.
+    /// The component version stamp is absent or names another version. Ordinary
+    /// open treats it as fatal unless Lash-managed `Enforce` consumes the exact
+    /// explicit migration from the published component-50 shape to 51 before
+    /// evaluating the open report. A stamped-50 store with version-51 artifacts
+    /// is refused as ledger/schema divergence rather than migrated partially.
     VersionMismatch {
         /// Version this build implements.
         expected: i32,
@@ -1367,10 +1373,14 @@ impl fmt::Display for SchemaReport {
         if self.has_version_finding() {
             return write!(
                 formatter,
-                " The component schema is a reject-and-recreate boundary with no migration \
-                 chain. Drain affected sessions and recreate the whole Lash trust domain with \
-                 this version: reset the tombstones, await-event revocation ledger, effect \
-                 journal, and Restate state together; see \
+                " The component schema is normally a reject-and-recreate boundary. This build \
+                 has one explicit Lash-managed migration from the published component-50 shape \
+                 to 51, run only under `SchemaCheck::Enforce` after exact source-shape preflight. \
+                 A component-50 stamp over version-51 artifacts is ledger/schema divergence and \
+                 must be refused with an inspect-and-recreate remedy; other mismatches require \
+                 the same remedy. Drain affected sessions and recreate the whole Lash trust \
+                 domain with this version: reset the tombstones, await-event revocation ledger, \
+                 effect journal, and Restate state together; see \
                  docs/persistence.html#delete-sessions. This gate is unconditional and no \
                  `SchemaCheck` relaxes it."
             );

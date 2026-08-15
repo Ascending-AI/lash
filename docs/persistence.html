@@ -56,7 +56,7 @@
     <div class="section" id="schema-compatibility">
       <div class="section-header">
         <h2>Schema Compatibility</h2>
-        <p>lash rejects a persistent database unless its schema version matches exactly: SQLite uses <code>PRAGMA user_version</code>, and Postgres records component versions. Postgres additionally verifies the live catalog's structure at open, because a host that provisions the database itself writes that version stamp too.</p>
+        <p>lash rejects a persistent database unless its schema version matches exactly after any applicable explicit migration: SQLite uses <code>PRAGMA user_version</code>, and Postgres records component versions. Postgres additionally verifies the live catalog's structure at open, because a host that provisions the database itself writes that version stamp too.</p>
       </div>
       <aside class="contract">
         <strong>Start fresh when the version moves</strong>
@@ -266,7 +266,7 @@ if let Some(process_report) = report.process {
       </div>
       <aside class="contract">
         <strong>Private by policy</strong>
-        <p>Raw SQL against a <code>lash_*</code> table is unsupported. Table names, column sets, and the shape of the record JSON stored in them are stable only within one schema version, and a version change is a clean break with no migration chain (see <a href="#schema-compatibility">schema compatibility</a> above).</p>
+        <p>Raw SQL against a <code>lash_*</code> table is unsupported. Table names, column sets, and the shape of the record JSON stored in them are stable only within one schema version, and a version change is either an explicit, published migration or a clean break requiring recreation (see <a href="#schema-compatibility">schema compatibility</a> above).</p>
       </aside>
       <p>Writes are the sharper edge. A hand-written <code>UPDATE</code> lands outside the revision fence and the idempotency receipt the store commits in the same transaction, so it can leave trigger, process, or session state that no retry, replay, or receipt read can reconstruct. Lash has no repair path for state changed that way, and the damage surfaces later rather than at the write.</p>
       <p>Every question worth asking a <code>lash_*</code> table has a supported answer:</p>
