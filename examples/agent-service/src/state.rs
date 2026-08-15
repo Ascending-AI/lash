@@ -34,6 +34,10 @@ pub(crate) struct AppStateData {
 }
 
 impl AppStateData {
+    // Every parameter is a distinct required collaborator; the repo's
+    // convention for constructors of this shape is the allow, not a config
+    // struct (see `docs-snippets::persistence`, `workflow-graph-roundtrip`).
+    #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "restate")]
     pub(crate) fn from_shared_db(
         core: LashCore,
@@ -42,6 +46,7 @@ impl AppStateData {
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
+        rlm_dialect: lash::rlm::RlmDialect,
         restate_ingress_url: Option<String>,
     ) -> Self {
         Self {
@@ -51,6 +56,7 @@ impl AppStateData {
             default_model,
             default_model_variant,
             durability,
+            rlm_dialect,
             restate_ingress_url,
             restate_http: reqwest::Client::new(),
         }

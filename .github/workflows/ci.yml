@@ -113,11 +113,18 @@ jobs:
 
       # The workspace check unifies testing features through dev-dependencies.
       # Keep these package-scoped consumers honest about feature forwarding.
+      #
+      # agent-service's `restate` feature is off by default, so the workspace
+      # check above compiles neither its restate constructor nor the E2E test
+      # target that calls it. That gap shipped a `missing field` break to the
+      # Functional E2E leg, twenty minutes of docker away, when a local
+      # workspace battery was entirely green. Compile it here in seconds.
       - name: Check package-scoped testing consumers
         run: |
           cargo check -p lash-protocol-rlm --features testing --locked
           cargo check -p agent-workbench --locked
           cargo check -p slack-clone --all-targets --features e2e --locked
+          cargo check -p agent-service --features restate --all-targets --locked
 
       - name: Check lash-runtime feature boundary
         run: |

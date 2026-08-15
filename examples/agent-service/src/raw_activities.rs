@@ -384,6 +384,10 @@ finish "done through raw activities"
             "scripted-model".to_string(),
             None,
             durability,
+            // The scripted provider in this fixture answers with a
+            // `<lashlang>` cell, so the fixture is a Lashlang one by
+            // construction rather than by omission.
+            lash::rlm::RlmDialect::Lashlang,
             None,
         );
         state
