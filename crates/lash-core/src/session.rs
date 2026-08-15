@@ -37,6 +37,16 @@ struct ToolCatalogArtifact {
 #[derive(Clone)]
 pub(crate) struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 
+type ToolContractFingerprints = Arc<Vec<[u8; 32]>>;
+type CompositionToolFingerprintCache = Arc<
+    std::sync::Mutex<
+        Vec<(
+            Arc<Vec<crate::llm::types::LlmToolSpec>>,
+            ToolContractFingerprints,
+        )>,
+    >,
+>;
+
 impl ToolCatalogHandle {
     fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
         Arc::clone(&self.0.tool_catalog)
@@ -112,6 +122,7 @@ pub struct Session {
     tool_registry: Arc<crate::ToolRegistry>,
     context_prompt_contributions: Vec<PromptContribution>,
     tool_catalog_cache: Arc<std::sync::Mutex<Vec<(ToolCatalogCacheKey, ToolCatalogHandle)>>>,
+    composition_tool_fingerprint_cache: CompositionToolFingerprintCache,
     /// Memoizes the rendered system prompt across turns. Most consecutive
     /// turns reuse the same template + context overlay, so the cache hits
     /// and we skip the section/Vec-join work in
@@ -120,7 +131,7 @@ pub struct Session {
     /// Fingerprint of the last model-facing composition emitted to the trace
     /// sink for this resident session. Effect-driver clones share the slot so
     /// a mid-turn execution-environment refresh cannot double-emit it.
-    composition_trace_fingerprint: Arc<std::sync::Mutex<Option<String>>>,
+    composition_trace_fingerprint: Arc<std::sync::Mutex<Option<[u8; 32]>>>,
 }
 
 impl Session {
@@ -135,6 +146,7 @@ impl Session {
             tool_registry,
             context_prompt_contributions: Vec::new(),
             tool_catalog_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
+            composition_tool_fingerprint_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
             prompt_cache: Arc::new(lash_sansio::PromptCache::new()),
             composition_trace_fingerprint: Arc::new(std::sync::Mutex::new(None)),
         };
@@ -160,17 +172,20 @@ impl Session {
             tool_registry: Arc::clone(&self.tool_registry),
             context_prompt_contributions: self.context_prompt_contributions.clone(),
             tool_catalog_cache: Arc::clone(&self.tool_catalog_cache),
+            composition_tool_fingerprint_cache: Arc::clone(
+                &self.composition_tool_fingerprint_cache,
+            ),
             prompt_cache: Arc::clone(&self.prompt_cache),
             composition_trace_fingerprint: Arc::clone(&self.composition_trace_fingerprint),
         }
     }
 
-    pub(crate) fn record_composition_trace_fingerprint(&self, fingerprint: &str) -> bool {
+    pub(crate) fn record_composition_trace_fingerprint(&self, fingerprint: [u8; 32]) -> bool {
         let mut last = self.composition_trace_fingerprint.lock_recover();
-        if last.as_deref() == Some(fingerprint) {
+        if last.as_ref() == Some(&fingerprint) {
             return false;
         }
-        *last = Some(fingerprint.to_string());
+        *last = Some(fingerprint);
         true
     }
 
@@ -309,6 +324,31 @@ impl Session {
         session_id: &str,
     ) -> Result<Arc<crate::TurnDriverPreamble>, crate::PluginError> {
         Ok(self.tool_catalog_cache_entry(session_id)?.preamble())
+    }
+
+    pub(crate) fn composition_tool_fingerprints(
+        &self,
+        tools: &Arc<Vec<crate::llm::types::LlmToolSpec>>,
+    ) -> ToolContractFingerprints {
+        let mut cache = self.composition_tool_fingerprint_cache.lock_recover();
+        if let Some((_, fingerprints)) = cache
+            .iter()
+            .find(|(cached_tools, _)| cached_tools.as_slice() == tools.as_slice())
+        {
+            return Arc::clone(fingerprints);
+        }
+        let fingerprints = Arc::new(
+            tools
+                .iter()
+                .map(crate::trace::composition_tool_fingerprint)
+                .collect(),
+        );
+        const MAX_COMPOSITION_FINGERPRINT_GENERATIONS: usize = 8;
+        if cache.len() == MAX_COMPOSITION_FINGERPRINT_GENERATIONS {
+            cache.remove(0);
+        }
+        cache.push((Arc::clone(tools), Arc::clone(&fingerprints)));
+        fingerprints
     }
 
     pub(crate) fn shared_tool_catalog(

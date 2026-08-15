@@ -19,13 +19,13 @@ use lash_trace::{
 use serde_json::json;
 
 #[test]
-fn trace_schema_version_is_pinned_at_4() {
+fn trace_schema_version_is_pinned_at_5() {
     // Tripwire. This is the current on-disk trace schema version. Every reader
     // (viewer, exporter, OTel bridge) keys off it, so a change here must be a
     // deliberate, documented schema bump — see the crate-level rustdoc and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy. If this fails,
     // read that policy before touching the constant.
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 4);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 5);
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn pre_frame_key_trace_schema_is_rejected_with_literal_versions() {
         lash_trace::ensure_trace_schema_version(3),
         Err(lash_trace::TraceSchemaVersionError {
             actual: 3,
-            expected: 4,
+            expected: 5,
         })
     );
 }
@@ -46,7 +46,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("schema-3 trace records must be refused during typed decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 4"
+        "unsupported trace schema version 3; expected 5"
     );
 
     let stale_and_malformed = r#"{"schema_version":3,"payload":"not a current event"}"#;
@@ -54,7 +54,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("the version refusal must precede current-shape validation");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 4"
+        "unsupported trace schema version 3; expected 5"
     );
 }
 
@@ -68,7 +68,7 @@ fn new_records_stamp_the_schema_version() {
     );
     assert_eq!(record.schema_version, lash_trace::TRACE_SCHEMA_VERSION);
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["schema_version"], 4);
+    assert_eq!(json["schema_version"], 5);
 }
 
 fn token_usage_sample() -> TraceTokenUsage {
@@ -321,7 +321,7 @@ fn event_samples_cover_every_variant() {
 }
 
 #[test]
-fn composition_change_is_an_additive_complete_snapshot_at_schema_version_four() {
+fn composition_change_is_a_complete_snapshot_at_schema_version_five() {
     let record = TraceRecord::new(
         TraceContext::default().for_session("composition-session"),
         TraceEvent::CompositionChanged {
@@ -345,7 +345,7 @@ fn composition_change_is_an_additive_complete_snapshot_at_schema_version_four() 
     );
     let mut json = serde_json::to_value(&record).expect("serialize composition snapshot");
 
-    assert_eq!(json["schema_version"], 4);
+    assert_eq!(json["schema_version"], 5);
     assert_eq!(json["type"], "composition_changed");
     assert_eq!(json["fingerprint"], "4c94f3");
     assert_eq!(json["rendered_system_prompt"], "Follow the stored policy.");
@@ -373,6 +373,65 @@ fn composition_change_is_an_additive_complete_snapshot_at_schema_version_four() 
             .into_iter()
             .collect(),
         "stripping the additive event leaves the pre-existing trace-record envelope"
+    );
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HistoricalV4ReadError {
+    UnsupportedVersion { actual: u32, expected: u32 },
+    Payload(String),
+}
+
+fn read_with_historical_v4_reader(input: &str) -> Result<(), HistoricalV4ReadError> {
+    let value: serde_json::Value = serde_json::from_str(input)
+        .map_err(|error| HistoricalV4ReadError::Payload(error.to_string()))?;
+    let actual = value["schema_version"]
+        .as_u64()
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or_else(|| HistoricalV4ReadError::Payload("missing schema_version".to_string()))?;
+    if actual != 4 {
+        return Err(HistoricalV4ReadError::UnsupportedVersion {
+            actual,
+            expected: 4,
+        });
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum HistoricalV4Event {
+        SessionStarted,
+    }
+
+    serde_json::from_value::<HistoricalV4Event>(value)
+        .map(|_| ())
+        .map_err(|error| HistoricalV4ReadError::Payload(error.to_string()))
+}
+
+#[test]
+fn historical_v4_reader_refuses_v5_before_interpreting_new_closed_enum_variant() {
+    let record = TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::CompositionChanged {
+            fingerprint: "fingerprint".to_string(),
+            rendered_system_prompt: "prompt".to_string(),
+            tool_schemas: Vec::new(),
+        },
+    );
+    let wire = serde_json::to_string(&record).expect("serialize v5 composition event");
+    assert_eq!(
+        read_with_historical_v4_reader(&wire),
+        Err(HistoricalV4ReadError::UnsupportedVersion {
+            actual: 5,
+            expected: 4,
+        }),
+        "the old reader's typed version gate must run before its closed enum decoder"
+    );
+
+    let forced_v4 = wire.replacen("\"schema_version\":5", "\"schema_version\":4", 1);
+    let error = read_with_historical_v4_reader(&forced_v4)
+        .expect_err("without the version gate, the new enum variant is unknown");
+    assert!(
+        matches!(error, HistoricalV4ReadError::Payload(message) if message.contains("unknown variant"))
     );
 }
 
@@ -565,7 +624,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
     );
     assert!(json["attempts"][1].get("reason").is_none());
     assert!(json["attempts"][1].get("delay_ms").is_none());
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 4);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 5);
 }
 
 #[test]
@@ -711,7 +770,7 @@ fn jsonl_round_trip_preserves_records() {
 
     assert_eq!(parsed, records, "JSONL round-trip must preserve records");
     for record in &parsed {
-        assert_eq!(record.schema_version, 4);
+        assert_eq!(record.schema_version, 5);
     }
 
     // Pin the diagnostic's `tool_calls` entry fields explicitly on the parsed
@@ -730,7 +789,7 @@ fn jsonl_round_trip_preserves_records() {
 }
 
 #[test]
-fn durable_step_events_are_additive_at_schema_version_four() {
+fn durable_step_events_round_trip_at_schema_version_five() {
     let events = vec![
         TraceEvent::JournaledEffectStarted {
             effect_name: "lash:turn:llm:1".to_string(),
@@ -770,7 +829,7 @@ fn durable_step_events_are_additive_at_schema_version_four() {
         let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
         let json = serde_json::to_value(&record).expect("serialize durable trace event");
         assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 4);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 5);
         assert_eq!(json["type"], expected_kind);
         let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
         assert_eq!(decoded.event.kind(), expected_kind);

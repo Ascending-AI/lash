@@ -12,6 +12,17 @@ use crate::llm::types::{
 };
 use crate::session_model::TokenUsage;
 use crate::{ToolCallOutcome, ToolCallOutput};
+use sha2::{Digest as _, Sha256};
+
+#[cfg(test)]
+thread_local! {
+    static COMPOSITION_SCHEMA_SERIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn composition_schema_serialization_count() -> usize {
+    COMPOSITION_SCHEMA_SERIALIZATIONS.with(std::cell::Cell::get)
+}
 
 pub(crate) fn emit_trace(
     sink: &Option<Arc<dyn TraceSink>>,
@@ -326,7 +337,63 @@ fn trace_tool_spec(tool: &LlmToolSpec) -> TraceToolSpec {
     }
 }
 
-pub(crate) fn trace_composition_snapshot(req: &LlmRequest) -> (String, String, Vec<TraceToolSpec>) {
+struct Sha256Writer(Sha256);
+
+impl std::io::Write for Sha256Writer {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+pub(crate) fn composition_tool_fingerprint(tool: &LlmToolSpec) -> [u8; 32] {
+    #[cfg(test)]
+    COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
+    let mut writer = Sha256Writer(Sha256::new());
+    serde_json::to_writer(&mut writer, tool)
+        .expect("model-facing tool contract serialization is infallible");
+    writer.0.finalize().into()
+}
+
+pub(crate) fn trace_composition_key(req: &LlmRequest, tool_fingerprints: &[[u8; 32]]) -> [u8; 32] {
+    debug_assert_eq!(req.tools.len(), tool_fingerprints.len());
+    let mut hash = Sha256::new();
+    hash.update(b"lash:model-facing-composition:v1\0");
+    if let Some(message) = req
+        .messages
+        .first()
+        .filter(|message| matches!(message.role, LlmRole::System))
+    {
+        for block in message.blocks.iter() {
+            if let LlmContentBlock::Text { text, .. } = block {
+                hash.update(text.len().to_le_bytes());
+                hash.update(text.as_bytes());
+            }
+        }
+    }
+    hash.update(tool_fingerprints.len().to_le_bytes());
+    for fingerprint in tool_fingerprints {
+        hash.update(fingerprint);
+    }
+    hash.finalize().into()
+}
+
+pub(crate) struct CompositionTraceSnapshot {
+    pub(crate) fingerprint: String,
+    pub(crate) rendered_system_prompt: String,
+    pub(crate) tool_schemas: Vec<TraceToolSpec>,
+}
+
+pub(crate) fn trace_composition_snapshot(
+    req: &LlmRequest,
+    fingerprint: [u8; 32],
+) -> CompositionTraceSnapshot {
+    #[cfg(test)]
+    COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
     let rendered_system_prompt = req
         .messages
         .first()
@@ -343,11 +410,15 @@ pub(crate) fn trace_composition_snapshot(req: &LlmRequest) -> (String, String, V
         })
         .unwrap_or_default();
     let tool_schemas = req.tools.iter().map(trace_tool_spec).collect::<Vec<_>>();
-    let fingerprint_preimage =
-        serde_json::to_vec(&(rendered_system_prompt.as_str(), tool_schemas.as_slice()))
-            .expect("composition trace snapshot serialization is infallible");
-    let fingerprint = lash_trace::sha256_hex(fingerprint_preimage);
-    (fingerprint, rendered_system_prompt, tool_schemas)
+    let fingerprint = fingerprint
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    CompositionTraceSnapshot {
+        fingerprint,
+        rendered_system_prompt,
+        tool_schemas,
+    }
 }
 
 pub(crate) fn trace_tool_call_output(output: &ToolCallOutput) -> lash_trace::TraceToolCallOutput {

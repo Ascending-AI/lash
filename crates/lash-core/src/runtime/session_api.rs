@@ -228,7 +228,12 @@ impl LashRuntime {
             checkpoint_ref: read.checkpoint_ref.clone(),
             token_ledger: read.token_ledger,
         };
+        // A resident refresh reconciles durable graph/checkpoint progress. It
+        // must not undo a host prompt mutation that is live in this process
+        // but has not reached the next commit boundary yet.
+        let live_prompt = self.policy.prompt.clone();
         apply_session_head(&mut self.state, &head);
+        self.state.policy.prompt = live_prompt;
         apply_session_checkpoint(&mut self.state, read.checkpoint).map_err(|source| {
             SessionError::Store {
                 context: "failed to restore session checkpoint".to_string(),

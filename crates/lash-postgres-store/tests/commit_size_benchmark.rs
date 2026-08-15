@@ -75,12 +75,8 @@ fn realistic_commit(
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.current_frame_node_id = Some(format!("{session_id}:node:0"));
-    commit.config = PersistedSessionConfig {
-        provider_id: "benchmark".to_string(),
-        model: state.policy.model,
-        turn_budget: state.policy.turn_budget,
-        prompt: state.policy.prompt,
-    };
+    commit.config = PersistedSessionConfig::from(&state.policy);
+    commit.config.provider_id = "benchmark".to_string();
     commit.graph = GraphAppend {
         leaf_node_id: nodes.last().map(|node| node.node_id.clone()),
         nodes,
@@ -153,12 +149,14 @@ fn measured_bytes_match_validate_budget_components() {
     assert!(matches!(
         commit.validate_budget(),
         Err(lash_core::StoreError::CommitByteBudgetExceeded {
+            session_config_bytes,
             graph_delta_bytes,
             checkpoint_bytes,
             attachment_manifest_bytes,
             total_bytes,
             max_bytes,
-        }) if graph_delta_bytes == expected.graph_delta_bytes
+        }) if session_config_bytes == expected.session_config_bytes
+            && graph_delta_bytes == expected.graph_delta_bytes
             && checkpoint_bytes == expected.checkpoint_bytes
             && attachment_manifest_bytes == expected.attachment_manifest_bytes
             && total_bytes == expected.total_bytes

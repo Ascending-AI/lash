@@ -177,6 +177,7 @@ mod store_commit_error_tests {
         assert!(node_error.message.contains("512-node transaction budget"));
 
         let byte_error = runtime_error_from_store_commit(StoreError::CommitByteBudgetExceeded {
+            session_config_bytes: 0,
             graph_delta_bytes: 900_000,
             checkpoint_bytes: 150_000,
             attachment_manifest_bytes: 1,

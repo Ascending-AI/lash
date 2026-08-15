@@ -422,12 +422,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         }
         edge_path.reverse();
         let fork_plan = lash_core::store::ForkPlan::derive(&request.session_id, edge_path)?;
-        let config = lash_core::PersistedSessionConfig {
-            provider_id: request.policy.recorded_provider_id().to_string(),
-            model: request.policy.model.clone(),
-            turn_budget: request.policy.turn_budget,
-            prompt: request.policy.prompt.clone(),
-        };
+        let config = lash_core::PersistedSessionConfig::from(&request.policy);
         let head = lash_core::store::SessionHeadMeta::assemble(
             lash_core::store::SessionHeadPayload {
                 schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,

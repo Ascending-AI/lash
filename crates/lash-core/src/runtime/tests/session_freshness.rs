@@ -115,6 +115,39 @@ async fn freshness_hydrates_when_revision_changed() {
 }
 
 #[tokio::test]
+async fn resident_refresh_does_not_revert_live_uncommitted_prompt() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    runtime
+        .add_prompt_contribution(crate::PromptContribution::guidance(
+            "Live host change",
+            "KEEP THIS LIVE PROMPT",
+        ))
+        .await
+        .expect("apply live prompt change");
+    let live_prompt = runtime.policy.prompt.clone();
+
+    let mut durable_head = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    durable_head.head_revision += 1;
+    durable_head.config.prompt = Some(crate::PromptLayer::new().with_contribution(
+        crate::PromptContribution::guidance("Stale durable value", "DO NOT RESTORE THIS"),
+    ));
+    store.save_session_head_meta(durable_head).await;
+
+    runtime
+        .refresh_session_graph_from_store()
+        .await
+        .expect("refresh resident graph");
+
+    assert_eq!(runtime.policy.prompt, live_prompt);
+    assert_eq!(runtime.state.policy.prompt, live_prompt);
+}
+
+#[tokio::test]
 async fn freshness_hydrates_when_leaf_changed() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;

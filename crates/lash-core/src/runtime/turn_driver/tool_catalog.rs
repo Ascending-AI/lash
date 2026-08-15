@@ -224,18 +224,20 @@ impl RuntimeTurnDriver<'_> {
         request: &LlmRequest,
     ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
         if self.host.core.tracing.trace_sink.is_some() {
-            let (fingerprint, rendered_system_prompt, tool_schemas) =
-                crate::trace::trace_composition_snapshot(request);
+            let tool_fingerprints = self.session.composition_tool_fingerprints(&request.tools);
+            let fingerprint =
+                crate::trace::trace_composition_key(request, tool_fingerprints.as_slice());
             if self
                 .session
-                .record_composition_trace_fingerprint(&fingerprint)
+                .record_composition_trace_fingerprint(fingerprint)
             {
+                let snapshot = crate::trace::trace_composition_snapshot(request, fingerprint);
                 self.emit_trace(
                     machine.protocol_iteration(),
                     lash_trace::TraceEvent::CompositionChanged {
-                        fingerprint,
-                        rendered_system_prompt,
-                        tool_schemas,
+                        fingerprint: snapshot.fingerprint,
+                        rendered_system_prompt: snapshot.rendered_system_prompt,
+                        tool_schemas: snapshot.tool_schemas,
                     },
                 );
             }

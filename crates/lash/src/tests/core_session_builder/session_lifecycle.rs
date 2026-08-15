@@ -1352,10 +1352,10 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
 }
 
 #[tokio::test]
-async fn session_created_yesterday_reopens_with_its_committed_prompt_layer() -> Result<()> {
+async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
     let expected_prompt = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance(
-            "Yesterday's policy",
+            "Committed policy",
             "Continue with the committed prompt configuration.",
         ),
     );
@@ -1365,7 +1365,7 @@ async fn session_created_yesterday_reopens_with_its_committed_prompt_layer() -> 
     persisted_policy.model = mock_model_spec();
     persisted_policy.prompt = expected_prompt.clone();
     let persisted = RuntimeSessionState {
-        session_id: "created-yesterday".to_string(),
+        session_id: "committed-session".to_string(),
         policy: persisted_policy,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1379,7 +1379,7 @@ async fn session_created_yesterday_reopens_with_its_committed_prompt_layer() -> 
         .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = core
-        .session("created-yesterday")
+        .session("committed-session")
         .store(store)
         .open()
         .await?;

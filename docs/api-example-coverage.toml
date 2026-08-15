@@ -12987,8 +12987,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PersistedSessionConfig::prompt"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1333#prompt: lash::prompt::PromptLayer::new(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1336#assert!(persisted.prompt.is_empty());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1333#prompt: Some(lash::prompt::PromptLayer::new()),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1337#assert!(encoded.get(\"prompt\").is_some());"
 
 [[api]]
 symbol = "lash::persistence::PersistedSessionConfig::provider_id"
@@ -16839,6 +16839,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::StoreError::CommitByteBudgetExceeded::session_config_bytes"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::CommitByteBudgetExceeded::session_config_bytes"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
 symbol = "lash::persistence::StoreError::CommitByteBudgetExceeded::max_bytes"
 kind = "field"
 availability = "default+all-features"
@@ -19912,7 +19921,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginError::Runtime"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1346#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1350#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -19922,8 +19931,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginError::Runtime::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1346#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1346#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1350#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1350#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
 
 [[api]]
 symbol = "lash::plugins::PluginError::RuntimeEffectController"
@@ -47979,8 +47988,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1339#assert!(cap_code.is_retryable());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1339#assert!(cap_code.is_retryable());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1343#assert!(cap_code.is_retryable());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1343#assert!(cap_code.is_retryable());"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]

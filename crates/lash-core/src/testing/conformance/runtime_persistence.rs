@@ -649,7 +649,7 @@ async fn session_prompt_layer_round_trips_through_the_committed_head(
         .await
         .expect("load session head")
         .expect("committed session head");
-    assert_eq!(head.config.prompt, expected_prompt);
+    assert_eq!(head.config.prompt, Some(expected_prompt.clone()));
     let restored = crate::store::load_persisted_session_state(store.as_ref())
         .await
         .expect("load persisted session state")

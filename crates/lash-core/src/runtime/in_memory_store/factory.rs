@@ -438,12 +438,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             crate::store::SessionHeadPayload {
                 schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
                 session_id: request.session_id.clone(),
-                config: crate::PersistedSessionConfig {
-                    provider_id: request.policy.recorded_provider_id().to_string(),
-                    model: request.policy.model.clone(),
-                    turn_budget: request.policy.turn_budget,
-                    prompt: request.policy.prompt.clone(),
-                },
+                config: crate::PersistedSessionConfig::from(&request.policy),
                 current_frame_node_id: Some(current_frame_node_id),
             },
             0,

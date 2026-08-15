@@ -319,11 +319,11 @@ pub struct PersistedSessionConfig {
     /// Session prompt configuration required to continue a cold-loaded
     /// session with the composition it last committed.
     ///
-    /// Heads written before this field existed omitted it and the runtime
-    /// reconstructed an empty layer. The serde default deliberately preserves
-    /// that historical behavior for old sessions.
-    #[serde(default, skip_serializing_if = "crate::PromptLayer::is_empty")]
-    pub prompt: crate::PromptLayer,
+    /// `None` is reserved for heads written before prompt persistence existed.
+    /// `Some(PromptLayer::new())` is an explicit committed empty layer and is
+    /// serialized so reopen authority can distinguish it from legacy absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<crate::PromptLayer>,
 }
 
 impl PersistedSessionConfig {
@@ -338,7 +338,18 @@ impl PersistedSessionConfig {
             provider_id: String::new(),
             model: crate::ModelSpec::default(),
             turn_budget,
-            prompt: crate::PromptLayer::new(),
+            prompt: None,
+        }
+    }
+}
+
+impl From<&crate::SessionPolicy> for PersistedSessionConfig {
+    fn from(policy: &crate::SessionPolicy) -> Self {
+        Self {
+            provider_id: policy.recorded_provider_id().to_string(),
+            model: policy.model.clone(),
+            turn_budget: policy.turn_budget,
+            prompt: Some(policy.prompt.clone()),
         }
     }
 }
@@ -690,12 +701,7 @@ impl SessionNodeRecord {
     /// Provider and model captured by this frame boundary.
     pub fn frame_config(&self) -> Option<PersistedSessionConfig> {
         let (_, assignment, _) = self.frame_open()?;
-        Some(PersistedSessionConfig {
-            provider_id: assignment.policy.recorded_provider_id().to_string(),
-            model: assignment.policy.model.clone(),
-            turn_budget: assignment.policy.turn_budget,
-            prompt: assignment.policy.prompt.clone(),
-        })
+        Some(PersistedSessionConfig::from(&assignment.policy))
     }
 
     /// Decodes a plugin node body for store and protocol implementors, returning `None` when the

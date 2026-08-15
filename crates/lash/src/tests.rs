@@ -93,16 +93,18 @@ struct SnapshotStore {
 
 impl SnapshotStore {
     fn with_state(state: RuntimeSessionState) -> Self {
+        let config = lash_core::PersistedSessionConfig::from(&state.policy);
+        Self::with_state_and_config(state, config)
+    }
+
+    fn with_state_and_config(
+        state: RuntimeSessionState,
+        config: lash_core::PersistedSessionConfig,
+    ) -> Self {
         let turn_state = state.turn_state();
         let session_meta = lash_core::SessionMeta {
             session_id: state.session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-        };
-        let config = lash_core::PersistedSessionConfig {
-            provider_id: state.policy.recorded_provider_id().to_string(),
-            model: state.policy.model.clone(),
-            turn_budget: state.policy.turn_budget,
-            prompt: state.policy.prompt.clone(),
         };
         let mut components = std::collections::BTreeMap::new();
         if let Some(tool_state) = state.tool_state_snapshot() {
