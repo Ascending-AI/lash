@@ -14,14 +14,15 @@ impl ExecutionHost for FluencyHost {
                         .operations
                         .iter()
                         .enumerate()
-                        .map(|(index, _)| {
-                            ResourceOperationResult::Value(Value::String(
-                                format!("page-{}", index + 1).into(),
-                            ))
+                        .map(|(index, call)| {
+                            ResourceOperationResult::Value(resource_operation_value(call, index))
                         })
                         .collect(),
                 ),
             )),
+            AbilityOp::ResourceOperation(call) => {
+                Ok(AbilityResult::Value(resource_operation_value(&call, 0)))
+            }
             AbilityOp::StartProcess(_) => {
                 Ok(AbilityResult::Value(Value::String("fluency-run".into())))
             }
@@ -36,8 +37,113 @@ impl ExecutionHost for FluencyHost {
     }
 }
 
+/// Answers one host resource operation.
+///
+/// `Date.now()` and `Math.random()` are journaled reads on the
+/// `__typescript_runtime` resource and `registerTrigger` is a call on the
+/// trigger registry — host operations rather than language builtins, so the
+/// host has to answer each in its own declared shape. Everything else is a
+/// tool call and gets the corpus's page payload.
+fn resource_operation_value(call: &lashlang::ResourceOperation, index: usize) -> Value {
+    let alias = match &call.receiver {
+        Value::Resource(handle) => handle.alias.as_str(),
+        _ => "",
+    };
+    match (alias, call.operation.as_str()) {
+        ("__typescript_runtime", "now") => Value::Number(1_700_000_000_000.0),
+        ("__typescript_runtime", "random") => Value::Number(0.5),
+        ("triggers", "register") => trigger_registration_value(),
+        _ => Value::String(format!("page-{}", index + 1).into()),
+    }
+}
+
+/// A registration record shaped like the one `triggers.register` returns.
+fn trigger_registration_value() -> Value {
+    let mut record = lashlang::Record::new();
+    record.insert(
+        "subscription_key".to_string(),
+        Value::String("fluency-subscription".into()),
+    );
+    record.insert("incarnation".to_string(), Value::String("1".into()));
+    record.insert("revision".to_string(), Value::Number(1.0));
+    record.insert(
+        "registrant".to_string(),
+        Value::Record(std::sync::Arc::new(lashlang::Record::new())),
+    );
+    record.insert(
+        "manifest_membership".to_string(),
+        Value::String("present_in_current_artifact".into()),
+    );
+    record.insert(
+        "source_key".to_string(),
+        Value::String("timer.Schedule".into()),
+    );
+    record.insert("name".to_string(), Value::String("fluency-trigger".into()));
+    record.insert(
+        "source_type".to_string(),
+        Value::String("timer.Schedule".into()),
+    );
+    record.insert(
+        "source".to_string(),
+        Value::Record(std::sync::Arc::new(lashlang::Record::new())),
+    );
+    record.insert(
+        "target".to_string(),
+        Value::Record(std::sync::Arc::new(lashlang::Record::new())),
+    );
+    record.insert("enabled".to_string(), Value::Bool(true));
+    Value::Record(std::sync::Arc::new(record))
+}
+
+/// The corpus's host environment.
+///
+/// This mirrors what the real RLM host builds in
+/// `lash_lashlang_runtime::lashlang_host_environment_from_tool_catalog`: the
+/// `__typescript_runtime` `now`/`random` bindings behind `Date.now()` and
+/// `Math.random()`, and — with triggers enabled — the trigger resource
+/// operations behind `registerTrigger`. A bare catalog cannot reach any of the
+/// three, so a corpus built on one was silently unable to exercise three
+/// behaviours the production prompt advertises.
 fn fluency_environment() -> lashlang::LashlangHostEnvironment {
     let mut catalog = lashlang::LashlangHostCatalog::new();
+    for (operation, host_operation) in [
+        ("now", "typescript.runtime.now"),
+        ("random", "typescript.runtime.random"),
+    ] {
+        catalog
+            .add_module_operation_binding(
+                ["__typescript_runtime"],
+                "typescript.Runtime",
+                operation,
+                host_operation,
+                lashlang::ResourceOperationBinding {
+                    input_ty: lashlang::TypeExpr::Any,
+                    output_ty: lashlang::TypeExpr::Float,
+                    output_from_input: None,
+                },
+            )
+            .expect("fluency typescript runtime binding");
+    }
+    lashlang::add_trigger_resource_operations(&mut catalog);
+    catalog
+        .add_trigger_source_constructor(
+            ["timer", "Schedule"],
+            lashlang::TypeExpr::Object(vec![lashlang::TypeField {
+                name: "expr".into(),
+                ty: lashlang::TypeExpr::Str,
+                optional: false,
+            }]),
+            lashlang::NamedDataType::object(
+                "timer.Tick",
+                vec![lashlang::TypeField {
+                    name: "fired_at".into(),
+                    ty: lashlang::TypeExpr::Str,
+                    optional: false,
+                }],
+            )
+            .expect("valid fluency timer tick type"),
+        )
+        .expect("fluency timer trigger source");
     catalog
         .add_module_operation_binding(
             ["web"],
@@ -56,7 +162,8 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
         lashlang::LashlangAbilities::default()
             .with_sleep()
             .with_processes()
-            .with_process_signals(),
+            .with_process_signals()
+            .with_triggers(),
     )
 }
 
@@ -137,6 +244,31 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         const shouted = rows.map((row) => row.toUpperCase());
         const indexed = rows.map((row, index) => index + ":" + row);
         finish(shouted.join(",") + "|" + indexed.join(","));
+        "#,
+        // The journaled runtime reads. Both are named in the production prompt
+        // and both are host operations, not language builtins, so a corpus
+        // against a bare catalog could not reach either.
+        r#"
+        const startedAt = Date.now();
+        const jitter = Math.random();
+        finish({ startedAt, bounded: jitter >= 0 && jitter <= 1 });
+        "#,
+        // `registerTrigger`, the third advertised behaviour the bare catalog
+        // could not reach: it needs the trigger resource operations and a
+        // trigger source constructor.
+        r#"
+        const remember = defineProcess({
+          name: "remember", signals: {},
+          run: async (tick: unknown) => { return tick; }
+        });
+        const source = timer.Schedule({ expr: "0 8 * * *" });
+        const registration = await registerTrigger({
+          source,
+          target: remember,
+          inputs: { tick: trigger.event },
+          name: "fluency-trigger"
+        });
+        finish(registration.enabled);
         "#,
     ];
 
