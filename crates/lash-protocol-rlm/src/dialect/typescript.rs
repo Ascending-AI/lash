@@ -93,7 +93,7 @@ declare const console: { log(...values: unknown[]): void };
 declare function print(value: unknown): void;
 declare function finish(value: unknown): never;
 declare function sleep(milliseconds: number): Promise<void>;
-declare function waitSignal(name: string): Promise<unknown>;
+declare function waitSignal(name: string): Promise<unknown>; // inside a defineProcess run body only
 declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
 declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: Record<string, unknown>): ProcessHandle<Output>;
 declare function wake(progress: unknown): void;
@@ -101,7 +101,7 @@ declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: u
 declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
 ```
 
-Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. The keys of `start`'s second argument are the `run` function's own parameter names, not a fixed `input` field — `run: async (request: unknown)` is started as `start(p, { request: value })`, and any other key rejects; `registerTrigger`'s `inputs` keys work the same way. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
+Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. The keys of `start`'s second argument are the `run` function's own parameter names, not a fixed `input` field — `run: async (request: unknown)` is started as `start(p, { request: value })`, and any other key rejects; `registerTrigger`'s `inputs` keys work the same way. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `waitSignal` is the only primitive above that is scoped to a process body: outside one it is refused as "`waitSignal` can only be used inside a process body", while `await sleep(ms)` is also valid in a cell. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
 
 ### v1 guardrails
 
@@ -505,6 +505,97 @@ mod tests {
             phantom.is_empty(),
             "the prompt names {phantom:?}, which the dialect cannot emit"
         );
+    }
+
+    /// The second, structural check on prompt honesty: the diagnostics the
+    /// prompt's own primitives can emit must be spelled in this dialect.
+    ///
+    /// `every_diagnostic_code_named_in_the_prompt_exists` walks `TS_` tokens,
+    /// so it can only see *codes*. It cannot see an identifier leak, and one
+    /// shipped: misusing `waitSignal` rejected with ``` `wait_signal` can only
+    /// be used inside a process body ``` — a Lashlang identifier that appears
+    /// nowhere in the TypeScript prompt, handed to a model that has no way to
+    /// map it back. This walks the other direction: every primitive the prompt
+    /// declares is misused on purpose, and the resulting model-facing message
+    /// must not name a Lashlang-only spelling.
+    #[test]
+    fn no_diagnostic_from_a_prompt_primitive_names_a_lashlang_identifier() {
+        let host = lashlang::LashlangHostEnvironment::new(
+            lashlang::LashlangHostCatalog::default(),
+            lashlang::LashlangAbilities::all(),
+        );
+        // Identifiers that exist only in Lashlang's surface. A model reading
+        // the TypeScript prompt has never seen any of them.
+        let lashlang_only = [
+            "wait_signal",
+            "signal_run",
+            "define_process",
+            "register_trigger",
+            "__typescript_runtime",
+        ];
+        // Misuse shapes for the primitives the Host API block declares. Each
+        // must reject, and reject in TypeScript's own vocabulary.
+        let misuses = [
+            ("waitSignal at top level", "await waitSignal(\"go\");"),
+            (
+                "waitSignal inside a plain function",
+                "function f(): unknown { return waitSignal(\"go\"); } finish(f());",
+            ),
+            (
+                "defineProcess not at top level",
+                "function f(): unknown { return defineProcess({ name: \"p\", signals: {}, run: async (a: unknown) => { return a; } }); } finish(f());",
+            ),
+            (
+                "a non-literal process name",
+                "const n = \"p\"; const p = defineProcess({ name: n, signals: {}, run: async (a: unknown) => { return a; } }); finish(1);",
+            ),
+            (
+                "a start key that is not a run parameter",
+                "const p = defineProcess({ name: \"p\", signals: {}, run: async (request: unknown) => { return request; } }); finish(start(p, { input: 1 }));",
+            ),
+            (
+                "registerTrigger with a non-literal target",
+                "const p = defineProcess({ name: \"p\", signals: {}, run: async (a: unknown) => { return a; } }); const t = p; finish(await registerTrigger({ source: 1, target: t, inputs: {} }));",
+            ),
+            (
+                "an unknown binding",
+                "finish(await nowhere.fetch({ url: \"x\" }));",
+            ),
+        ];
+
+        let mut leaks = Vec::new();
+        for (label, source) in misuses {
+            let message = match lash_typescript::link(source, &host) {
+                Ok(_) => {
+                    leaks.push(format!("{label}: linked, so it is not a misuse at all"));
+                    continue;
+                }
+                Err(error) => error.to_string(),
+            };
+            for identifier in lashlang_only {
+                if message.contains(identifier) {
+                    leaks.push(format!("{label}: names `{identifier}` — {message}"));
+                }
+            }
+        }
+        assert!(
+            leaks.is_empty(),
+            "model-facing TypeScript diagnostics leak Lashlang identifiers: {leaks:#?}"
+        );
+
+        // The prompt now states the scope rule the reject enforces, and states
+        // that its neighbour is *not* scoped that way. Both halves are pinned
+        // here, because a scope annotation that is wrong in the permissive
+        // direction is worse than none.
+        let refusal = lash_typescript::link("await waitSignal(\"go\");", &host)
+            .expect_err("waitSignal outside a process body must reject")
+            .to_string();
+        assert!(
+            refusal.contains("`waitSignal` can only be used inside a process body"),
+            "the prompt quotes this message verbatim: {refusal}"
+        );
+        lash_typescript::link("await sleep(1); finish(1);", &host)
+            .expect("the prompt says sleep is also valid in a cell");
     }
 
     #[test]
