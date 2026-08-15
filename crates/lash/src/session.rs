@@ -137,15 +137,18 @@ impl SessionBuilder {
                 requested: self.session_id,
             });
         }
-        reconcile_loaded_state_policy(&mut state, &policy, self.spec.prompt.is_some(), None);
+        let supplied_prompt = state.policy.prompt.clone();
+        reconcile_loaded_state_policy(
+            &mut state,
+            &policy,
+            self.spec.prompt.is_some(),
+            Some(&supplied_prompt),
+        );
         Box::pin(self.open_resolved(state, store)).await
     }
 
     fn session_policy(&self) -> SessionPolicy {
         let mut policy = self.spec.resolve_against(&self.core.policy);
-        if let Some(session_prompt) = self.spec.prompt.as_ref() {
-            policy.prompt = compose_prompt_layers(&self.core.policy.prompt, session_prompt);
-        }
         policy.session_id = Some(self.session_id.clone());
         policy
     }
@@ -345,26 +348,6 @@ fn reconcile_loaded_state_policy(
     if !host_prompt_is_present && let Some(persisted_prompt) = persisted_prompt {
         state.policy.prompt = persisted_prompt.clone();
     }
-}
-
-fn compose_prompt_layers(base: &PromptLayer, overlay: &PromptLayer) -> PromptLayer {
-    let mut composed = base.clone();
-    if let Some(template) = overlay.template.as_ref() {
-        composed.template = Some(template.clone());
-    }
-    for (slot, layer) in &overlay.slots {
-        if layer.reset {
-            composed.slots.insert(*slot, layer.clone());
-        } else {
-            composed
-                .slots
-                .entry(*slot)
-                .or_default()
-                .contributions
-                .extend(layer.contributions.iter().cloned());
-        }
-    }
-    composed
 }
 
 async fn load_persisted_state(

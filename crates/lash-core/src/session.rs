@@ -331,10 +331,9 @@ impl Session {
         tools: &Arc<Vec<crate::llm::types::LlmToolSpec>>,
     ) -> ToolContractFingerprints {
         let mut cache = self.composition_tool_fingerprint_cache.lock_recover();
-        if let Some((_, fingerprints)) = cache
-            .iter()
-            .find(|(cached_tools, _)| cached_tools.as_slice() == tools.as_slice())
-        {
+        if let Some((_, fingerprints)) = cache.iter().find(|(cached_tools, _)| {
+            Arc::ptr_eq(cached_tools, tools) || cached_tools.as_slice() == tools.as_slice()
+        }) {
             return Arc::clone(fingerprints);
         }
         let fingerprints = Arc::new(

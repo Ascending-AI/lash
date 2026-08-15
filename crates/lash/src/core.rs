@@ -1241,7 +1241,6 @@ impl LashCoreBuilder {
         let base_policy = SessionPolicy {
             provider_id,
             model,
-            prompt: self.prompt.take().unwrap_or_default(),
             ..SessionPolicy::new(turn_budget)
         };
         let policy = self.session_spec.resolve_against(&base_policy);

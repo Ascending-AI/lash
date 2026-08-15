@@ -75,6 +75,119 @@ fn rendered_system_prompt(request: &lash_core::LlmRequest) -> String {
 }
 
 #[tokio::test]
+async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt() -> Result<()> {
+    use crate::PromptLayerSink as _;
+
+    let store = Arc::new(SnapshotStore::default());
+    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let core_v1 = explicit_ephemeral_facets(LashCore::standard_builder(
+        crate::TurnBudget::Unbounded,
+    ))
+    .instructions("CORE PROMPT V1")
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core_v1
+        .session("core-prompt-redeploy")
+        .store(store.clone() as Arc<dyn lash_core::RuntimePersistence>)
+        .open()
+        .await?;
+    session.turn(TurnInput::text("commit V1")).run().await?;
+    drop(session);
+    drop(core_v1);
+
+    let core_v2 = explicit_ephemeral_facets(LashCore::standard_builder(
+        crate::TurnBudget::Unbounded,
+    ))
+    .instructions("CORE PROMPT V2")
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    core_v2
+        .session("core-prompt-redeploy")
+        .store(store as Arc<dyn lash_core::RuntimePersistence>)
+        .open()
+        .await?
+        .turn(TurnInput::text("render V2"))
+        .run()
+        .await?;
+
+    let requests = captures.lock_recover();
+    assert_eq!(requests.len(), 2);
+    let rendered = rendered_system_prompt(&requests[1]);
+    assert!(rendered.contains("CORE PROMPT V2"));
+    assert!(!rendered.contains("CORE PROMPT V1"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn open_with_state_without_builder_prompt_renders_supplied_snapshot_prompt() -> Result<()> {
+    let supplied = lash_core::PromptLayer::new().with_contribution(
+        lash_core::PromptContribution::guidance(
+            "Supplied snapshot",
+            "OPEN WITH STATE SUPPLIED PROMPT",
+        ),
+    );
+    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(prompt_capture_provider(Arc::clone(&captures)))
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+
+    core.session("open-with-state-supplied-prompt")
+        .open_with_state(prompt_probe_state(
+            "open-with-state-supplied-prompt",
+            supplied,
+        ))
+        .await?
+        .turn(TurnInput::text("probe"))
+        .run()
+        .await?;
+
+    let requests = captures.lock_recover();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        rendered_system_prompt(&requests[0]).contains("OPEN WITH STATE SUPPLIED PROMPT")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn open_with_state_builder_prompt_replaces_supplied_snapshot_prompt() -> Result<()> {
+    use crate::PromptLayerSink as _;
+
+    let supplied = lash_core::PromptLayer::new().with_contribution(
+        lash_core::PromptContribution::guidance(
+            "Supplied snapshot",
+            "OPEN WITH STATE OLD PROMPT",
+        ),
+    );
+    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(prompt_capture_provider(Arc::clone(&captures)))
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+
+    core.session("open-with-state-builder-prompt")
+        .instructions("OPEN WITH STATE NEW PROMPT")
+        .open_with_state(prompt_probe_state(
+            "open-with-state-builder-prompt",
+            supplied,
+        ))
+        .await?
+        .turn(TurnInput::text("probe"))
+        .run()
+        .await?;
+
+    let requests = captures.lock_recover();
+    assert_eq!(requests.len(), 1);
+    let rendered = rendered_system_prompt(&requests[0]);
+    assert!(rendered.contains("OPEN WITH STATE NEW PROMPT"));
+    assert!(!rendered.contains("OPEN WITH STATE OLD PROMPT"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_in_memory() -> Result<()> {
     use crate::PromptLayerSink as _;
 
@@ -152,7 +265,7 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_in_memory
 }
 
 #[tokio::test]
-async fn explicit_empty_committed_prompt_beats_inherited_host_default_in_memory() -> Result<()> {
+async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_memory() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let state = prompt_probe_state("explicit-empty-prompt", lash_core::PromptLayer::new());
@@ -174,8 +287,8 @@ async fn explicit_empty_committed_prompt_beats_inherited_host_default_in_memory(
 
     let requests = captures.lock_recover();
     assert!(
-        !rendered_system_prompt(&requests[0]).contains("INHERITED CORE DEFAULT"),
-        "present empty is authority, not legacy absence"
+        rendered_system_prompt(&requests[0]).contains("INHERITED CORE DEFAULT"),
+        "durable session state must not erase the live core prompt"
     );
     Ok(())
 }
@@ -362,7 +475,7 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
 }
 
 #[tokio::test]
-async fn explicit_empty_committed_prompt_beats_inherited_host_default_sqlite() -> Result<()> {
+async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqlite() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let (_dir, _factory, store) =
@@ -380,7 +493,7 @@ async fn explicit_empty_committed_prompt_beats_inherited_host_default_sqlite() -
         .turn(TurnInput::text("probe"))
         .run()
         .await?;
-    assert!(!rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE INHERITED DEFAULT"));
+    assert!(rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE INHERITED DEFAULT"));
     Ok(())
 }
 

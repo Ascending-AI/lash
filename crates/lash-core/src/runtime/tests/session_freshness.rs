@@ -148,6 +148,69 @@ async fn resident_refresh_does_not_revert_live_uncommitted_prompt() {
 }
 
 #[tokio::test]
+async fn resident_refresh_does_not_revert_live_uncommitted_model() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let live_model = crate::ModelSpec::builder("live-uncommitted-model")
+        .context_window_tokens(123_456)
+        .build()
+        .expect("live model");
+    runtime.set_model(live_model.clone());
+
+    let mut durable_head = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    durable_head.head_revision += 1;
+    durable_head.config.model = crate::ModelSpec::builder("stale-durable-model")
+        .context_window_tokens(65_536)
+        .build()
+        .expect("stale durable model");
+    store.save_session_head_meta(durable_head).await;
+
+    runtime
+        .refresh_session_graph_from_store()
+        .await
+        .expect("refresh resident graph");
+
+    assert_eq!(runtime.policy.model, live_model);
+    assert_eq!(runtime.state.policy.model, live_model);
+}
+
+#[tokio::test]
+async fn resident_refresh_does_not_revert_live_uncommitted_provider() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let live_provider = TestProvider::builder()
+        .kind("live-uncommitted-provider")
+        .complete_error("provider must not be called by refresh")
+        .build()
+        .into_handle();
+    runtime.set_provider(live_provider);
+
+    let mut durable_head = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    durable_head.head_revision += 1;
+    durable_head.config.provider_id = "stale-durable-provider".to_string();
+    store.save_session_head_meta(durable_head).await;
+
+    runtime
+        .refresh_session_graph_from_store()
+        .await
+        .expect("refresh resident graph");
+
+    assert_eq!(runtime.policy.provider_id, "live-uncommitted-provider");
+    assert_eq!(
+        runtime.state.policy.provider_id,
+        "live-uncommitted-provider"
+    );
+}
+
+#[tokio::test]
 async fn freshness_hydrates_when_leaf_changed() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;
