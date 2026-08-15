@@ -435,7 +435,7 @@ pub(crate) async fn finalize_tool_result_with_execution_context(
         ))
         .await
     {
-        Ok(directives) => apply_after_tool_directives(context, result, directives).await,
+        Ok(directives) => Box::pin(apply_after_tool_directives(context, result, directives)).await,
         Err(err) => runtime_failure(
             ToolFailureClass::Internal,
             "after_tool_call_failed",
