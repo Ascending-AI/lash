@@ -295,3 +295,31 @@ fn typescript_this_parameter_is_erased_before_runtime_arity() {
         Value::Number(1.0)
     );
 }
+
+/// An empty search expands per UTF-16 code unit in ECMA, so on an astral
+/// receiver node produces lone surrogates between the halves of a surrogate
+/// pair. Those are not representable here, and quietly expanding per Unicode
+/// scalar instead would be a silent divergence — the dialect's whole claim is
+/// that a difference is either absent or named. `split('')` already refuses the
+/// same shape for the same reason, so this refuses alongside it.
+#[test]
+fn empty_search_replace_all_refuses_to_split_a_surrogate_pair() {
+    let error = execute("finish('\u{1F600}'.replaceAll('', '-'));")
+        .expect_err("an astral receiver cannot expand per code unit");
+    assert!(
+        error
+            .to_string()
+            .contains("TS_LONE_SURROGATE_UNSUPPORTED"),
+        "the refusal is the named one: {error}"
+    );
+
+    // BMP receivers are unaffected, including multi-byte ones.
+    assert_eq!(
+        finished("finish('café'.replaceAll('', '.'));"),
+        Value::String(".c.a.f.é.".into())
+    );
+    assert_eq!(
+        finished("finish('ab'.replaceAll('', '-'));"),
+        Value::String("-a-b-".into())
+    );
+}

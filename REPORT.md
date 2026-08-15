@@ -92,9 +92,13 @@ kind of finding for a layer this size. See
 
 ### Standard library and safety
 
-- The advertised inventory contains 55 method names: 37 static methods and 18
+- The advertised inventory contains 64 method names: 37 static methods and 27
   instance method names across String, Array, Object, JSON, Number, and Math.
-  Every absent operation is a named static or typed runtime rejection.
+  Every absent operation is a named static or typed runtime rejection. The
+  instance half is not a number this report maintains: the register and the
+  lowerer's allowlist are one list read from two places, and
+  `instance_method_inventory_matches_the_lowerer` asserts set equality in both
+  directions, so neither can move without the other.
 - Checked Node v25.2.1 differentials and focused regressions cover coercion,
   UTF-16-sensitive behavior, key ordering, replacement tokens, JSON number
   formatting, numeric edge cases, optional arguments, and the supported method
