@@ -407,7 +407,9 @@ fn output_limit_unclosed_cell_retries_with_shorten_block_diagnostic() {
                 part.content.contains("shorter block")
                     && part.content.contains("output limit")
                     && part.content.contains("4096")
-                    && part.content.contains("do less per cell")
+                    // The Lashlang reader's noun, from the dialect's own
+                    // vocabulary: this fixture runs the default dialect.
+                    && part.content.contains("do less per block")
             }))
     );
     assert!(assistant_visible_texts(&machine).is_empty());

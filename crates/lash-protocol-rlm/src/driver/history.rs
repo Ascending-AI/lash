@@ -222,18 +222,18 @@ pub(super) fn render_history_messages(
                         }
                     })
                     .collect::<Vec<_>>();
-                let obs_text = step_output_text(
-                    input.dialect.prompt_vocabulary(),
-                    history_projection
+                let obs_text = step_output_text(StepOutputInput {
+                    vocabulary: input.dialect.prompt_vocabulary(),
+                    index: history_projection
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
-                    &step.output,
-                    &image_refs,
-                    &step.calls,
-                    step.calls_omitted,
-                    step.error.as_deref(),
-                    step.final_output.as_ref(),
-                );
+                    output: &step.output,
+                    images: &image_refs,
+                    calls: &step.calls,
+                    calls_omitted: step.calls_omitted,
+                    error: step.error.as_deref(),
+                    final_output: step.final_output.as_ref(),
+                });
                 let mut obs_blocks = vec![text_block(obs_text, false)];
                 append_borrowed_entry_image_blocks(entry, attachments, &mut obs_blocks);
                 messages.push(LlmMessage::new(LlmRole::User, obs_blocks));
@@ -437,16 +437,28 @@ fn message_text(
 /// handles), images, executed calls, error, and final value. Calls intentionally
 /// render even on success: the model pays the token cost to distinguish work
 /// that ran from work that failed before dispatch. Never empty.
-fn step_output_text(
+struct StepOutputInput<'a> {
     vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
-    output: &[String],
-    images: &[RlmImageRef],
-    calls: &[lash_rlm_types::RlmExecutedCall],
+    output: &'a [String],
+    images: &'a [RlmImageRef],
+    calls: &'a [lash_rlm_types::RlmExecutedCall],
     calls_omitted: usize,
-    error: Option<&str>,
-    final_output: Option<&serde_json::Value>,
-) -> String {
+    error: Option<&'a str>,
+    final_output: Option<&'a serde_json::Value>,
+}
+
+fn step_output_text(input: StepOutputInput<'_>) -> String {
+    let StepOutputInput {
+        vocabulary,
+        index,
+        output,
+        images,
+        calls,
+        calls_omitted,
+        error,
+        final_output,
+    } = input;
     let mut out = String::new();
     for (output_index, item) in output.iter().enumerate() {
         let (preview, projected_lossy) = project_history_output(item);
