@@ -81,6 +81,13 @@ async fn create_session(
         }
         Some(name) => name.to_string(),
     };
+    // Creating a session is creating something to observe, so it clears the
+    // same gate the routes that read one do.
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::Observe {
+            session_id: session_id.clone(),
+        })?;
     let entry = state.sessions.record(session_id.clone(), name, dialect);
     // Open once so the session exists for the selector and the first `/api/state`
     // poll, through the same builder every route uses.
@@ -122,6 +129,11 @@ async fn select_session(
         session_id: Some(request.session_id.clone()),
     }
     .resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::Observe {
+            session_id: session_id.clone(),
+        })?;
     let entry = state.sessions.select(&session_id).ok_or_else(|| {
         AppError::not_found(format!("session `{session_id}` is not on the roster"))
     })?;
