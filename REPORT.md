@@ -19,6 +19,7 @@ Implementation commits:
 - `cdb15d32f` — map runs in the VM; iterable aliasing rejects; cache hits stop allocating
 - `78f7e9cef` — latency-ordered settlement pinned for deferred batch leaves
 - `fa2ab715c` — the fixed map and padding cases fed to the oracle
+- `010663589` / `92bed819b` — the round-3 findings, red then green
 
 Every SHA above is an ancestor of the head. An earlier revision of this ledger
 named pre-rebase commits that no longer describe this history.
@@ -44,7 +45,11 @@ hand-written test — is what holds the fix down. Two of those rulings changed
 what this report claims rather than what the code does, and one (M4) was
 refuted on evidence: the guarantee it asked for already held, and what was
 missing was a test, which now exists and has been shown to fail when the
-property is broken. See [Round 2 verification closure](#round-2-verification-closure).
+property is broken. See [Round 2 verification closure](#round-2-verification-closure). Round 3
+closed the five findings that closure round raised — two of them, N1 and N2,
+regressions this layer introduced rather than inherited, which is the useful
+kind of finding for a layer this size. See
+[Round 3 verification closure](#round-3-verification-closure).
 
 ## Delivered surface
 
@@ -94,7 +99,7 @@ property is broken. See [Round 2 verification closure](#round-2-verification-clo
   UTF-16-sensitive behavior, key ordering, replacement tokens, JSON number
   formatting, numeric edge cases, optional arguments, and the supported method
   inventory. The generated expectation table is byte-stable at SHA-256
-  `5de53a85d61562bb1b499706e4fb16a705b1769a5ae404d3caf52b1c5f819a91`.
+  `f4484da0248849f1a9eb78e5e8c4851264a4b1322cc9ec25048c3b95ff241492`.
 - Multiplicative string growth, including `repeat` and `$&`, ``$` ``, and `$'`
   replacement expansion, is sized before allocation. A result beyond 8 MiB
   terminates with uncatchable `MemoryLimitExceeded`; it cannot become a host
@@ -315,6 +320,40 @@ the pin has teeth rather than merely being green.
 The narrowed-claim fallback the ruling asked for is therefore not needed: the
 layer's ECMA claim covers deferred tools as stated.
 
+## Round 3 verification closure
+
+Round-2 closure verification confirmed every ruling closed or refuted with
+evidence, and raised five new findings. All five are closed.
+
+| Finding | What it was | Red | Fix |
+| --- | --- | --- | --- |
+| N1 (Medium) | `replaceAll` with an empty search delegated to the single-match path, returning `-abc` where ECMA gives `-a-b-c-` — and the comment above it asserted the delegation *was* ECMA's behaviour. The M3 fix had traded one divergence for another: before it, Rust's `str::replace` happened to agree with node | `010663589` | `92bed819b` |
+| N2 (Medium) | The aliasing half of the `for…of` filter compared exact identifiers while the mutation half tracked an expression's root binding, so the two disagreed about what "the iterable" is and a member-rooted iterable (`data.items`) could be aliased through the gap | `92bed819b` | `92bed819b` |
+| N3 (Low) | The `map` branch preceded the literal-receiver check, so `"ab".map(f)` skipped its named rejection and failed at run time with a shaping error instead | `92bed819b` | `92bed819b` |
+| N4 (Low) | The register pin asserted documented ⊆ accepted and sampled the reverse, leaving the direction that actually caused M5 — the allowlist growing while the register stands still — checked only by spot samples | — | `92bed819b` |
+| N5 (Low) | The effect restriction on `map` callbacks was undocumented | — | `92bed819b` |
+
+N1's fix carries five node rows including the end-of-string match, the empty
+receiver, the `replace` contrast that must *not* change, a non-ASCII case, and
+the replacement tokens around each empty match. N3 carries a rejection row.
+
+N4 is now structural rather than assertional: the allowlist is a single named
+list that both the predicate and the register pin read, and the pin asserts set
+equality in both directions. Adding a name to the allowlist alone fails it with
+`the lowerer accepts ["flatMap"], which the register does not document` —
+verified by mutation, since a pin that has never been seen red is not yet a
+pin. N5's register line is likewise pinned rather than asserted in prose: a
+test drives the documented failure and the `await` rejection that makes the
+"no suspension inside `map`" half true.
+
+Two production files crossed the 1 600-line budget during this round. Rather
+than compress comments to fit, the two concerns that had outgrown their hosts
+moved out: JSON encoding and decoding (whose rewrite-and-restore pair is only
+correct as a unit) left the method-dispatch table for
+`vm/javascript_json.rs`, and the `map` lowering (the one instance method that
+cannot cross the host boundary, and so owns its own arity reasoning) left the
+general lowerer for `lower/array_map.rs`.
+
 ## Accepted v1 restrictions and deviations
 
 The full executable register is in `crates/lash-typescript/README.md`. The
@@ -327,7 +366,11 @@ agent-surface-specific limits are:
   built dynamically, or declaring a third `array` parameter rejects as
   `TS_METHOD_UNSUPPORTED` rather than lowering to something that only
   resembles it — the VM checks arity exactly, so nothing lowers that cannot
-  run.
+  run. A literal receiver that cannot carry `map` is rejected by
+  name before lowering. The callback runs in the VM and cannot perform
+  effects; one inside terminates with the typed `EffectInBuiltinCallback`,
+  and `await` inside it is a parse-level rejection, so there is no suspension
+  point inside `map` to make durable.
 - Promise aggregates accept array literals containing top-level tool promises
   and resolved values. Nested aggregates, non-array iterables, and process or
   timer promises inside an aggregate reject.
@@ -398,7 +441,7 @@ hazard here and a concurrent battery is not evidence either way.
 | `python3 scripts/check_test_quarantines.py` | PASS |
 | `python3 scripts/check_api_example_coverage.py` | PASS; 8,106 entries (run unpiped, exit code checked) |
 | `bash scripts/check-production-file-size.sh` | PASS; main executor reduced to 1,588 lines |
-| `cargo test -p lash-typescript --test differential_oracle` | PASS; 340 node-checked rows, corpus regenerated byte-identically |
+| `cargo test -p lash-typescript --test differential_oracle` | PASS; 346 node-checked rows, corpus regenerated byte-identically |
 | `python3 scripts/release_notes.py check-pr --range 1532794d9..HEAD` | PASS; every user-facing commit categorized |
 | `git diff --check 1532794d93606940121c3dcff88ac9ad088ddd3e..HEAD` | PASS |
 | `cargo test -p lashlang --locked` | PASS; 464 unit tests and all package integrations |
