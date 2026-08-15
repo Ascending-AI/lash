@@ -94,6 +94,7 @@ jobs:
           python3 scripts/test_publish_workspace.py
           python3 scripts/test_confidence_gate_ci_contract.py
           python3 scripts/test_slack_clone_full_host_e2e_contract.py
+          python3 scripts/test_slack_clone_live_model_e2e_contract.py
           python3 scripts/test_judged_runbook_matrix.py
           python3 scripts/test_release_notes.py
           bash scripts/test-worktree-gate-env.sh
