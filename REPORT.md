@@ -15,8 +15,20 @@ A fourth round followed the three below: the judged battery's **cheap end** was
 run — one scripted TypeScript row per host, no model spend — and it found a
 defect class none of the earlier rounds could see, because every fixture in the
 tree built a Lashlang host. A TypeScript session was correct in its execution
-section and wrong in most of what surrounded it. That round is written up first
-in the review ledger and ratified as ADR 0060.
+section and wrong in most of what surrounded it.
+
+The largest single finding is not prompt copy at all. **A TypeScript cell could
+not read a binding an earlier cell made** (F11): the lowerer resolved names at
+parse against source-local scopes, so cell B rejected `findings` with
+`TS_UNKNOWN_BINDING` while the same turn's prompt listed `findings` with its
+value. Lashlang never had it, because it resolves names at link where the live
+session globals are known. Every crate-level test missed it by pre-supplying its
+bindings in the same source it compiled. That is the difference between a
+dialect that can hold state across a turn and one that can only run
+self-contained one-shot cells, and it is now covered by deterministic
+dual-dialect fixtures driven through the production turn path.
+
+This round is written up first in the review ledger and ratified as ADR 0060.
 
 Three review rounds landed on this branch: two independent adversarial reviews
 (APPROVE-WITH-FIXES) and one fresh-eyes final verification that returned
@@ -34,7 +46,8 @@ substitution was made.
 
 - Branch: `samuel-fig-1306`
 - Base: `dc191172e` (the FIG-1305 head this layer stacks on)
-- Final head: the report commit at the branch tip
+- Final head: the report commit at the branch tip (the twelve commits of this
+  round run `ffb4cdaba` … `c706ff7bc`)
 - Push: not performed
 
 ## The dialect mechanism, as it now stands
@@ -313,6 +326,8 @@ Every hash below is reachable from the branch head.
 | `3034ed91e` | Declare the host surface to TypeScript, and spell its examples | Fixed |
 | `a5feeb96c` | Satisfy the strict lints and the vocabulary-owned retry copy | — |
 | `304f2bfcd` | Name a cell of the inactive dialect instead of reading it as prose | Fixed |
+| `6b60a5524` | Check the extraction recognition list against the dialects themselves | — |
+| `c706ff7bc` | Let a cell read what an earlier cell bound (F11), and label the trace | Fixed |
 | final report commit | Regenerate this report against the branch as it stands | Internal |
 
 ## Review ledger
@@ -347,6 +362,8 @@ argument for the walker existing at all.
 | D (generalized) | Two judged gates asked for readings a correct run cannot produce: a marker's absence from an omitted request body, and `lane_held = false` from a race the harness deliberately does not fix | — (documentation) | `2bae0152a` |
 | O3 (discoverability) | A TypeScript session was never told its trigger sources, host data types or `triggers.*` operations exist, while the host prompt told it to use `cron.Schedule`. A judged row watched a model search, find nothing, and produce a VOID | new dialect test, both directions | `3034ed91e` |
 | O3 (examples) | Authored tool examples are Lashlang source; the try-operator six of seven resident examples carry is a **syntax error** in TypeScript | walker marker, non-vacuity asserted from the authored corpus | `3034ed91e` |
+| **F11 — cross-cell bindings (the round's largest defect)** | A TypeScript cell reading a name an earlier cell bound rejected with `TS_UNKNOWN_BINDING` at parse, while the same turn's prompt listed that name under `=== BOUND VARIABLES ===` **with its value**. The lowerer resolved names against source-local scopes; the live globals reach the host environment at link, which runs after. Lashlang never had it because it resolves at link. This is every stateful multi-cell TypeScript session | dual-dialect executor-path fixtures: bind / read / rebind, the same across a restart, and a negative control per dialect | `c706ff7bc` |
+| B (fourth site) | A TypeScript session's execution trace records said `language: "lashlang"`, so its own `lashlang-execution.jsonl` described its executions as Lashlang | the graph projection's own test, inverted | `c706ff7bc` |
 | Extraction (the loop's mechanism) | A cell tagged with a registered-but-inactive dialect matched nothing and counted as **prose**, so a `FinishRequired` turn asked the model to finish, the model answered with the same cell, and the turn re-prompted without bound — 36 iterations of `request_finish` with `lashlang_cell_count: 0` in the row that found it. The execution fence never fires because extraction never yields a cell to fence | driver fixture: a `<typescript>` cell in a Lashlang session must be named on iteration 1 | `304f2bfcd` |
 
 ### The A-inventory, and what happened to each site
@@ -370,6 +387,11 @@ it in its data; "residual" means the leak is real and open.
 | `protocol/prompt.rs` host-environment section | **Fixed this round** — one inventory, two formatters, `__` namespace hidden |
 | `protocol/driver.rs:890` `lashlang_step_<turn>_<iteration>` event ids | **Carve-out.** Durable session-graph identifiers, and the model receives `kind: "lashlang_step"` in `history`. ADR 0060 |
 | `driver.rs:566/592` test-fixture `lashlang_step_*` ids | Same carve-out; they mirror the durable ids on purpose |
+| `lash_typescript::parse` name resolution | **Fixed this round (F11)** — the executor passes the live session globals as an ambient root scope; a name nobody has still rejects at parse |
+| Execution trace `language` field | **Fixed this round** — records the dialect of the source that ran. The event name, JSONL file name and graph API keep their Lashlang names, because those describe the substrate |
+| Effect ids `lashlang:effect:…` | **Carve-out.** Durable journal key identity naming the engine |
+| Process-body execution records (`language: "lashlang"`) | No change: what runs in a process body is the lowered program, whatever the authoring dialect |
+| `deferred_tools.rs` generated example (`await m.op({ … })?`) | Covered by the examples fix at render time; the grant registry itself was already dialect-aware (`definition.bindings` carries `typescript.tool`) |
 | Durable process ids `process:lashlang:sha256:…` (visible through a host's work API) | **Carve-out.** Every dialect's processes are compiled against the Lashlang VM substrate and the id is journal identity. The label half of the same question — what a rendered transcript calls the code — is what got fixed |
 | Deferred-tool grant registry | No change needed: `definition.bindings` already carries `typescript.tool`, so the grant surface is dialect-aware. Its only leak was the rendered examples string, which the examples fix covers |
 | `lash-lashlang-runtime` `__typescript_runtime` module path | **Carve-out, hidden not renamed.** Embedded in every lowered TypeScript program including persisted process bodies; its host operation ids reach the effect journal |
@@ -380,6 +402,29 @@ it in its data; "residual" means the leak is real and open.
 | `agent-service` board context | **Fixed this round** |
 | Runbook harnesses (`version_bump`, `session_lease_triage`, `process_operator_flow`) | **Fixed this round** |
 | `mock_provider.rs` scripted cells | Left alone: it serves `restate-postgres-workers`, which is not a judged parity scenario and has no dialect row |
+
+### The walker's carve-out list, in full
+
+`SUBSTRATE_CARVE_OUTS` (`dialect/prompt_walker_tests.rs`) and ADR 0060 hold the
+same three entries. A carve-out is an identifier a prompt may spell in the other
+dialect's vocabulary **because the model genuinely receives it in its data**;
+everything else is either hidden or fixed.
+
+| Identifier | Why it may cross | What would have to change to remove it |
+|---|---|---|
+| `lashlang_step` | The model-visible `history` variable contains `kind: "lashlang_step"` in both dialects — `RlmHistoryItem` is one serialized type, and the session-graph event ids are `lashlang_step_<turn>_<iteration>`. A prompt saying `typescript_step` would disagree with the data the model is handed | Renaming the payload discriminant and the durable event ids together |
+| `process:lashlang:` | Durable process ids, visible to a host through its work API. Every dialect's processes are compiled against the Lashlang VM substrate | A durable process-id migration; the *label* half (what a transcript calls the code) is fixed instead |
+| `lashlang:effect:` | The durable effect-id prefix and part of journal key identity. It names the engine, which is the same VM under both dialects | A journal key migration |
+
+Two identifiers were considered and **not** carved out: `__typescript_runtime`
+is hidden from the prompt instead (nothing about it has to reach a model), and
+the trace record's `language` field is now the source's dialect rather than the
+engine's.
+
+And two leaks are **residuals**, not carve-outs — real, open, and asserted by
+equality in `KNOWN_TYPE_SYNTAX_RESIDUALS` so a third cannot join them quietly:
+tool-doc signatures render `-> str`, and the bound-variable block renders
+`list[HistoryItem]`, both to a TypeScript reader.
 
 ### Fresh-eyes final verification (BLOCK) — prior round
 
@@ -452,6 +497,12 @@ Things a reader should not have to dig for:
   internal name in a string a model can see. It is unreachable in production (the
   real host always installs those bindings) and is out of this round's scope, but
   it is the same class as F3 and is recorded rather than dropped.
+- **Every crate-level TypeScript test pre-supplies its own bindings.** That is
+  why the dialect shipped through four rounds unable to read a session global
+  (F11): the corpus, the conformance suites and the differential oracle all
+  compile self-contained programs, which is exactly the one shape the defect
+  does not touch. The fixtures added here drive the production turn path
+  instead, in both dialects, because that is the only place the gap is visible.
 - **The cheap end of the battery found a class every fixture was blind to.**
   Twenty-one rows boot the Workbench and nine of them boot its scripted
   provider; every one of those replies was a Lashlang cell, so a TypeScript row
@@ -489,9 +540,9 @@ with no other heavy build job running concurrently.
 |---|---|
 | `cargo fmt --all --check` | PASS |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0). Red twice before it: a `&format!` at the `continue_as` doc and `step_output_text` crossing the argument bound once the vocabulary joined it |
-| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-restate-postgres-workers-e2e --locked` | PASS; **685 run, 685 passed**, 13 skipped. Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
-| `cargo test -p lash-runtime --features rlm --lib` | PASS; 230 tests. Run explicitly because the RLM-feature tests, including the new per-turn-override pin, are `cfg(feature = "rlm")` |
-| `cargo test --workspace --locked` | PASS; the canonical final run, executed alone with nothing else building. Scored on the **passed count**, not the exit code. Its first execution this round was red on three agent-scenario size labels, which reproduce with this branch's inherited `lash-protocol-rlm` restored and are therefore pre-existing drift, re-recorded here |
+| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-trace -p lash-restate-postgres-workers-e2e --locked` | PASS; **722 run, 722 passed**, 13 skipped. Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
+| `cargo test -p lash-runtime --features rlm --lib` | PASS; 247 tests. Run explicitly because the RLM-feature tests, including the new per-turn-override pin, are `cfg(feature = "rlm")` |
+| `cargo test --workspace --locked` | PASS; **4,501 passed, zero failures**, exit 0. The canonical final run, executed alone with nothing else building, and scored on the **passed count** rather than the exit code. Its first execution this round was red on three agent-scenario size labels, which reproduce with this branch's inherited `lash-protocol-rlm` restored and are therefore pre-existing drift, re-recorded here |
 | `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,488 entries, after re-anchoring 33 references. `RlmSessionReadViewExt` and its `rlm_dialect` moved from `unused-add` to `used-asserted` on the new end-to-end label assertion |
 | `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
 | `python3 scripts/test_judged_runbook_matrix.py` | PASS; 6 tests (4 before this round) |
@@ -508,6 +559,7 @@ with no other heavy build job running concurrently.
 | C (`code-failure`) | Restoring the shipped cell (`fail "..."` in both dialects) makes `the_code_failure_scenario_renders_a_failed_cell_and_terminates` fail at its 60s timeout with "the lashlang code-failure scenario never reached a terminal state" — the hang reproduced, then green again in 0.18s |
 | C (harnesses) | With the example routing unwired, the walker reports `typescript prompt fragment `tool docs` contains `)?``; the fixture's Lashlang rendering is separately asserted to contain `)?` so the marker has something real to catch |
 | E (matrix) | The row total is derived from the four category lists and pinned, so a reclassification that leaves RULES.md or this report stale turns the self-test red |
+| F11 | Reverting the executor's one-line wiring (`parse_with_globals` → `parse`) turns both TypeScript legs of `a_cell_reads_what_an_earlier_cell_bound_in_both_dialects` and `a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects` red, with both Lashlang legs still green — the dialect asymmetry named directly. The crate-level rule has its own five-case suite (`crates/lash-typescript/tests/session_globals.rs`) |
 | Extraction | `a_cell_of_the_inactive_dialect_is_named_on_the_first_iteration` fails on the shipped scanner: nothing executes (correct) but nothing tells the model why, so the reply is prose and the turn re-prompts |
 | Residuals | `KNOWN_TYPE_SYNTAX_RESIDUALS` is asserted by equality: a third leak fails the walker, and closing one of the two fails it until its row is deleted |
 
