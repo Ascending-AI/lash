@@ -223,6 +223,7 @@ pub(super) fn render_history_messages(
                     })
                     .collect::<Vec<_>>();
                 let obs_text = step_output_text(
+                    input.dialect.prompt_vocabulary(),
                     history_projection
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
@@ -241,6 +242,7 @@ pub(super) fn render_history_messages(
                 // User / system / event turn: rendered verbatim by role.
                 flush_pending_prose(&mut messages, &mut pending);
                 let text = message_text(
+                    input.dialect.prompt_vocabulary(),
                     history_projection
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
@@ -402,6 +404,7 @@ fn append_borrowed_entry_image_blocks(
 /// Verbatim content for a plain (non-step) message. No `--- history[N] ---`
 /// wrapper; keeps the truncation re-fetch handle and the attachment listing.
 fn message_text(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
     content: &str,
     attachments: &[RlmAttachmentRef],
@@ -412,7 +415,8 @@ fn message_text(
     if raw_len > max_output_chars {
         let _ = write!(
             out,
-            "\n\n(preview only — full value retained; re-print history[{index}].content for the rest)"
+            "\n\n({})",
+            preview_retained_copy(vocabulary, &format!("history[{index}].content"))
         );
     }
     if !attachments.is_empty() {
@@ -434,6 +438,7 @@ fn message_text(
 /// render even on success: the model pays the token cost to distinguish work
 /// that ran from work that failed before dispatch. Never empty.
 fn step_output_text(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
     output: &[String],
     images: &[RlmImageRef],
@@ -447,6 +452,7 @@ fn step_output_text(
         let (preview, projected_lossy) = project_history_output(item);
         let raw_len = item.chars().count();
         let full_ref = projected_ref(
+            vocabulary,
             projected_lossy,
             &format!("history[{index}].output[{output_index}]"),
         );
@@ -594,12 +600,23 @@ fn message_history_reasoning_blocks(parts: &[lash_core::Part]) -> Vec<LlmContent
         .collect()
 }
 
-fn projected_ref(projected_lossy: bool, reference: &str) -> String {
+/// State retention, stated explicitly: a truncated preview is display-only, the
+/// full value is still live and re-readable. Models otherwise misread a short
+/// preview as lost state and stop mid-task.
+pub(crate) fn preview_retained_copy(
+    _vocabulary: crate::dialect::DialectPromptVocabulary,
+    reference: &str,
+) -> String {
+    format!("preview only — full value retained; re-print {reference} for the rest")
+}
+
+fn projected_ref(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+    projected_lossy: bool,
+    reference: &str,
+) -> String {
     if projected_lossy {
-        // State retention explicitly: a truncated preview is display-only, the
-        // full value is still live and re-printable. Models otherwise misread a
-        // short preview as lost state and stop mid-task.
-        format!(" — preview only, full value retained; re-print {reference} for the rest")
+        format!(" — {}", preview_retained_copy(vocabulary, reference))
     } else {
         String::new()
     }

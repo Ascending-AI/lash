@@ -32,9 +32,13 @@ fn foreign_markers(language_id: &str) -> Vec<&'static str> {
             "lashlang blocks",
             "bound in lashlang",
             "`print ",
+            "re-print",
             "finish <value>",
         ],
         // And the reverse: a Lashlang session must not be handed TypeScript.
+        // The last two are the *substrate* direction: internal identifiers the
+        // TypeScript lowerer needs are bound into every Lashlang host, and the
+        // host-environment section advertised them to a Lashlang reader.
         "lashlang" => vec![
             "<typescript>",
             "</typescript>",
@@ -42,27 +46,39 @@ fn foreign_markers(language_id: &str) -> Vec<&'static str> {
             "typescript cells",
             "console.log(",
             "finish(value)",
+            "per cell",
+            "__typescript_runtime",
+            "typescript.runtime",
         ],
         other => panic!("unknown dialect `{other}`"),
     }
 }
 
-/// Fragments that legitimately carry the other dialect's spelling.
+/// Substrate identifiers that may appear in a prompt written in the other
+/// dialect's spelling. ADR 0060 holds the rule and the whole list; this is the
+/// executable half of it.
 ///
-/// Exactly one, and it is a payload discriminant rather than prose: the
-/// model-visible `history` variable really does contain
+/// Exactly one qualifies, and it is a payload discriminant rather than prose:
+/// the model-visible `history` variable really does contain
 /// `kind: "lashlang_step"` in both dialects, because `RlmHistoryItem` is one
-/// serialized type. Teaching a TypeScript model to expect `typescript_step`
-/// would make the prompt *disagree with the data the model receives*, which is
-/// the defect class this layer exists to close. Renaming both sides together is
-/// a durable payload change and is tracked separately; until then the honest
-/// prompt is the one that matches the wire.
-const ALLOWED_SHARED_SPELLINGS: &[&str] = &["lashlang_step"];
+/// serialized type and its event ids (`lashlang_step_<turn>_<iteration>`,
+/// `protocol/driver.rs`) are durable session-graph identifiers. Teaching a
+/// TypeScript model to expect `typescript_step` would make the prompt
+/// *disagree with the data the model receives*, which is the defect class this
+/// layer exists to close. Renaming both sides together is a durable payload
+/// change and is tracked separately; until then the honest prompt is the one
+/// that matches the wire.
+///
+/// The other durable cross-dialect identifier, the `__typescript_runtime`
+/// module the TypeScript lowerer resolves `Date.now()`/`Math.random()` through,
+/// is deliberately **not** here: nothing about it has to reach a model, so ADR
+/// 0060 hides it from the prompt instead of carving it out.
+const SUBSTRATE_CARVE_OUTS: &[&str] = &["lashlang_step"];
 
-fn strip_allowed(text: &str) -> String {
+fn strip_carve_outs(text: &str) -> String {
     let mut text = text.to_string();
-    for allowed in ALLOWED_SHARED_SPELLINGS {
-        text = text.replace(allowed, "«allowed»");
+    for allowed in SUBSTRATE_CARVE_OUTS {
+        text = text.replace(allowed, "«substrate carve-out»");
     }
     text
 }
@@ -168,6 +184,23 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
         dialect.invalid_cell_retry_copy("no closing tag"),
     ));
     fragments.push(("output limit", dialect.output_limit_cell_copy(Some(2_048))));
+
+    // Copy the *driver* assembles around the dialect's own fragments. These
+    // reach the model on ordinary turns — a truncated history entry and an
+    // output-limit retry are not edge cases — and were written when Lashlang
+    // was the only dialect.
+    fragments.push((
+        "history preview notice",
+        crate::driver::history::preview_retained_copy(vocabulary, "history[0].content"),
+    ));
+    fragments.push((
+        "history output reference",
+        crate::driver::history::preview_retained_copy(vocabulary, "history[0].output[0]"),
+    ));
+    fragments.push((
+        "output limit retry",
+        crate::protocol::finish::output_limit_retry_copy(vocabulary, Some(2_048)),
+    ));
     fragments
 }
 
@@ -183,7 +216,7 @@ fn no_assembled_prompt_fragment_carries_the_other_dialects_words() {
         let language_id = dialect.language_id();
         let markers = foreign_markers(language_id);
         for (name, fragment) in assembled_prompt_fragments(dialect.as_ref()) {
-            let haystack = strip_allowed(&fragment).to_lowercase();
+            let haystack = strip_carve_outs(&fragment).to_lowercase();
             for marker in &markers {
                 if haystack.contains(&marker.to_lowercase()) {
                     violations.push(format!(

@@ -225,6 +225,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     )));
                 }
                 retry_events.push(conversation_event(output_limit_retry_message(
+                    self.dialect.prompt_vocabulary(),
                     rlm_message_id(
                         ctx.turn_id(),
                         ctx.protocol_iteration(),

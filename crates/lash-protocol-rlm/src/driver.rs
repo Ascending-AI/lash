@@ -1,5 +1,5 @@
 use lash_sansio::sync::RwLockExt;
-mod history;
+pub(crate) mod history;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
