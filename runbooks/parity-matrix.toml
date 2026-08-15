@@ -46,3 +46,8 @@ scenarios = [
 # twin. The runbook keeps them together because the final phase composes all
 # three into the required durable restart turn.
 typescript_only = ["typescript-codemode-parity"]
+
+# Deterministic, hermetic harnesses that CI executes rather than judges. They
+# make no model call, so they have no dialect to pin and no judged row to pair;
+# listing them here keeps discovery honest without inventing paid twin runs.
+deterministic_only = ["slack-clone-deterministic"]

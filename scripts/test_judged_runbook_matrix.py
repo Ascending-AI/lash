@@ -19,10 +19,11 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         rows = MATRIX.rows(config)
         ordinary = set(config["scenarios"])
         actual = {(row["scenario"], row["dialect"]) for row in rows}
+        excluded = set(config["typescript_only"]) | set(config["deterministic_only"])
         discovered = {
             path.parent.name
             for path in (ROOT / "runbooks").glob("*/runbook.md")
-            if path.parent.name not in set(config["typescript_only"])
+            if path.parent.name not in excluded
         }
         self.assertEqual(discovered, ordinary)
         for scenario in ordinary:
@@ -34,7 +35,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # shard set silently grows, and every extra row is a paid judged run.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
-        for key in ("scenarios", "typescript_only"):
+        for key in ("scenarios", "typescript_only", "deterministic_only"):
             listed = config.get(key, [])
             duplicates = sorted(
                 {name for name in listed if listed.count(name) > 1}
