@@ -203,6 +203,54 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
         };
         let Some(cell) = extraction else {
+            // A cell of a registered-but-inactive dialect is recognized rather
+            // than read as prose. Falling through here is what turned a
+            // mis-dialected scripted reply into an unbounded re-prompt: the
+            // model was asked to finish, answered with the same cell, and
+            // nothing in the loop could ever name the mismatch.
+            if let Some((_foreign_language, foreign_tags)) =
+                super::cell::foreign_dialect_cell(&assistant_text, tags)
+            {
+                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
+                    "llm_extraction",
+                    llm_extraction_payload(
+                        "retry_foreign_dialect_cell",
+                        &termination,
+                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
+                    ),
+                )]));
+                let mut retry_events = Vec::new();
+                if !visible_prose.trim().is_empty() || !reasoning.is_empty() {
+                    retry_events.push(conversation_event(internal_assistant_prose_message(
+                        rlm_message_id(
+                            ctx.turn_id(),
+                            ctx.protocol_iteration(),
+                            "assistant_response",
+                        ),
+                        visible_prose,
+                        &reasoning,
+                    )));
+                }
+                retry_events.push(conversation_event(invalid_cell_message(
+                    self.dialect.as_ref(),
+                    rlm_message_id(
+                        ctx.turn_id(),
+                        ctx.protocol_iteration(),
+                        "foreign_dialect_cell",
+                    ),
+                    &self.dialect.foreign_cell_retry_copy(foreign_tags.open),
+                )));
+                if let Err(err) = continue_or_stop_after_nonterminal(
+                    self.dialect.as_ref(),
+                    &ctx,
+                    &mut actions,
+                    Vec::new(),
+                    retry_events,
+                ) {
+                    return invalid_turn_options_actions(err);
+                }
+                return actions;
+            }
             if terminal_reason == LlmTerminalReason::OutputLimit {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     "llm_extraction",

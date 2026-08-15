@@ -21,6 +21,40 @@ const LASHLANG_TAGS: CellTags = CellTags {
     close: "</lashlang>",
 };
 
+const TYPESCRIPT_TAGS: CellTags = CellTags {
+    open: "<typescript>",
+    close: "</typescript>",
+};
+
+/// Every registered dialect's tag set, so extraction can *recognize* a cell it
+/// must not execute.
+///
+/// A scanner that knows only the active dialect's tags reads a foreign cell as
+/// prose. That is not a cosmetic miss: with `FinishRequired` the driver asks
+/// the model to finish, the model answers with the cell it was told to write,
+/// and the turn re-prompts forever — the execution fence never fires because
+/// extraction never yields a cell to fence. The list is asserted against the
+/// dialect registry, so a third dialect cannot be forgotten here.
+const REGISTERED_CELL_TAGS: &[(&str, CellTags)] = &[
+    (crate::dialect::lashlang::LANGUAGE_ID, LASHLANG_TAGS),
+    ("typescript", TYPESCRIPT_TAGS),
+];
+
+/// The registered-but-inactive dialect this text writes a cell in, if any.
+pub(crate) fn foreign_dialect_cell(
+    text: &str,
+    active: CellTags,
+) -> Option<(&'static str, CellTags)> {
+    REGISTERED_CELL_TAGS
+        .iter()
+        .find(|(_, tags)| {
+            tags.open != active.open
+                && (first_cell_span(text, *tags).is_some()
+                    || complete_start_tag_span(text, *tags).is_some())
+        })
+        .map(|(language, tags)| (*language, *tags))
+}
+
 pub fn contains_lashlang_cell(text: &str) -> bool {
     first_cell_span(text, LASHLANG_TAGS).is_some()
 }
@@ -51,4 +85,57 @@ pub(super) fn extract_cell(
         code,
         lashlang_cell_count: 1,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The recognition list must cover every dialect the registry can activate,
+    /// or a session running the missing one silently reads foreign cells as
+    /// prose again.
+    #[test]
+    fn every_registered_dialect_is_recognizable() {
+        let registered = crate::dialect::registered_language_ids();
+        let known = REGISTERED_CELL_TAGS
+            .iter()
+            .map(|(language, _)| *language)
+            .collect::<std::collections::BTreeSet<_>>();
+        for language in registered {
+            assert!(
+                known.contains(language),
+                "`{language}` is registered but its cell tags are unknown to extraction"
+            );
+        }
+    }
+
+    #[test]
+    fn a_foreign_cell_is_named_and_the_active_one_is_not() {
+        let typescript = CellTags {
+            open: "<typescript>",
+            close: "</typescript>",
+        };
+        assert_eq!(
+            foreign_dialect_cell("<typescript>\nfinish(1);\n</typescript>", LASHLANG_TAGS)
+                .map(|(language, _)| language),
+            Some("typescript")
+        );
+        assert_eq!(
+            foreign_dialect_cell("<lashlang>\nfinish 1\n</lashlang>", typescript)
+                .map(|(language, _)| language),
+            Some("lashlang")
+        );
+        assert_eq!(
+            foreign_dialect_cell("<lashlang>\nfinish 1\n</lashlang>", LASHLANG_TAGS),
+            None
+        );
+        // An unclosed foreign cell is still a foreign cell: the model wrote the
+        // wrong tag, and saying so beats an unclosed-cell diagnostic about a
+        // dialect this session does not run.
+        assert_eq!(
+            foreign_dialect_cell("<typescript>\nfinish(1);", LASHLANG_TAGS)
+                .map(|(language, _)| language),
+            Some("typescript")
+        );
+    }
 }

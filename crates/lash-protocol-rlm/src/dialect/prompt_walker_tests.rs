@@ -81,7 +81,13 @@ fn foreign_markers(language_id: &str) -> Vec<&'static str> {
 /// module the TypeScript lowerer resolves `Date.now()`/`Math.random()` through,
 /// is deliberately **not** here: nothing about it has to reach a model, so ADR
 /// 0060 hides it from the prompt instead of carving it out.
-const SUBSTRATE_CARVE_OUTS: &[&str] = &["lashlang_step"];
+/// The second carve-out is a durable process identity. A TypeScript session's
+/// processes are compiled against the Lashlang VM substrate and their ids are
+/// `process:lashlang:sha256:…` — journal identity, visible to a host through
+/// `/api/work`. Renaming them would move a durable id for a cosmetic gain, so
+/// the id stays and the *label* half of the same defect is what got fixed
+/// (transcript badges read the recorded dialect).
+const SUBSTRATE_CARVE_OUTS: &[&str] = &["lashlang_step", "process:lashlang:"];
 
 fn strip_carve_outs(text: &str) -> String {
     let mut text = text.to_string();

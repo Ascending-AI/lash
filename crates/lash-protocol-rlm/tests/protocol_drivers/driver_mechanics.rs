@@ -896,3 +896,53 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     let (_, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
     assert_eq!(checkpoint, CheckpointKind::AfterWork);
 }
+
+/// A cell tagged with a registered-but-inactive dialect must be *named*, not
+/// silently read as prose.
+///
+/// This is the mechanism behind the hang the battery found. Extraction only
+/// knows the active dialect's tags, so a `<typescript>` cell in a Lashlang
+/// session (or the reverse) matched nothing: `lashlang_cell_count` stayed 0,
+/// the whole reply counted as prose, and a `FinishRequired` turn asked the
+/// model to finish — forever, because the model kept answering with the cell it
+/// had been told to write. The execution fence never fires because extraction
+/// never yields a cell to fence.
+#[test]
+fn a_cell_of_the_inactive_dialect_is_named_on_the_first_iteration() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "Here is the answer.\n<typescript>\nfinish(\"ok\");\n</typescript>";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    // Nothing executes: the cell is not this session's.
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
+    // And the model is told exactly what is wrong, in its own dialect's words,
+    // on this first iteration rather than after an unbounded number of them.
+    let told = machine.messages().iter().any(|message| {
+        message.parts.iter().any(|part| {
+            part.content.contains("<typescript>")
+                && part.content.contains("<lashlang>")
+                && part.content.contains("does not run")
+        })
+    });
+    assert!(told, "messages: {:#?}", machine.messages());
+}

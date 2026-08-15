@@ -191,6 +191,24 @@ pub(crate) trait RlmDialect: Send + Sync {
 
     fn invalid_cell_retry_copy(&self, error_text: &str) -> String;
 
+    /// What to tell a model that wrote a cell in a registered dialect this
+    /// session is not running.
+    ///
+    /// Written from the vocabulary, so the correction is in the reader's own
+    /// words: naming the tag it wrote and the one it must write is the whole
+    /// content, and both are facts the dialect already owns.
+    fn foreign_cell_retry_copy(&self, foreign_open_tag: &str) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        let tags = self.cell_tags();
+        format!(
+            "That reply put its code in a `{foreign_open_tag}` {noun}, which this session does not run. This session executes {language}: send the same work again inside one paired `{open}` … `{close}` {noun}.",
+            noun = vocabulary.cell_noun,
+            language = vocabulary.language_name,
+            open = tags.open,
+            close = tags.close,
+        )
+    }
+
     fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String;
 
     fn code_stream_kind(&self) -> &'static str;
@@ -200,6 +218,12 @@ pub(crate) trait RlmDialect: Send + Sync {
     fn stream_cell_start_event_name(&self) -> &'static str;
 
     fn stream_cell_end_event_name(&self) -> &'static str;
+}
+
+/// Every language id the registry can activate. The source of truth for
+/// extraction's recognition list.
+pub(crate) fn registered_language_ids() -> &'static [&'static str] {
+    &[lashlang::LANGUAGE_ID, typescript::LANGUAGE_ID]
 }
 
 #[derive(Clone)]

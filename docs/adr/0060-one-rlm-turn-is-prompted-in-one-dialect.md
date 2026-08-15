@@ -55,12 +55,20 @@ dialect, in both directions, and one executable walker enforces it.**
 4. Where hiding is impossible because the model genuinely receives the
    identifier in its data, the spelling is **carved out** — listed explicitly,
    with its reason, in the walker's `SUBSTRATE_CARVE_OUTS` and here.
+5. **A cell of a registered-but-inactive dialect is recognized, never read as
+   prose.** Extraction knows every registered dialect's tags, executes only the
+   active one's, and names the mismatch on the first iteration. A scanner that
+   knows only the active tags turns a mis-dialected reply into an unbounded
+   re-prompt: the model is asked to finish, answers with the cell it was told to
+   write, and the execution fence never fires because extraction never yields a
+   cell to fence.
 
 ### The carve-out list
 
 | Identifier | Why it may cross dialects | Disposition |
 | --- | --- | --- |
 | `lashlang_step` | The model-visible `history` variable really does contain `kind: "lashlang_step"` in both dialects: `RlmHistoryItem` is one serialized type, and the session-graph event ids are `lashlang_step_<turn>_<iteration>` (`protocol/driver.rs`). A prompt that said `typescript_step` would disagree with the data the model receives — the exact defect class this ADR closes | Carved out. Renaming both sides is a durable payload change, tracked separately |
+| `process:lashlang:sha256:…` | A durable process id, and part of journal identity. Every dialect's processes are compiled against the Lashlang VM substrate, so the substrate's name is in the id. A host can see it through its own work API | Carved out. The *label* half of the same question — what a rendered transcript calls the code — reads the session's recorded dialect instead |
 | `__typescript_runtime` | The module path is embedded in every lowered TypeScript program, including the persisted bodies of durable processes that must still resolve when a worker wakes them after a restart. The host operation ids (`typescript.runtime.now`) reach the effect journal | Hidden, not carved out: nothing about it has to reach a model, so the prompt omits it and the durable identity does not move |
 
 ## Consequences
