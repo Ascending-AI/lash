@@ -1,0 +1,48 @@
+schema_version = 1
+execution_model_floor = "gpt-5.6-sol"
+judge_model_floor = "gpt-5.6-sol"
+artifact_layout = "<run-root>/<scenario>/<dialect>"
+
+# Every ordinary judged runbook is dialect-independent at the scenario level
+# and therefore runs in both first-class RLM dialects.
+dialects = ["lashlang", "typescript"]
+
+scenarios = [
+  "agent-service-branching",
+  "docs-quickstart",
+  "graceful-drain",
+  "process-operations",
+  "request-abandon",
+  "rlm-cell-boundary",
+  "session-lease-triage",
+  "slack-clone-bot",
+  "slack-clone-mcp-client-depth",
+  "tictactoe-full-game",
+  "version-bump-recreation",
+  "workbench-attachments",
+  "workbench-break-glass",
+  "workbench-chat-projection",
+  "workbench-continue-as",
+  "workbench-cron-schedule",
+  "workbench-deferred-tools",
+  "workbench-durable-stop",
+  "workbench-engine-restart",
+  "workbench-execution-state-rehydration",
+  "workbench-failure-paths",
+  "workbench-inbox-world",
+  "workbench-process-lifecycle",
+  "workbench-reconnect-resilience",
+  "workbench-session-id-retirement",
+  "workbench-session-isolation",
+  "workbench-session-resume",
+  "workbench-shared-session-multi-tab",
+  "workbench-trigger-lifecycle",
+  "workbench-turn-ingress",
+  "workbench-usage-ledger",
+  "workflow-editor-authoring",
+]
+
+# These exercise TypeScript-only host-language surface with no honest Lashlang
+# twin. The runbook keeps them together because the final phase composes all
+# three into the required durable restart turn.
+typescript_only = ["typescript-codemode-parity"]

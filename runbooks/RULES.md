@@ -33,6 +33,36 @@ judged. **Manual judged** is the semantic browser or static-page runbook layer.
 | `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md) and [`slack-clone-mcp-client-depth`](slack-clone-mcp-client-depth/runbook.md). |
 | `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
 
+## Dialect parity is mandatory
+
+Every judged scenario is a two-row acceptance matrix: run it once with the session pinned
+to `lashlang` and once with the session pinned to `typescript`. This includes scenarios
+whose primary mechanism is dialect-independent. Use a fresh session id, data directory,
+ports, trace offset, and artifact directory for each row; never reuse one dialect's
+evidence for the other. The machine-readable inventory is
+[`parity-matrix.toml`](parity-matrix.toml).
+
+Set `LASH_RUNBOOK_DIALECT` to the row's language id and make the host pass that value in
+the RLM session-creation contract. Absence is allowed only for a Lashlang row and must be
+recorded as the default substitution. A TypeScript row that receives a Lashlang prompt,
+cell tag, execution event, or restored engine id is a contract violation and triggers the
+normal Abort/RCA rule.
+
+Runbook prose predating the parity matrix may say “Lashlang cell/program/source.” Read
+that as “the active dialect's cell/program/source” unless it names a stable product API,
+artifact filename, trace field, or historical term (for example
+`/api/lashlang-graphs` or `lashlang-execution.jsonl`). Prompts ask for outcomes, not
+ready-made source, in both rows. Deterministic providers must expose equivalent fixed
+programs for both dialect ids; silently feeding their Lashlang program to a TypeScript
+row is a failed harness, not a skipped row.
+
+Independent scenario/dialect rows may execute concurrently from the start, subject to the
+repository's two-heavy-job limit and each runbook's port/container isolation rules.
+Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
+or mutates the app it scores. RLM model-calling steps use `gpt-5.6-sol` or newer; record
+the actual execution model and judge model on every row, including any substitution.
+`python3 scripts/judged_runbook_matrix.py --shard I/N` emits a stable JSON work shard.
+
 ## What you're testing
 
 You are testing the **example app's browser surface**, not the model and not your own
