@@ -291,12 +291,6 @@ impl RlmProjectedBindings {
 pub(crate) struct RlmProjectionExtension {
     pub(crate) bindings: RlmProjectedBindings,
     pub(crate) tool_result_projectors: Vec<RlmToolResultProjector>,
-    /// The words the read-only-variables blurb is written in.
-    ///
-    /// An extension can be built by a host before any dialect is resolved, so
-    /// this starts at the default dialect's vocabulary and the protocol sets
-    /// the session's real one as soon as it owns the extension.
-    pub(crate) vocabulary: crate::dialect::DialectPromptVocabulary,
 }
 
 impl RlmProjectionExtension {
@@ -304,7 +298,6 @@ impl RlmProjectionExtension {
         Self {
             bindings,
             tool_result_projectors: Vec::new(),
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
         }
     }
 
@@ -312,7 +305,6 @@ impl RlmProjectionExtension {
         Self {
             bindings: RlmProjectedBindings::new(),
             tool_result_projectors: vec![projector],
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
         }
     }
 
@@ -343,8 +335,31 @@ impl ProtocolTurnExtension for RlmProjectionExtension {
         self
     }
 
+    /// Nothing. The read-only-variables block is assembled by the RLM prompt
+    /// hook, which is the only place that knows the session's dialect.
+    ///
+    /// This handle is built by a host — `TurnInput::rlm_project` — before any
+    /// session has resolved a dialect, so it cannot render dialect-specific
+    /// copy. It used to try: it stored a vocabulary field seeded with
+    /// Lashlang's, and `lash-core` rendered it into the prompt directly
+    /// (`turn_driver/tool_catalog.rs`), beside the copy the protocol hook was
+    /// already contributing from the *same* bindings.
+    ///
+    /// That duplication was invisible for exactly as long as one dialect
+    /// existed: `merge_prompt_contributions` drops contributions that are
+    /// byte-identical, and two Lashlang renderings of one binding set are. The
+    /// second dialect made the two copies *differ*, so the dedup stopped
+    /// applying and a TypeScript session received both — its own block, and
+    /// underneath it "Access them directly in `<lashlang>` blocks", the
+    /// sentence ADR 0060 exists to eliminate.
+    ///
+    /// The handle keeps its real job, which is validation:
+    /// `validate_turn_extension` rejects reserved binding names and refuses
+    /// bindings that cannot merge with the session's. Assembly belongs to the
+    /// one route that can spell it correctly, and the walker now renders both
+    /// routes so a third cannot appear unseen.
     fn prompt_contributions(&self) -> Vec<PromptContribution> {
-        Self::prompt_contributions_for(&self.bindings, self.vocabulary)
+        Vec::new()
     }
 }
 
@@ -557,8 +572,19 @@ mod tests {
         assert!(err.to_string().contains("doc"));
     }
 
+    /// `rlm_project` attaches the bindings on both seams, and exactly one of
+    /// them writes prompt copy.
+    ///
+    /// The turn-extension handle carries the bindings for validation and
+    /// contributes **no** prompt: it is built before a session has resolved a
+    /// dialect, so it cannot spell dialect-specific copy, and `lash-core`
+    /// renders whatever it returns straight into the prompt with no dedup. The
+    /// protocol's own hook assembles the block from the plugin-input copy with
+    /// the session's vocabulary. This test used to assert the opposite, which
+    /// is how a duplicated, always-Lashlang block reached every
+    /// projected-binding turn.
     #[test]
-    fn turn_input_extension_attaches_prompt_contribution() {
+    fn turn_input_projection_contributes_prompt_on_one_route_only() {
         let input = TurnInput {
             items: Vec::new(),
             protocol_turn_options: None,
@@ -572,18 +598,45 @@ mod tests {
                 .expect("bind"),
         )
         .expect("attach");
-        let contribution = input
+
+        assert!(
+            input
+                .protocol_extension
+                .as_ref()
+                .expect("extension")
+                .prompt_contributions()
+                .is_empty(),
+            "the generic seam cannot know the dialect, so it must contribute nothing"
+        );
+
+        // The bindings are still on the handle, which is what validation reads.
+        let extension = input
             .protocol_extension
+            .as_ref()
             .expect("extension")
-            .prompt_contributions()
-            .pop()
-            .expect("prompt contribution");
-        assert!(contribution.content.contains("`current_file`"));
+            .as_any()
+            .downcast_ref::<RlmProjectionExtension>()
+            .expect("RLM projection extension");
+        assert!(!extension.bindings.prompt_docs().is_empty());
+
+        // And the route that does assemble copy renders it in the dialect it
+        // is handed, which is what the protocol hook passes.
+        let contribution = RlmProjectionExtension::prompt_contributions_for(
+            &extension.bindings,
+            crate::dialect::typescript_prompt_vocabulary(),
+        )
+        .pop()
+        .expect("prompt contribution");
         assert!(
             contribution
                 .content
                 .contains("`current_file`: `str`, read-only")
         );
+        assert!(
+            contribution.content.contains("<typescript>"),
+            "{contribution:?}"
+        );
+        assert!(!contribution.content.contains("<lashlang>"));
     }
 
     #[test]

@@ -220,6 +220,13 @@ pub(crate) trait RlmDialect: Send + Sync {
     fn stream_cell_end_event_name(&self) -> &'static str;
 }
 
+/// The TypeScript dialect's words, for assertions that need a vocabulary which
+/// is provably not the default.
+#[cfg(test)]
+pub(crate) fn typescript_prompt_vocabulary() -> DialectPromptVocabulary {
+    typescript::TYPESCRIPT_PROMPT_VOCABULARY
+}
+
 #[derive(Clone)]
 pub(crate) struct RlmDialectRegistry {
     dialects: Arc<BTreeMap<&'static str, Arc<dyn RlmDialect>>>,

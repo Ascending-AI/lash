@@ -174,6 +174,36 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
             .to_string(),
     ));
 
+    // Read-only variables, both routes.
+    //
+    // The fragment is assembled twice from one object: the protocol's own
+    // prompt hook renders it with the session's vocabulary, and `lash-core`
+    // renders the same handle's `ProtocolTurnExtension::prompt_contributions`
+    // into the same prompt with no dedup. A walker that only exercised the
+    // first route would keep passing while the second handed a TypeScript
+    // session "Access them directly in `<lashlang>` blocks" — which is the
+    // sentence ADR 0060's Context quotes as the defect it exists to remove.
+    let projected = crate::projection::RlmProjectedBindings::new()
+        .bind_json("current_file", serde_json::json!("src/lib.rs"))
+        .expect("seed one projected binding");
+    fragments.push((
+        "read-only variables (protocol hook)",
+        crate::projection::RlmProjectionExtension::prompt_contributions_for(&projected, vocabulary)
+            .into_iter()
+            .map(|contribution| contribution.content.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ));
+    fragments.push(("read-only variables (turn extension handle)", {
+        use lash_core::ProtocolTurnExtension as _;
+        crate::projection::RlmProjectionExtension::new(projected.clone())
+            .prompt_contributions()
+            .into_iter()
+            .map(|contribution| contribution.content.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }));
+
     // The budget escalation tails, at each of the three thresholds.
     for used in [600usize, 950, 1_200] {
         let usage = lash_core::PromptUsage {
