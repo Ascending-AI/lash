@@ -1,5 +1,5 @@
 pub(crate) mod lashlang;
-mod typescript;
+pub(crate) mod typescript;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

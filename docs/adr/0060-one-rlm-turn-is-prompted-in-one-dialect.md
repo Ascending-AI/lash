@@ -69,6 +69,7 @@ dialect, in both directions, and one executable walker enforces it.**
 | --- | --- | --- |
 | `lashlang_step` | The model-visible `history` variable really does contain `kind: "lashlang_step"` in both dialects: `RlmHistoryItem` is one serialized type, and the session-graph event ids are `lashlang_step_<turn>_<iteration>` (`protocol/driver.rs`). A prompt that said `typescript_step` would disagree with the data the model receives — the exact defect class this ADR closes | Carved out. Renaming both sides is a durable payload change, tracked separately |
 | `process:lashlang:sha256:…` | A durable process id, and part of journal identity. Every dialect's processes are compiled against the Lashlang VM substrate, so the substrate's name is in the id. A host can see it through its own work API | Carved out. The *label* half of the same question — what a rendered transcript calls the code — reads the session's recorded dialect instead |
+| `lashlang:effect:…` | The durable effect-id prefix, and part of journal key identity. It names the *engine*, which is the Lashlang VM under every dialect | Carved out, on the same ruling as the process id |
 | `__typescript_runtime` | The module path is embedded in every lowered TypeScript program, including the persisted bodies of durable processes that must still resolve when a worker wakes them after a restart. The host operation ids (`typescript.runtime.now`) reach the effect journal | Hidden, not carved out: nothing about it has to reach a model, so the prompt omits it and the durable identity does not move |
 
 ## Consequences
@@ -81,6 +82,12 @@ dialect, in both directions, and one executable walker enforces it.**
   assembly changes.
 - The carve-out list is a debt register, not a permission. Each row names what
   would have to change for the entry to disappear.
+- The **trace record's `language` field is the source's dialect**, not the
+  engine's: a TypeScript session's execution records say `typescript`. The
+  event name, the JSONL file name and the graph API keep their Lashlang names,
+  because those describe the substrate and the projection reduces every
+  dialect's events. A process body's own execution records stay `lashlang`:
+  what runs there is the lowered program, whatever the authoring dialect.
 - Hosts assemble prompt copy of their own (the Agent Workbench's tutorials, for
   instance). This ADR binds the substrate; a host that injects code examples
   owns the same rule for its own copy, and the reference hosts carry the

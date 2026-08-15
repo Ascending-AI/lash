@@ -87,7 +87,14 @@ fn foreign_markers(language_id: &str) -> Vec<&'static str> {
 /// `/api/work`. Renaming them would move a durable id for a cosmetic gain, so
 /// the id stays and the *label* half of the same defect is what got fixed
 /// (transcript badges read the recorded dialect).
-const SUBSTRATE_CARVE_OUTS: &[&str] = &["lashlang_step", "process:lashlang:"];
+const SUBSTRATE_CARVE_OUTS: &[&str] = &[
+    "lashlang_step",
+    "process:lashlang:",
+    // Effect ids are `lashlang:effect:<session>:<turn>:…` in every dialect:
+    // the engine identity in a durable journal key. Same ruling as the process
+    // id — durable, so carved out rather than renamed.
+    "lashlang:effect:",
+];
 
 fn strip_carve_outs(text: &str) -> String {
     let mut text = text.to_string();

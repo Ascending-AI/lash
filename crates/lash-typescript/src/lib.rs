@@ -59,6 +59,21 @@ pub fn parse(source: &str) -> Result<lashlang::Program, Diagnostic> {
     lower::lower(&normalized)
 }
 
+/// Parses a cell that runs in a session which already has `globals` bound.
+///
+/// A standalone program is self-contained, which is what [`parse`] compiles. A
+/// *cell* is not: the session model persists top-level bindings across cells,
+/// and the prompt shows them to the model with their values. Passing the live
+/// names here is what lets cell B read what cell A bound; a name in neither the
+/// source nor `globals` still rejects as `TS_UNKNOWN_BINDING`.
+pub fn parse_with_globals(
+    source: &str,
+    globals: &std::collections::BTreeSet<String>,
+) -> Result<lashlang::Program, Diagnostic> {
+    let normalized = adapter::parse(source)?;
+    lower::lower_with_ambient(&normalized, globals)
+}
+
 /// Validates that a source program belongs to the accepted TypeScript dialect.
 pub fn validate(source: &str) -> Result<(), Diagnostic> {
     parse(source).map(|_| ())
@@ -76,7 +91,9 @@ pub fn link(
     source: &str,
     host: &lashlang::LashlangHostEnvironment,
 ) -> Result<lashlang::LinkedModule, Diagnostic> {
-    let program = parse(source)?;
+    // The host environment already carries the session's live globals, so
+    // linking a cell reads them from the same place the linker will.
+    let program = parse_with_globals(source, &host.globals)?;
     lashlang::LinkedModule::link_with_dialect(
         program,
         host,

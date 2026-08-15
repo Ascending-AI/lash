@@ -196,6 +196,9 @@ impl<'run> HostBridge<'run> {
 #[derive(Clone)]
 pub(super) struct LashlangExecutionTrace {
     sink: std::sync::Arc<dyn TraceSink>,
+    /// The dialect of the *source* that ran. The substrate is the Lashlang VM
+    /// under both, which is why the event and the file keep their names.
+    language: &'static str,
     base_context: TraceContext,
     identity: TraceLanguageExecutionIdentity,
 }
@@ -203,11 +206,13 @@ pub(super) struct LashlangExecutionTrace {
 impl LashlangExecutionTrace {
     pub(super) fn new(
         sink: std::sync::Arc<dyn TraceSink>,
+        language: &'static str,
         base_context: TraceContext,
         identity: TraceLanguageExecutionIdentity,
     ) -> Self {
         Self {
             sink,
+            language,
             base_context,
             identity,
         }
@@ -267,7 +272,7 @@ impl LashlangExecutionTrace {
         let _ = self.sink.append(&TraceRecord::new(
             context,
             TraceEvent::LanguageExecution {
-                language: LASHLANG_ENGINE_KIND.to_string(),
+                language: self.language.to_string(),
                 event,
             },
         ));

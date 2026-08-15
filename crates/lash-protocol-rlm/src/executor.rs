@@ -136,6 +136,23 @@ enum SourceDialect {
     Typescript,
 }
 
+impl SourceDialect {
+    /// The language id an execution trace record carries.
+    ///
+    /// Every record said `lashlang` regardless, so a TypeScript session's
+    /// `lashlang-execution.jsonl` described its own executions as Lashlang —
+    /// the same "evidence that disagrees with its own label" defect the
+    /// transcript badge had. The substrate under both dialects is the Lashlang
+    /// VM, which is why the file name and the graph API keep their names; what
+    /// was wrong is the claim about the *source* that ran.
+    fn language_id(self) -> &'static str {
+        match self {
+            Self::Lashlang => crate::dialect::lashlang::LANGUAGE_ID,
+            Self::Typescript => crate::dialect::typescript::LANGUAGE_ID,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_code_with_dialect_and_bounds(
     mut state: RlmExecutionState,
@@ -384,7 +401,12 @@ async fn execute_code_inner(
                 lashlang::CompilationDialect::Typescript,
             ) {
                 Some(program) => Ok(program),
-                None => lash_typescript::parse(code)
+                // Parsed with the session's live globals, so a cell can read
+                // what an earlier cell bound. Lashlang gets this for free by
+                // resolving at link; TypeScript resolves names at parse, so the
+                // names have to arrive here. `host_environment` already carries
+                // them — it is the same set the linker will check against.
+                None => lash_typescript::parse_with_globals(code, &host_environment.globals)
                     .map_err(|error| error.to_string())
                     .and_then(|program| {
                         state
@@ -543,6 +565,7 @@ async fn execute_code_inner(
         &ctx,
         &linked_module.artifact,
         &lashlang_execution_trace_config,
+        source_dialect.language_id(),
     );
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
@@ -714,6 +737,7 @@ fn foreground_lashlang_execution_trace(
     ctx: &RuntimeExecutionContext<'_>,
     artifact: &lashlang::ModuleArtifact,
     config: &RlmLashlangExecutionTraceConfig,
+    language: &'static str,
 ) -> Option<LashlangExecutionTrace> {
     let sink = config.sink.as_ref()?.clone();
     let invocation = ctx.parent_invocation()?;
@@ -724,6 +748,7 @@ fn foreground_lashlang_execution_trace(
     let kind = invocation.effect_kind()?;
     Some(LashlangExecutionTrace::new(
         sink,
+        language,
         config.trace_context.clone(),
         TraceLanguageExecutionIdentity {
             scope: TraceRuntimeScope {

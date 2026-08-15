@@ -73,6 +73,20 @@ fn assert_no_lashlang_words(prompts: &[String]) {
     );
 }
 
+/// Everything the rendered transcript says back to the user: assistant rows and
+/// the output of each executed cell.
+fn transcript_answers(snapshot: &StateReadSnapshot) -> Vec<String> {
+    snapshot
+        .transcript
+        .iter()
+        .flat_map(|row| match row {
+            TranscriptRow::Message { message } => vec![message.text.clone()],
+            TranscriptRow::CodeBlock { output, .. } => vec![output.clone()],
+            TranscriptRow::Reasoning { .. } => Vec::new(),
+        })
+        .collect()
+}
+
 fn transcript_code_languages(snapshot: &StateReadSnapshot) -> Vec<String> {
     snapshot
         .transcript
@@ -624,6 +638,235 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
                 .iter()
                 .any(|(language, success)| language == dialect.language_id() && !success),
             "the {} scenario must render a failed cell of its own dialect: {blocks:?}",
+            dialect.language_id()
+        );
+    }
+}
+
+/// A scripted provider that answers each call with the next cell in a list.
+fn scripted_cells_provider(kind: &'static str, cells: Vec<String>) -> lash::provider::ProviderHandle {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    lash::testing::TestProvider::builder()
+        .kind(kind)
+        .complete(move |_request: lash::provider::LlmRequest| {
+            let cells = cells.clone();
+            let calls = Arc::clone(&calls);
+            async move {
+                let index = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let cell = cells
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| panic!("the scripted provider ran out of cells at {index}"));
+                Ok(text_response(&cell))
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+/// Cell A binds, cell B reads, cell C rebinds and reads back — in both
+/// dialects, through the production turn path.
+///
+/// This is the session model the prompt promises: top-level bindings persist
+/// across cells and are listed under `=== BOUND VARIABLES ===` with their
+/// values. Lashlang has always delivered it because it resolves names at link,
+/// where the live session globals are known. The TypeScript lowerer resolved
+/// every name at parse against source-local scopes, so cell B rejected with
+/// `TS_UNKNOWN_BINDING` for a name the same prompt was showing it — and every
+/// crate-level test missed it, because they pre-supply their bindings in the
+/// same source they compile.
+///
+/// The test is deliberately parameterized over both dialects and driven
+/// through `session_builder(...).turn(...)`, the path a served turn uses: any
+/// future dialect that resolves names its own way fails here loudly rather than
+/// shipping as a demo that cannot hold state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
+    for (dialect, cells) in [
+        (
+            lash::rlm::RlmDialect::Lashlang,
+            vec![
+                "<lashlang>\nfindings = { summary: \"first pass\" }\nfinish \"bound\"\n</lashlang>"
+                    .to_string(),
+                "<lashlang>\nfinish findings.summary\n</lashlang>".to_string(),
+                "<lashlang>\nfindings = { summary: \"second pass\" }\nfinish findings.summary\n</lashlang>"
+                    .to_string(),
+            ],
+        ),
+        (
+            lash::rlm::RlmDialect::Typescript,
+            vec![
+                "<typescript>\nconst findings = { summary: \"first pass\" };\nfinish(\"bound\");\n</typescript>"
+                    .to_string(),
+                "<typescript>\nfinish(findings.summary);\n</typescript>".to_string(),
+                "<typescript>\nconst findings = { summary: \"second pass\" };\nfinish(findings.summary);\n</typescript>"
+                    .to_string(),
+            ],
+        ),
+    ] {
+        let data_dir = tempfile::tempdir().expect("temp dir");
+        let provider = scripted_cells_provider("session-globals", cells);
+        let mut state = queued_send_test_state(data_dir.path(), provider).await;
+        state.rlm_dialect = dialect;
+        let session_id = state.current_session_id();
+
+        for (index, prompt) in ["bind it", "read it back", "rebind and read"]
+            .into_iter()
+            .enumerate()
+        {
+            run_turn_through_the_workbench_open_path(
+                &state,
+                &session_id,
+                &format!("session-globals-{}-{index}", dialect.language_id()),
+                prompt,
+            )
+            .await;
+        }
+
+        // The second turn's answer is the value the *first* turn bound, and the
+        // third turn's is the rebound one. Read from the rendered transcript,
+        // which is what a host and a judged row see.
+        let Json(projected) = app_state(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect("project the session");
+        let answers = transcript_answers(&projected);
+        assert!(
+            answers.iter().any(|answer| answer.contains("first pass")),
+            "{} must read the binding a previous cell made: {answers:#?}",
+            dialect.language_id()
+        );
+        assert!(
+            answers.iter().any(|answer| answer.contains("second pass")),
+            "{} must read back a rebound session global: {answers:#?}",
+            dialect.language_id()
+        );
+    }
+}
+
+/// The same session model across a *restart*: a second host process opens the
+/// same store and the next cell still reads what the first process bound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects() {
+    for (dialect, first, second) in [
+        (
+            lash::rlm::RlmDialect::Lashlang,
+            "<lashlang>\nfindings = { summary: \"survived\" }\nfinish \"bound\"\n</lashlang>",
+            "<lashlang>\nfinish findings.summary\n</lashlang>",
+        ),
+        (
+            lash::rlm::RlmDialect::Typescript,
+            "<typescript>\nconst findings = { summary: \"survived\" };\nfinish(\"bound\");\n</typescript>",
+            "<typescript>\nfinish(findings.summary);\n</typescript>",
+        ),
+    ] {
+        let data_dir = tempfile::tempdir().expect("temp dir");
+        let session_id = {
+            let mut state = queued_send_test_state(
+                data_dir.path(),
+                scripted_cells_provider("session-globals-restart", vec![first.to_string()]),
+            )
+            .await;
+            state.rlm_dialect = dialect;
+            let session_id = state.current_session_id();
+            run_turn_through_the_workbench_open_path(&state, &session_id, "bind it", "bind it")
+                .await;
+            session_id
+        };
+
+        // A second host process over the same durable store.
+        let mut state = queued_send_test_state(
+            data_dir.path(),
+            scripted_cells_provider("session-globals-restart", vec![second.to_string()]),
+        )
+        .await;
+        state.rlm_dialect = dialect;
+        run_turn_through_the_workbench_open_path(
+            &state,
+            &session_id,
+            "read after restart",
+            "read it back",
+        )
+        .await;
+
+        let Json(projected) = app_state(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect("project the rehydrated session");
+        let answers = transcript_answers(&projected);
+        assert!(
+            answers.iter().any(|answer| answer.contains("survived")),
+            "{} must read its earlier binding after a restart: {answers:#?}",
+            dialect.language_id()
+        );
+    }
+}
+
+/// The negative control, per dialect: a name neither the cell nor the session
+/// has must still be refused, and the refusal must reach the model.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_name_no_one_has_is_still_refused_in_both_dialects() {
+    for (dialect, cells, expected) in [
+        (
+            lash::rlm::RlmDialect::Lashlang,
+            vec![
+                "<lashlang>\nfinish nowhere\n</lashlang>".to_string(),
+                "<lashlang>\nfinish \"recovered\"\n</lashlang>".to_string(),
+            ],
+            "nowhere",
+        ),
+        (
+            lash::rlm::RlmDialect::Typescript,
+            vec![
+                "<typescript>\nfinish(nowhere);\n</typescript>".to_string(),
+                "<typescript>\nfinish(\"recovered\");\n</typescript>".to_string(),
+            ],
+            "TS_UNKNOWN_BINDING",
+        ),
+    ] {
+        let data_dir = tempfile::tempdir().expect("temp dir");
+        let mut state = queued_send_test_state(
+            data_dir.path(),
+            scripted_cells_provider("session-globals-unknown", cells),
+        )
+        .await;
+        state.rlm_dialect = dialect;
+        let session_id = state.current_session_id();
+        run_turn_through_the_workbench_open_path(
+            &state,
+            &session_id,
+            "unknown-name-turn",
+            "read a name nobody has",
+        )
+        .await;
+
+        let Json(projected) = app_state(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect("project the session");
+        let failures = projected
+            .transcript
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::CodeBlock { error, .. } => error.clone(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            failures.iter().any(|error| error.contains(expected)),
+            "{} must refuse a name nobody has: {failures:#?}",
             dialect.language_id()
         );
     }
