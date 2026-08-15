@@ -534,8 +534,9 @@ fn record_schema_migration_denial(
     );
 }
 
-/// Renders the reject-and-recreate boundary error, naming the remedy rather than
-/// only the numbers.
+/// Renders the remaining version-mismatch error, naming the remedy rather than
+/// only the numbers. The explicit 50 -> 51 migration has already been handled
+/// by the Lash-managed `Enforce` preflight when it is applicable.
 pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     let (found, expected) = match found {
         Some(version) => (
@@ -549,8 +550,11 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     };
     StoreError::Backend(format!(
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
-         The component schema is a reject-and-recreate boundary with no migration chain. Drain \
-         affected sessions and recreate the whole Lash trust domain with this version: provision \
+         The component schema is normally a reject-and-recreate boundary. This build has one \
+         explicit Lash-managed migration from the published component-50 shape to 51; it runs \
+         only under SchemaCheck::Enforce after an exact source-shape preflight. This mismatch \
+         has no applicable migration. Drain affected sessions and recreate the whole Lash trust \
+         domain with this version: provision \
          the database from this build's schema.sql artifact, and reset the tombstones, await-event \
          revocation ledger, effect journal, and Restate state together; see \
          docs/persistence.html#delete-sessions. This gate is unconditional; \

@@ -440,9 +440,12 @@ impl PostgresStorage {
     /// The component schema version this build implements, as stamped in
     /// `lash_schema_versions`.
     ///
-    /// The component schema is a reject-and-recreate boundary: there is no
-    /// migration chain between versions, and a database stamped with any other
-    /// version is rejected at open.
+    /// The component schema is normally a reject-and-recreate boundary. This
+    /// build has one explicit exception: Lash-managed `Enforce` mode can apply
+    /// the creation-only migration from the published component-50 shape to 51
+    /// after an exact source-shape preflight. A component-50 stamp over
+    /// version-51 artifacts is ledger/schema divergence and is refused with an
+    /// inspect-and-recreate remedy; other mismatches are rejected at open.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }

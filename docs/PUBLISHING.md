@@ -132,16 +132,18 @@ release gate by itself. Every other commit remains eligible to contribute.
 
 A change to any store schema version (`lash-sqlite-store`'s `PRAGMA
 user_version`, or a `lash-postgres-store` component version) is breaking for
-every persistent deployment: the new binary refuses the existing store, and the
-only way to adopt the release is to recreate durable state from empty. That
-release's notes must say so, and must say it is one-way. Lead the section with
-`Breaking:` and carry three facts:
+every persistent deployment unless the release publishes an explicit
+Lash-managed migration from an exact source shape. Without one, the new binary
+refuses the existing store and the only way to adopt the release is to recreate
+durable state from empty. The release notes must say which path applies and
+must say it is one-way. Lead the section with `Breaking:` and carry three facts
+when recreation is required:
 
 ```text
 Release-Notes:
-- Breaking: the Postgres store schema version changed. Persistent deployments
-  must recreate their stores (and the effect journal alongside them); lash
-  maintains no migration chain.
+- Breaking: this release has no explicit Postgres store migration. Persistent
+  deployments must recreate their stores (and the effect journal alongside
+  them); lash will refuse the old schema rather than guess at a transition.
 - Adopting this release is forward-only. Once stores are recreated, the previous
   version refuses to open them and will not boot. There is no rollback and no
   restore procedure; recovery from a failed bump is fix-forward.
