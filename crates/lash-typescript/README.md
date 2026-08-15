@@ -87,6 +87,11 @@ language semantics:
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
+- A `map` callback runs inside the VM and cannot perform effects. `console.log`,
+  a tool call, or any other effect inside one terminates with the typed
+  `EffectInBuiltinCallback` error. The callback is ordinary synchronous code:
+  an `await` inside it is a parse-level rejection, so there is no suspension
+  point inside `map` to make durable.
 - A single JavaScript string result is capped at **8 MiB**. Multiplicative
   growth paths such as `repeat` and replacement-token expansion preflight the
   result before allocation; exceeding the cap terminates as the uncatchable

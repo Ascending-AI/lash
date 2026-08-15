@@ -40,6 +40,16 @@ pub fn accepts_instance_method(method: &str) -> bool {
     lower::accepts_instance_method(method)
 }
 
+/// Every instance standard-library method the lowerer accepts.
+///
+/// Exposed alongside the predicate so the register's pin can assert set
+/// equality. A predicate alone only answers questions that are asked, which
+/// leaves the direction that actually drifted — the allowlist growing while
+/// the register stands still — checked by spot samples.
+pub fn accepted_instance_methods() -> &'static [&'static str] {
+    lower::accepted_instance_methods()
+}
+
 pub use diagnostics::{Diagnostic, DiagnosticCode, SourceSpan};
 pub use signatures::render_tool_signature;
 

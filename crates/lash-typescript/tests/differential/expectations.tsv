@@ -343,3 +343,4 @@ findings	54	accept	"''.replaceAll('', '-')"	"-"	-
 findings	55	accept	"'abc'.replace('', '-')"	"-abc"	-
 findings	56	accept	"'café'.replaceAll('', '.')"	".c.a.f.é."	-
 findings	57	accept	"'ab'.replaceAll('', '[$`|$\\']')"	"[|ab]a[a|b]b[ab|]"	-
+findings	58	reject	"'ab'.map((x) => x)"	"ERR<TypeError>"	TS_METHOD_UNSUPPORTED

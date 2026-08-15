@@ -1259,10 +1259,72 @@ fn for_of_bodies_reject_aliasing_the_iterable() {
             "the rejection names the iterable: {error}"
         );
     }
+    // A member-rooted iterable is the same hazard: `data.items` roots at
+    // `data`, and the mutation half of the filter already tracks that root, so
+    // the aliasing half has to agree or the alias escapes through the gap.
+    for source in [
+        "const data = { items: ['a','b'] }; let out = ''; for (const u of data.items) { const alias = data.items; alias[1] = 'MUT'; out = out + u; } finish(out);",
+        "const data = { items: ['a','b'] }; for (const u of data.items) { const b = { x: data.items }; b.x[1] = 'MUT'; } finish('done');",
+        "const data = { items: ['a','b'] }; for (const u of data.items) { const b = [data.items]; b[0][1] = 'MUT'; } finish('done');",
+        "const data = { items: ['a','b'] }; for (const u of data.items) { const alias = data; alias.items[1] = 'MUT'; } finish('done');",
+    ] {
+        let error = lash_typescript::link(source, &environment)
+            .expect_err("aliasing a member-rooted iterable must reject");
+        assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{source}");
+        assert!(
+            error.to_string().contains("data"),
+            "the rejection names the root the loop is walking: {error}"
+        );
+    }
     // Binding something else entirely stays fine.
-    lash_typescript::link(
+    for source in [
         "const urls = ['a']; const other = ['b']; for (const u of urls) { const alias = other; alias[0] = 'ok'; } finish('done');",
+        "const data = { items: ['a'] }; const other = ['b']; for (const u of data.items) { const alias = other; alias[0] = 'ok'; } finish('done');",
+        "const urls = ['a','b']; let out = ''; for (const u of urls) { const upper = u + '!'; out = out + upper; } finish(out);",
+        "const data = { items: ['a','b'] }; let n = 0; for (const u of data.items) { n = n + 1; } finish('done');",
+    ] {
+        lash_typescript::link(source, &environment)
+            .unwrap_or_else(|error| panic!("legal body must still compile: {source}: {error}"));
+    }
+}
+
+/// The register states that a `map` callback cannot perform effects and that
+/// there is therefore no suspension point inside `map` to make durable. Both
+/// halves are claims about behaviour, so both are pinned here rather than
+/// asserted in prose alone.
+#[test]
+fn map_callbacks_cannot_perform_effects() {
+    let environment = two_leaf_web_environment();
+
+    // An effect inside the callback terminates with the typed error the
+    // register names — not an untyped host failure, and not silently working.
+    let linked = lash_typescript::link(
+        "const out = [1,2].map((x) => { console.log(x); return x; }); finish(out);",
         &environment,
     )
-    .expect("aliasing a different array is not the iterable");
+    .expect("an effect inside a callback is not a link-time rejection today");
+    let error = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &AggregateHost,
+    ))
+    .expect_err("an effect inside a map callback must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("effects are not supported inside builtin callbacks"),
+        "the failure is the typed builtin-callback error: {error}"
+    );
+
+    // `await` inside the callback never reaches run time, so no suspension can
+    // occur inside `map`.
+    let rejected = lash_typescript::link(
+        "const out = [1,2].map(async (x) => { return await fetchPage('a'); }); finish(out);",
+        &environment,
+    )
+    .expect_err("an async callback must reject");
+    assert!(
+        rejected.code.as_str().starts_with("TS_"),
+        "the rejection is named: {rejected}"
+    );
 }

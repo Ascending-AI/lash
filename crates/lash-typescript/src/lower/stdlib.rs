@@ -73,36 +73,44 @@ pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
     }
 }
 
+/// Every instance standard-library method the lowerer accepts.
+///
+/// This is the one list. The predicate below reads it and so does the
+/// register's pin, so the allowlist cannot grow without the documented
+/// inventory growing with it — the drift that shipped a register nine methods
+/// behind the lowerer was possible only while the two were separate.
+pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
+    "at",
+    "charAt",
+    "charCodeAt",
+    "codePointAt",
+    "concat",
+    "endsWith",
+    "includes",
+    "indexOf",
+    "join",
+    "lastIndexOf",
+    "map",
+    "padEnd",
+    "padStart",
+    "repeat",
+    "replace",
+    "replaceAll",
+    "slice",
+    "split",
+    "startsWith",
+    "substring",
+    "toLowerCase",
+    "toUpperCase",
+    "toString",
+    "trim",
+    "trimEnd",
+    "trimStart",
+    "valueOf",
+];
+
 pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
-    matches!(
-        method,
-        "at" | "charAt"
-            | "charCodeAt"
-            | "codePointAt"
-            | "concat"
-            | "endsWith"
-            | "includes"
-            | "indexOf"
-            | "join"
-            | "lastIndexOf"
-            | "map"
-            | "padEnd"
-            | "padStart"
-            | "repeat"
-            | "replace"
-            | "replaceAll"
-            | "slice"
-            | "split"
-            | "startsWith"
-            | "substring"
-            | "toLowerCase"
-            | "toUpperCase"
-            | "toString"
-            | "trim"
-            | "trimEnd"
-            | "trimStart"
-            | "valueOf"
-    )
+    INSTANCE_STDLIB_METHODS.contains(&method)
 }
 
 pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> bool {

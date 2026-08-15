@@ -298,14 +298,24 @@ fn instance_method_inventory_matches_the_lowerer() {
         .map(str::to_string)
         .collect::<std::collections::BTreeSet<_>>();
 
-    // Every documented name must be accepted, and the count must match the
-    // register's own claim, so neither list can grow without the other.
-    for method in &documented {
-        assert!(
-            lash_typescript::accepts_instance_method(method),
-            "the register documents `{method}`, which the lowerer does not accept"
-        );
-    }
+    // Set equality in both directions. Documented-implies-accepted alone
+    // leaves the direction that actually drifted — the allowlist growing while
+    // the register stands still — unchecked, which is how the register came to
+    // be nine methods behind.
+    let accepted = lash_typescript::accepted_instance_methods()
+        .iter()
+        .map(|method| (*method).to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+    let undocumented = accepted.difference(&documented).collect::<Vec<_>>();
+    assert!(
+        undocumented.is_empty(),
+        "the lowerer accepts {undocumented:?}, which the register does not document"
+    );
+    let unaccepted = documented.difference(&accepted).collect::<Vec<_>>();
+    assert!(
+        unaccepted.is_empty(),
+        "the register documents {unaccepted:?}, which the lowerer does not accept"
+    );
     let claimed = register
         .split("37 static methods and\n")
         .nth(1)

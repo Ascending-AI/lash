@@ -11,10 +11,11 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 57],
+  ['findings', 'findings-expressions.txt', 58],
 ];
 
 const rejected = new Map([
+  ["'ab'.map((x) => x)", 'TS_METHOD_UNSUPPORTED'],
   ['2 ** 3', 'TS_EXPONENTIATION_UNSUPPORTED'],
   ['1 & 3', 'TS_BITWISE_UNSUPPORTED'],
   ['1 | 2', 'TS_BITWISE_UNSUPPORTED'],

@@ -289,8 +289,15 @@ pub(super) fn body_may_mutate_iterable(iterable: &Expr, body: &Stmt) -> Option<S
 /// urls`, or boxing it in a structure the loop can reach later.
 fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
     fn names_iterable_directly(expr: &Expr, binding: &str) -> bool {
+        // `data.items` roots at `data` exactly as `data` does. The mutation
+        // half of this filter tracks the root, so this half has to as well:
+        // when the two disagree about what "the iterable" is, a member-rooted
+        // iterable can be aliased through the gap between them and the loop
+        // diverges from ECMA in silence.
+        if expression_root_binding(expr) == Some(binding) {
+            return true;
+        }
         match expr {
-            Expr::Ident(name) => name.as_str() == binding,
             // Boxing it in a literal keeps a live reference to it.
             Expr::Array(items) => items
                 .iter()

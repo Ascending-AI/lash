@@ -17,6 +17,7 @@ mod effects;
 mod exceptions;
 mod heap_plan;
 mod javascript;
+mod javascript_json;
 mod reference_assignment;
 
 #[cfg(test)]
