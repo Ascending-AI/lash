@@ -74,6 +74,14 @@ pub(crate) fn plugin_runtime_session_events(
         .collect()
 }
 
+/// An action emitted by a plugin hook for the runtime to apply at that hook's boundary.
+///
+/// Before-tool-call hooks compose monotonically. Argument replacements take effect before the
+/// next registered hook runs. Terminal directives are joined by restrictiveness: abort beats a
+/// denied or cancelled short-circuit, which beats a successful short-circuit. Equal-strength
+/// conflicts use plugin ID as a stable tie-breaker, so changing registration order cannot restore
+/// permission. The runtime surfaces every terminal conflict as a structured plugin-composition
+/// warning and also publishes a best-effort runtime event when that channel can accept it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 // justification: directives are transient public plugin values and the common short-circuit output avoids another allocation.

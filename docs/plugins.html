@@ -200,6 +200,27 @@ fn update_plan_definition() -&gt; ToolDefinition {
       </div>
     </div>
 
+    <div class="section" id="before-tool-call-composition">
+      <div class="section-header">
+        <h2>Before-tool-call composition</h2>
+        <p>Before-tool-call hooks may only preserve or reduce permission. Installing another plugin cannot turn an earlier denial or abort into permission to continue.</p>
+      </div>
+      <div class="listing">
+        <div class="listing__row">
+          <div class="listing__label">arguments</div>
+          <div class="listing__body"><p>Hooks run in plugin registration order. A <code>ReplaceToolArgs</code> directive takes effect immediately, and every remaining hook inspects the replacement rather than the original snapshot.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">terminal precedence</div>
+          <div class="listing__body"><p>The fold joins terminal directives by restrictiveness: <code>AbortTurn</code> wins over a failed or cancelled <code>ShortCircuitTool</code>, which wins over a successful short-circuit. Equal-strength conflicts use plugin ID as a stable tie-breaker, so reversing registration order does not change the result.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">conflicts</div>
+          <div class="listing__body"><p>A losing terminal directive is never silently discarded. Lash always emits a <code>lash::plugin_composition</code> warning with the winning and ignored plugin IDs and directive kinds. It also publishes a best-effort <code>lash.plugin_runtime</code> event named <code>before_tool_call.directive_conflict</code> when the runtime-event channel can accept it without blocking tool dispatch.</p></div>
+        </div>
+      </div>
+    </div>
+
     <div class="section" id="failure-modes">
       <div class="section-header">
         <h2>Failure Modes</h2>

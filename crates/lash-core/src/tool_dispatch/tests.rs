@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+mod directives;
 mod internal_activation;
 
 type AttemptObservation = (u32, u32, Option<String>);

@@ -316,16 +316,22 @@ impl PluginSession {
 
     pub async fn before_tool_call(
         &self,
-        ctx: ToolCallHookContext,
+        mut ctx: ToolCallHookContext,
     ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
-        collect_owned_async(
-            &self.contributions.before_tool_call_hooks,
-            ctx,
-            "before_tool_call",
-            None,
-            |hook, ctx| hook(ctx),
-        )
-        .await
+        let mut out = Vec::new();
+        for registered in &self.contributions.before_tool_call_hooks {
+            let directives = (registered.hook)(ctx.clone()).await?;
+            for directive in directives {
+                if let PluginDirective::ReplaceToolArgs { args } = &directive {
+                    ctx.args = args.clone();
+                }
+                out.push(PluginOwned {
+                    plugin_id: registered.plugin_id.clone(),
+                    value: directive,
+                });
+            }
+        }
+        Ok(out)
     }
 
     pub async fn after_tool_call(
