@@ -183,19 +183,44 @@ opposite directions:
 ## Judged-runbook parity
 
 `runbooks/parity-matrix.toml` is the machine-readable authority. It expands to
-**63 independent rows**: 30 RLM scenarios in each of the two dialects, two
-standard-mode rows, and one TypeScript-only composite acceptance row.
+**62 independent rows**: 30 RLM scenarios in each of the two dialects, one
+standard-mode row, and one TypeScript-only composite acceptance row.
 `scripts/judged_runbook_matrix.py` validates the files and emits stable `I/N`
 shards as JSON. The matrix properties — complete twin coverage, lossless
-sharding, one row per standard-mode host, and the row total itself — are
-mutation-earned: a duplicated scenario and a lossy shard were green before this
-work and are red now, and CI runs the gate.
+sharding, one row per standard-mode host, tier/model agreement, and the row total
+itself — are mutation-earned: a duplicated scenario, a lossy shard, and a row
+funded at a model its tier does not name were green before this work and are red
+now, and CI runs the gate.
 
-`slack-clone-bot` and `slack-clone-mcp-client-depth` are the two standard-mode
-rows. Both run `LashCore::standard_builder` — a native tool loop with no RLM
-session — so they have no dialect to pin and no honest twin; a second row would
-have bought an identical judged run and labelled it with a language the session
-never had.
+`slack-clone-bot` is the standard-mode row. It runs `LashCore::standard_builder`
+— a native tool loop with no RLM session — so it has no dialect to pin and no
+honest twin; a second row would have bought an identical judged run and labelled
+it with a language the session never had.
+
+The former `slack-clone-mcp-client-depth` row was retired into `slack-clone-bot`
+Phase 3M. The subset proof, in three parts: (1)
+`slack-clone-deterministic`'s own coverage table maps its whole scorecard —
+sampling, form elicitation, URL elicitation/completion, roots, four committed
+results and four exact trace attempts — with no uncovered cell, and the retired
+runbook conceded it in its own second paragraph ("The same four client-depth
+tools run with exact scripted answers inside the token-free full-host CI
+companion"); (2) the judged battery ran the row and every host-owned feature
+passed, with the single failing gate being "exactly four *top-level* tool
+records", which fired only because a real model legitimately batched three of
+the four calls — a gate the paid row makes *worse*, not better (battery
+Finding H); (3) the one claim the scripted harness genuinely cannot make — that
+sampling is served by the bot's own configured provider, since a scripted
+provider has no model id to name — is now a step and two scorecard rows on
+`slack-clone-bot`, an already-paid judged row on the same host and the same
+boot. Phase 3M also carries the Finding H repair: the tool-name count unwraps a
+`batch` envelope instead of demanding four top-level records.
+
+Each scenario also carries an execution **tier** (`deterministic` / `economy` /
+`frontier`) and the concrete model slug the tier funds. The tier is a claim about
+what the row tests: a row whose every gate is a count, an id, or a byte
+comparison does not need a frontier driver to produce that evidence, while the
+organic `continue_as` lever, first-shot codemode fluency, and the
+pinned-program-shape rows do. `judge_model_floor` is unchanged at `gpt-5.6-sol`.
 
 Every RLM and judge step has a `gpt-5.6-sol` floor. Independent rows may execute
 concurrently; judging is sharded; evidence must be fresh; provider-equivalent
@@ -216,7 +241,6 @@ no mislabeled evidence was produced; the fix precedes the battery.
 | `rlm-cell-boundary` | PREPARED / NOT RUN | PREPARED / NOT RUN |
 | `session-lease-triage` | PREPARED / NOT RUN | PREPARED / NOT RUN |
 | `slack-clone-bot` | standard mode — one dialect-neutral row, PREPARED / NOT RUN ||
-| `slack-clone-mcp-client-depth` | standard mode — one dialect-neutral row, PREPARED / NOT RUN ||
 | `tictactoe-full-game` | PREPARED / NOT RUN | PREPARED / NOT RUN |
 | `version-bump-recreation` | PREPARED / NOT RUN | PREPARED / NOT RUN |
 | `workbench-attachments` | PREPARED / NOT RUN | PREPARED / NOT RUN |

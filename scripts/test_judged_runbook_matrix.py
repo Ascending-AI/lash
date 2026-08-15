@@ -35,21 +35,23 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             self.assertIn((scenario, "typescript"), actual)
 
     def test_the_matrix_lists_no_scenario_twice(self) -> None:
-        # A duplicated scenario is invisible to a set comparison while the
+        # A scenario in two groups is invisible to a per-group check while the
         # shard set silently grows, and every extra row is a paid judged run.
+        # (TOML already refuses a repeated key inside one group.)
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
-        for key in (
-            "scenarios",
-            "typescript_only",
-            "deterministic_only",
-            "standard_mode_only",
-        ):
-            listed = config.get(key, [])
-            duplicates = sorted(
-                {name for name in listed if listed.count(name) > 1}
+        listed = [
+            name
+            for key in (
+                "scenarios",
+                "typescript_only",
+                "deterministic_only",
+                "standard_mode_only",
             )
-            self.assertEqual(duplicates, [], f"`{key}` repeats {duplicates}")
+            for name in config.get(key, {})
+        ]
+        duplicates = sorted({name for name in listed if listed.count(name) > 1})
+        self.assertEqual(duplicates, [], f"the matrix classifies {duplicates} twice")
         rows = MATRIX.rows(config)
         keys = [(row["scenario"], row["dialect"]) for row in rows]
         repeated = sorted({key for key in keys if keys.count(key) > 1})
@@ -84,7 +86,42 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             + len(config["standard_mode_only"])
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 63)
+        self.assertEqual(expected, 62)
+
+    def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
+        # The tier word is what a reader trusts; the slug is what the bill is
+        # for. A row whose model does not match its tier is a funding claim the
+        # evidence cannot support, and nothing else in the repository looks.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        self.assertEqual(MATRIX.tier_violations(config), [])
+        self.assertEqual(
+            sorted(config["tiers"]), ["deterministic", "economy", "frontier"]
+        )
+        for item in MATRIX.rows(config):
+            self.assertIn(item["tier"], config["tiers"])
+            self.assertIn(item["model"], config["tiers"][item["tier"]])
+
+    def test_a_mismatched_tier_model_is_rejected(self) -> None:
+        # Drives the checker with the mutation it exists to catch, so an
+        # assertion that only reads the shipped file cannot pass vacuously.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        config["scenarios"]["docs-quickstart"]["model"] = config["tiers"]["frontier"][0]
+        self.assertNotEqual(MATRIX.tier_violations(config), [])
+        config["scenarios"]["docs-quickstart"]["tier"] = "platinum"
+        self.assertNotEqual(MATRIX.tier_violations(config), [])
+
+    def test_no_deterministic_scenario_names_a_paid_model(self) -> None:
+        # The tier's whole claim is that the row makes no provider network
+        # call. A deterministic row pointing at a real slug would spend money
+        # under a label that says it cannot.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        self.assertEqual(config["tiers"]["deterministic"], ["scripted-provider"])
+        for item in MATRIX.rows(config):
+            if item["tier"] == "deterministic":
+                self.assertNotIn("/", item["model"])
 
     def test_shards_are_disjoint_and_complete(self) -> None:
         # Drives the script's own selection, so a regression in the shard

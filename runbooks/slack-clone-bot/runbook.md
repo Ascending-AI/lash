@@ -224,6 +224,44 @@ The reply's *wording* is not gated. That it names A's fact and a real channel is
 behaviour; that exactly one turn ran and folded the queued input is the objective gate.
 Screenshot `03-mention-both-tabs.png`.
 
+## Phase 3M — MCP client depth: the host answers, over a real provider
+
+This phase absorbs the former `slack-clone-mcp-client-depth` runbook. The four
+client-depth features themselves — sampling, form elicitation, URL elicitation
+completion, and workspace roots — are proven headlessly with exact scripted
+oracles by [`slack-clone-deterministic`](../slack-clone-deterministic/runbook.md)
+("MCP phases 0-3"), so re-running them as their own paid judged row bought a
+second boot and no additional claim. Two things the scripted harness cannot say
+survive here, because they need a real provider: that **sampling is served by
+the model the bot configured**, and that the reply reflects the sampled input.
+
+As **B**, post one message that mentions the bot and asks for all four features,
+naming them:
+
+> `<@U…> call mcp__slack_clone__sample_summary with "Host policy stays with the embedding application", then call mcp__slack_clone__elicit_confirmation, mcp__slack_clone__elicit_via_url, and mcp__slack_clone__list_host_roots. Report the summary, form action and answer, URL action and completion status, and root name.`
+
+Poll until exactly one new bot reply renders, then require:
+
+- **Layer 3:** the committed tool results carry the **sampled model id equal to
+  the bot's own configured provider model**, plus
+  `{ "action": "accept", "answer": "yes" }`, an accepted URL result with
+  `completion_notified = true` and `elicitation_id = "slack-clone-demo-url-1"`,
+  and a root named `slack-clone` with a `file://` URI.
+- **Layer 4:** exactly **one** new `turn_completed`, and one successful
+  `tool_call_started`/`tool_call_completed` pair for each of the four exact MCP
+  tool names. **A `batch` envelope is permitted**: unwrap its per-entry `tool`
+  field and count the four names inside it. Do not gate on four *top-level*
+  tool records — a real model legitimately batches, and the former runbook's
+  literal "exactly four tool records" gate failed a correct run on exactly that
+  (battery Finding H). What stays prohibited is a second `turn_completed` or a
+  nested direct-command envelope.
+- **Judged:** the reply reports a summary that reflects the supplied input, the
+  form answer, the URL completion, and the root name. Wording is not gated.
+
+Require the bot process log to contain `MCP URL elicitation completed` with
+`slack-clone-demo-url-1`. Screenshot `03M-mcp-depth-both-tabs.png` and save
+`03M-session-tool-results.json` and `03M-url-completion.txt`.
+
 ## Phase 3T — Human B opens a thread: inherited context, one threaded reply, no channel leak
 
 Use Human A's first ambient message from phase 2 as the thread root. In **B's** tab click that
@@ -441,6 +479,8 @@ Run `bash scripts/slack-clone-dev.sh down --port <p>` and confirm both processes
 | Fold is provable | ambient markers committed in the drained turn with `TurnInput` provenance | | layer-3 extract |
 | Twin dropped | the `message` twin `ignored` as `superseded_by_app_mention` | | layer-3 extract |
 | Tool loop ran | `tool_call_started`/`completed` pair; exactly one `turn_completed` | | layer-4 extract |
+| MCP client depth | four host-owned results committed; four exact tool names, `batch` envelope unwrapped; one `turn_completed` | | `03M-session-tool-results.json`, `03M-url-completion.txt` |
+| MCP sampling is the host's | sampled model id equals the bot's configured provider model | | `03M-session-tool-results.json` |
 | Thread fork | deterministic child session with retained channel ancestry | | `03T-thread-both-tabs.png`, layer-3 extract |
 | Thread inheritance | reply uses the pre-fork ambient fact; post-fork marker absent from the committed thread transcript | | phase-3T transcript extract |
 | Request body accounted for | `body_len` + `body_sha256` present; `body_json_omitted_reason` when over the 2 KiB cap | | phase-3T trace extract |

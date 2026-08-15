@@ -1,5 +1,4 @@
-schema_version = 1
-execution_model_floor = "gpt-5.6-sol"
+schema_version = 2
 judge_model_floor = "gpt-5.6-sol"
 artifact_layout = "<run-root>/<scenario>/<dialect>"
 
@@ -7,43 +6,70 @@ artifact_layout = "<run-root>/<scenario>/<dialect>"
 # and therefore runs in both first-class RLM dialects.
 dialects = ["lashlang", "typescript"]
 
-scenarios = [
-  "agent-service-branching",
-  "docs-quickstart",
-  "graceful-drain",
-  "process-operations",
-  "request-abandon",
-  "rlm-cell-boundary",
-  "session-lease-triage",
-  "tictactoe-full-game",
-  "version-bump-recreation",
-  "workbench-attachments",
-  "workbench-break-glass",
-  "workbench-chat-projection",
-  "workbench-continue-as",
-  "workbench-cron-schedule",
-  "workbench-deferred-tools",
-  "workbench-durable-stop",
-  "workbench-engine-restart",
-  "workbench-execution-state-rehydration",
-  "workbench-failure-paths",
-  "workbench-inbox-world",
-  "workbench-process-lifecycle",
-  "workbench-reconnect-resilience",
-  "workbench-session-id-retirement",
-  "workbench-session-isolation",
-  "workbench-session-resume",
-  "workbench-shared-session-multi-tab",
-  "workbench-trigger-lifecycle",
-  "workbench-turn-ingress",
-  "workbench-usage-ledger",
-  "workflow-editor-authoring",
-]
+# Execution tiers. A judged row's execution model is a claim about what the row
+# is testing, not a uniform quality floor: the old blanket `gpt-5.6-sol`
+# execution floor bought a frontier model for rows whose every gate is a row
+# count. `tier` says which claim the row makes; `model` on each scenario is the
+# concrete slug, written out rather than defaulted so a substitution is visible
+# in the diff. RULES.md carries the semantics and the substitution rule.
+#
+#   deterministic — the row makes no provider network call. A scripted or
+#                   in-process fixture provider supplies every reply, so the
+#                   model's choices are not the judged subject at all.
+#   economy       — a competent driver suffices. Every gate is a count, an id,
+#                   a durable fact, or an instruction the runbook states
+#                   outright; a frontier model would produce the same evidence.
+#   frontier      — model *behaviour* is the judged subject. A weaker driver
+#                   changes the verdict rather than the prose.
+# Each tier lists the models it may be funded at; a scenario must name one of
+# them. `economy` has two rungs because "a competent driver suffices" is not one
+# capability: `flash` runs the rows that only have to follow an instruction the
+# runbook states outright, `pro` the rows that have to author a working durable
+# program or discover an affordance.
+[tiers]
+deterministic = ["scripted-provider"]
+economy = ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]
+frontier = ["openai/gpt-5.6-sol"]
+
+# Ordinary RLM scenarios: one judged row per dialect. Order is the shard order,
+# so a reordering moves rows between shards.
+[scenarios]
+agent-service-branching = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
+docs-quickstart = { tier = "deterministic", model = "scripted-provider" }
+graceful-drain = { tier = "deterministic", model = "scripted-provider" }
+process-operations = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the `just process-operations-e2e` companion, the FIG-1292 preflight, and Phases 0-8; only the five FIG-1293 tool rows call a provider" }
+request-abandon = { tier = "deterministic", model = "scripted-provider" }
+rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
+session-lease-triage = { tier = "deterministic", model = "scripted-provider" }
+tictactoe-full-game = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
+version-bump-recreation = { tier = "deterministic", model = "scripted-provider" }
+workbench-attachments = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 2 calls a provider" }
+workbench-break-glass = { tier = "deterministic", model = "scripted-provider" }
+workbench-chat-projection = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "Surfaces A-E, on the named dev-provider scenarios; only Phases 0-4 call a provider" }
+workbench-continue-as = { tier = "frontier", model = "openai/gpt-5.6-sol" }
+workbench-cron-schedule = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-deferred-tools = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-durable-stop = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-engine-restart = { tier = "frontier", model = "openai/gpt-5.6-sol" }
+workbench-execution-state-rehydration = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-failure-paths = { tier = "deterministic", model = "scripted-provider" }
+workbench-inbox-world = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-process-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-reconnect-resilience = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
+workbench-session-id-retirement = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-session-isolation = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-session-resume = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
+workbench-shared-session-multi-tab = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
+workbench-trigger-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-turn-ingress = { tier = "frontier", model = "openai/gpt-5.6-sol" }
+workbench-usage-ledger = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 1 calls a provider" }
+workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider" }
 
 # These exercise TypeScript-only host-language surface with no honest Lashlang
 # twin. The runbook keeps them together because the final phase composes all
 # three into the required durable restart turn.
-typescript_only = ["typescript-codemode-parity"]
+[typescript_only]
+typescript-codemode-parity = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 
 # Standard-mode reference hosts: `LashCore::standard_builder`, a native tool
 # loop, no RLM session and therefore no dialect to pin. Running them twice would
@@ -51,9 +77,11 @@ typescript_only = ["typescript-codemode-parity"]
 # `dialect` label would be a claim about a session that does not exist. They get
 # one dialect-neutral row each, emitted with `dialect = "standard"` — the mode,
 # not a language — which is also their artifact directory.
-standard_mode_only = ["slack-clone-bot", "slack-clone-mcp-client-depth"]
+[standard_mode_only]
+slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 
 # Deterministic, hermetic harnesses that CI executes rather than judges. They
 # make no model call, so they have no dialect to pin and no judged row to pair;
 # listing them here keeps discovery honest without inventing paid twin runs.
-deterministic_only = ["slack-clone-deterministic"]
+[deterministic_only]
+slack-clone-deterministic = { tier = "deterministic", model = "scripted-provider" }

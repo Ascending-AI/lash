@@ -30,7 +30,7 @@ judged. **Manual judged** is the semantic browser or static-page runbook layer.
 | `agent-service` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs `Test workspace shard`. | `Functional E2E (agent-service)` runs `agent-service-restate-e2e`, including the Restate ingress and process-workflow live test; it is not a browser journey. | [`agent-service-branching`](agent-service-branching/runbook.md) and [`tictactoe-full-game`](tictactoe-full-game/runbook.md). |
 | `agent-workbench` | `Test docs + build cache` runs `Check workspace (all targets)` and the package-scoped workbench check; `Test shard ${{ matrix.shard }}/3` runs `Test workspace shard`. | `Functional E2E (agent-workbench)` runs `agent-workbench-restate-e2e` with Restate and Postgres live tests; it is not a browser journey. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. |
 | `docs-snippets` | `Test docs + build cache` runs `Check workspace (all targets)`, which compiles the snippet target, and the docs/API checks. | None. `Publish docs` publishes the checked-in static docs; it does not judge a hosted quickstart journey. | [`docs-quickstart`](docs-quickstart/runbook.md). |
-| `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md) and [`slack-clone-mcp-client-depth`](slack-clone-mcp-client-depth/runbook.md). |
+| `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md), whose Phase 3M carries MCP client depth. |
 | `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
 
 ## Dialect parity is mandatory
@@ -84,18 +84,60 @@ row is a failed harness, not a skipped row.
 Independent scenario/dialect rows may execute concurrently from the start, subject to the
 repository's two-heavy-job limit and each runbook's port/container isolation rules.
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
-or mutates the app it scores. RLM model-calling steps use `gpt-5.6-sol` or newer; record
-the actual execution model and judge model on every row, including any substitution.
-`python3 scripts/judged_runbook_matrix.py --shard I/N` emits a stable JSON work shard. The
-matrix currently expands to **63 rows**: 30 RLM scenarios in two dialects, two
-standard-mode rows, and one TypeScript-only composite. The arithmetic is asserted by
-`scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave this number
-stale without turning CI red.
+or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
+stable JSON work shard. The matrix currently expands to **62 rows**: 30 RLM scenarios in two
+dialects, one standard-mode row, and one TypeScript-only composite. The arithmetic is
+asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave this
+number stale without turning CI red.
 
 Score a `cargo test`/`cargo nextest` run by its **passed count**, never by its exit code. A
 filter that matches nothing exits `0` and prints `0 passed; N filtered out`, which reads as
 a green gate and is evidence of nothing. Two shards of an earlier round were reported green
 on exactly that.
+
+## Execution tiers
+
+A row's execution model is a **claim about what the row is testing**, not a uniform quality
+floor. The earlier blanket `gpt-5.6-sol` execution floor bought a frontier model for rows
+whose every gate is a row count, an id, or a byte comparison — evidence any competent driver
+produces identically. `runbooks/parity-matrix.toml` therefore carries a `tier` and the
+concrete `model` slug per scenario, and the emitted shard carries both on every row.
+
+- **`deterministic`** — the row makes **no provider network call**. A scripted or in-process
+  fixture provider supplies every reply, so the model's choices are not the judged subject at
+  all. A deterministic row is only honest when the runbook names its public environment
+  selector, expected exact output, and dev-only startup warning (the real-token rule below).
+  The matrix refuses a deterministic scenario that names a real model slug.
+- **`economy`** — `deepseek/deepseek-v4-flash`, or `deepseek/deepseek-v4-pro` where the row
+  needs the driver to author a non-trivial durable program or discover an affordance rather
+  than follow an instruction the runbook states outright. Every gate is still a count, an id,
+  a durable fact, or a literal the operator supplied.
+- **`frontier`** — `openai/gpt-5.6-sol`. Reserved for rows where model **behaviour is the
+  judged subject**, so a weaker driver changes the verdict rather than the prose: the organic
+  `continue_as` lever, first-shot codemode fluency, and the pinned-program-shape rows whose
+  documented failure mode is an Abort rather than a retry.
+
+Three rules keep the tiers honest:
+
+1. **The tier is not a licence to weaken a gate.** If a gate only passes at `frontier`, the
+   row is `frontier`; do not retune the answer key downward to fit a cheaper driver.
+2. **Record the served model from the row's own evidence**, never from the environment — the
+   same rule the dialect pin already carries. Any substitution (a slug that is unavailable, a
+   tier raised mid-row after a repeated model failure) is recorded on the row's scorecard with
+   the reason, exactly as a dialect substitution is.
+3. **A tier change is a matrix change.** Running a row at a model the matrix does not name for
+   it produces mislabeled evidence in the same way a carried-over data directory does. Move
+   the scenario's tier in `parity-matrix.toml` first, in its own commit, with the reason.
+
+Where a runbook is half mechanics and half behaviour, the mechanical half runs deterministic
+and only the residue is funded: `parity-matrix.toml` records that split per scenario in
+`deterministic_phases`. A companion shared by two scenarios
+(`agent-workbench-attachment-usage-gate` serves both `workbench-attachments` and
+`workbench-usage-ledger`) is run **once per battery** and cited by both rows; re-running it
+per row buys an identical log.
+
+The judge is separate and unchanged: `judge_model_floor` stays `gpt-5.6-sol`. A cheap driver
+producing the evidence does not license a cheap reader of it.
 
 ## What you're testing
 
@@ -157,10 +199,11 @@ Apply every rule below to the browser surface:
 **Real tokens, deliberate runs.** Except for an explicitly documented, dev-only provider
 scenario in a runbook, the examples call OpenRouter (and Tavily for web tools) with keys
 from the environment / repo `.env`. Browser scenarios are deliberate, token-spending,
-and model-nondeterministic unless their runbook names that exception. Gate real-provider
-runs on **structural outcomes** (a terminal game state, a message present in an inbox),
-never on exact model prose. A missing required key is a harness gap → Abort; do not add an
-ad hoc stub. A deterministic provider is valid only when the runbook names its public
+and model-nondeterministic unless their runbook names that exception. Export the model the
+row's tier names (`OPENROUTER_MODEL`, and confirm it from the row's own evidence rather than
+the environment). Gate real-provider runs on **structural outcomes** (a terminal game state,
+a message present in an inbox), never on exact model prose. A missing required key is a
+harness gap → Abort; do not add an ad hoc stub. A deterministic provider is valid only when the runbook names its public
 environment selector, expected exact output, and dev-only startup warning.
 
 **Boot and teardown are part of the run.** Phase 0 boots the example (`cargo run -p

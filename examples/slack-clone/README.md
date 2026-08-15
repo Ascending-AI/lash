@@ -64,8 +64,8 @@ source of truth for the CI split:
 - **Manual live-model CI:** the dispatch-only `Slack-clone live-model acceptance`
   workflow runs one RLM agent and one standard agent through OpenRouter. It is
   never triggered by pushes, pull requests, or schedules.
-- **Manual judged:** [`slack-clone-bot`](../../runbooks/slack-clone-bot/runbook.md)
-  and [`slack-clone-mcp-client-depth`](../../runbooks/slack-clone-mcp-client-depth/runbook.md).
+- **Manual judged:** [`slack-clone-bot`](../../runbooks/slack-clone-bot/runbook.md),
+  whose Phase 3M covers MCP client depth.
 
 For the executable, token-free downstream acceptance used by CI, run:
 
@@ -188,8 +188,8 @@ are in-attempt host I/O and must not emit journaled Lash effects. Host-owned
 sampling is billed by the host: its usage is visible in provider/host traces,
 not in the session usage ledger or `TurnResult` usage.
 
-[Run the judged MCP client-depth walkthrough](../../runbooks/slack-clone-mcp-client-depth/runbook.md)
-for real-provider semantic judgement, or the
+[Run the judged MCP client-depth walkthrough](../../runbooks/slack-clone-bot/runbook.md)
+(`slack-clone-bot` Phase 3M) for real-provider semantic judgement, or the
 [deterministic full-host companion](../../runbooks/slack-clone-deterministic/runbook.md)
 for the exact four-tool, four-layer CI contract.
 
