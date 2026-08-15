@@ -315,7 +315,7 @@ pub(crate) enum ToolCallLaunch {
 }
 
 pub(crate) enum ToolPreparationOutcome {
-    Prepared(PreparedToolCall),
+    Prepared(Box<PreparedToolCall>),
     Completed(Box<ToolDispatchOutcome>),
 }
 

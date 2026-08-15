@@ -15,8 +15,10 @@ use lash_trace::{
 use super::*;
 
 mod host_forwarder;
+mod terminal;
 
 use host_forwarder::{ProviderDeltaClass, ProviderHostForwarder};
+use terminal::{observed_stream_protocol_position, synthesize_protocol_abort};
 
 /// Largest exact provider request body retained as structured JSON in a trace.
 /// Larger bodies keep their byte length and wire-byte digest without inflating
@@ -105,54 +107,6 @@ fn record_protocol_owned_stop_suppression(
             suppress(&mut attempt.generation_disposition);
         }
     }
-}
-
-fn synthesize_protocol_abort(
-    stream_accumulator: &LlmStreamAccumulator,
-    streamed_usage: LlmUsage,
-    stream_evidence: &crate::LlmStreamEvidence,
-    started_at: u64,
-    duration: std::time::Duration,
-) -> (LlmResponse, crate::LlmCallRecord) {
-    let mut execution_evidence = stream_evidence
-        .execution_evidence
-        .clone()
-        .unwrap_or_default();
-    execution_evidence.collection_interruption =
-        Some(crate::ExecutionEvidenceCollectionInterruption::ProtocolAbort);
-    let mut response = LlmResponse {
-        full_text: stream_accumulator.full_text(),
-        parts: Vec::new(),
-        usage: streamed_usage,
-        terminal_reason: crate::LlmTerminalReason::Stop,
-        terminal_diagnostic: None,
-        provider_usage: stream_evidence.provider_usage.clone(),
-        request_body: stream_evidence.request_body.clone(),
-        http_summary: stream_evidence.http_summary.clone(),
-        execution_evidence: Some(execution_evidence.clone()),
-        generation_disposition: stream_evidence.generation_disposition,
-        response_metadata: stream_evidence.response_metadata.clone(),
-    };
-    stream_accumulator.apply_to_response(&mut response);
-    let call_record = crate::LlmCallRecord {
-        call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),
-        label: None,
-        attempts: vec![crate::AttemptRecord {
-            ordinal: 1,
-            started_at,
-            duration,
-            outcome: crate::AttemptOutcome::Aborted,
-            protocol_position: crate::ProtocolPosition::OutputStarted,
-            retry_budget_consumed: true,
-            retry_decision: None,
-            error: None,
-            evidence: Some(execution_evidence),
-            generation_disposition: response.generation_disposition,
-            usage: (response.provider_usage.is_some() || response.usage != LlmUsage::default())
-                .then(|| response.usage.clone()),
-        }],
-    };
-    (response, call_record)
 }
 
 impl RuntimeTurnDriver<'_> {
@@ -325,7 +279,7 @@ impl RuntimeTurnDriver<'_> {
         let mut debug = LlmStreamDebugState::new(self.host.core.clock.now());
         let provider_trace =
             self.provider_trace_sender(protocol_iteration, llm_call_id.clone(), &debug);
-        let llm_request = LlmRequest {
+        let mut llm_request = LlmRequest {
             scope: crate::LlmRequestScope::new(
                 self.session_id.clone(),
                 self.turn_pipeline
@@ -345,8 +299,12 @@ impl RuntimeTurnDriver<'_> {
         };
 
         let mut call_provider = self.policy.provider().clone();
+        let completion_sideband = call_provider.prepare_completion(&mut llm_request);
+        let task_sideband = completion_sideband.clone();
         let mut llm_task = crate::task::spawn(async move {
-            let result = call_provider.complete(llm_request).await;
+            let result = call_provider
+                .complete_prepared(llm_request, task_sideband)
+                .await;
             (result, call_provider)
         });
         let mut llm_task_abort = AbortOnDrop::new(llm_task.abort_handle());
@@ -381,16 +339,29 @@ impl RuntimeTurnDriver<'_> {
             tokio::select! {
                 _ = cancel.cancelled() => {
                     llm_task.abort();
-                    break Err(LlmCallError {
-                        message: "cancelled".to_string(),
-                        retryable: false,
-                        kind: crate::ProviderFailureKind::Unknown,
-                        raw: None,
-                        code: Some("cancelled".to_string()),
-                        terminal_reason: crate::LlmTerminalReason::Cancelled,
-                        request_body: None,
-                        partial_response: None,
-                    });
+                    let failure = crate::llm::transport::LlmTransportError::new("cancelled")
+                    .with_kind(crate::ProviderFailureKind::Unknown)
+                    .with_code("cancelled")
+                    .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
+                    .retryable(false);
+                    call_record = Some(crate::provider::synthetic_terminal_call_record(
+                        attempt_started_at,
+                        self.host
+                            .core
+                            .clock
+                            .now()
+                            .saturating_duration_since(attempt_started),
+                        crate::AttemptOutcome::Aborted,
+                        &failure,
+                        true,
+                        observed_stream_protocol_position(
+                            *stream_state.text_streamed,
+                            stream_state.stream_accumulator,
+                            stream_state.stream_evidence,
+                        ),
+                        completion_sideband.replay_drops(),
+                    ));
+                    break Err(crate::runtime::effect::llm_call_error_from_transport(failure));
                 }
                 Some(stream_event) = llm_stream_rx.recv() => {
                     if let Err(err) = self
@@ -444,24 +415,60 @@ impl RuntimeTurnDriver<'_> {
                                     });
                                 }
                             };
-                            if let Ok(completion) = provider_result {
-                                let crate::ProviderCompletion {
-                                    response: mut resp,
-                                    call_record: completed_call_record,
-                                } = completion;
-                                call_record = Some(completed_call_record);
-                                if response_usage_is_empty(&resp.usage) {
-                                    resp.usage = stream_state.streamed_usage.clone();
+                            match provider_result {
+                                Ok(completion) => {
+                                    let crate::ProviderCompletion {
+                                        response: mut resp,
+                                        call_record: completed_call_record,
+                                    } = completion;
+                                    call_record = Some(completed_call_record);
+                                    if response_usage_is_empty(&resp.usage) {
+                                        resp.usage = stream_state.streamed_usage.clone();
+                                    }
+                                    stream_state.stream_accumulator.apply_to_response(&mut resp);
+                                    let resp = match self
+                                        .transform_assistant_response(&mut host_forwarder, resp)
+                                        .await
+                                    {
+                                        Ok(resp) => resp,
+                                        Err(err) => break Err(err),
+                                    };
+                                    break Ok(resp);
                                 }
-                                stream_state.stream_accumulator.apply_to_response(&mut resp);
-                                let resp = match self
-                                    .transform_assistant_response(&mut host_forwarder, resp)
-                                    .await
-                                {
-                                    Ok(resp) => resp,
-                                    Err(err) => break Err(err),
-                                };
-                                break Ok(resp);
+                                Err(error) => {
+                                    let crate::ProviderCompletionError {
+                                        error,
+                                        call_record: failed_call_record,
+                                    } = error;
+                                    call_record = Some(failed_call_record);
+                                    if completion_sideband.origin_conflict().is_some() {
+                                        break Err(
+                                            crate::runtime::effect::llm_call_error_from_transport(
+                                                error,
+                                            ),
+                                        );
+                                    }
+                                    let (resp, _) = synthesize_protocol_abort(
+                                        stream_state.stream_accumulator,
+                                        stream_state.streamed_usage.clone(),
+                                        stream_state.stream_evidence,
+                                        attempt_started_at,
+                                        self.host
+                                            .core
+                                            .clock
+                                            .now()
+                                            .saturating_duration_since(attempt_started),
+                                        completion_sideband.replay_drops(),
+                                    );
+                                    let resp = match self
+                                        .transform_assistant_response(&mut host_forwarder, resp)
+                                        .await
+                                    {
+                                        Ok(resp) => resp,
+                                        Err(err) => break Err(err),
+                                    };
+                                    break Ok(resp);
+                                }
                             }
                         }
                         let (resp, aborted_call_record) = synthesize_protocol_abort(
@@ -474,7 +481,22 @@ impl RuntimeTurnDriver<'_> {
                                 .clock
                                 .now()
                                 .saturating_duration_since(attempt_started),
+                            completion_sideband.replay_drops(),
                         );
+                        let mut resp = resp;
+                        if let Err(error) = completion_sideband.fence_response(&mut resp) {
+                            call_record = Some(aborted_call_record);
+                            break Err(LlmCallError {
+                                message: error.message,
+                                retryable: error.retryable,
+                                kind: error.kind,
+                                raw: error.raw.map(|raw| *raw),
+                                code: error.code,
+                                terminal_reason: error.terminal_reason,
+                                request_body: error.request_body,
+                                partial_response: error.partial_response,
+                            });
+                        }
                         let resp = match self
                             .transform_assistant_response(&mut host_forwarder, resp)
                             .await
@@ -500,6 +522,7 @@ impl RuntimeTurnDriver<'_> {
                             call_record = Some(crate::LlmCallRecord {
                                 call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),
                                 label: None,
+                                replay_drops: completion_sideband.replay_drops(),
                                 attempts: vec![crate::AttemptRecord {
                                     ordinal: 1,
                                     started_at: self.host.core.clock.timestamp_ms(),
@@ -538,16 +561,34 @@ impl RuntimeTurnDriver<'_> {
                             drop(payload);
                             break Err(failure);
                         }
-                        Err(e) => break Err(LlmCallError {
-                            message: format!("internal task failed: {e}"),
-                            retryable: false,
-                            kind: crate::ProviderFailureKind::Unknown,
-                            raw: None,
-                            code: Some("task_join_failed".to_string()),
-                            terminal_reason: crate::LlmTerminalReason::ProviderError,
-                            request_body: None,
-                            partial_response: None,
-                        }),
+                        Err(e) => {
+                            let failure = crate::llm::transport::LlmTransportError::new(format!(
+                                "internal task failed: {e}"
+                            ))
+                            .with_kind(crate::ProviderFailureKind::Unknown)
+                            .with_code("task_join_failed")
+                            .retryable(false);
+                            call_record = Some(crate::provider::synthetic_terminal_call_record(
+                                attempt_started_at,
+                                self.host
+                                    .core
+                                    .clock
+                                    .now()
+                                    .saturating_duration_since(attempt_started),
+                                crate::AttemptOutcome::Interrupted,
+                                &failure,
+                                true,
+                                observed_stream_protocol_position(
+                                    *stream_state.text_streamed,
+                                    stream_state.stream_accumulator,
+                                    stream_state.stream_evidence,
+                                ),
+                                completion_sideband.replay_drops(),
+                            ));
+                            break Err(crate::runtime::effect::llm_call_error_from_transport(
+                                failure,
+                            ));
+                        }
                     };
                     self.policy.binding = match crate::ProviderBinding::new(
                         self.policy.binding.provider_id.clone(),
@@ -618,6 +659,30 @@ impl RuntimeTurnDriver<'_> {
         };
 
         let mut result = result;
+        if let Some(conflict) = completion_sideband.origin_conflict() {
+            match &mut result {
+                Ok(_) => {
+                    result = Err(LlmCallError {
+                        message: conflict.to_string(),
+                        retryable: false,
+                        kind: crate::ProviderFailureKind::Validation,
+                        raw: None,
+                        code: Some("provider_replay_origin_conflict".to_string()),
+                        terminal_reason: crate::LlmTerminalReason::ProviderError,
+                        request_body: None,
+                        partial_response: None,
+                    });
+                }
+                Err(error) if error.code.as_deref() != Some("provider_replay_origin_conflict") => {
+                    error.message =
+                        format!("{conflict}; original runtime failure: {}", error.message);
+                    error.retryable = false;
+                    error.kind = crate::ProviderFailureKind::Validation;
+                    error.code = Some("provider_replay_origin_conflict".to_string());
+                }
+                Err(_) => {}
+            }
+        }
         let cancelled = matches!(
             &result,
             Err(err) if err.terminal_reason == crate::LlmTerminalReason::Cancelled
@@ -1405,6 +1470,7 @@ mod clamp_report_tests {
         let mut call_record = crate::LlmCallRecord {
             call_id: crate::LlmCallId("call".to_string()),
             label: None,
+            replay_drops: Vec::new(),
             attempts: vec![crate::AttemptRecord {
                 ordinal: 1,
                 started_at: 0,
@@ -1470,6 +1536,7 @@ mod clamp_report_tests {
         let mut call_record = crate::LlmCallRecord {
             call_id: crate::LlmCallId("call".to_string()),
             label: None,
+            replay_drops: Vec::new(),
             attempts: vec![crate::AttemptRecord {
                 ordinal: 1,
                 started_at: 0,

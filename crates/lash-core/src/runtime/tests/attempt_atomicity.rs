@@ -263,6 +263,7 @@ fn tool_context_with_provider<'run>(
                     call_id: crate::LlmCallId("attempt-atomicity-direct".to_string()),
                     label: None,
                     attempts: Vec::new(),
+                    replay_drops: Vec::new(),
                 },
             })
         }),

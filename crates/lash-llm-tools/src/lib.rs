@@ -415,6 +415,7 @@ mod tests {
                     llm_call: lash_core::LlmCallRecord {
                         call_id: lash_core::LlmCallId("llm-tools-test".to_string()),
                         label: None,
+                        replay_drops: Vec::new(),
                         attempts: Vec::new(),
                     },
                 })

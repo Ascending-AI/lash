@@ -1,10 +1,26 @@
 use super::*;
 
-const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 2;
+const LEGACY_TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 2;
+const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
 const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
 const TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION: u8 = 1;
 const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 2;
+
+pub(super) fn trigger_definition_family_version(draft: &TriggerSubscriptionDraft) -> u8 {
+    match &draft.target {
+        crate::ProcessInput::ToolCall { call }
+            if call
+                .replay
+                .as_ref()
+                .and_then(|replay| replay.origin.as_ref())
+                .is_some() =>
+        {
+            TRIGGER_DEFINITION_FAMILY_VERSION
+        }
+        _ => LEGACY_TRIGGER_DEFINITION_FAMILY_VERSION,
+    }
+}
 
 pub fn deterministic_subscription_id(
     owner_scope: &TriggerOwnerScope,
@@ -46,12 +62,13 @@ fn trigger_subscription_definition_preimage(
     owner_scope: &TriggerOwnerScope,
     draft: &TriggerSubscriptionDraft,
 ) -> Vec<u8> {
+    let family_version = trigger_definition_family_version(draft);
     let mut fingerprint = crate::stable_identity::IdentityEncoder::new(
         "lash.trigger-subscription-definition",
-        TRIGGER_DEFINITION_FAMILY_VERSION,
+        family_version,
     );
     project_trigger_owner(&mut fingerprint, owner_scope);
-    project_trigger_draft(&mut fingerprint, draft);
+    project_trigger_draft(&mut fingerprint, draft, family_version);
     fingerprint.finish()
 }
 
@@ -63,11 +80,8 @@ pub fn trigger_subscription_definition_fingerprint(
     // lookup. Its v2 grammar shares the trigger store's reject-and-recreate
     // lifecycle; projection corrections require a new family version.
     let preimage = trigger_subscription_definition_preimage(owner_scope, draft);
-    crate::stable_identity::rendered_hash(
-        "trigger-definition",
-        TRIGGER_DEFINITION_FAMILY_VERSION,
-        &preimage,
-    )
+    let family_version = trigger_definition_family_version(draft);
+    crate::stable_identity::rendered_hash("trigger-definition", family_version, &preimage)
 }
 
 pub(super) fn project_trigger_owner(
@@ -106,6 +120,7 @@ pub(super) fn project_trigger_actor(
 pub(super) fn project_trigger_draft(
     identity: &mut crate::stable_identity::IdentityEncoder,
     draft: &TriggerSubscriptionDraft,
+    family_version: u8,
 ) {
     let TriggerSubscriptionDraft {
         subscription_key,
@@ -139,7 +154,7 @@ pub(super) fn project_trigger_draft(
     identity.string(source_key);
     project_trigger_payload_leaf(identity, source);
     project_trigger_schema_leaf(identity, &payload_schema.schema);
-    project_trigger_process_input(identity, target);
+    project_trigger_process_input(identity, target, family_version);
     let crate::ProcessIdentity {
         kind,
         label,
@@ -235,6 +250,7 @@ fn project_trigger_value_selector(
 fn project_trigger_process_input(
     identity: &mut crate::stable_identity::IdentityEncoder,
     input: &crate::ProcessInput,
+    family_version: u8,
 ) {
     match input {
         crate::ProcessInput::ToolCall { call } => {
@@ -252,9 +268,16 @@ fn project_trigger_process_input(
             identity.string(tool_name);
             project_trigger_payload_leaf(identity, args);
             identity.optional(replay.as_ref(), |identity, replay| {
-                let lash_sansio::llm::types::ProviderReplayMeta { item_id, opaque } = replay;
+                let lash_sansio::llm::types::ProviderReplayMeta {
+                    item_id,
+                    opaque,
+                    origin,
+                } = replay;
                 identity.optional(item_id.as_deref(), |identity, value| identity.string(value));
                 identity.optional(opaque.as_deref(), |identity, value| identity.string(value));
+                if family_version == TRIGGER_DEFINITION_FAMILY_VERSION {
+                    identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
+                }
             });
             project_trigger_payload_leaf(identity, prepared_payload);
         }
@@ -874,6 +897,7 @@ mod tests {
                 Some(lash_sansio::llm::types::ProviderReplayMeta {
                     item_id: Some("item".to_string()),
                     opaque: None,
+                    ..Default::default()
                 }),
                 serde_json::json!({"prepared": true}),
             ),
@@ -959,6 +983,40 @@ mod tests {
             assert_eq!(preimage, expected_preimage);
             assert_eq!(key, expected_key);
         }
+    }
+
+    #[test]
+    fn replay_route_rotates_trigger_definition_to_v3_without_moving_v2() {
+        let owner = TriggerOwnerScope::session("owner");
+        let mut draft = minimal_identity_corpus_draft(crate::ProcessInput::ToolCall {
+            call: crate::PreparedToolCall::from_parts(
+                "call",
+                crate::ToolId::new("tool-id"),
+                "tool",
+                serde_json::json!({}),
+                Some(lash_sansio::llm::types::ProviderReplayMeta {
+                    item_id: Some("item".to_string()),
+                    opaque: None,
+                    origin: None,
+                }),
+                serde_json::Value::Null,
+            ),
+        });
+        let legacy = trigger_subscription_definition_fingerprint(&owner, &draft);
+        assert!(legacy.starts_with("trigger-definition:v2:sha256:"));
+
+        let crate::ProcessInput::ToolCall { call } = &mut draft.target else {
+            unreachable!()
+        };
+        call.replay.as_mut().expect("replay").origin =
+            Some(lash_sansio::llm::types::ProviderRouteIdentity::new(
+                "openai-compatible",
+                "https://gateway.example/v1",
+                "shared-model",
+            ));
+        let routed = trigger_subscription_definition_fingerprint(&owner, &draft);
+        assert!(routed.starts_with("trigger-definition:v3:sha256:"));
+        assert_ne!(legacy, routed);
     }
 
     #[test]

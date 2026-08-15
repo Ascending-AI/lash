@@ -16,6 +16,7 @@ mod attachment_tests;
 mod conformance;
 mod generation_tests;
 mod output_started_tests;
+mod replay_provenance_tests;
 
 type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);
 
@@ -1575,6 +1576,7 @@ fn assistant_text_preserves_response_meta() {
                 id: Some("msg_1".to_string()),
                 status: Some("completed".to_string()),
                 phase: Some("final_answer".to_string()),
+                origin: Some(provider.route_identity("openai/gpt-5.4")),
                 ..ResponseTextMeta::default()
             }),
             cache_breakpoint: false,
@@ -1594,42 +1596,6 @@ fn legacy_assistant_text_gets_deterministic_id() {
     assert_eq!(body["input"][0]["id"], "msg_lash_0_0");
     assert_eq!(body["input"][0]["status"], "completed");
     assert!(body["input"][0].get("phase").is_none());
-}
-
-#[test]
-fn chat_body_replays_openrouter_reasoning_details_on_tool_calls() {
-    let req = request(vec![LlmMessage::new(
-        LlmRole::Assistant,
-        vec![LlmContentBlock::ToolCall {
-            call_id: "call_1".to_string(),
-            tool_name: "lookup".to_string(),
-            input_json: "{\"q\":\"x\"}".to_string(),
-            replay: Some(ProviderReplayMeta {
-                item_id: None,
-                opaque: Some(
-                    json!({
-                        "type": "reasoning.encrypted",
-                        "id": "call_1",
-                        "data": "encrypted"
-                    })
-                    .to_string(),
-                ),
-            }),
-        }],
-    )]);
-
-    let body = openrouter_provider()
-        .build_chat_request_body(&req, false)
-        .unwrap();
-
-    assert_eq!(
-        body["messages"][0]["reasoning_details"][0],
-        json!({
-            "type": "reasoning.encrypted",
-            "id": "call_1",
-            "data": "encrypted"
-        })
-    );
 }
 
 #[test]

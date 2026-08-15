@@ -2221,6 +2221,7 @@ fn natural_prose_reasoning_provider(
                             signature: None,
                             redacted: false,
                             summary: Vec::new(),
+                            ..Default::default()
                         }),
                     });
                 }
@@ -5269,6 +5270,7 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
                         signature: Some("signature-after-abort".to_string()),
                         redacted: false,
                         summary: vec!["signed reasoning".to_string()],
+                        ..Default::default()
                     }),
                 }));
                 stream.send(LlmStreamEvent::Usage(lash_core::llm::types::LlmUsage {

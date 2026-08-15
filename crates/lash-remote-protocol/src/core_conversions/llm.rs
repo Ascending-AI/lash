@@ -516,12 +516,32 @@ impl From<core_llm::LlmCallRecord> for RemoteLlmCallRecord {
         let core_llm::LlmCallRecord {
             call_id: core_llm::LlmCallId(call_id),
             label,
+            replay_drops,
             attempts,
         } = value;
         Self {
             call_id,
             label,
+            replay_drops: replay_drops.into_iter().map(Into::into).collect(),
             attempts: attempts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<core_llm::ProviderReplayDrop> for RemoteProviderReplayDrop {
+    fn from(value: core_llm::ProviderReplayDrop) -> Self {
+        Self {
+            kind: match value.kind {
+                core_llm::ProviderReplayKind::ResponseText => RemoteProviderReplayKind::ResponseText,
+                core_llm::ProviderReplayKind::Reasoning => RemoteProviderReplayKind::Reasoning,
+                core_llm::ProviderReplayKind::ToolCall => RemoteProviderReplayKind::ToolCall,
+            },
+            reason: match value.reason {
+                core_llm::ProviderReplayDropReason::Unstamped => RemoteProviderReplayDropReason::Unstamped,
+                core_llm::ProviderReplayDropReason::ForeignRoute => RemoteProviderReplayDropReason::ForeignRoute,
+            },
+            minting_route: value.minting_route.map(Into::into),
+            serving_route: value.serving_route.into(),
         }
     }
 }
@@ -786,6 +806,22 @@ impl From<RemoteLlmContentBlock> for core_llm::LlmContentBlock {
     }
 }
 
+impl From<core_llm::ProviderRouteIdentity> for RemoteProviderRouteIdentity {
+    fn from(value: core_llm::ProviderRouteIdentity) -> Self {
+        Self {
+            provider: value.provider.into(),
+            endpoint: value.endpoint.into(),
+            model: value.model.into(),
+        }
+    }
+}
+
+impl From<RemoteProviderRouteIdentity> for core_llm::ProviderRouteIdentity {
+    fn from(value: RemoteProviderRouteIdentity) -> Self {
+        core_llm::ProviderRouteIdentity::new(value.provider, value.endpoint, value.model)
+    }
+}
+
 impl From<core_llm::ResponseTextMeta> for RemoteResponseTextMeta {
     fn from(value: core_llm::ResponseTextMeta) -> Self {
         let core_llm::ResponseTextMeta {
@@ -793,16 +829,15 @@ impl From<core_llm::ResponseTextMeta> for RemoteResponseTextMeta {
             status,
             phase,
             provider_payload,
-            origin_provider,
-            origin_model,
+            origin,
+            ..
         } = value;
         Self {
             id,
             status,
             phase,
             provider_payload,
-            origin_provider,
-            origin_model,
+            origin: origin.map(Into::into),
         }
     }
 }
@@ -814,31 +849,46 @@ impl From<RemoteResponseTextMeta> for core_llm::ResponseTextMeta {
             status,
             phase,
             provider_payload,
-            origin_provider,
-            origin_model,
+            origin,
         } = value;
         Self {
             id,
             status,
             phase,
             provider_payload,
-            origin_provider,
-            origin_model,
+            origin: origin.map(Into::into),
+            ..Default::default()
         }
     }
 }
 
 impl From<core_llm::ProviderReplayMeta> for RemoteProviderReplayMeta {
     fn from(value: core_llm::ProviderReplayMeta) -> Self {
-        let core_llm::ProviderReplayMeta { item_id, opaque } = value;
-        Self { item_id, opaque }
+        let core_llm::ProviderReplayMeta {
+            item_id,
+            opaque,
+            origin,
+        } = value;
+        Self {
+            item_id,
+            opaque,
+            origin: origin.map(Into::into),
+        }
     }
 }
 
 impl From<RemoteProviderReplayMeta> for core_llm::ProviderReplayMeta {
     fn from(value: RemoteProviderReplayMeta) -> Self {
-        let RemoteProviderReplayMeta { item_id, opaque } = value;
-        Self { item_id, opaque }
+        let RemoteProviderReplayMeta {
+            item_id,
+            opaque,
+            origin,
+        } = value;
+        Self {
+            item_id,
+            opaque,
+            origin: origin.map(Into::into),
+        }
     }
 }
 
@@ -850,6 +900,7 @@ impl From<core_llm::ProviderReasoningReplay> for RemoteProviderReasoningReplay {
             signature,
             redacted,
             summary,
+            origin,
         } = value;
         Self {
             item_id,
@@ -857,6 +908,7 @@ impl From<core_llm::ProviderReasoningReplay> for RemoteProviderReasoningReplay {
             signature,
             redacted,
             summary,
+            origin: origin.map(Into::into),
         }
     }
 }
@@ -869,6 +921,7 @@ impl From<RemoteProviderReasoningReplay> for core_llm::ProviderReasoningReplay {
             signature,
             redacted,
             summary,
+            origin,
         } = value;
         Self {
             item_id,
@@ -876,6 +929,7 @@ impl From<RemoteProviderReasoningReplay> for core_llm::ProviderReasoningReplay {
             signature,
             redacted,
             summary,
+            origin: origin.map(Into::into),
         }
     }
 }

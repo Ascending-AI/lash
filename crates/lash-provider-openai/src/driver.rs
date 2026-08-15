@@ -16,6 +16,13 @@ struct ResponseContext {
 }
 
 impl CompletionEndpoint {
+    fn provider_kind(self) -> &'static str {
+        match self {
+            Self::Responses => "openai",
+            Self::ChatCompletions => "openai-compatible",
+        }
+    }
+
     pub(crate) fn request_trace_name(self) -> &'static str {
         match self {
             Self::Responses => "responses",
@@ -79,7 +86,26 @@ pub(crate) async fn complete(
     req: LlmRequest,
     endpoint: CompletionEndpoint,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let stream_events = req.stream_events.clone();
+    let origin_model = req.model.clone();
+    let origin_route = ProviderRouteIdentity::for_endpoint(
+        endpoint.provider_kind(),
+        &provider.base_url,
+        origin_model.clone(),
+    );
+    origin_route.validate_endpoint().map_err(|error| {
+        LlmTransportError::new(error.to_string())
+            .with_kind(ProviderFailureKind::Validation)
+            .with_code("invalid_provider_endpoint")
+    })?;
+    let stream_events = req.stream_events.clone().map(|downstream| {
+        let origin_route = origin_route.clone();
+        LlmEventSender::new(move |mut event| {
+            if let LlmStreamEvent::Part(part) = &mut event {
+                let _ = part.stamp_replay_origin(&origin_route);
+            }
+            downstream.send(event);
+        })
+    });
     let provider_trace = req.provider_trace.clone();
     let timeouts = provider.options.llm_timeouts();
     let stream = stream_events.is_some();
@@ -89,7 +115,9 @@ pub(crate) async fn complete(
         .stream_termination
         .unwrap_or(compat.stream_termination);
     let mut body = match endpoint {
-        CompletionEndpoint::Responses => provider.build_responses_request_body(&req, stream)?,
+        CompletionEndpoint::Responses => {
+            provider.build_responses_request_body_for_route(&req, stream, &origin_route)?
+        }
         CompletionEndpoint::ChatCompletions => provider.build_chat_request_body(&req, stream)?,
     };
     if compat.cache_session_affinity {
@@ -232,6 +260,13 @@ pub(crate) async fn complete(
             if let Some(partial) = failure.partial_response.as_deref_mut() {
                 partial.response_metadata = response_metadata;
                 partial.generation_disposition = generation_disposition;
+                partial
+                    .stamp_replay_origin(&origin_route)
+                    .map_err(|conflict| {
+                        LlmTransportError::new(conflict.to_string())
+                            .with_kind(ProviderFailureKind::Validation)
+                            .with_code("provider_replay_origin_conflict")
+                    })?;
             }
             if let (Some(partial), Some(provider_request_id)) = (
                 failure.partial_response.as_deref_mut(),
@@ -268,6 +303,13 @@ pub(crate) async fn complete(
     response.request_body = Some(request_body_for_error);
     response.response_metadata = capture.into_metadata();
     response.generation_disposition = generation_disposition;
+    response
+        .stamp_replay_origin(&origin_route)
+        .map_err(|conflict| {
+            LlmTransportError::new(conflict.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_code("provider_replay_origin_conflict")
+        })?;
     Ok(response)
 }
 

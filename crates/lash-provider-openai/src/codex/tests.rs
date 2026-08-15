@@ -117,7 +117,11 @@ fn websocket_test_provider(
         .with_endpoint_urls(responses_url, websocket_url)
 }
 
-fn assistant_message_with_meta(message_id: &str, text: &str) -> LlmMessage {
+fn assistant_message_with_meta(
+    route: &lash_core::ProviderRouteIdentity,
+    message_id: &str,
+    text: &str,
+) -> LlmMessage {
     LlmMessage::new(
         LlmRole::Assistant,
         vec![lash_core::llm::types::LlmContentBlock::Text {
@@ -126,6 +130,7 @@ fn assistant_message_with_meta(message_id: &str, text: &str) -> LlmMessage {
                 id: Some(message_id.to_string()),
                 status: Some("completed".to_string()),
                 phase: Some("final_answer".to_string()),
+                origin: Some(route.clone()),
                 ..ResponseTextMeta::default()
             }),
             cache_breakpoint: false,
@@ -299,6 +304,140 @@ fn codex_request_body_omits_reasoning_without_capability() {
 }
 
 #[test]
+fn raw_codex_builder_strips_unstamped_and_foreign_replay_fields() {
+    let foreign_route = lash_core::ProviderRouteIdentity::for_endpoint(
+        "openai_compatible",
+        "https://foreign.example/v1",
+        "gpt-5.4",
+    );
+    let req = request(vec![LlmMessage::new(
+        LlmRole::Assistant,
+        vec![
+            lash_core::llm::types::LlmContentBlock::Text {
+                text: "portable answer".into(),
+                response_meta: Some(ResponseTextMeta {
+                    id: Some("unstamped-response-id".to_string()),
+                    status: Some("completed".to_string()),
+                    phase: Some("final_answer".to_string()),
+                    ..ResponseTextMeta::default()
+                }),
+                cache_breakpoint: false,
+            },
+            lash_core::llm::types::LlmContentBlock::Reasoning {
+                text: "portable summary".to_string(),
+                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                    encrypted_content: Some("foreign-encrypted-content".to_string()),
+                    origin: Some(foreign_route.clone()),
+                    ..Default::default()
+                }),
+            },
+            lash_core::llm::types::LlmContentBlock::ToolCall {
+                call_id: "call-1".to_string(),
+                tool_name: "lookup".to_string(),
+                input_json: "{}".to_string(),
+                replay: Some(lash_core::llm::types::ProviderReplayMeta {
+                    item_id: Some("foreign-tool-item".to_string()),
+                    opaque: Some("foreign-tool-opaque".to_string()),
+                    origin: Some(foreign_route),
+                }),
+            },
+        ],
+    )]);
+
+    let body = CodexProvider::new("access", "refresh", 0)
+        .build_request_body(&req, true)
+        .expect("Codex request serializes its neutral fallback");
+    let wire = body.to_string();
+
+    assert!(wire.contains("portable answer"));
+    assert!(!wire.contains("unstamped-response-id"));
+    assert!(!wire.contains("foreign-encrypted-content"));
+    assert!(!wire.contains("foreign-tool-item"));
+    assert!(!wire.contains("foreign-tool-opaque"));
+}
+
+fn adversarial_codex_raw_request() -> LlmRequest {
+    let foreign_route = lash_core::ProviderRouteIdentity::for_endpoint(
+        "openai-compatible",
+        "https://foreign.example/v1",
+        "gpt-5.4",
+    );
+    request(vec![LlmMessage::new(
+        LlmRole::Assistant,
+        vec![
+            lash_core::llm::types::LlmContentBlock::Text {
+                text: "portable answer".into(),
+                response_meta: Some(ResponseTextMeta {
+                    id: Some("unstamped-codex-wire-id".to_string()),
+                    provider_payload: Some("unstamped-codex-wire-payload".to_string()),
+                    ..Default::default()
+                }),
+                cache_breakpoint: false,
+            },
+            lash_core::llm::types::LlmContentBlock::Reasoning {
+                text: "portable summary".to_string(),
+                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                    encrypted_content: Some("foreign-codex-wire-reasoning".to_string()),
+                    origin: Some(foreign_route.clone()),
+                    ..Default::default()
+                }),
+            },
+            lash_core::llm::types::LlmContentBlock::ToolCall {
+                call_id: "call-1".to_string(),
+                tool_name: "lookup".to_string(),
+                input_json: "{}".to_string(),
+                replay: Some(lash_core::llm::types::ProviderReplayMeta {
+                    item_id: Some("foreign-codex-wire-tool-id".to_string()),
+                    opaque: Some("foreign-codex-wire-tool-opaque".to_string()),
+                    origin: Some(foreign_route),
+                }),
+            },
+        ],
+    )])
+}
+
+fn assert_codex_adversarial_replay_absent(wire: &str) {
+    assert!(wire.contains("portable answer"));
+    assert!(!wire.contains("unstamped-codex-wire-id"));
+    assert!(!wire.contains("unstamped-codex-wire-payload"));
+    assert!(!wire.contains("foreign-codex-wire-reasoning"));
+    assert!(!wire.contains("foreign-codex-wire-tool-id"));
+    assert!(!wire.contains("foreign-codex-wire-tool-opaque"));
+}
+
+#[tokio::test]
+async fn raw_provider_complete_filters_codex_sse_and_websocket_wire_captures() {
+    let http = spawn_http_sse("resp-http", "msg-http", "done").await;
+    let mut sse_provider = websocket_test_provider(
+        CodexTransport::Sse,
+        http.url.clone(),
+        "ws://127.0.0.1:9/unused".to_string(),
+    );
+    Provider::complete(&mut sse_provider, adversarial_codex_raw_request())
+        .await
+        .expect("raw Codex SSE completion");
+    let sse_wire = http.captured().join("\n");
+    assert_codex_adversarial_replay_absent(&sse_wire);
+
+    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::Complete {
+        response_id: "resp-ws",
+        message_id: "msg-ws",
+        text: "done",
+    }])
+    .await;
+    let mut websocket_provider = websocket_test_provider(
+        CodexTransport::Websocket,
+        "http://127.0.0.1:9/unused".to_string(),
+        ws.url.clone(),
+    );
+    Provider::complete(&mut websocket_provider, adversarial_codex_raw_request())
+        .await
+        .expect("raw Codex WebSocket completion");
+    let websocket_wire = serde_json::to_string(&ws.captured()).expect("captured websocket JSON");
+    assert_codex_adversarial_replay_absent(&websocket_wire);
+}
+
+#[test]
 fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
@@ -398,6 +537,7 @@ fn codex_request_uses_openai_schema_projection() {
 
 #[test]
 fn codex_request_history_preserves_assistant_message_metadata() {
+    let provider = CodexProvider::new("access", "refresh", 0);
     let req = request(vec![LlmMessage::new(
         LlmRole::Assistant,
         vec![lash_core::llm::types::LlmContentBlock::Text {
@@ -406,15 +546,14 @@ fn codex_request_history_preserves_assistant_message_metadata() {
                 id: Some("msg_1".to_string()),
                 status: Some("completed".to_string()),
                 phase: Some("final_answer".to_string()),
+                origin: Some(provider.route_identity("gpt-5.4")),
                 ..ResponseTextMeta::default()
             }),
             cache_breakpoint: false,
         }],
     )]);
 
-    let body = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, false)
-        .unwrap();
+    let body = provider.build_request_body(&req, false).unwrap();
 
     assert_eq!(body["input"][0]["type"], "message");
     assert_eq!(body["input"][0]["id"], "msg_1");
@@ -458,6 +597,7 @@ fn codex_cached_continuation_sends_delta_after_prior_request_and_response_items(
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
                     phase: Some("final_answer".to_string()),
+                    origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
                 cache_breakpoint: false,
@@ -660,7 +800,7 @@ async fn assert_trace_cached_delta_for_transport(transport: CodexTransport) {
         .complete(traced_request(
             vec![
                 LlmMessage::text(LlmRole::User, "hello"),
-                assistant_message_with_meta("msg_1", "answer"),
+                assistant_message_with_meta(&provider.route_identity("gpt-5.4"), "msg_1", "answer"),
                 LlmMessage::text(LlmRole::User, "next"),
             ],
             Arc::clone(&trace),
@@ -717,7 +857,7 @@ async fn assert_trace_stale_retry_for_transport(transport: CodexTransport) {
         .complete(traced_request(
             vec![
                 LlmMessage::text(LlmRole::User, "hello"),
-                assistant_message_with_meta("msg_1", "answer"),
+                assistant_message_with_meta(&provider.route_identity("gpt-5.4"), "msg_1", "answer"),
                 LlmMessage::text(LlmRole::User, "next"),
             ],
             Arc::clone(&trace),
@@ -850,6 +990,7 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
                     phase: Some("final_answer".to_string()),
+                    origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
                 cache_breakpoint: false,
@@ -1019,6 +1160,7 @@ async fn codex_scripted_websocket_same_session_different_frame_does_not_reuse_co
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
                     phase: Some("final_answer".to_string()),
+                    origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
                 cache_breakpoint: false,
@@ -1098,6 +1240,7 @@ async fn codex_scripted_websocket_stale_previous_response_retries_full_context_o
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
                     phase: Some("final_answer".to_string()),
+                    origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
                 cache_breakpoint: false,
@@ -1165,6 +1308,7 @@ async fn codex_stale_continuation_after_allocation_only_event_still_recovers() {
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
                     phase: Some("final_answer".to_string()),
+                    origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
                 cache_breakpoint: false,
@@ -1220,6 +1364,7 @@ async fn codex_scripted_websocket_dead_reused_socket_reconnects_full_context() {
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
                     phase: Some("final_answer".to_string()),
+                    origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
                 cache_breakpoint: false,
@@ -1275,7 +1420,7 @@ async fn codex_scripted_websocket_incomplete_terminal_response_is_not_cached() {
         .expect("incomplete terminal response");
     let second = request(vec![
         LlmMessage::text(LlmRole::User, "hello"),
-        assistant_message_with_meta("msg_1", "partial"),
+        assistant_message_with_meta(&provider.route_identity("gpt-5.4"), "msg_1", "partial"),
         LlmMessage::text(LlmRole::User, "next"),
     ]);
     let full_body = provider.build_request_body(&second, true).unwrap();
@@ -1425,7 +1570,27 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
         event_sink.lock_recover().push(event);
     }));
 
-    provider.complete(req).await.expect("SSE response");
+    let response = provider.complete(req).await.expect("SSE response");
+
+    let expected_route = provider.route_identity("gpt-5.4");
+    assert!(response.parts.iter().any(|part| {
+        matches!(
+            part,
+            LlmOutputPart::Text {
+                response_meta: Some(meta),
+                ..
+            } if meta.origin.as_ref() == Some(&expected_route)
+        )
+    }));
+    assert!(events.lock_recover().iter().any(|event| {
+        matches!(
+            event,
+            lash_core::llm::types::LlmStreamEvent::Part(LlmOutputPart::Text {
+                response_meta: Some(meta),
+                ..
+            }) if meta.origin.as_ref() == Some(&expected_route)
+        )
+    }));
 
     assert!(events.lock_recover().iter().any(|event| {
         matches!(
@@ -1790,7 +1955,28 @@ fn codex_stream_preserves_reasoning_message_and_tool_call_once() {
 
     let response = response_from_state(state);
     assert_eq!(response.full_text, "Hi");
-    assert_eq!(emitted_parts.len(), 1);
+    assert_eq!(emitted_parts.len(), 3);
+    assert_eq!(
+        emitted_parts
+            .iter()
+            .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        emitted_parts
+            .iter()
+            .filter(|part| matches!(part, LlmOutputPart::Text { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        emitted_parts
+            .iter()
+            .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
+            .count(),
+        1
+    );
     assert_eq!(
         response
             .parts
@@ -1825,6 +2011,7 @@ mod conformance {
     use super::super::{PROVIDER, shared};
     use super::{CodexProvider, request};
     use lash_core::llm::types::{LlmMessage, LlmOutputPart, LlmTerminalReason, LlmUsage};
+    use lash_core::provider::Provider;
     use lash_llm_transport::conformance::{
         CanonicalUsage as U, ProviderConformanceSpec, ProviderNormalizer, ProviderWire, Scenario,
         StreamAssembly, provider_conformance, strong_replay_payload,
@@ -1987,20 +2174,31 @@ mod conformance {
         fn assemble_stream(&self, scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
             let mut state = shared::ResponsesStreamState::default();
             let mut stream_events = Vec::new();
+            let provider = CodexProvider::new("access", "refresh", 0);
+            let route = provider.route_identity("gpt-5.4");
             for raw in sse_events {
                 let mut emitted_parts = Vec::new();
                 let capture_parts = matches!(scenario, Scenario::StreamingToolCallAbortEquivalence)
                     .then_some(&mut emitted_parts);
                 shared::process_sse_event(PROVIDER, raw, &mut state, capture_parts)
                     .expect("responses sse event parses");
+                for part in &mut emitted_parts {
+                    part.stamp_replay_origin(&route)
+                        .expect("conformance stream output accepts its minting route");
+                }
                 stream_events.extend(
                     emitted_parts
                         .into_iter()
                         .map(lash_core::llm::types::LlmStreamEvent::Part),
                 );
             }
+            let mut parts = state.response_parts();
+            for part in &mut parts {
+                part.stamp_replay_origin(&route)
+                    .expect("conformance output accepts its minting route");
+            }
             StreamAssembly {
-                parts: state.response_parts(),
+                parts,
                 usage: state.usage.clone(),
                 stream_events,
             }

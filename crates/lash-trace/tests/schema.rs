@@ -12,20 +12,21 @@ use lash_trace::{
     TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
     TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLashlangExecutionEvent,
     TraceLashlangExecutionIdentity, TraceLashlangStatus, TraceLlmRequest, TraceLlmResponse,
-    TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope,
-    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome,
-    TraceToolCallOutput,
+    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
+    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRecord,
+    TraceRuntimeScope, TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage,
+    TraceToolCallOutcome, TraceToolCallOutput,
 };
 use serde_json::json;
 
 #[test]
-fn trace_schema_version_is_pinned_at_5() {
+fn trace_schema_version_is_pinned_at_6() {
     // Tripwire. This is the current on-disk trace schema version. Every reader
     // (viewer, exporter, OTel bridge) keys off it, so a change here must be a
     // deliberate, documented schema bump — see the crate-level rustdoc and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy. If this fails,
     // read that policy before touching the constant.
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 5);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 6);
 }
 
 #[test]
@@ -34,7 +35,7 @@ fn pre_frame_key_trace_schema_is_rejected_with_literal_versions() {
         lash_trace::ensure_trace_schema_version(3),
         Err(lash_trace::TraceSchemaVersionError {
             actual: 3,
-            expected: 5,
+            expected: 6,
         })
     );
 }
@@ -46,7 +47,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("schema-3 trace records must be refused during typed decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 5"
+        "unsupported trace schema version 3; expected 6"
     );
 
     let stale_and_malformed = r#"{"schema_version":3,"payload":"not a current event"}"#;
@@ -54,7 +55,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("the version refusal must precede current-shape validation");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 5"
+        "unsupported trace schema version 3; expected 6"
     );
 }
 
@@ -68,7 +69,7 @@ fn new_records_stamp_the_schema_version() {
     );
     assert_eq!(record.schema_version, lash_trace::TRACE_SCHEMA_VERSION);
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["schema_version"], 5);
+    assert_eq!(json["schema_version"], 6);
 }
 
 fn token_usage_sample() -> TraceTokenUsage {
@@ -185,6 +186,22 @@ fn event_samples() -> Vec<TraceEvent> {
                 body_json_omitted_reason: None,
             },
         },
+        TraceEvent::ProviderReplayDropped {
+            event: TraceProviderReplayDropEvent {
+                replay_kind: TraceProviderReplayKind::Reasoning,
+                reason: TraceProviderReplayDropReason::ForeignRoute,
+                minting_route: Some(TraceProviderRouteIdentity {
+                    provider: "anthropic".to_string(),
+                    endpoint: "https://api.anthropic.com".to_string(),
+                    model: "claude".to_string(),
+                }),
+                serving_route: TraceProviderRouteIdentity {
+                    provider: "google_oauth".to_string(),
+                    endpoint: "https://cloudcode-pa.googleapis.com/v1internal".to_string(),
+                    model: "gemini".to_string(),
+                },
+            },
+        },
         TraceEvent::EffectEnvelopeDiff {
             event: TraceEffectEnvelopeDiffEvent {
                 recorded_envelope_hash: "old".to_string(),
@@ -286,6 +303,7 @@ const ALL_TRACE_EVENT_KINDS: &[&str] = &[
     "llm_call_completed",
     "llm_call_failed",
     "provider_request",
+    "provider_replay_dropped",
     "effect_envelope_diff",
     "provider_stream_event",
     "runtime_stream_event",
@@ -345,6 +363,8 @@ fn composition_change_is_a_complete_snapshot_at_schema_version_five() {
     );
     let mut json = serde_json::to_value(&record).expect("serialize composition snapshot");
 
+    assert_eq!(json["schema_version"], 6);
+    json["schema_version"] = json!(5);
     assert_eq!(json["schema_version"], 5);
     assert_eq!(json["type"], "composition_changed");
     assert_eq!(json["fingerprint"], "4c94f3");
@@ -417,7 +437,8 @@ fn historical_v4_reader_refuses_v5_before_interpreting_new_closed_enum_variant()
             tool_schemas: Vec::new(),
         },
     );
-    let wire = serde_json::to_string(&record).expect("serialize v5 composition event");
+    let current_wire = serde_json::to_string(&record).expect("serialize composition event");
+    let wire = current_wire.replacen("\"schema_version\":6", "\"schema_version\":5", 1);
     assert_eq!(
         read_with_historical_v4_reader(&wire),
         Err(HistoricalV4ReadError::UnsupportedVersion {
@@ -432,6 +453,77 @@ fn historical_v4_reader_refuses_v5_before_interpreting_new_closed_enum_variant()
         .expect_err("without the version gate, the new enum variant is unknown");
     assert!(
         matches!(error, HistoricalV4ReadError::Payload(message) if message.contains("unknown variant"))
+    );
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HistoricalV5ReadError {
+    UnsupportedVersion { actual: u32, expected: u32 },
+    Payload(String),
+}
+
+fn read_with_historical_v5_reader(input: &str) -> Result<(), HistoricalV5ReadError> {
+    let value: serde_json::Value = serde_json::from_str(input)
+        .map_err(|error| HistoricalV5ReadError::Payload(error.to_string()))?;
+    let actual = value["schema_version"]
+        .as_u64()
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or_else(|| HistoricalV5ReadError::Payload("missing schema_version".to_string()))?;
+    if actual != 5 {
+        return Err(HistoricalV5ReadError::UnsupportedVersion {
+            actual,
+            expected: 5,
+        });
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum HistoricalV5Event {
+        SessionStarted,
+        CompositionChanged,
+    }
+
+    serde_json::from_value::<HistoricalV5Event>(value)
+        .map(|_| ())
+        .map_err(|error| HistoricalV5ReadError::Payload(error.to_string()))
+}
+
+#[test]
+fn historical_v5_reader_refuses_v6_provider_replay_dropped_before_interpreting_variant() {
+    let record = TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::ProviderReplayDropped {
+            event: TraceProviderReplayDropEvent {
+                replay_kind: TraceProviderReplayKind::Reasoning,
+                reason: TraceProviderReplayDropReason::ForeignRoute,
+                minting_route: Some(TraceProviderRouteIdentity {
+                    provider: "anthropic".to_string(),
+                    endpoint: "https://api.anthropic.com".to_string(),
+                    model: "claude".to_string(),
+                }),
+                serving_route: TraceProviderRouteIdentity {
+                    provider: "google_oauth".to_string(),
+                    endpoint: "https://cloudcode-pa.googleapis.com/v1internal".to_string(),
+                    model: "gemini".to_string(),
+                },
+            },
+        },
+    );
+    let wire = serde_json::to_string(&record).expect("serialize v6 replay-drop event");
+    assert_eq!(
+        read_with_historical_v5_reader(&wire),
+        Err(HistoricalV5ReadError::UnsupportedVersion {
+            actual: 6,
+            expected: 5,
+        }),
+        "the v5 reader's typed version gate must run before its closed enum decoder"
+    );
+
+    let forced_v5 = wire.replacen("\"schema_version\":6", "\"schema_version\":5", 1);
+    let error = read_with_historical_v5_reader(&forced_v5)
+        .expect_err("without the version gate, the new enum variant is unknown");
+    assert!(
+        matches!(error, HistoricalV5ReadError::Payload(message) if message.contains("unknown variant"))
     );
 }
 
@@ -624,7 +716,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
     );
     assert!(json["attempts"][1].get("reason").is_none());
     assert!(json["attempts"][1].get("delay_ms").is_none());
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 5);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 6);
 }
 
 #[test]
@@ -770,7 +862,7 @@ fn jsonl_round_trip_preserves_records() {
 
     assert_eq!(parsed, records, "JSONL round-trip must preserve records");
     for record in &parsed {
-        assert_eq!(record.schema_version, 5);
+        assert_eq!(record.schema_version, 6);
     }
 
     // Pin the diagnostic's `tool_calls` entry fields explicitly on the parsed
@@ -789,7 +881,7 @@ fn jsonl_round_trip_preserves_records() {
 }
 
 #[test]
-fn durable_step_events_round_trip_at_schema_version_five() {
+fn durable_step_events_round_trip_at_schema_version_six() {
     let events = vec![
         TraceEvent::JournaledEffectStarted {
             effect_name: "lash:turn:llm:1".to_string(),
@@ -829,7 +921,7 @@ fn durable_step_events_round_trip_at_schema_version_five() {
         let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
         let json = serde_json::to_value(&record).expect("serialize durable trace event");
         assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 5);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 6);
         assert_eq!(json["type"], expected_kind);
         let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
         assert_eq!(decoded.event.kind(), expected_kind);

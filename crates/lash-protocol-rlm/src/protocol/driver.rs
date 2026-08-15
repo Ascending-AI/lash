@@ -1039,6 +1039,7 @@ mod tests {
             signature: Some("signed".to_string()),
             redacted: true,
             summary: vec!["summary".to_string()],
+            ..Default::default()
         };
 
         let projected = project_response(vec![LlmOutputPart::Reasoning {
@@ -1062,6 +1063,7 @@ mod tests {
                 signature: None,
                 redacted: false,
                 summary: Vec::new(),
+                ..Default::default()
             }),
         }];
 

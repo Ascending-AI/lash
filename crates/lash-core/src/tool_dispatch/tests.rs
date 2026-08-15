@@ -1820,7 +1820,7 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     )
     .await
     {
-        ToolPreparationOutcome::Prepared(prepared) => prepared,
+        ToolPreparationOutcome::Prepared(prepared) => *prepared,
         ToolPreparationOutcome::Completed(outcome) => {
             panic!("grant should prepare, got {:?}", outcome.record.output)
         }
@@ -2394,6 +2394,7 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
                 call_id: crate::LlmCallId("attempt-direct-call".to_string()),
                 label: None,
                 attempts: Vec::new(),
+                replay_drops: Vec::new(),
             },
         })
     });

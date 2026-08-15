@@ -9,8 +9,12 @@ from Lash's durable session store after replacing the entire web process, and th
 next turn continues with that history in its provider request. This is deliberately
 different from active-turn recovery: every pre-restart turn must settle before restart.
 
-**Real tokens.** Turns use OpenRouter. Gate on exact nonce text supplied by the operator,
-committed row counts, request history, and cross-surface agreement—not on prose quality.
+**Deterministic provider.** Run this scenario with the opt-in
+`replay-route-change` development LLM Provider and initial model
+`dev/replay-route-a`. It returns numbered terminal values and mints one opaque reasoning
+replay carrier per call, so the continuity and route-filter gates cannot pass by
+coincidence. The run is still browser-driven and must be judged by `gpt-5.6-sol`; retain
+its prompt and verdict with the run artifacts.
 
 ## Scenario-specific golden rules
 
@@ -34,11 +38,21 @@ committed row counts, request history, and cross-surface agreement—not on pros
    `composition_changed` snapshot. The first post-restart model request must emit another
    `composition_changed`; its exact `rendered_system_prompt` and ordered `tool_schemas`
    must match the saved snapshot when the host changed neither input.
+7. **Replay routing stays observable.** Provider-owned response-text, reasoning, and tool
+   replay state may be served only by the exact LLM Provider replay route that minted it:
+   provider kind, normalized configured endpoint, and model. The runtime preserves neutral text
+   while stripping unstamped or foreign opaque state
+   and emits one standard-level `provider_replay_dropped` trace event per stripped carrier,
+   including on failure, protocol abort, or cancellation. This same-route resume scenario
+   requires zero such events after the Phase 3 trace boundary. Phase 4 then changes only the
+   model component of that route and requires matching drop rows in both the trace and operator
+   surfaces. Those rows are emitted by the same structural pass that removes each foreign
+   carrier; the pre-filter `llm_call_started` request is context evidence, not a wire capture.
 
 ## Working material
 
 - Boot with a fresh durable directory:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=replay-route-change OPENROUTER_MODEL=dev/replay-route-a AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
   Gate `GET /healthz` → 200. The entire Restate stack is port-isolated by default: the
   helper derives its endpoint, ingress, admin port, node port, and container name from
   `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
@@ -76,21 +90,26 @@ committed row counts, request history, and cross-surface agreement—not on pros
   differs by surface: store rows use `User`/`Assistant`, API rows use
   `user`/`assistant`, and the DOM renders `YOU`/`AGENT`. Normalize roles before comparing
   ordered transcripts; do not treat casing or presentation labels as content drift.
+- Route endpoints in replay-drop rows are operator-visible routing metadata. URL userinfo is
+  rejected; do not put credentials in endpoint paths or query strings because those bytes are
+  deliberately identity-significant and are not redacted from traces.
 
 ## Phase 0 — Boot and identify the durable session
 
-Require `OPENROUTER_API_KEY`; a missing key is a harness gap → Abort. Boot, poll
-`/healthz`, and open the browser. Record the workbench PID, rendered session id,
+Boot with the exact deterministic-provider environment above, poll `/healthz`, and open the
+browser. Require the model control to render `dev/replay-route-a` and retain the startup log row
+that names `replay-route-change`; any other provider/model is a harness gap → Abort. Record the
+workbench PID, rendered session id,
 `/api/state.settings.session_id`, and `<data-dir>/session-id`; require all three ids to
 match. Screenshot `00-ready.png`.
 
 ## Phase 1 — Commit two distinguishable turns
 
-Submit two short turns sequentially. Include unique literal markers such as
-`FIG425-RESUME-ONE-<run-id>` and `FIG425-RESUME-TWO-<run-id>`, and ask that each marker be
-included verbatim in the answer. After each submission, poll until the UI is idle,
+Submit two short turns sequentially with unique literal markers such as
+`FIG425-RESUME-ONE-<run-id>` and `FIG425-RESUME-TWO-<run-id>`. After each submission, poll until the UI is idle,
 `active_turns` is empty, and `/api/state.messages` has gained an ordered user/assistant
-pair.
+pair. Require the assistant rows to be exactly `FIG-1374 replay-route response 1` and
+`FIG-1374 replay-route response 2`.
 
 Save `/api/state` as `01-before-restart-state.json`. Extract the active-path message
 records from `graph_nodes` and save them as `01-before-restart-store.json`; require the
@@ -132,12 +151,52 @@ Extract the first post-restart `composition_changed` record to
 `rendered_system_prompt` and ordered `tool_schemas` with
 `01-final-composition.json`; compare those fields directly, not only the fingerprint.
 
+Also extract any `provider_replay_dropped` records after the boundary to
+`03-provider-replay-drops.json` and require the array to be empty: all replay state in this
+same-route continuation was minted by the selected route. A non-empty array is typed evidence
+of a route/configuration mismatch, not harmless trace noise, and requires Abort/RCA.
+
 Finally require the store's active path and `/api/state.messages` to contain all six
 committed rows in identical order. Save them as `03-continuity-state.json` and
 `03-continuity-store.json`; screenshot the fully scrolled transcript as
 `03-continuity-transcript.png`.
 
-## Phase 4 — Teardown and score
+## Phase 4 — Minted-carrier route switch proves filtering and drop evidence
+
+This phase is mandatory. It is the mutation-resistant proof that replay filtering and
+drop-evidence emission actually ran.
+
+From the active `graph_nodes` path after Phase 3, extract every reasoning replay carrier whose
+provider-owned signature starts with `FIG1374-OPAQUE-REPLAY-` to
+`04-minted-replay-carriers.json`. Require at least one row, and require each row's origin to name
+provider `workbench-dev-failure`, endpoint `workbench-dev-failure`, and model
+`dev/replay-route-a`. Record the current end offset or record count of `trace.jsonl`.
+
+In the browser's model control, replace `dev/replay-route-a` with
+`dev/replay-route-b`; leave the provider kind and endpoint unchanged. Submit a fourth turn with
+marker `FIG425-RESUME-ROUTE-SWITCH-<run-id>` and poll until idle. Require the assistant result
+`FIG-1374 replay-route response 4` and eight committed user/assistant rows.
+
+From trace rows after the Phase 4 boundary:
+
+- save the first, pre-filter `llm_call_started` request as
+  `04-pre-filter-provider-request.json` and require it contains all prior neutral
+  `FIG-1374 replay-route response` text, portable `FIG-1374 portable reasoning` summaries,
+  and the provider-owned reasoning candidates (`has_encrypted: true`) that the serving-route
+  fence must inspect. This trace record intentionally precedes `prepare_completion`; it does
+  not claim to show the serialized provider wire;
+- save `provider_replay_dropped` rows as `04-provider-replay-drops.json` and require at least
+  one `reasoning` / `foreign_route` row whose minting route model is
+  `dev/replay-route-a` and serving route model is `dev/replay-route-b`;
+- save the model-call record exposed by the workbench product-event/operator surface as
+  `04-model-call-record.json` and require its `replay_drops` contains the same foreign-route
+  evidence.
+
+Any missing minted carrier, missing pre-filter candidate, absent trace drop, absent operator-surface
+drop, or route mismatch is a contract violation → Abort/RCA. Screenshot the model control,
+terminal response, and execution scorecard as `04-route-filtered.png`.
+
+## Phase 5 — Teardown and score
 
 Run `just agent-workbench-down <port>` and confirm the workbench and its Restate
 container are gone.
@@ -149,11 +208,16 @@ container are gone.
 | Cold reconstruction | PID changed; session id and all four rows survived | | `02-reconstructed-transcript.png`, `02-resumed-*.json` |
 | Provider continuity | post-restart provider request contains five required history/input markers | | `03-provider-request.json` |
 | Composition continuity | cold reopen re-emits and exact prompt plus ordered schemas match | | `01-final-composition.json`, `03-composition-reopen.json` |
+| Replay-route continuity | no replay carrier is dropped on the same-route continuation | | `03-provider-replay-drops.json` |
 | Continued commit | six ordered rows agree in UI, API, and store | | `03-continuity-transcript.png`, `03-continuity-*.json` |
+| Minted replay precondition | stored opaque carrier is stamped with provider kind + endpoint + model A | | `04-minted-replay-carriers.json` |
+| Foreign-route filter context | model-B pre-filter trace request contains neutral history and provider-owned candidates for the serving-route fence | | `04-pre-filter-provider-request.json` |
+| Drop evidence | trace and product-event surfaces expose matching `reasoning` / `foreign_route` evidence | | `04-provider-replay-drops.json`, `04-model-call-record.json` |
 | No local-cache credit | replacement PID plus unchanged durable identity recorded | | command log, state artifacts |
 
 **Aggregate:** did a replacement web process reconstruct every committed turn from the
-session store and send that complete history into the next provider request?
+session store, continue with the full history, then prove a minted opaque carrier was filtered
+and evidenced when the exact LLM Provider replay route changed?
 
 ---
 

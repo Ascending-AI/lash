@@ -396,6 +396,10 @@ impl Provider for GoogleOAuthProvider {
         "google_oauth"
     }
 
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        Self::route_identity_for_model(model)
+    }
+
     fn options(&self) -> ProviderOptions {
         self.options.clone()
     }
@@ -436,6 +440,13 @@ impl Provider for GoogleOAuthProvider {
     }
 
     async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        Self::route_identity_for_model(&req.model)
+            .validate_endpoint()
+            .map_err(|error| {
+                LlmTransportError::new(error.to_string())
+                    .with_kind(ProviderFailureKind::Validation)
+                    .with_code("invalid_provider_endpoint")
+            })?;
         Self::validate_attachments(&req)?;
         if self.attempt_credential.is_none() {
             let manager = Arc::clone(&self.credentials);

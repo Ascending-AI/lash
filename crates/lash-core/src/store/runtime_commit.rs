@@ -608,7 +608,7 @@ impl RuntimeTurnCommitStamp {
         Ok(Self {
             operation,
             identity_encoding_version: Some(
-                commit_identity::APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
+                commit_identity::append_request_identity_encoding_version(nodes),
             ),
             request_identity_hash: Some(request_identity_hash),
             requested_node_count: Some(nodes.len()),

@@ -10,6 +10,9 @@ use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, LlmResponse, LlmTransportError, Provider,
     ProviderComponents, ProviderFailureKind, ProviderHandle, ProviderOptions, ProviderReliability,
 };
+use lash_core::llm::types::{
+    LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay, ProviderRouteIdentity,
+};
 
 pub(crate) const DEV_PROVIDER_SCENARIO_ENV: &str = "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO";
 
@@ -24,6 +27,7 @@ pub(crate) enum DevProviderScenario {
     RenderedSurface,
     CodeFailure,
     RetryResetPartial,
+    ReplayRouteChange,
 }
 
 impl DevProviderScenario {
@@ -45,10 +49,12 @@ impl DevProviderScenario {
             "rendered-surface" => Self::RenderedSurface,
             "code-failure" => Self::CodeFailure,
             "retry-reset-partial" => Self::RetryResetPartial,
+            "replay-route-change" => Self::ReplayRouteChange,
             other => bail!(
                 "invalid {DEV_PROVIDER_SCENARIO_ENV} `{other}`; expected one of: \
                  auth-failure-once, rate-limit-once, partial-output-failure, failed-process, \
-                 exec-blocked, tool-value, rendered-surface, code-failure, retry-reset-partial"
+                 exec-blocked, tool-value, rendered-surface, code-failure, retry-reset-partial, \
+                 replay-route-change"
             ),
         };
         Ok(Some(scenario))
@@ -65,6 +71,14 @@ impl DevProviderScenario {
             Self::RenderedSurface => "rendered-surface",
             Self::CodeFailure => "code-failure",
             Self::RetryResetPartial => "retry-reset-partial",
+            Self::ReplayRouteChange => "replay-route-change",
+        }
+    }
+
+    pub(crate) fn initial_model(self) -> &'static str {
+        match self {
+            Self::ReplayRouteChange => "dev/replay-route-a",
+            _ => "dev/failure-paths",
         }
     }
 
@@ -145,6 +159,10 @@ struct DevFailureProvider {
 impl Provider for DevFailureProvider {
     fn kind(&self) -> &'static str {
         "workbench-dev-failure"
+    }
+
+    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -287,6 +305,7 @@ finish "exec block unexpectedly returned"
                 &request,
                 "<lashlang>\nfinish \"FIG-1350 retry replacement\"\n</lashlang>",
             )),
+            DevProviderScenario::ReplayRouteChange => Ok(replay_route_response(&request)),
         }
     }
 
@@ -308,6 +327,55 @@ fn streamed_response(request: &LlmRequest, text: &str) -> LlmResponse {
     }
 }
 
+fn replay_route_response(request: &LlmRequest) -> LlmResponse {
+    let turn = next_replay_route_turn(&request.messages);
+    let answer = format!("FIG-1374 replay-route response {turn}");
+    let text = format!("<lashlang>\nfinish \"{answer}\"\n</lashlang>");
+    let reasoning = format!("FIG-1374 portable reasoning {turn}");
+    send_reasoning(request, &reasoning);
+    send_delta(request, &text);
+    LlmResponse {
+        full_text: text.clone(),
+        parts: vec![
+            LlmOutputPart::Reasoning {
+                text: reasoning,
+                replay: Some(ProviderReasoningReplay {
+                    signature: Some(format!("FIG1374-OPAQUE-REPLAY-{turn}")),
+                    origin: Some(ProviderRouteIdentity::new(
+                        "workbench-dev-failure",
+                        "workbench-dev-failure",
+                        request.model.clone(),
+                    )),
+                    ..ProviderReasoningReplay::default()
+                }),
+            },
+            LlmOutputPart::Text {
+                text,
+                response_meta: None,
+            },
+        ],
+        response_metadata: Default::default(),
+        ..LlmResponse::default()
+    }
+}
+
+fn next_replay_route_turn(messages: &[LlmMessage]) -> usize {
+    messages
+        .iter()
+        .filter(|message| message.role == LlmRole::Assistant)
+        .filter(|message| {
+            message.blocks.iter().any(|block| {
+                matches!(
+                    block,
+                    LlmContentBlock::Text { text, .. }
+                        if text.contains("FIG-1374 replay-route response ")
+                )
+            })
+        })
+        .count()
+        + 1
+}
+
 fn send_delta(request: &LlmRequest, text: &str) {
     if let Some(events) = request.stream_events.as_ref() {
         events.send(LlmStreamEvent::Delta(text.to_string()));
@@ -317,5 +385,41 @@ fn send_delta(request: &LlmRequest, text: &str) {
 fn send_reasoning(request: &LlmRequest, text: &str) {
     if let Some(events) = request.stream_events.as_ref() {
         events.send(LlmStreamEvent::ReasoningDelta(text.to_string()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lash_core::llm::types::{LlmMessage, LlmRole};
+
+    use super::{DevProviderScenario, next_replay_route_turn};
+
+    #[test]
+    fn replay_route_change_starts_on_route_a() {
+        assert_eq!(
+            DevProviderScenario::ReplayRouteChange.initial_model(),
+            "dev/replay-route-a"
+        );
+        assert_eq!(
+            DevProviderScenario::PartialOutputFailure.initial_model(),
+            "dev/failure-paths"
+        );
+    }
+
+    #[test]
+    fn replay_route_turn_counts_completed_scenario_responses_not_rlm_control_messages() {
+        let first_request = vec![
+            LlmMessage::text(LlmRole::User, "FIG425-RESUME-ONE"),
+            LlmMessage::text(LlmRole::User, "=== CURRENT ITERATION: 1 ==="),
+        ];
+        assert_eq!(next_replay_route_turn(&first_request), 1);
+
+        let second_request = vec![
+            LlmMessage::text(LlmRole::User, "FIG425-RESUME-ONE"),
+            LlmMessage::text(LlmRole::Assistant, "FIG-1374 replay-route response 1"),
+            LlmMessage::text(LlmRole::User, "FIG425-RESUME-TWO"),
+            LlmMessage::text(LlmRole::User, "=== CURRENT ITERATION: 1 ==="),
+        ];
+        assert_eq!(next_replay_route_turn(&second_request), 2);
     }
 }

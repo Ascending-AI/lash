@@ -70,7 +70,7 @@ impl RuntimeExecutionContext<'_> {
             replay: None,
         };
         let prepared_call = match self.prepare_tool_call(pending_call).await {
-            ToolPreparationOutcome::Prepared(prepared) => prepared,
+            ToolPreparationOutcome::Prepared(prepared) => *prepared,
             ToolPreparationOutcome::Completed(outcome) => {
                 let mut record = outcome.record;
                 record.call_id = Some(call_id);

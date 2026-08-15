@@ -36,7 +36,8 @@ pub(crate) use executor::{
 };
 pub(crate) use outcome::{
     LlmTraceFailure, apply_direct_outcome, emit_llm_trace_completed, emit_llm_trace_failed,
-    emit_llm_trace_started, token_usage_from_llm,
+    emit_llm_trace_started, emit_provider_replay_drops, llm_call_error_from_transport,
+    token_usage_from_llm,
 };
 
 #[cfg(test)]

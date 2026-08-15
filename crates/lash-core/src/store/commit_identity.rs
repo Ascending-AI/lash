@@ -11,7 +11,8 @@ pub struct OperationId {
     pub key: String,
 }
 
-pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
+pub(super) const LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
+pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
 
 /// Shared backend-independent decision for an existing runtime commit receipt.
 ///
@@ -152,7 +153,11 @@ fn push_string(encoded: &mut Vec<u8>, value: &str) {
     push_len_prefixed(encoded, value.as_bytes());
 }
 
-fn push_optional<T>(encoded: &mut Vec<u8>, value: Option<&T>, push: impl FnOnce(&mut Vec<u8>, &T)) {
+fn push_optional<T: ?Sized>(
+    encoded: &mut Vec<u8>,
+    value: Option<&T>,
+    push: impl FnOnce(&mut Vec<u8>, &T),
+) {
     match value {
         Some(value) => {
             encoded.push(1);
@@ -441,7 +446,13 @@ fn push_prune_state(encoded: &mut Vec<u8>, state: &crate::PruneState) {
     }
 }
 
-fn push_part(encoded: &mut Vec<u8>, part: &crate::Part) {
+fn push_route(encoded: &mut Vec<u8>, route: &lash_sansio::llm::types::ProviderRouteIdentity) {
+    push_string(encoded, &route.provider);
+    push_string(encoded, &route.endpoint);
+    push_string(encoded, &route.model);
+}
+
+fn push_part(encoded: &mut Vec<u8>, part: &crate::Part, encoding_version: u32) {
     let crate::Part {
         id,
         kind,
@@ -469,13 +480,20 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part) {
         push_string(encoded, value)
     });
     push_optional(encoded, tool_replay.as_ref(), |encoded, replay| {
-        let lash_sansio::llm::types::ProviderReplayMeta { item_id, opaque } = replay;
+        let lash_sansio::llm::types::ProviderReplayMeta {
+            item_id,
+            opaque,
+            origin,
+        } = replay;
         push_optional(encoded, item_id.as_ref(), |encoded, value| {
             push_string(encoded, value)
         });
         push_optional(encoded, opaque.as_ref(), |encoded, value| {
             push_string(encoded, value)
         });
+        if encoding_version == APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
+            push_optional(encoded, origin.as_ref(), push_route);
+        }
     });
     push_prune_state(encoded, prune_state);
     push_optional(encoded, reasoning_meta.as_ref(), |encoded, replay| {
@@ -485,6 +503,7 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part) {
             signature,
             redacted,
             summary,
+            origin,
         } = replay;
         push_optional(encoded, item_id.as_ref(), |encoded, value| {
             push_string(encoded, value)
@@ -499,6 +518,9 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part) {
         push_slice(encoded, summary, |encoded, value| {
             push_string(encoded, value)
         });
+        if encoding_version == APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
+            push_optional(encoded, origin.as_ref(), push_route);
+        }
     });
     push_optional(encoded, response_meta.as_ref(), |encoded, response| {
         let lash_sansio::llm::types::ResponseTextMeta {
@@ -506,25 +528,39 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part) {
             status,
             phase,
             provider_payload,
-            origin_provider,
-            origin_model,
+            origin,
+            legacy_origin_provider,
+            legacy_origin_model,
         } = response;
-        for value in [
-            id,
-            status,
-            phase,
-            provider_payload,
-            origin_provider,
-            origin_model,
-        ] {
+        for value in [id, status, phase, provider_payload] {
             push_optional(encoded, value.as_ref(), |encoded, value| {
                 push_string(encoded, value)
             });
         }
+        if encoding_version == LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
+            // ResponseTextMeta carried provider/model before the unified
+            // route. Project those two legacy leaves and deliberately omit
+            // endpoint so migrated values retain their exact v1 preimage.
+            let provider = legacy_origin_provider
+                .as_ref()
+                .map(String::as_str)
+                .or_else(|| origin.as_ref().map(|route| route.provider.as_ref()));
+            let model = legacy_origin_model
+                .as_ref()
+                .map(String::as_str)
+                .or_else(|| origin.as_ref().map(|route| route.model.as_ref()));
+            push_optional(encoded, provider, push_string);
+            push_optional(encoded, model, push_string);
+        } else {
+            push_optional(encoded, origin.as_ref(), push_route);
+        }
     });
 }
 
-fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>, StoreError> {
+fn append_node_identity_bytes_with_version(
+    node: &crate::SessionAppendNode,
+    encoding_version: u32,
+) -> Result<Vec<u8>, StoreError> {
     let mut encoded = Vec::new();
     match node {
         crate::SessionAppendNode::Message { message } => {
@@ -543,7 +579,9 @@ fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>
             push_message_role(&mut encoded, *role);
             push_string(&mut encoded, content);
             push_optional(&mut encoded, origin.as_ref(), push_message_origin);
-            push_slice(&mut encoded, parts, push_part);
+            push_slice(&mut encoded, parts, |encoded, part| {
+                push_part(encoded, part, encoding_version)
+            });
             push_slice(&mut encoded, attachments, push_attachment_source);
         }
         crate::SessionAppendNode::ProtocolEvent { event } => {
@@ -559,6 +597,38 @@ fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>
         }
     }
     Ok(encoded)
+}
+
+#[cfg(test)]
+fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>, StoreError> {
+    append_node_identity_bytes_with_version(node, LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION)
+}
+
+pub(super) fn append_request_identity_encoding_version(nodes: &[crate::SessionAppendNode]) -> u32 {
+    let has_route = nodes.iter().any(|node| match node {
+        crate::SessionAppendNode::Message { message } => message.parts.iter().any(|part| {
+            part.tool_replay
+                .as_ref()
+                .and_then(|replay| replay.origin.as_ref())
+                .or_else(|| {
+                    part.reasoning_meta
+                        .as_ref()
+                        .and_then(|replay| replay.origin.as_ref())
+                })
+                .or_else(|| {
+                    part.response_meta
+                        .as_ref()
+                        .and_then(|meta| meta.origin.as_ref())
+                })
+                .is_some()
+        }),
+        _ => false,
+    });
+    if has_route {
+        APPEND_REQUEST_IDENTITY_ENCODING_VERSION
+    } else {
+        LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION
+    }
 }
 
 /// Version 1 canonical bytes, in order:
@@ -577,6 +647,7 @@ fn append_request_identity_bytes(
     requested_ancestor_node_id: Option<&str>,
     nodes: &[crate::SessionAppendNode],
 ) -> Result<Vec<u8>, StoreError> {
+    let encoding_version = append_request_identity_encoding_version(nodes);
     let operation_key = operation.storage_key()?;
     let mut encoded = Vec::new();
     push_len_prefixed(&mut encoded, operation_key.as_bytes());
@@ -589,7 +660,7 @@ fn append_request_identity_bytes(
     }
     encoded.extend_from_slice(&(nodes.len() as u64).to_be_bytes());
     for node in nodes {
-        let semantic_node = append_node_identity_bytes(node)?;
+        let semantic_node = append_node_identity_bytes_with_version(node, encoding_version)?;
         push_len_prefixed(&mut encoded, &semantic_node);
     }
     Ok(encoded)
@@ -886,8 +957,8 @@ mod append_request_identity_tests {
                         },
                         "response_meta": {
                             "id": "response-id", "status": "complete", "phase": "final_answer",
-                            "provider_payload": "payload", "origin_provider": "provider",
-                            "origin_model": "model"
+                            "provider_payload": "payload",
+                            "origin_provider": "provider", "origin_model": "model"
                         }
                     },
                     {"id": "p1", "kind": "Text", "content": "text", "prune_state": "Intact"},
@@ -919,6 +990,11 @@ mod append_request_identity_tests {
                 "origin": {"kind": "plugin", "plugin_id": "plugin-id", "transient": true}
             }
         }));
+        assert_eq!(
+            append_request_identity_encoding_version(std::slice::from_ref(&comprehensive_message)),
+            LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
+            "actual base-era ResponseTextMeta JSON must stay in the v1 family"
+        );
         let system_message = crate::SessionAppendNode::message(crate::PluginMessage::text(
             crate::MessageRole::System,
             "system",
@@ -1046,6 +1122,117 @@ mod append_request_identity_tests {
             assert_eq!(actual, **expected, "v1 bytes moved for {name}");
         }
         assert_eq!(rendered_len, expected.len(), "golden corpus row count");
+    }
+
+    #[test]
+    fn base_response_text_meta_json_retains_its_exact_v1_preimage() {
+        // This is the ResponseTextMeta vocabulary emitted by 01aaf70cc: the
+        // provider/model leaves are siblings and no endpoint exists.
+        let node = node_fixture(
+            serde_json::from_str(
+                r#"{"kind":"message","message":{"role":"Assistant","content":"base-era response","parts":[{"id":"p0","kind":"Prose","content":"answer","prune_state":"Intact","response_meta":{"id":"response-id","status":"complete","phase":"final_answer","provider_payload":"signature","origin_provider":"google_oauth","origin_model":"gemini-base"}}]}}"#,
+            )
+            .expect("literal base-commit JSON"),
+        );
+        assert_eq!(
+            append_request_identity_encoding_version(std::slice::from_ref(&node)),
+            LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION
+        );
+        assert_eq!(
+            hex(&append_node_identity_bytes(&node).expect("encode legacy node")),
+            include_str!("testdata/response_text_meta_base_v1.hex").trim(),
+            "the v1 preimage of actual base-era JSON must never move"
+        );
+    }
+
+    #[test]
+    fn append_request_identity_v2_golden_byte_corpus() {
+        // To refresh after an intentional v2 grammar change:
+        // UPDATE_APPEND_REQUEST_IDENTITY_V2_GOLDEN=1 cargo test -p lash-core \
+        //   append_request_identity_v2_golden_byte_corpus -- --exact
+        // The v1 corpus above is never regenerated by this procedure.
+        let node = node_fixture(serde_json::json!({
+            "kind": "message",
+            "message": {
+                "role": "Assistant",
+                "content": "route-owned replay",
+                "parts": [{
+                    "id": "p0",
+                    "kind": "ToolCall",
+                    "content": "tool",
+                    "tool_replay": {
+                        "item_id": "tool-item",
+                        "opaque": "tool-opaque",
+                        "origin": {
+                            "provider": "openai-compatible",
+                            "endpoint": "https://gateway.example/v1",
+                            "model": "shared-model"
+                        }
+                    },
+                    "reasoning_meta": {
+                        "signature": "reasoning-signature",
+                        "origin": {
+                            "provider": "openai-compatible",
+                            "endpoint": "https://gateway.example/v1",
+                            "model": "shared-model"
+                        }
+                    },
+                    "response_meta": {
+                        "id": "response-id",
+                        "status": "completed",
+                        "phase": "final_answer",
+                        "origin": {
+                            "provider": "openai-compatible",
+                            "endpoint": "https://gateway.example/v1",
+                            "model": "shared-model"
+                        }
+                    },
+                    "prune_state": "Intact"
+                }]
+            }
+        }));
+        assert_eq!(
+            append_request_identity_encoding_version(std::slice::from_ref(&node)),
+            APPEND_REQUEST_IDENTITY_ENCODING_VERSION
+        );
+        let rows = [
+            (
+                "route_node",
+                hex(&append_node_identity_bytes_with_version(
+                    &node,
+                    APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
+                )
+                .expect("encode v2 node")),
+            ),
+            (
+                "route_request",
+                hex(&append_request_identity_bytes(
+                    &operation("route-request"),
+                    Some("ancestor"),
+                    std::slice::from_ref(&node),
+                )
+                .expect("encode v2 request")),
+            ),
+        ];
+        let rendered = rows
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        if std::env::var_os("UPDATE_APPEND_REQUEST_IDENTITY_V2_GOLDEN").is_some() {
+            std::fs::write(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("src/store/testdata/append_request_identity_v2.hex"),
+                &rendered,
+            )
+            .expect("write v2 golden corpus");
+        }
+        assert_eq!(
+            rendered,
+            include_str!("testdata/append_request_identity_v2.hex"),
+            "v2 bytes moved; use the documented refresh command only for an intentional grammar change"
+        );
     }
 
     #[test]

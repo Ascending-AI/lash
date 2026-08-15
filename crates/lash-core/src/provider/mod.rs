@@ -22,6 +22,7 @@ mod tests;
 mod traits;
 
 pub use factory::ProviderFactory;
+pub(crate) use handle::synthetic_terminal_call_record;
 pub use handle::{
     ProviderCompletion, ProviderCompletionError, ProviderComponents, ProviderHandle,
     UnconfiguredProvider,

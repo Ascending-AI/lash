@@ -73,7 +73,11 @@ impl OpenAiProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
-        self.inner.build_responses_request_body(req, stream)
+        self.inner.build_responses_request_body_for_route(
+            req,
+            stream,
+            &self.route_identity(&req.model),
+        )
     }
 }
 
@@ -81,6 +85,10 @@ impl OpenAiProvider {
 impl Provider for OpenAiCompatibleProvider {
     fn kind(&self) -> &'static str {
         "openai-compatible"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::for_endpoint(self.kind(), &self.base_url, model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -129,6 +137,10 @@ impl Provider for OpenAiCompatibleProvider {
 impl Provider for OpenAiProvider {
     fn kind(&self) -> &'static str {
         "openai"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::for_endpoint(self.kind(), &self.inner.base_url, model)
     }
 
     fn options(&self) -> ProviderOptions {

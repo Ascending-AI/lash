@@ -176,6 +176,10 @@ impl GoogleOAuthProvider {
         format!("{}:{}", Self::endpoint_base_url(), method)
     }
 
+    pub(crate) fn route_identity_for_model(model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::for_endpoint(Self::PROVIDER_KIND, &Self::endpoint_base_url(), model)
+    }
+
     pub fn into_components(self) -> ProviderComponents {
         ProviderComponents::new(Box::new(self))
     }

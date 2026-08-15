@@ -752,6 +752,10 @@ mod tests {
             "stub"
         }
 
+        fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+            lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+        }
+
         fn options(&self) -> lash_core::facade_support::ProviderOptions {
             lash_core::facade_support::ProviderOptions::default()
         }

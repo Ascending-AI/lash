@@ -831,6 +831,7 @@ fn remote_turn_result_maps_core_semantics() {
     let call_record = lash_core::LlmCallRecord {
         call_id: lash_core::LlmCallId("llm-call-1".to_string()),
         label: Some("scorecard".to_string()),
+        replay_drops: Vec::new(),
         attempts: vec![lash_core::AttemptRecord {
             ordinal: 1,
             started_at: 1_700_000_000_000,
@@ -979,12 +980,141 @@ fn remote_turn_result_maps_core_semantics() {
     assert_eq!(record.attempts[0].evidence.as_ref(), Some(evidence));
 }
 
+fn synthetic_terminal_call_record(
+    call_id: &str,
+    outcome: lash_core::AttemptOutcome,
+    failure_kind: lash_core::ProviderFailureKind,
+    code: &str,
+    retry_budget_consumed: bool,
+) -> lash_core::LlmCallRecord {
+    lash_core::LlmCallRecord {
+        call_id: lash_core::LlmCallId(call_id.to_string()),
+        label: None,
+        replay_drops: Vec::new(),
+        attempts: vec![lash_core::AttemptRecord {
+            ordinal: 1,
+            started_at: 1_700_000_000_000,
+            duration: std::time::Duration::ZERO,
+            outcome,
+            protocol_position: lash_core::ProtocolPosition::NoResponse,
+            retry_budget_consumed,
+            retry_decision: None,
+            error: Some(lash_core::NormalizedError {
+                class: failure_kind.code().to_string(),
+                provider_code: Some(code.to_string()),
+                http_status: None,
+                provider_request_id: None,
+                retry_after: None,
+                diagnostic: Some(code.to_string()),
+            }),
+            evidence: None,
+            generation_disposition: None,
+            usage: None,
+        }],
+    }
+}
+
+fn assert_terminal_call_record_converts_and_validates(
+    record: lash_core::LlmCallRecord,
+    cancelled: bool,
+) {
+    let activity = RemoteTurnActivity::from_core(
+        1,
+        lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {
+            record: record.clone(),
+        }),
+    );
+    activity
+        .validate()
+        .expect("ModelCallRecorded conversion validates");
+    let activity_json = serde_json::to_vec(&activity).expect("encode activity");
+    RemoteTurnActivity::decode_json(&activity_json).expect("activity decoder validates");
+
+    let turn = lash_core::facade_support::AssembledTurn {
+        state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        )),
+        outcome: if cancelled {
+            lash_core::facade_support::TurnOutcome::Stopped(
+                lash_core::facade_support::TurnStop::Cancelled,
+            )
+        } else {
+            lash_core::facade_support::TurnOutcome::Stopped(
+                lash_core::facade_support::TurnStop::ProviderError,
+            )
+        },
+        cancellation: cancelled.then(|| lash_core::facade_support::TurnCancellationEvidence {
+            request_id: "cancel-request".to_string(),
+            origin: None,
+            reason: None,
+        }),
+        assistant_output: lash_core::facade_support::AssistantOutput {
+            safe_text: String::new(),
+            raw_text: String::new(),
+            state: lash_core::facade_support::OutputState::EmptyOutput,
+        },
+        execution: lash_core::facade_support::ExecutionSummary::default(),
+        token_usage: lash_core::TokenUsage::default(),
+        children_usage: Vec::new(),
+        llm_calls: vec![record],
+        tool_calls: Vec::new(),
+        errors: Vec::new(),
+    };
+    let result = RemoteTurnResult::from_core("session", "turn", turn, [activity]);
+    result
+        .validate()
+        .expect("turn-result conversion validates the terminal call record");
+}
+
+#[test]
+fn cancelled_mid_call_record_converts_and_validates() {
+    assert_terminal_call_record_converts_and_validates(
+        synthetic_terminal_call_record(
+            "cancelled-call",
+            lash_core::AttemptOutcome::Aborted,
+            lash_core::ProviderFailureKind::Unknown,
+            "cancelled",
+            true,
+        ),
+        true,
+    );
+}
+
+#[test]
+fn task_join_failure_record_converts_and_validates() {
+    assert_terminal_call_record_converts_and_validates(
+        synthetic_terminal_call_record(
+            "join-failure-call",
+            lash_core::AttemptOutcome::Interrupted,
+            lash_core::ProviderFailureKind::Unknown,
+            "task_join_failed",
+            true,
+        ),
+        false,
+    );
+}
+
+#[test]
+fn invalid_endpoint_record_converts_and_validates() {
+    assert_terminal_call_record_converts_and_validates(
+        synthetic_terminal_call_record(
+            "invalid-endpoint-call",
+            lash_core::AttemptOutcome::Failed,
+            lash_core::ProviderFailureKind::Validation,
+            "invalid_provider_endpoint",
+            false,
+        ),
+        false,
+    );
+}
+
 #[test]
 fn core_diagnostics_do_not_cross_the_public_remote_projection() {
     const PRIVATE_DIAGNOSTIC: &str = "secret provider panic: token=raw-secret";
     let record = lash_core::LlmCallRecord {
         call_id: lash_core::LlmCallId("panic-call".to_string()),
         label: None,
+        replay_drops: Vec::new(),
         attempts: vec![lash_core::AttemptRecord {
             ordinal: 1,
             started_at: 0,

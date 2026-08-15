@@ -1221,6 +1221,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     let expected_record = lash::remote::llm::RemoteLlmCallRecord {
         call_id: "call-1".to_string(),
         label: None,
+        replay_drops: Vec::new(),
         attempts: vec![
             lash::remote::llm::RemoteAttemptRecord {
                 ordinal: 1,

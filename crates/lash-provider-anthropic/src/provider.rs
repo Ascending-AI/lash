@@ -12,6 +12,14 @@ impl Provider for AnthropicProvider {
         "anthropic"
     }
 
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::for_endpoint(
+            self.kind(),
+            self.base_url.as_deref().unwrap_or(DEFAULT_BASE_URL),
+            model,
+        )
+    }
+
     fn options(&self) -> ProviderOptions {
         self.options.clone()
     }
@@ -42,7 +50,22 @@ impl Provider for AnthropicProvider {
         serde_json::Value::Object(map)
     }
 
-    async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+    async fn complete(&mut self, mut req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        let minting_route = self.route_identity(&req.model);
+        minting_route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_code("invalid_provider_endpoint")
+        })?;
+        if let Some(downstream) = req.stream_events.take() {
+            let stream_route = minting_route.clone();
+            req.stream_events = Some(LlmEventSender::new(move |mut event| {
+                if let LlmStreamEvent::Part(part) = &mut event {
+                    let _ = part.stamp_replay_origin(&stream_route);
+                }
+                downstream.send(event);
+            }));
+        }
         let stream_events = req.stream_events.clone();
         let provider_trace = req.provider_trace.clone();
         let timeouts = self.options.llm_timeouts();
@@ -156,16 +179,28 @@ impl Provider for AnthropicProvider {
                 request_body.clone(),
                 &url,
                 generation_disposition,
+                &req.model,
             );
             partial.response_metadata = response_metadata.into_metadata();
+            partial
+                .stamp_replay_origin(&minting_route)
+                .map_err(replay_origin_conflict_error)?;
             return Err(error.with_partial_response(partial));
         }
         if stream_termination == StreamTermination::RequireTerminalEvidence
             && !state.message_stopped
         {
-            let mut partial =
-                Self::partial_response(state, request_body, &url, generation_disposition);
+            let mut partial = Self::partial_response(
+                state,
+                request_body,
+                &url,
+                generation_disposition,
+                &req.model,
+            );
             partial.response_metadata = response_metadata.into_metadata();
+            partial
+                .stamp_replay_origin(&minting_route)
+                .map_err(replay_origin_conflict_error)?;
             return Err(
                 LlmTransportError::new("Anthropic stream ended before message_stop")
                     .with_kind(ProviderFailureKind::Stream)
@@ -177,8 +212,8 @@ impl Provider for AnthropicProvider {
 
         let provider_usage = state.provider_usage.take();
         let execution_evidence = state.execution_evidence.clone();
-        let (parts, full_text, usage, terminal_reason) = Self::finalize(state);
-        Ok(LlmResponse {
+        let (parts, full_text, usage, terminal_reason) = Self::finalize(state, &req.model);
+        let mut response = LlmResponse {
             full_text,
             parts,
             usage,
@@ -190,12 +225,25 @@ impl Provider for AnthropicProvider {
             execution_evidence,
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
-        })
+        };
+        response
+            .stamp_replay_origin(&minting_route)
+            .map_err(replay_origin_conflict_error)?;
+        Ok(response)
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
     }
+}
+
+fn replay_origin_conflict_error(
+    conflict: lash_core::llm::types::ProviderReplayOriginConflict,
+) -> LlmTransportError {
+    LlmTransportError::new(conflict.to_string())
+        .with_kind(ProviderFailureKind::Validation)
+        .with_code("provider_replay_origin_conflict")
+        .retryable(false)
 }
 
 impl AnthropicProvider {
@@ -230,10 +278,11 @@ impl AnthropicProvider {
         request_body: Option<String>,
         url: &str,
         generation_disposition: Option<GenerationDisposition>,
+        origin_model: &str,
     ) -> LlmResponse {
         let provider_usage = state.provider_usage.take();
         let execution_evidence = state.execution_evidence.clone();
-        let (parts, full_text, usage, _) = Self::finalize(state);
+        let (parts, full_text, usage, _) = Self::finalize(state, origin_model);
         LlmResponse {
             full_text,
             parts,

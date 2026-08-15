@@ -1,10 +1,14 @@
 mod config;
+#[cfg(all(test, feature = "testing"))]
+mod conformance_route;
 #[cfg(test)]
 mod execution_evidence_tests;
 pub mod oauth;
 mod provider;
 #[cfg(test)]
 mod provider_trace_tests;
+#[cfg(test)]
+mod replay_provenance_tests;
 mod request;
 mod stream;
 mod support;
@@ -27,7 +31,7 @@ mod tests {
     use lash_core::llm::types::{
         AttachmentSource, LlmContentBlock, LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest,
         LlmRole, LlmStreamEvent, LlmTerminalReason, LlmToolChoice, LlmToolSpec, LlmUsage,
-        ResponseTextMeta,
+        ProviderRouteIdentity, ResponseTextMeta,
     };
     use lash_core::provider::{
         ModelCapability, ProviderOptions, ReasoningCapability, ReasoningEncoding, StreamTermination,
@@ -428,6 +432,7 @@ mod tests {
         let durable_history: Vec<Message> =
             serde_json::from_str(&durable_json).expect("history deserializes");
         let mut req = request(None);
+        req.model = "gemini-test".to_string();
         req.messages = lash_core::session_model::render_prompt(&durable_history).messages;
         let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
         GoogleOAuthProvider::build_request(
@@ -496,6 +501,15 @@ mod tests {
                 .as_ref()
                 .and_then(|meta| meta.signature.as_deref()),
             Some(REASONING_SIGNATURE_1)
+        );
+        assert_eq!(
+            reasoning[0]
+                .1
+                .as_ref()
+                .and_then(|meta| meta.origin.as_ref()),
+            Some(&GoogleOAuthProvider::route_identity_for_model(
+                "gemini-test"
+            ))
         );
         assert_eq!(reasoning[1].0, "carefully");
         assert_eq!(
@@ -1159,10 +1173,11 @@ mod tests {
         };
         assert_eq!(meta.provider_payload.as_deref(), Some(signature.as_str()));
         assert_eq!(
-            meta.origin_provider.as_deref(),
-            Some(GoogleOAuthProvider::PROVIDER_KIND)
+            meta.origin.as_ref(),
+            Some(&GoogleOAuthProvider::route_identity_for_model(
+                "gemini-3.1-pro-preview"
+            ))
         );
-        assert_eq!(meta.origin_model.as_deref(), Some("gemini-3.1-pro-preview"));
 
         let mut req = request(None);
         req.messages = vec![LlmMessage::new(
@@ -1214,7 +1229,7 @@ mod tests {
                 output_parts: Some(&mut output_parts),
                 finish_event: &mut finish_event,
             },
-            None,
+            Some("gemini-test"),
         )
         .expect("streaming function call parses");
         let batch_parts = GoogleOAuthProvider::response_parts_from_value(
@@ -1222,7 +1237,7 @@ mod tests {
                 "content":{"parts":[function_part]},
                 "finishReason":"STOP"
             }]}),
-            None,
+            Some("gemini-test"),
         );
 
         for (path, parts) in [("streaming", streaming_parts), ("batch", batch_parts)] {
@@ -1233,6 +1248,8 @@ mod tests {
                         replay: Some(replay),
                         ..
                     }] if replay.opaque.as_deref() == Some(signature)
+                        && replay.origin.as_ref()
+                            == Some(&GoogleOAuthProvider::route_identity_for_model("gemini-test"))
                 ),
                 "{path} parser must retain the functionCall thoughtSignature"
             );
@@ -1251,20 +1268,25 @@ mod tests {
         for meta in [
             ResponseTextMeta {
                 provider_payload: Some("not base64!".to_string()),
-                origin_provider: Some(GoogleOAuthProvider::PROVIDER_KIND.to_string()),
-                origin_model: Some("gemini-3.1-pro-preview".to_string()),
+                origin: Some(GoogleOAuthProvider::route_identity_for_model(
+                    "gemini-3.1-pro-preview",
+                )),
                 ..ResponseTextMeta::default()
             },
             ResponseTextMeta {
                 provider_payload: Some(valid.clone()),
-                origin_provider: Some("other_provider".to_string()),
-                origin_model: Some("gemini-3.1-pro-preview".to_string()),
+                origin: Some(ProviderRouteIdentity::new(
+                    "other_provider",
+                    "other-route",
+                    "gemini-3.1-pro-preview",
+                )),
                 ..ResponseTextMeta::default()
             },
             ResponseTextMeta {
                 provider_payload: Some(valid.clone()),
-                origin_provider: Some(GoogleOAuthProvider::PROVIDER_KIND.to_string()),
-                origin_model: Some("gemini-2.5-pro".to_string()),
+                origin: Some(GoogleOAuthProvider::route_identity_for_model(
+                    "gemini-2.5-pro",
+                )),
                 ..ResponseTextMeta::default()
             },
         ] {
@@ -1512,11 +1534,7 @@ mod tests {
                 GoogleOAuthProvider::terminal_reason_from_value(body, parts)
             }
 
-            fn assemble_stream(
-                &self,
-                _scenario: Scenario,
-                sse_events: &[String],
-            ) -> StreamAssembly {
+            fn assemble_stream(&self, scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
                 let mut full = String::new();
                 let mut text_deltas = Vec::new();
                 let mut reasoning_deltas = Vec::new();
@@ -1555,6 +1573,9 @@ mod tests {
                 }
                 let mut parts = output_parts;
                 parts.extend(tool_calls);
+                if matches!(scenario, Scenario::ReasoningReplayRoundTrip) {
+                    crate::conformance_route::stamp_google_replay_origin(&mut parts);
+                }
                 StreamAssembly {
                     parts,
                     usage,

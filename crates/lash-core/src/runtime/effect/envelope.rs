@@ -269,8 +269,9 @@ pub struct RuntimeEffectEnvelope {
     pub command: RuntimeEffectCommand,
 }
 
-// Measured 448 B on rustc 1.97.0, x86_64-unknown-linux-gnu (FIG-595).
-const _: () = assert!(std::mem::size_of::<RuntimeEffectEnvelope>() <= 576);
+// Measured 600 B on rustc 1.97.0, x86_64-unknown-linux-gnu after the
+// endpoint-aware replay route and typed tool-intent attribution cutovers.
+const _: () = assert!(std::mem::size_of::<RuntimeEffectEnvelope>() <= 640);
 
 impl RuntimeEffectEnvelope {
     /// Constructs a validated effect envelope for effect-host implementors and panics if the

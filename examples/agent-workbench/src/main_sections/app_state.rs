@@ -684,6 +684,7 @@ pub(crate) async fn commit_assistant_transcript(
     session: &lash::LashSession,
     turn_id: &str,
     assistant_text: String,
+    model: Option<&str>,
 ) -> Result<(), AppError> {
     let message_id = workbench_turn_assistant_message_id(turn_id);
     let already_committed = session
@@ -694,18 +695,52 @@ pub(crate) async fn commit_assistant_transcript(
     if already_committed {
         return Ok(());
     }
+    let mut message = lash::plugins::PluginMessage::text(
+        lash::messages::MessageRole::Assistant,
+        assistant_text.clone(),
+    )
+    .with_id(message_id.clone());
+    if let Some((turn, model)) = replay_route_committed_reply(&assistant_text, model) {
+        // The deterministic replay-route fixture must cross the same durable
+        // transcript seam as a resumed production turn. Keep its visible text
+        // ordinary, while retaining provider-owned replay state in a hidden
+        // reasoning part for the next request's route filter to inspect.
+        message.content.clear();
+        message.parts = vec![
+            lash_core::Part::text(format!("{message_id}.p0"), assistant_text, None),
+            lash_core::Part::reasoning(
+                format!("{message_id}.p1"),
+                format!("FIG-1374 portable reasoning {turn}"),
+                Some(lash_core::llm::types::ProviderReasoningReplay {
+                    signature: Some(format!("FIG1374-OPAQUE-REPLAY-{turn}")),
+                    origin: Some(lash_core::ProviderRouteIdentity::new(
+                        "workbench-dev-failure",
+                        "workbench-dev-failure",
+                        model,
+                    )),
+                    ..Default::default()
+                }),
+            ),
+        ];
+    }
     session
         .admin()
         .state()
-        .append_messages(vec![
-            lash::plugins::PluginMessage::text(
-                lash::messages::MessageRole::Assistant,
-                assistant_text,
-            )
-            .with_id(message_id),
-        ])
+        .append_messages(vec![message])
         .await
         .map_err(AppError::runtime)
+}
+
+fn replay_route_committed_reply<'a>(
+    assistant_text: &str,
+    model: Option<&'a str>,
+) -> Option<(usize, &'a str)> {
+    let model = model.filter(|model| model.starts_with("dev/replay-route-"))?;
+    let turn = assistant_text
+        .strip_prefix("FIG-1374 replay-route response ")?
+        .parse()
+        .ok()?;
+    Some((turn, model))
 }
 
 fn assistant_text_for_display(output: &TurnResult, streamed_prose: &str) -> String {

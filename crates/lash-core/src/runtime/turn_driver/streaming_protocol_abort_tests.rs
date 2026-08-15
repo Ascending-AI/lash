@@ -26,6 +26,7 @@ fn abort_persists_request_disposition_and_typed_interruption() {
         &evidence,
         17,
         std::time::Duration::from_millis(3),
+        Vec::new(),
     );
 
     assert_eq!(
@@ -74,6 +75,7 @@ fn abort_retains_provider_usage_delivered_before_preemption() {
         &evidence,
         19,
         std::time::Duration::from_millis(5),
+        Vec::new(),
     );
 
     assert_eq!(response.usage, usage);
@@ -92,6 +94,7 @@ fn abort_suppression_updates_response_and_attempt_together() {
         },
         23,
         std::time::Duration::ZERO,
+        Vec::new(),
     );
     let mut result = Ok(response);
 

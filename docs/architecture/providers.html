@@ -215,6 +215,9 @@ impl Provider for AdmissionGate {
     fn kind(&amp;self) -&gt; &amp;'static str {
         self.inner.kind()
     }
+    fn route_identity(&amp;self, model: &amp;str) -&gt; ProviderRouteIdentity {
+        self.inner.route_identity(model)
+    }
     fn options(&amp;self) -&gt; ProviderOptions {
         self.inner.options()
     }

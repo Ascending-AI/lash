@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use lash::direct::ProviderRouteIdentity;
 use lash::provider::{
     LlmRequest, LlmResponse, LlmTransportError, Provider, ProviderComponents, ProviderHandle,
     ProviderOptions,
@@ -54,6 +55,9 @@ impl Provider for AdmissionGate {
 
     fn kind(&self) -> &'static str {
         self.inner.kind()
+    }
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        self.inner.route_identity(model)
     }
     fn options(&self) -> ProviderOptions {
         self.inner.options()
@@ -349,5 +353,114 @@ mod asserted_examples {
                 "unknown",
             ]
         );
+    }
+
+    #[derive(Clone, Debug, Default)]
+    struct DocsRouteProvider {
+        options: ProviderOptions,
+    }
+
+    #[async_trait::async_trait]
+    impl super::Provider for DocsRouteProvider {
+        fn kind(&self) -> &'static str {
+            "docs_route"
+        }
+
+        fn route_identity(&self, model: &str) -> super::ProviderRouteIdentity {
+            super::ProviderRouteIdentity::new(self.kind(), "eu-docs", model)
+        }
+
+        fn options(&self) -> ProviderOptions {
+            self.options.clone()
+        }
+
+        fn set_options(&mut self, options: ProviderOptions) {
+            self.options = options;
+        }
+
+        fn serialize_config(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+
+        async fn complete(
+            &mut self,
+            _request: super::LlmRequest,
+        ) -> Result<super::LlmResponse, super::LlmTransportError> {
+            unreachable!("route example does not execute the transport")
+        }
+
+        fn clone_boxed(&self) -> Box<dyn super::Provider> {
+            Box::new(self.clone())
+        }
+    }
+
+    #[test]
+    fn provider_routes_and_replay_drop_evidence_are_typed() {
+        use lash::direct::{
+            ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
+        };
+        use lash::provider::ProviderComponents;
+        use lash_core::ProviderEndpointError;
+
+        let normalized = ProviderRouteIdentity::for_endpoint(
+            "openai_compatible",
+            " HTTPS://Gateway.Example/v1/ ",
+            "gpt-5.4",
+        );
+        assert_eq!(normalized.provider.as_ref(), "openai_compatible");
+        assert_eq!(normalized.endpoint.as_ref(), "https://gateway.example/v1");
+        assert_eq!(normalized.model.as_ref(), "gpt-5.4");
+        normalized
+            .validate_endpoint()
+            .expect("credential-free endpoint");
+
+        let credential_bearing = ProviderRouteIdentity::for_endpoint(
+            "openai_compatible",
+            "https://user:secret@Gateway.Example/v1",
+            "gpt-5.4",
+        );
+        let endpoint_error = credential_bearing
+            .validate_endpoint()
+            .expect_err("endpoint userinfo is forbidden");
+        assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);
+
+        let opaque = ProviderRouteIdentity::new("host_mux", "eu-west", "gpt-5.4");
+        let drops = [
+            ProviderReplayDrop {
+                kind: ProviderReplayKind::ResponseText,
+                reason: ProviderReplayDropReason::Unstamped,
+                minting_route: None,
+                serving_route: normalized.clone(),
+            },
+            ProviderReplayDrop {
+                kind: ProviderReplayKind::Reasoning,
+                reason: ProviderReplayDropReason::ForeignRoute,
+                minting_route: Some(opaque.clone()),
+                serving_route: normalized.clone(),
+            },
+            ProviderReplayDrop {
+                kind: ProviderReplayKind::ToolCall,
+                reason: ProviderReplayDropReason::ForeignRoute,
+                minting_route: Some(opaque),
+                serving_route: normalized,
+            },
+        ];
+        let wire = serde_json::to_value(drops).expect("replay drops serialize");
+        assert_eq!(wire[0]["kind"], "response_text");
+        assert_eq!(wire[0]["reason"], "unstamped");
+        let serving_endpoint = &wire[0]["serving_route"]["endpoint"];
+        assert_eq!(serving_endpoint, "https://gateway.example/v1");
+        assert_eq!(wire[1]["kind"], "reasoning");
+        assert_eq!(wire[1]["reason"], "foreign_route");
+        assert_eq!(wire[1]["minting_route"]["endpoint"], "eu-west");
+        assert_eq!(wire[2]["kind"], "tool_call");
+
+        let handle = super::install_admission_gate(ProviderComponents::new(Box::new(
+            DocsRouteProvider::default(),
+        )));
+        let handle_route = handle.route_identity("test-model");
+        assert_eq!(handle_route.provider.as_ref(), "docs_route");
+        assert_eq!(handle_route.endpoint.as_ref(), "eu-docs");
+        assert_eq!(handle_route.model.as_ref(), "test-model");
     }
 }

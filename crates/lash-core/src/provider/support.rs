@@ -8,7 +8,8 @@ pub(super) use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub(super) use crate::llm::transport::{LlmTransportError, ProviderFailure, ProviderFailureKind};
 pub(super) use crate::llm::types::{
     AttemptOutcome, AttemptRecord, ExecutionEvidence, LlmCallId, LlmCallRecord, LlmContentBlock,
-    LlmRequest, LlmResponse, LlmTerminalReason, NormalizedError, ProtocolPosition, RetryDecision,
+    LlmRequest, LlmResponse, LlmTerminalReason, NormalizedError, ProtocolPosition,
+    ProviderReplayOriginConflict, ProviderRouteIdentity, RetryDecision,
 };
 
 pub(super) use super::handle::*;

@@ -263,6 +263,7 @@ impl LlmStreamAccumulator {
             signature: None,
             redacted: false,
             summary,
+            origin: None,
         };
         self.push_reasoning_with_replay(text, (!replay.is_empty()).then_some(replay));
     }

@@ -294,6 +294,10 @@ impl Provider for TestProvider {
         self.kind
     }
 
+    fn route_identity(&self, model: &str) -> crate::ProviderRouteIdentity {
+        crate::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+
     fn options(&self) -> ProviderOptions {
         self.options.clone()
     }

@@ -458,6 +458,7 @@ mod tests {
             signature: Some("signed".to_string()),
             redacted: false,
             summary: vec!["thought".to_string()],
+            ..Default::default()
         };
         let response = transform_final_response(
             &detector,

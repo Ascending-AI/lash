@@ -59,7 +59,7 @@ pub(crate) async fn dispatch_tool_call_with_execution_context<'run>(
         ToolPreparationOutcome::Prepared(prepared) => {
             Box::pin(dispatch_prepared_tool_call_with_execution_context(
                 context,
-                prepared,
+                *prepared,
                 tool_context,
             ))
             .await
@@ -206,7 +206,7 @@ async fn prepare_authorized_tool_call_with_context(
     };
     match prepared {
         Ok(prepared) if prepared.tool_id == manifest.id => {
-            ToolPreparationOutcome::Prepared(prepared)
+            ToolPreparationOutcome::Prepared(Box::new(prepared))
         }
         Ok(prepared) => completed_preparation(outcome(
             tool_name,

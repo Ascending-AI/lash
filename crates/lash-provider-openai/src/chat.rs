@@ -370,6 +370,9 @@ impl OpenAiCompatibleProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<(Value, CacheBreakpointDiagnostics), LlmTransportError> {
+        let serving_route = self.route_identity(&req.model);
+        let safe_request = req.replay_safe_for(&serving_route);
+        let req = safe_request.as_ref();
         Self::validate_chat_attachments(req)?;
         let compat = self.resolved_compat(CompletionEndpoint::ChatCompletions);
         let mut messages = Self::build_chat_messages(req);
@@ -551,6 +554,7 @@ impl OpenAiCompatibleProvider {
                         .map(|opaque| ProviderReplayMeta {
                             item_id: None,
                             opaque: Some(opaque),
+                            ..ProviderReplayMeta::default()
                         }),
                 });
             }
@@ -882,6 +886,7 @@ impl ChatStreamState {
                     .map(|opaque| ProviderReplayMeta {
                         item_id: None,
                         opaque: Some(opaque),
+                        ..ProviderReplayMeta::default()
                     }),
             });
             self.emitted_tool_call_indices.insert(index);
@@ -935,6 +940,7 @@ impl ChatStreamState {
                     .map(|opaque| ProviderReplayMeta {
                         item_id: None,
                         opaque: Some(opaque),
+                        ..ProviderReplayMeta::default()
                     }),
             });
         }

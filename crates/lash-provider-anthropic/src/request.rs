@@ -345,6 +345,9 @@ impl AnthropicProvider {
     }
 
     pub(crate) fn build_request_body(&self, req: &LlmRequest) -> Result<Value, LlmTransportError> {
+        let serving_route = self.route_identity(&req.model);
+        let safe_request = req.replay_safe_for(&serving_route);
+        let req = safe_request.as_ref();
         for source in &req.attachments {
             if matches!(
                 source,

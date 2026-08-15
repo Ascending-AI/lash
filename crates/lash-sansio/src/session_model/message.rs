@@ -859,6 +859,8 @@ fn llm_role_for_message(role: MessageRole) -> LlmRole {
 }
 
 #[cfg(test)]
+mod replay_provenance_tests;
+#[cfg(test)]
 mod tests {
     /// Commit-identity tripwire: `Part` is `#[non_exhaustive]`, so downstream
     /// exhaustive destructures (e.g. lash-core's commit-identity hasher) are
@@ -885,6 +887,7 @@ mod tests {
 
     use super::*;
     use crate::AttachmentRef;
+    use crate::llm::types::ProviderRouteIdentity;
 
     fn part(kind: PartKind, content: &str) -> Part {
         Part::base("p0".to_string(), kind, content.to_string())
@@ -915,6 +918,11 @@ mod tests {
         let tool_replay = ProviderReplayMeta {
             item_id: Some("call-item".to_string()),
             opaque: Some("opaque-call-state".to_string()),
+            origin: Some(ProviderRouteIdentity::new(
+                "provider-a",
+                "route-a",
+                "model-a",
+            )),
         };
         let tool_call = Part::tool_call(
             "m0.p0".to_string(),
@@ -1366,6 +1374,7 @@ mod tests {
                 encrypted_content: Some(encrypted.to_string()),
                 signature: None,
                 redacted: false,
+                origin: None,
             }),
         )
     }
@@ -1428,22 +1437,6 @@ mod tests {
                 .expect("deserialize sequence");
         assert_eq!(decoded.len(), 2);
         assert_eq!(decoded.as_slice()[1].id, "m1");
-    }
-
-    #[test]
-    fn reasoning_part_roundtrips_when_snapshot_predates_field() {
-        // Older snapshots written before fix 1.3b have no
-        // `reasoning_meta` column. The field must default to `None`
-        // and the deserializer must accept the legacy shape.
-        let legacy = r#"[{
-            "id":"m0","role":"Assistant",
-            "parts":[{
-                "id":"m0.p0","kind":"Prose","content":"Hi",
-                "prune_state":"Intact"
-            }]
-        }]"#;
-        let msgs: Vec<Message> = serde_json::from_str(legacy).expect("legacy snapshot");
-        assert!(msgs[0].parts[0].reasoning_meta.is_none());
     }
 
     #[test]

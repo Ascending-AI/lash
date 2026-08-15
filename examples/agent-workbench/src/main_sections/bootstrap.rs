@@ -87,7 +87,7 @@ async fn async_main() -> AnyhowResult<()> {
         eprintln!("warning: TAVILY_API_KEY is empty; web tools will return configuration errors");
     }
     let model = dev_provider_scenario
-        .map(|_| "dev/failure-paths".to_string())
+        .map(|scenario| scenario.initial_model().to_string())
         .unwrap_or_else(|| {
             std::env::var("OPENROUTER_MODEL")
                 .unwrap_or_else(|_| "anthropic/claude-sonnet-4.6".to_string())

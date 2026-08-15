@@ -47,12 +47,87 @@ fn remote_llm_request_json_round_trips() {
     };
 
     request.validate().expect("valid request");
-    let value = serde_json::to_value(&request).expect("serialize");
-    let decoded: RemoteLlmRequest = serde_json::from_value(value).expect("deserialize");
+    let wire = serde_json::to_vec(&request).expect("serialize");
+    let decoded = RemoteLlmRequest::decode_json(&wire).expect("version-first decode");
     assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(decoded.request_id, request.request_id);
     assert_eq!(decoded.scope, request.scope);
     assert_eq!(decoded.messages, request.messages);
+}
+
+#[test]
+fn v37_llm_decode_refuses_v36_and_v35_before_new_or_malformed_vocabulary() {
+    for peer_version in [36, 35] {
+        for content in [
+            serde_json::json!({
+                "type": "text",
+                "text": "captured response",
+                "response_meta": {
+                    "origin": {
+                        "provider": "openai-compatible",
+                        "endpoint": "https://gateway.example/v1",
+                        "model": "shared-model"
+                    }
+                }
+            }),
+            serde_json::json!({
+                "type": "future_route_bound_reasoning",
+                "origin": { "endpoint": 17 }
+            }),
+        ] {
+            let wire = serde_json::json!({
+                "protocol_version": peer_version,
+                "request_id": "request-old-peer",
+                "scope": "malformed-on-purpose",
+                "model_intent": { "model": "shared-model" },
+                "messages": [{ "role": "assistant", "content": [content] }]
+            })
+            .to_string();
+
+            assert!(matches!(
+                RemoteLlmRequest::decode_json(wire.as_bytes()),
+                Err(RemoteProtocolError::UnsupportedProtocolVersion { actual, expected })
+                    if actual == peer_version && expected == REMOTE_PROTOCOL_VERSION
+            ));
+        }
+    }
+}
+
+#[test]
+fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
+    let request = RemoteLlmRequest {
+        protocol_version: REMOTE_PROTOCOL_VERSION,
+        request_id: "request-userinfo".to_string(),
+        scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-userinfo"),
+        model_intent: RemoteModelIntent::new("gpt-test"),
+        messages: vec![RemoteLlmMessage {
+            role: RemoteLlmRole::Assistant,
+            content: vec![RemoteLlmContentBlock::Text {
+                text: "portable answer".to_string(),
+                response_meta: Some(RemoteResponseTextMeta {
+                    origin: Some(RemoteProviderRouteIdentity {
+                        provider: "openai-compatible".to_string(),
+                        endpoint: "https://route-user:route-secret@gateway.example/v1".to_string(),
+                        model: "gpt-test".to_string(),
+                    }),
+                    ..Default::default()
+                }),
+                cache_breakpoint: false,
+            }],
+        }],
+        attachments: Vec::new(),
+        tools: Vec::new(),
+        tool_choice: RemoteLlmToolChoice::Auto,
+        output_spec: None,
+        generation: RemoteGenerationOptions::default(),
+        metadata: HashMap::new(),
+    };
+    let wire = serde_json::to_vec(&request).expect("serialize adversarial request");
+
+    let error = RemoteLlmRequest::decode_json(&wire)
+        .expect_err("userinfo-bearing replay routes must fail closed");
+    assert!(matches!(error, RemoteProtocolError::InvalidEnvelope { .. }));
+    assert!(!error.to_string().contains("route-secret"));
 }
 
 #[test]
@@ -219,6 +294,7 @@ fn remote_turn_result_json_round_trips() {
     let call_record = RemoteLlmCallRecord {
         call_id: "llm-call".to_string(),
         label: Some("answer".to_string()),
+        replay_drops: Vec::new(),
         attempts: vec![RemoteAttemptRecord {
             ordinal: 1,
             started_at_ms: 7,
@@ -337,6 +413,7 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
     let valid_record = RemoteLlmCallRecord {
         call_id: "llm-call".to_string(),
         label: None,
+        replay_drops: Vec::new(),
         attempts: vec![RemoteAttemptRecord {
             ordinal: 1,
             started_at_ms: 0,
@@ -417,6 +494,7 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
     let summary = RemoteLlmCallRecord {
         call_id: "same-call".to_string(),
         label: Some("foreground".to_string()),
+        replay_drops: Vec::new(),
         attempts: vec![RemoteAttemptRecord {
             ordinal: 1,
             started_at_ms: 7,
@@ -499,6 +577,7 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
         let record = RemoteLlmCallRecord {
             call_id: "call-1".to_string(),
             label: None,
+            replay_drops: Vec::new(),
             attempts: vec![RemoteAttemptRecord {
                 ordinal: 1,
                 started_at_ms: 1,
@@ -596,6 +675,7 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
         let record = RemoteLlmCallRecord {
             call_id: "llm-call".to_string(),
             label: None,
+            replay_drops: Vec::new(),
             attempts: vec![attempt],
         };
         let activity = RemoteTurnActivity {
@@ -678,6 +758,7 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         let record = RemoteLlmCallRecord {
             call_id: "llm-call".to_string(),
             label: None,
+            replay_drops: Vec::new(),
             attempts,
         };
         RemoteTurnActivity {
@@ -1071,7 +1152,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 36, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 37, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1480,7 +1561,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 36,
+            expected: 37,
         })
     ));
 }

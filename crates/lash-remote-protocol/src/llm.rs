@@ -110,6 +110,33 @@ pub struct RemoteLlmRequest {
 }
 
 impl RemoteLlmRequest {
+    /// Decode one JSON request with the protocol-version refusal ahead of the
+    /// nested LLM vocabulary.
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        Self::decode_json_expecting_protocol_version(bytes, crate::REMOTE_PROTOCOL_VERSION)
+    }
+
+    pub(crate) fn decode_json_expecting_protocol_version(
+        bytes: &[u8],
+        expected_version: u32,
+    ) -> Result<Self, RemoteProtocolError> {
+        #[derive(Deserialize)]
+        struct VersionProbe {
+            protocol_version: u32,
+        }
+
+        let probe: VersionProbe = serde_json::from_slice(bytes)?;
+        if probe.protocol_version != expected_version {
+            return Err(RemoteProtocolError::UnsupportedProtocolVersion {
+                actual: probe.protocol_version,
+                expected: expected_version,
+            });
+        }
+        let request: Self = serde_json::from_slice(bytes)?;
+        request.validate()?;
+        Ok(request)
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteLlmRequest", "request_id", &self.request_id)?;
@@ -216,7 +243,33 @@ pub struct RemoteLlmCallRecord {
     pub call_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replay_drops: Vec<RemoteProviderReplayDrop>,
     pub attempts: Vec<RemoteAttemptRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteProviderReplayDrop {
+    pub kind: RemoteProviderReplayKind,
+    pub reason: RemoteProviderReplayDropReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minting_route: Option<RemoteProviderRouteIdentity>,
+    pub serving_route: RemoteProviderRouteIdentity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProviderReplayKind {
+    ResponseText,
+    Reasoning,
+    ToolCall,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProviderReplayDropReason {
+    Unstamped,
+    ForeignRoute,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -283,6 +336,13 @@ pub(crate) fn validate_llm_call_record(
     record: &RemoteLlmCallRecord,
 ) -> Result<(), RemoteProtocolError> {
     require_non_empty("RemoteLlmCallRecord", "call_id", &record.call_id)?;
+    for drop in &record.replay_drops {
+        if let Some(route) = &drop.minting_route {
+            route.validate("RemoteProviderReplayDrop.minting_route")?;
+        }
+        drop.serving_route
+            .validate("RemoteProviderReplayDrop.serving_route")?;
+    }
     if record.attempts.is_empty() {
         return Err(RemoteProtocolError::InvalidEnvelope {
             type_name: "RemoteLlmCallRecord",
@@ -671,16 +731,69 @@ impl RemoteLlmContentBlock {
     fn validate(&self) -> Result<(), RemoteProtocolError> {
         match self {
             Self::ToolCall {
-                call_id, tool_name, ..
+                call_id,
+                tool_name,
+                replay,
+                ..
             } => {
                 require_non_empty("RemoteLlmContentBlock::ToolCall", "call_id", call_id)?;
-                require_non_empty("RemoteLlmContentBlock::ToolCall", "tool_name", tool_name)
+                require_non_empty("RemoteLlmContentBlock::ToolCall", "tool_name", tool_name)?;
+                if let Some(origin) = replay.as_ref().and_then(|replay| replay.origin.as_ref()) {
+                    origin.validate("RemoteProviderReplayMeta.origin")?;
+                }
+                Ok(())
             }
             Self::ToolResult { call_id, .. } => {
                 require_non_empty("RemoteLlmContentBlock::ToolResult", "call_id", call_id)
             }
-            Self::Text { .. } | Self::Attachment { .. } | Self::Reasoning { .. } => Ok(()),
+            Self::Text { response_meta, .. } => {
+                if let Some(origin) = response_meta
+                    .as_ref()
+                    .and_then(|metadata| metadata.origin.as_ref())
+                {
+                    origin.validate("RemoteResponseTextMeta.origin")?;
+                }
+                Ok(())
+            }
+            Self::Reasoning { replay, .. } => {
+                if let Some(origin) = replay.as_ref().and_then(|replay| replay.origin.as_ref()) {
+                    origin.validate("RemoteProviderReasoningReplay.origin")?;
+                }
+                Ok(())
+            }
+            Self::Attachment { .. } => Ok(()),
         }
+    }
+}
+
+/// Exact configured LLM Provider route that owns opaque replay state.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteProviderRouteIdentity {
+    pub provider: String,
+    /// Stable routing metadata, not a secret-bearing URL. LLM Provider
+    /// endpoints reject URL userinfo; paths and query strings remain visible
+    /// in remote envelopes and traces and therefore must not carry secrets.
+    pub endpoint: String,
+    pub model: String,
+}
+
+impl RemoteProviderRouteIdentity {
+    fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        require_non_empty(type_name, "provider", &self.provider)?;
+        require_non_empty(type_name, "endpoint", &self.endpoint)?;
+        require_non_empty(type_name, "model", &self.model)?;
+        if let Some((_, remainder)) = self.endpoint.split_once("://") {
+            let authority_end = remainder.find(['/', '?', '#']).unwrap_or(remainder.len());
+            if remainder[..authority_end].contains('@') {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message:
+                        "LLM Provider endpoint must not contain userinfo; configure credentials separately"
+                            .to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -695,9 +808,7 @@ pub struct RemoteResponseTextMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_payload: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin_model: Option<String>,
+    pub origin: Option<RemoteProviderRouteIdentity>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -706,6 +817,9 @@ pub struct RemoteProviderReplayMeta {
     pub item_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opaque: Option<String>,
+    /// Exact LLM Provider route that minted the opaque replay state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<RemoteProviderRouteIdentity>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -720,6 +834,9 @@ pub struct RemoteProviderReasoningReplay {
     pub redacted: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub summary: Vec<String>,
+    /// Exact LLM Provider route that minted the reasoning replay state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<RemoteProviderRouteIdentity>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

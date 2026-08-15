@@ -24,6 +24,7 @@ mod persistence;
 mod plugin_lifecycle;
 mod projection;
 mod replay_mismatch;
+mod replay_origin;
 mod runtime_scenarios;
 mod session_freshness;
 mod session_lease_observability;

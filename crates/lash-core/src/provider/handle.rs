@@ -1,6 +1,111 @@
 use super::support::*;
 use futures_util::FutureExt as _;
 
+fn replay_origin_conflict_error(conflict: ProviderReplayOriginConflict) -> LlmTransportError {
+    LlmTransportError::new(conflict.to_string())
+        .with_kind(ProviderFailureKind::Validation)
+        .with_code("provider_replay_origin_conflict")
+        .retryable(false)
+}
+
+fn replay_origin_conflict_with_provider_error(
+    conflict: ProviderReplayOriginConflict,
+    mut provider_error: LlmTransportError,
+) -> LlmTransportError {
+    provider_error.message = format!(
+        "{conflict}; original LLM Provider failure: {}",
+        provider_error.message
+    );
+    provider_error.kind = ProviderFailureKind::Validation;
+    provider_error.code = Some("provider_replay_origin_conflict".to_string());
+    provider_error.retryable = false;
+    provider_error
+}
+
+#[derive(Debug)]
+struct ProviderCompletionSidebandState {
+    serving_route: ProviderRouteIdentity,
+    replay_drops: Vec<crate::ProviderReplayDrop>,
+    origin_conflict: Option<ProviderReplayOriginConflict>,
+}
+
+/// Replay safety state shared with the runtime independently of the spawned
+/// LLM Provider task's terminal return.
+#[derive(Clone, Debug)]
+pub(crate) struct ProviderCompletionSideband {
+    state: Arc<Mutex<ProviderCompletionSidebandState>>,
+}
+
+impl ProviderCompletionSideband {
+    fn new(
+        serving_route: ProviderRouteIdentity,
+        replay_drops: Vec<crate::ProviderReplayDrop>,
+    ) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(ProviderCompletionSidebandState {
+                serving_route,
+                replay_drops,
+                origin_conflict: None,
+            })),
+        }
+    }
+
+    fn with_state<R>(&self, f: impl FnOnce(&mut ProviderCompletionSidebandState) -> R) -> R {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f(&mut state)
+    }
+
+    fn record_origin_conflict(&self, conflict: ProviderReplayOriginConflict) {
+        self.with_state(|state| {
+            if state.origin_conflict.is_none() {
+                state.origin_conflict = Some(conflict);
+            }
+        });
+    }
+
+    pub(crate) fn replay_drops(&self) -> Vec<crate::ProviderReplayDrop> {
+        self.with_state(|state| state.replay_drops.clone())
+    }
+
+    fn serving_route(&self) -> ProviderRouteIdentity {
+        self.with_state(|state| state.serving_route.clone())
+    }
+
+    pub(crate) fn origin_conflict(&self) -> Option<ProviderReplayOriginConflict> {
+        self.with_state(|state| state.origin_conflict.clone())
+    }
+
+    pub(crate) fn fence_response(
+        &self,
+        response: &mut LlmResponse,
+    ) -> Result<(), LlmTransportError> {
+        let serving_route = self.serving_route();
+        if let Err(conflict) = response.stamp_replay_origin(&serving_route) {
+            self.record_origin_conflict(conflict);
+        }
+        match self.origin_conflict() {
+            Some(conflict) => Err(replay_origin_conflict_error(conflict)),
+            None => Ok(()),
+        }
+    }
+
+    fn fence_error(&self, mut error: LlmTransportError) -> LlmTransportError {
+        let serving_route = self.serving_route();
+        if let Some(partial) = error.partial_response.as_deref_mut()
+            && let Err(conflict) = partial.stamp_replay_origin(&serving_route)
+        {
+            self.record_origin_conflict(conflict);
+        }
+        match self.origin_conflict() {
+            Some(conflict) => replay_origin_conflict_with_provider_error(conflict, error),
+            None => error,
+        }
+    }
+}
+
 /// Component bundle returned by provider factories.
 #[derive(Debug)]
 pub struct ProviderComponents {
@@ -115,6 +220,10 @@ impl ProviderHandle {
         self.components.provider.kind()
     }
 
+    pub fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        self.components.provider.route_identity(model)
+    }
+
     pub fn options(&self) -> ProviderOptions {
         self.components.provider.options()
     }
@@ -132,8 +241,70 @@ impl ProviderHandle {
 
     pub async fn complete(
         &mut self,
-        request: LlmRequest,
+        mut request: LlmRequest,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
+        let sideband = self.prepare_completion(&mut request);
+        self.complete_prepared(request, sideband).await
+    }
+
+    pub(crate) fn prepare_completion(
+        &self,
+        request: &mut LlmRequest,
+    ) -> ProviderCompletionSideband {
+        let serving_route = self.route_identity(&request.model);
+        // Do not manufacture trace evidence containing an invalid endpoint:
+        // URL userinfo may itself be credential material. `complete_prepared`
+        // rejects the route before the LLM Provider is invoked.
+        let replay_drops = if serving_route.validate_endpoint().is_ok() {
+            request.drop_foreign_replay(&serving_route)
+        } else {
+            Vec::new()
+        };
+        let sideband = ProviderCompletionSideband::new(serving_route.clone(), replay_drops);
+        if let Some(stream_events) = request.stream_events.take() {
+            let stream_route = serving_route.clone();
+            let stream_sideband = sideband.clone();
+            request.stream_events =
+                Some(crate::llm::types::LlmEventSender::new(move |mut event| {
+                    if let crate::llm::types::LlmStreamEvent::Part(part) = &mut event {
+                        // Conflicting origins are deliberately preserved. The
+                        // stream remains foreign instead of being laundered into
+                        // the serving route; terminal response stamping surfaces
+                        // the typed contract error where a Result is available.
+                        if let Err(conflict) = part.stamp_replay_origin(&stream_route) {
+                            stream_sideband.record_origin_conflict(conflict);
+                        }
+                    }
+                    stream_events.send(event);
+                }));
+        }
+        sideband
+    }
+
+    pub(crate) async fn complete_prepared(
+        &mut self,
+        request: LlmRequest,
+        sideband: ProviderCompletionSideband,
+    ) -> Result<ProviderCompletion, ProviderCompletionError> {
+        let serving_route = sideband.serving_route();
+        if let Err(error) = serving_route.validate_endpoint() {
+            let error = LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_code("invalid_provider_endpoint")
+                .retryable(false);
+            return Err(ProviderCompletionError {
+                call_record: synthetic_terminal_call_record(
+                    self.components.rate_limiter.clock().timestamp_ms(),
+                    Duration::ZERO,
+                    AttemptOutcome::Failed,
+                    &error,
+                    false,
+                    ProtocolPosition::NoResponse,
+                    sideband.replay_drops(),
+                ),
+                error,
+            });
+        }
         let reliability = self.options().reliability;
         let attempts = reliability.retry.attempts();
         let mut attempt = 0;
@@ -149,7 +320,7 @@ impl ProviderHandle {
             let clock = self.components.rate_limiter.clock();
             let started_at = clock.timestamp_ms();
             let started = clock.now();
-            let (result, panic_payload) = match std::panic::AssertUnwindSafe(
+            let (mut result, panic_payload) = match std::panic::AssertUnwindSafe(
                 self.components.provider.complete(request.clone()),
             )
             .catch_unwind()
@@ -165,6 +336,23 @@ impl ProviderHandle {
                             .retryable(false)),
                         Some(payload),
                     )
+                }
+            };
+            // Classify provider-owned failures before applying Lash's replay
+            // contract. A classifier must never reinterpret the synthetic,
+            // non-retryable origin-conflict result from the fence below.
+            if panic_payload.is_none() {
+                result =
+                    result.map_err(|failure| self.components.failure_classifier.classify(failure));
+            }
+            let (result, original_failure) = match result {
+                Ok(mut response) => match sideband.fence_response(&mut response) {
+                    Ok(()) => (Ok(response), None),
+                    Err(error) => (Err(error), None),
+                },
+                Err(error) => {
+                    let original_failure = error.clone();
+                    (Err(sideband.fence_error(error)), Some(original_failure))
                 }
             };
             match result {
@@ -191,18 +379,16 @@ impl ProviderHandle {
                         call_record: LlmCallRecord {
                             call_id,
                             label: None,
+                            replay_drops: sideband.replay_drops(),
                             attempts: records,
                         },
                     });
                 }
                 Err(failure) => {
-                    // Lash manufactured `provider_panicked`; it is not provider
-                    // text and must never pass through heuristic classification.
-                    let failure = if panic_payload.is_some() {
-                        failure
-                    } else {
-                        self.components.failure_classifier.classify(failure)
-                    };
+                    // The outer error is Lash's typed conflict classification;
+                    // the sealed attempt remains the provider's original
+                    // failure evidence (kind, code, status, and diagnostic).
+                    let recorded_failure = original_failure.as_ref().unwrap_or(&failure);
                     let protocol_position = failure_protocol_position(&failure);
                     let retry_guarantee = self
                         .components
@@ -286,7 +472,7 @@ impl ProviderHandle {
                             records.len() as u32 + 1,
                             started_at,
                             clock.now().saturating_duration_since(started),
-                            &failure,
+                            recorded_failure,
                             true,
                             protocol_position,
                             Some(RetryDecision {
@@ -300,6 +486,7 @@ impl ProviderHandle {
                             call_record: LlmCallRecord {
                                 call_id,
                                 label: None,
+                                replay_drops: sideband.replay_drops(),
                                 attempts: records,
                             },
                         });
@@ -323,7 +510,7 @@ impl ProviderHandle {
                             records.len() as u32 + 1,
                             started_at,
                             clock.now().saturating_duration_since(started),
-                            &failure,
+                            recorded_failure,
                             false,
                             protocol_position,
                             Some(RetryDecision {
@@ -366,7 +553,7 @@ impl ProviderHandle {
                             records.len() as u32 + 1,
                             started_at,
                             clock.now().saturating_duration_since(started),
-                            &failure,
+                            recorded_failure,
                             true,
                             protocol_position,
                             Some(RetryDecision {
@@ -380,6 +567,7 @@ impl ProviderHandle {
                             call_record: LlmCallRecord {
                                 call_id,
                                 label: None,
+                                replay_drops: sideband.replay_drops(),
                                 attempts: records,
                             },
                         };
@@ -395,7 +583,7 @@ impl ProviderHandle {
                         records.len() as u32 + 1,
                         started_at,
                         clock.now().saturating_duration_since(started),
-                        &failure,
+                        recorded_failure,
                         true,
                         protocol_position,
                         Some(RetryDecision {
@@ -645,6 +833,33 @@ fn unsafe_retry_refusal(
     failure
 }
 
+pub(crate) fn synthetic_terminal_call_record(
+    started_at: u64,
+    duration: Duration,
+    outcome: AttemptOutcome,
+    failure: &LlmTransportError,
+    retry_budget_consumed: bool,
+    protocol_position: ProtocolPosition,
+    replay_drops: Vec<crate::ProviderReplayDrop>,
+) -> LlmCallRecord {
+    let mut attempt = failure_attempt_record(
+        1,
+        started_at,
+        duration,
+        failure,
+        retry_budget_consumed,
+        protocol_position,
+        None,
+    );
+    attempt.outcome = outcome;
+    LlmCallRecord {
+        call_id: LlmCallId(uuid::Uuid::new_v4().to_string()),
+        label: None,
+        replay_drops,
+        attempts: vec![attempt],
+    }
+}
+
 fn failure_attempt_record(
     ordinal: u32,
     started_at: u64,
@@ -773,6 +988,10 @@ impl UnconfiguredProvider {
 impl Provider for UnconfiguredProvider {
     fn kind(&self) -> &'static str {
         "unconfigured"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {

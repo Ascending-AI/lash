@@ -723,6 +723,7 @@ async fn run_user_turn(
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     let mut input = workbench_turn_input(&state, &request).await?;
+    let turn_model_id = request.model.model.clone();
     let turn_model = model_spec_from_selection(request.model);
     let session = state
         .core
@@ -747,13 +748,14 @@ async fn run_user_turn(
         .stream_to(&ui_events)
         .await
         .map_err(AppError::runtime)?;
-    record_turn_output(
+    record_turn_output_for_model(
         &state,
         &session,
         &request.turn_id,
         output,
         turn_state,
         "restate_user_turn.completed",
+        Some(&turn_model_id),
     )
     .await?;
     Ok(())
@@ -1025,13 +1027,14 @@ async fn run_queued_turn(
         state.publish_turn_done(&request.session_id, &request.turn_id);
         return Ok(());
     };
-    record_turn_output(
+    record_turn_output_for_model(
         &state,
         &session,
         &request.turn_id,
         output,
         turn_state,
         "restate_queued_turn.completed",
+        Some(&selected_model.id),
     )
     .await?;
     Ok(())
@@ -1161,6 +1164,7 @@ fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn record_turn_output(
     state: &AppState,
     session: &lash::LashSession,
@@ -1168,6 +1172,28 @@ pub(crate) async fn record_turn_output(
     output: lash::TurnResult,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
+) -> Result<(), AppError> {
+    let selected_model = state.selected_model();
+    record_turn_output_for_model(
+        state,
+        session,
+        turn_id,
+        output,
+        turn_state,
+        trace_name,
+        Some(&selected_model.model),
+    )
+    .await
+}
+
+async fn record_turn_output_for_model(
+    state: &AppState,
+    session: &lash::LashSession,
+    turn_id: &str,
+    output: lash::TurnResult,
+    turn_state: Arc<Mutex<TurnStreamState>>,
+    trace_name: &str,
+    model: Option<&str>,
 ) -> Result<(), AppError> {
     let streamed_prose = {
         let mut turn_state = turn_state.lock_recover();
@@ -1248,7 +1274,8 @@ pub(crate) async fn record_turn_output(
         }
         _ => {
             if workbench_owns_committed_agent_reply(&output) {
-                commit_assistant_transcript(session, turn_id, assistant_text.clone()).await?;
+                commit_assistant_transcript(session, turn_id, assistant_text.clone(), model)
+                    .await?;
             }
             state.push_message_with_id_for_session(
                 &session.session_id(),

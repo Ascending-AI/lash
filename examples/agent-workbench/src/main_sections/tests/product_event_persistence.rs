@@ -138,6 +138,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
     let expected_record = lash::remote::llm::RemoteLlmCallRecord {
                 call_id: "boundary-call".to_string(),
                 label: Some("boundary".to_string()),
+                replay_drops: Vec::new(),
                 attempts: vec![
                     lash::remote::llm::RemoteAttemptRecord {
                         ordinal: 1,

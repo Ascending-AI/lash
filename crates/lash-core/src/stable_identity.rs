@@ -125,6 +125,15 @@ impl IdentityEncoder {
     }
 }
 
+pub(crate) fn provider_route(
+    identity: &mut IdentityEncoder,
+    route: &lash_sansio::llm::types::ProviderRouteIdentity,
+) {
+    identity.string(&route.provider);
+    identity.string(&route.endpoint);
+    identity.string(&route.model);
+}
+
 pub(crate) fn rendered_hash(prefix: &str, family_version: u8, preimage: &[u8]) -> String {
     format!(
         "{prefix}:v{family_version}:sha256:{}",
