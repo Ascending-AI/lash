@@ -405,22 +405,7 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
             "park/resume transcript changed for seed {seed}"
         );
     }
-    let transcript_without_opaque_tool_state_size = transcript
-        .lines()
-        .map(|line| {
-            if line.contains("tool_state            stored logical=") {
-                let prefix = line
-                    .split_once("logical=")
-                    .map(|(prefix, _)| prefix)
-                    .expect("matched tool-state size label");
-                format!("{prefix}logical=<opaque>")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    insta::assert_snapshot!(transcript_without_opaque_tool_state_size, @r#"
+    insta::assert_snapshot!(transcript, @r#"
     suspend-tool  ingress   session.open.suspend    turn=1
     suspend-tool  park      session.park
     suspend-tool  resume    session.resume

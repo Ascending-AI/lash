@@ -284,7 +284,7 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
         root                     turn_state            stored logical=370B
-        root                     tool_state            stored logical=3.3KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=346B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="lookup" kind="lashlang" terminal=true
@@ -435,13 +435,13 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=5.9KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=341B
-        session-001              tool_state            stored logical=6.6KB
+        session-001              tool_state            stored logical=<opaque>
         session-001              plugin_snapshot       stored logical=342B
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
@@ -496,7 +496,7 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=3.1KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
@@ -560,13 +560,13 @@ finish result"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=5.9KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=346B
-        session-001              tool_state            stored logical=6.6KB
+        session-001              tool_state            stored logical=<opaque>
         session-001              plugin_snapshot       stored logical=342B
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
@@ -641,7 +641,7 @@ finish { joined: [left_value, right_value] }"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=240B
-        root                     tool_state            stored logical=3.1KB
+        root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
