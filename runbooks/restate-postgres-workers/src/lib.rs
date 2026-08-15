@@ -1495,3 +1495,48 @@ pub fn current_epoch_ms() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+
+/// The dialect a judged runbook row is running, from `LASH_RUNBOOK_DIALECT`.
+///
+/// A harness that scripts a cell has to script it in the session's dialect: a
+/// cell the session cannot execute never commits, so the row hangs rather than
+/// failing. `runbooks/RULES.md` requires the host to pass this value on every
+/// session open, and these harnesses are hosts.
+pub fn runbook_rlm_dialect() -> Result<lash::rlm::RlmDialect> {
+    match std::env::var("LASH_RUNBOOK_DIALECT")
+        .unwrap_or_else(|_| "lashlang".to_string())
+        .as_str()
+    {
+        "lashlang" => Ok(lash::rlm::RlmDialect::Lashlang),
+        "typescript" => Ok(lash::rlm::RlmDialect::Typescript),
+        other => bail!(
+            "LASH_RUNBOOK_DIALECT must be a registered RLM language id (`lashlang` or `typescript`), got `{other}`"
+        ),
+    }
+}
+
+/// One scripted cell that finishes with `value`, spelled for `dialect`.
+pub fn scripted_finish_cell(dialect: lash::rlm::RlmDialect, value: &str) -> String {
+    match dialect {
+        lash::rlm::RlmDialect::Typescript => {
+            format!("<typescript>\nfinish({value});\n</typescript>")
+        }
+        _ => format!("<lashlang>\nfinish {value}\n</lashlang>"),
+    }
+}
+
+#[cfg(test)]
+mod dialect_tests {
+    use super::*;
+
+    /// Both spellings are real cells of their own dialect, and neither carries
+    /// the other's words (ADR 0060).
+    #[test]
+    fn a_scripted_finish_is_a_cell_of_its_own_dialect() {
+        let lashlang = scripted_finish_cell(lash::rlm::RlmDialect::Lashlang, "\"ok\"");
+        assert_eq!(lashlang, "<lashlang>\nfinish \"ok\"\n</lashlang>");
+        let typescript = scripted_finish_cell(lash::rlm::RlmDialect::Typescript, "\"ok\"");
+        assert_eq!(typescript, "<typescript>\nfinish(\"ok\");\n</typescript>");
+        assert!(!typescript.contains("lashlang"));
+    }
+}

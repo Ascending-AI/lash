@@ -107,10 +107,11 @@ async fn async_main() -> AnyhowResult<()> {
 
     let provider = if let Some(scenario) = dev_provider_scenario {
         eprintln!(
-            "warning: agent-workbench development provider scenario enabled: {}",
-            scenario.as_str()
+            "warning: agent-workbench development provider scenario enabled: {} ({})",
+            scenario.as_str(),
+            rlm_dialect.language_id()
         );
-        scenario.provider()
+        scenario.provider(rlm_dialect)
     } else {
         ProviderHandle::new(
             OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)

@@ -173,19 +173,26 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
 /// commit is not. Returns the turn id whose commit row proves the turn landed.
 async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str) -> Result<String> {
     let attachments = tempfile::tempdir().context("attachment dir for version-bump turn")?;
+    // The row's dialect decides the scripted cell *and* the session's pin: a
+    // TypeScript row that commits a Lashlang cell cannot execute it, and the
+    // turn never reaches a terminal state.
+    let dialect = lash_restate_postgres_workers_e2e::runbook_rlm_dialect()?;
+    let scripted = lash_restate_postgres_workers_e2e::scripted_finish_cell(dialect, "\"ok\"");
     let provider = lash_core::testing::TestProvider::builder()
         .kind("version-bump-recreation")
-        .complete(|_request| async {
-            let text = "<lashlang>\nfinish \"ok\"\n</lashlang>";
-            Ok(lash::provider::LlmResponse {
-                full_text: text.to_string(),
-                parts: vec![lash_core::LlmOutputPart::Text {
-                    text: text.to_string(),
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..lash::provider::LlmResponse::default()
-            })
+        .complete(move |_request| {
+            let text = scripted.clone();
+            async move {
+                Ok(lash::provider::LlmResponse {
+                    full_text: text.to_string(),
+                    parts: vec![lash_core::LlmOutputPart::Text {
+                        text: text.to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..lash::provider::LlmResponse::default()
+                })
+            }
         })
         .build()
         .into_handle();
@@ -227,11 +234,15 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         ))
         .context("build version-bump core")?;
 
-    let session = core
-        .session(session_id)
-        .open()
-        .await
-        .with_context(|| format!("open session `{session_id}`"))?;
+    let session = {
+        use lash::rlm::RlmSessionBuilderExt as _;
+        core.session(session_id)
+            .rlm_dialect(dialect)
+            .context("pin the row's dialect")?
+            .open()
+            .await
+            .with_context(|| format!("open session `{session_id}`"))?
+    };
     let turn_id = format!("version-bump-{tag}-{session_id}");
     let output = session
         .turn(lash::TurnInput::text(TURN_PROMPT))

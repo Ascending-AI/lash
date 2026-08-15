@@ -815,7 +815,7 @@ async fn live_failure_path_harness(
     let harness = live_workbench_restate_state_with_provider(
         &data_dir,
         ingress_url,
-        scenario.provider(),
+        scenario.provider(lash::rlm::RlmDialect::Lashlang),
         WorkbenchSessionIds::fresh(),
         ActiveTurns::default(),
     )

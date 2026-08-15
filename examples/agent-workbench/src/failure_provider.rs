@@ -82,7 +82,15 @@ impl DevProviderScenario {
         }
     }
 
-    pub(crate) fn provider(self) -> ProviderHandle {
+    /// The scripted provider for this scenario, in the dialect the host is
+    /// configured to run.
+    ///
+    /// ADR 0060 is about prompts; this is the same rule one layer out. Every
+    /// reply below is a *cell*, and a cell in the wrong dialect cannot execute:
+    /// the session refuses it, the turn never reaches a terminal state, and the
+    /// scenario hangs rather than failing. Nine of the twenty-one TypeScript
+    /// judged rows boot this provider.
+    pub(crate) fn provider(self, dialect: lash::rlm::RlmDialect) -> ProviderHandle {
         let retry_delay_ms = if self == Self::RetryResetPartial {
             2_000
         } else {
@@ -90,6 +98,7 @@ impl DevProviderScenario {
         };
         ProviderHandle::new(ProviderComponents::new(Box::new(DevFailureProvider {
             scenario: self,
+            dialect,
             calls: Arc::new(AtomicUsize::new(0)),
             options: ProviderOptions {
                 reliability: ProviderReliability::default()
@@ -99,6 +108,98 @@ impl DevProviderScenario {
                 ..ProviderOptions::default()
             },
         })))
+    }
+
+    /// The scripted cells, for the fixture that walks every scenario.
+    #[cfg(test)]
+    pub(crate) fn scripted_cell_for_test(
+        self,
+        dialect: lash::rlm::RlmDialect,
+        call: usize,
+    ) -> Option<String> {
+        self.scripted_cell(dialect, call)
+    }
+
+    /// The cell this scenario scripts for `call`, in the host's dialect.
+    ///
+    /// One table rather than literals scattered through `complete`, so the
+    /// fixture test can walk every scenario in both dialects and link what a
+    /// judged row would actually execute. A cell in the wrong dialect does not
+    /// fail a scenario — the session cannot execute it, so the turn never
+    /// reaches a terminal state and the row hangs.
+    fn scripted_cell(self, dialect: lash::rlm::RlmDialect, call: usize) -> Option<String> {
+        Some(match (self, call) {
+            (Self::AuthFailureOnce, 0)
+            | (Self::RateLimitOnce, 0)
+            | (Self::PartialOutputFailure, 0)
+            | (Self::RetryResetPartial, 0) => return None,
+            (Self::AuthFailureOnce, _) => {
+                finish_cell(dialect, "\"session recovered after provider auth failure\"")
+            }
+            (Self::RateLimitOnce, _) => finish_cell(dialect, "\"provider retry succeeded\""),
+            (Self::PartialOutputFailure, _) => {
+                finish_cell(dialect, "\"UNSAFE second generation was purchased\"")
+            }
+            (Self::RetryResetPartial, _) => finish_cell(dialect, "\"FIG-1350 retry replacement\""),
+            (Self::FailedProcess, _) => cell(
+                dialect,
+                r#"process FIG425_deterministic_failure() {
+  fail "deterministic durable process failure"
+}
+start FIG425_deterministic_failure()
+finish "started deterministic failing process""#,
+                // `fail` is Lashlang's process-only failure keyword and has no
+                // direct TypeScript twin: `new Error` is refused
+                // (`TS_NEW_UNSUPPORTED`), so the honest form is an uncaught
+                // throw of a supported value.
+                r#"const FIG425_deterministic_failure = defineProcess({
+  name: "FIG425_deterministic_failure",
+  signals: {},
+  run: async (request: unknown) => {
+    throw "deterministic durable process failure";
+  }
+});
+start(FIG425_deterministic_failure, { request: 1 });
+finish("started deterministic failing process");"#,
+            ),
+            (Self::ExecBlocked, 0) => cell(
+                dialect,
+                "sleep for \"10m\"\nfinish \"exec block unexpectedly returned\"",
+                "await sleep(600000);\nfinish(\"exec block unexpectedly returned\");",
+            ),
+            (Self::ExecBlocked, _) => {
+                finish_cell(dialect, "\"session recovered after break glass\"")
+            }
+            (Self::ToolValue, _) => cell(
+                dialect,
+                "await workbench_surface.terminal({})?",
+                "await workbench_surface.terminal({});",
+            ),
+            (Self::RenderedSurface, _) => finish_cell(
+                dialect,
+                "{ event_class: \"final_value\", marker: \"FIG-1350 deterministic final value\" }",
+            ),
+            // The failing cell this scenario exists to render. What shipped was
+            // `fail "..."` at cell top level in *both* dialects, and `fail` is
+            // process-only: the cell never executed, the turn never reached a
+            // terminal state, and the unbounded workbench turn budget re-asked
+            // the provider forever (FIG-1407 owns the budget). Each dialect now
+            // fails the way a model actually fails, and the retry terminates.
+            (Self::CodeFailure, 0) => cell(
+                dialect,
+                "finish format(\"FIG-1350 deterministic code failure: {} {}\", \"one argument\")",
+                "throw \"FIG-1350 deterministic code failure\";",
+            ),
+            (Self::CodeFailure, _) => {
+                finish_cell(dialect, "\"session recovered after code failure\"")
+            }
+            // Turn-numbered, because the replay-route scenario asserts a
+            // distinct answer per turn; `call` is that turn.
+            (Self::ReplayRouteChange, _) => finish_cell(
+                dialect,
+                &format!("\"FIG-1374 replay-route response {call}\""),
+            ),
+        })
     }
 
     pub(crate) fn tool_provider(self) -> Option<Arc<dyn lash::tools::ToolProvider>> {
@@ -151,6 +252,7 @@ impl lash::tools::StaticToolExecute for DevToolValue {
 #[derive(Clone, Debug)]
 struct DevFailureProvider {
     scenario: DevProviderScenario,
+    dialect: lash::rlm::RlmDialect,
     calls: Arc<AtomicUsize>,
     options: ProviderOptions,
 }
@@ -174,7 +276,10 @@ impl Provider for DevFailureProvider {
     }
 
     fn serialize_config(&self) -> serde_json::Value {
-        serde_json::json!({ "scenario": self.scenario.as_str() })
+        serde_json::json!({
+            "scenario": self.scenario.as_str(),
+            "dialect": self.dialect.language_id()
+        })
     }
 
     fn requires_streaming(&self) -> bool {
@@ -203,10 +308,9 @@ impl Provider for DevFailureProvider {
                         .with_code("dev_auth_rejected"),
                 )
             }
-            DevProviderScenario::AuthFailureOnce => Ok(streamed_response(
-                &request,
-                "<lashlang>\nfinish \"session recovered after provider auth failure\"\n</lashlang>",
-            )),
+            DevProviderScenario::AuthFailureOnce => {
+                Ok(streamed_response(&request, &self.cell(call)))
+            }
             DevProviderScenario::RateLimitOnce if call == 0 => Err(LlmTransportError::new(
                 "development provider rate limit; retry is safe",
             )
@@ -215,7 +319,7 @@ impl Provider for DevFailureProvider {
             .with_code("dev_rate_limited")),
             DevProviderScenario::RateLimitOnce => Ok(streamed_response(
                 &request,
-                "retry observer single-copy marker\n<lashlang>\nfinish \"provider retry succeeded\"\n</lashlang>",
+                &format!("retry observer single-copy marker\n{}", self.cell(call)),
             )),
             DevProviderScenario::PartialOutputFailure if call == 0 => {
                 let partial = "paid partial output marker";
@@ -242,46 +346,17 @@ impl Provider for DevFailureProvider {
                         }),
                 )
             }
-            DevProviderScenario::PartialOutputFailure => Ok(streamed_response(
-                &request,
-                "<lashlang>\nfinish \"UNSAFE second generation was purchased\"\n</lashlang>",
-            )),
-            DevProviderScenario::FailedProcess => Ok(streamed_response(
-                &request,
-                r#"<lashlang>
-process FIG425_deterministic_failure() {
-  fail "deterministic durable process failure"
-}
-start FIG425_deterministic_failure()
-finish "started deterministic failing process"
-</lashlang>"#,
-            )),
-            DevProviderScenario::ExecBlocked if call == 0 => Ok(streamed_response(
-                &request,
-                r#"<lashlang>
-sleep for "10m"
-finish "exec block unexpectedly returned"
-</lashlang>"#,
-            )),
-            DevProviderScenario::ExecBlocked => Ok(streamed_response(
-                &request,
-                "<lashlang>\nfinish \"session recovered after break glass\"\n</lashlang>",
-            )),
-            DevProviderScenario::ToolValue => Ok(streamed_response(
-                &request,
-                "<lashlang>\nawait workbench_surface.terminal({})?\n</lashlang>",
-            )),
+            DevProviderScenario::PartialOutputFailure => {
+                Ok(streamed_response(&request, &self.cell(call)))
+            }
+            DevProviderScenario::FailedProcess
+            | DevProviderScenario::ExecBlocked
+            | DevProviderScenario::ToolValue
+            | DevProviderScenario::CodeFailure => Ok(streamed_response(&request, &self.cell(call))),
             DevProviderScenario::RenderedSurface => {
                 send_reasoning(&request, "FIG-1350 deterministic reasoning");
-                Ok(streamed_response(
-                    &request,
-                    "<lashlang>\nfinish { event_class: \"final_value\", marker: \"FIG-1350 deterministic final value\" }\n</lashlang>",
-                ))
+                Ok(streamed_response(&request, &self.cell(call)))
             }
-            DevProviderScenario::CodeFailure => Ok(streamed_response(
-                &request,
-                "<lashlang>\nfail \"FIG-1350 deterministic code failure\"\n</lashlang>",
-            )),
             DevProviderScenario::RetryResetPartial if call == 0 => {
                 let partial = "FIG-1350 superseded partial text";
                 send_delta(&request, partial);
@@ -301,17 +376,43 @@ finish "exec block unexpectedly returned"
                         }),
                 )
             }
-            DevProviderScenario::RetryResetPartial => Ok(streamed_response(
-                &request,
-                "<lashlang>\nfinish \"FIG-1350 retry replacement\"\n</lashlang>",
-            )),
-            DevProviderScenario::ReplayRouteChange => Ok(replay_route_response(&request)),
+            DevProviderScenario::RetryResetPartial => {
+                Ok(streamed_response(&request, &self.cell(call)))
+            }
+            DevProviderScenario::ReplayRouteChange => {
+                Ok(replay_route_response(&request, self.dialect))
+            }
         }
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
     }
+}
+
+impl DevFailureProvider {
+    fn cell(&self, call: usize) -> String {
+        self.scenario
+            .scripted_cell(self.dialect, call)
+            .expect("every response-producing branch scripts a cell")
+    }
+}
+
+/// One scripted cell, in the dialect the host is running.
+fn cell(dialect: lash::rlm::RlmDialect, lashlang: &str, typescript: &str) -> String {
+    match dialect {
+        lash::rlm::RlmDialect::Typescript => format!("<typescript>\n{typescript}\n</typescript>"),
+        _ => format!("<lashlang>\n{lashlang}\n</lashlang>"),
+    }
+}
+
+/// The common shape: one cell that finishes with `value`, spelled per dialect.
+fn finish_cell(dialect: lash::rlm::RlmDialect, value: &str) -> String {
+    cell(
+        dialect,
+        &format!("finish {value}"),
+        &format!("finish({value});"),
+    )
 }
 
 fn streamed_response(request: &LlmRequest, text: &str) -> LlmResponse {
@@ -327,10 +428,15 @@ fn streamed_response(request: &LlmRequest, text: &str) -> LlmResponse {
     }
 }
 
-fn replay_route_response(request: &LlmRequest) -> LlmResponse {
+fn replay_route_response(request: &LlmRequest, dialect: lash::rlm::RlmDialect) -> LlmResponse {
     let turn = next_replay_route_turn(&request.messages);
-    let answer = format!("FIG-1374 replay-route response {turn}");
-    let text = format!("<lashlang>\nfinish \"{answer}\"\n</lashlang>");
+    // The row's own dialect, like every other scripted reply here: a Lashlang
+    // cell served to a TypeScript session is a wrong-dialect cell, not a
+    // dialect-independent one. The table is the single source, so the dialect
+    // walk covers this scenario too.
+    let text = DevProviderScenario::ReplayRouteChange
+        .scripted_cell(dialect, turn)
+        .expect("the replay-route scenario scripts every call");
     let reasoning = format!("FIG-1374 portable reasoning {turn}");
     send_reasoning(request, &reasoning);
     send_delta(request, &text);

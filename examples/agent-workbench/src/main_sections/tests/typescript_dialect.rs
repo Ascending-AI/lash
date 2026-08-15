@@ -184,11 +184,14 @@ fn typescript_prompt_programs() -> Vec<String> {
 fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = workbench_lashlang_resources();
     lashlang::add_trigger_resource_operations(&mut resources);
-    let modules: [(&[&str], &str, &[&str]); 4] = [
+    let modules: [(&[&str], &str, &[&str]); 5] = [
         (&["agents"], "Agents", &["spawn"]),
         (&["web"], "Web", &["search", "fetch"]),
         (&["inbox", "work"], "Inbox", &["list", "send", "delete"]),
         (&["inbox", "personal"], "Inbox", &["list", "send", "delete"]),
+        // The `tool-value` scenario's own tool, installed by
+        // `DevProviderScenario::tool_provider`.
+        (&["workbench_surface"], "WorkbenchSurface", &["terminal"]),
     ];
     for (path, resource_type, operations) in modules {
         for operation in operations {
@@ -447,4 +450,181 @@ async fn a_lashlang_workbench_still_serves_lashlang_turns() {
         transcript_code_languages(&projected),
         vec!["lashlang".to_string()],
     );
+}
+
+/// Every scripted development-provider reply, in both dialects.
+///
+/// The dev provider boots nine of the twenty-one TypeScript judged rows. Its
+/// ten replies were Lashlang cells regardless of the configured dialect, and a
+/// cell the session cannot execute does not fail the scenario — the turn never
+/// reaches a terminal state, so the row hangs. The check therefore walks tags
+/// first, then links what a judged row would actually run.
+#[test]
+fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
+    let scenarios = [
+        failure_provider::DevProviderScenario::AuthFailureOnce,
+        failure_provider::DevProviderScenario::RateLimitOnce,
+        failure_provider::DevProviderScenario::PartialOutputFailure,
+        failure_provider::DevProviderScenario::FailedProcess,
+        failure_provider::DevProviderScenario::ExecBlocked,
+        failure_provider::DevProviderScenario::ToolValue,
+        failure_provider::DevProviderScenario::RenderedSurface,
+        failure_provider::DevProviderScenario::CodeFailure,
+        failure_provider::DevProviderScenario::RetryResetPartial,
+    ];
+    let environment = workbench_link_environment();
+    let mut hits = Vec::new();
+    let mut seen = 0usize;
+    for scenario in scenarios {
+        for dialect in [
+            lash::rlm::RlmDialect::Lashlang,
+            lash::rlm::RlmDialect::Typescript,
+        ] {
+            let (open, close) = match dialect {
+                lash::rlm::RlmDialect::Typescript => ("<typescript>", "</typescript>"),
+                _ => ("<lashlang>", "</lashlang>"),
+            };
+            for call in 0..3 {
+                let Some(text) = scenario.scripted_cell_for_test(dialect, call) else {
+                    continue;
+                };
+                seen += 1;
+                let label = format!("{} call {call} ({})", scenario.as_str(), dialect.language_id());
+                if !text.starts_with(open) || !text.trim_end().ends_with(close) {
+                    hits.push(format!("{label}: not a {} cell: {text}", dialect.language_id()));
+                    continue;
+                }
+                let code = text
+                    .trim_start_matches(open)
+                    .trim_end()
+                    .trim_end_matches(close)
+                    .trim();
+                match dialect {
+                    lash::rlm::RlmDialect::Typescript => {
+                        if let Err(error) = lash_typescript::link(code, &environment) {
+                            hits.push(format!("{label}: {error}"));
+                        }
+                    }
+                    _ => match lashlang::parse(code) {
+                        Ok(program) => {
+                            // The deliberate code failure is a *runtime* failure
+                            // by construction: it must link and then fail while
+                            // executing, which is what the scenario renders.
+                            if let Err(error) =
+                                lashlang::LinkedModule::link(program, environment.clone())
+                            {
+                                hits.push(format!("{label}: {error}"));
+                            }
+                        }
+                        Err(error) => hits.push(format!("{label}: {error}")),
+                    },
+                }
+            }
+        }
+    }
+    assert!(seen >= 20, "every scenario must script at least one cell in each dialect, saw {seen}");
+    assert!(hits.is_empty(), "scripted replies a session cannot run: {hits:#?}");
+}
+
+/// Every multi-shot scenario must terminate.
+///
+/// `code-failure` shipped without one: its only reply was a cell that could
+/// never commit, so with the workbench's unbounded turn budget the driver
+/// re-asked the provider forever. A retry branch that finishes is what makes
+/// each of these a *scenario* rather than a loop.
+#[test]
+fn every_dev_provider_scenario_reaches_a_finish() {
+    for scenario in [
+        failure_provider::DevProviderScenario::AuthFailureOnce,
+        failure_provider::DevProviderScenario::RateLimitOnce,
+        failure_provider::DevProviderScenario::PartialOutputFailure,
+        failure_provider::DevProviderScenario::ExecBlocked,
+        failure_provider::DevProviderScenario::CodeFailure,
+        failure_provider::DevProviderScenario::RetryResetPartial,
+    ] {
+        for dialect in [
+            lash::rlm::RlmDialect::Lashlang,
+            lash::rlm::RlmDialect::Typescript,
+        ] {
+            let last = scenario
+                .scripted_cell_for_test(dialect, 1)
+                .unwrap_or_else(|| panic!("{} scripts a second call", scenario.as_str()));
+            let finish = match dialect {
+                lash::rlm::RlmDialect::Typescript => "finish(",
+                _ => "finish ",
+            };
+            assert!(
+                last.contains(finish),
+                "{} ({}) must terminate on its retry: {last}",
+                scenario.as_str(),
+                dialect.language_id()
+            );
+        }
+    }
+}
+
+/// The `code-failure` scenario, executed, in both dialects.
+///
+/// This scenario had no test at all, which is how it shipped scripting
+/// `fail "..."` at cell top level — process-only in Lashlang, unspellable in
+/// TypeScript. The cell could never commit, and with the workbench's unbounded
+/// turn budget the driver re-asked the provider forever, so the failure mode
+/// was a hang rather than a red row. The timeout here is the regression guard:
+/// a scenario that cannot terminate must fail this test rather than run out the
+/// harness.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
+    for dialect in [
+        lash::rlm::RlmDialect::Lashlang,
+        lash::rlm::RlmDialect::Typescript,
+    ] {
+        let data_dir = tempfile::tempdir().expect("temp dir");
+        let provider = failure_provider::DevProviderScenario::CodeFailure.provider(dialect);
+        let mut state = queued_send_test_state(data_dir.path(), provider).await;
+        state.rlm_dialect = dialect;
+        let session_id = state.current_session_id();
+
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            run_turn_through_the_workbench_open_path(
+                &state,
+                &session_id,
+                "code-failure-turn",
+                "run the deterministic code failure",
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "the {} code-failure scenario never reached a terminal state",
+                dialect.language_id()
+            )
+        });
+
+        let Json(projected) = app_state(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect("project the code-failure session");
+        let blocks = projected
+            .transcript
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::CodeBlock {
+                    language, success, ..
+                } => Some((language.clone(), *success)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            blocks
+                .iter()
+                .any(|(language, success)| language == dialect.language_id() && !success),
+            "the {} scenario must render a failed cell of its own dialect: {blocks:?}",
+            dialect.language_id()
+        );
+    }
 }
