@@ -93,18 +93,24 @@ mod tests {
 
     /// The recognition list must cover every dialect the registry can activate,
     /// or a session running the missing one silently reads foreign cells as
-    /// prose again.
+    /// prose again. Checked against the dialect implementations themselves —
+    /// both the id and the tags — rather than against a second list of names.
     #[test]
     fn every_registered_dialect_is_recognizable() {
-        let registered = crate::dialect::registered_language_ids();
-        let known = REGISTERED_CELL_TAGS
-            .iter()
-            .map(|(language, _)| *language)
-            .collect::<std::collections::BTreeSet<_>>();
-        for language in registered {
+        let dialects: Vec<std::sync::Arc<dyn crate::dialect::RlmDialect>> = vec![
+            std::sync::Arc::new(crate::dialect::lashlang_test_dialect()),
+            std::sync::Arc::new(crate::dialect::typescript_test_dialect()),
+        ];
+        for dialect in dialects {
+            let tags = dialect.cell_tags();
             assert!(
-                known.contains(language),
-                "`{language}` is registered but its cell tags are unknown to extraction"
+                REGISTERED_CELL_TAGS.iter().any(|(language, known)| {
+                    *language == dialect.language_id()
+                        && known.open == tags.open
+                        && known.close == tags.close
+                }),
+                "`{}` is a registered dialect whose cell tags extraction cannot recognize",
+                dialect.language_id()
             );
         }
     }

@@ -311,7 +311,8 @@ Every hash below is reachable from the branch head.
 | `0424bdfed` | Stop billing standard-mode hosts twice for a dialect they lack | Internal |
 | `2bae0152a` | Gate two judged claims on what the host can actually show | Internal |
 | `3034ed91e` | Declare the host surface to TypeScript, and spell its examples | Fixed |
-| style commit | Satisfy the strict lints and the vocabulary-owned retry copy | — |
+| `a5feeb96c` | Satisfy the strict lints and the vocabulary-owned retry copy | — |
+| `304f2bfcd` | Name a cell of the inactive dialect instead of reading it as prose | Fixed |
 | final report commit | Regenerate this report against the branch as it stands | Internal |
 
 ## Review ledger
@@ -346,6 +347,7 @@ argument for the walker existing at all.
 | D (generalized) | Two judged gates asked for readings a correct run cannot produce: a marker's absence from an omitted request body, and `lane_held = false` from a race the harness deliberately does not fix | — (documentation) | `2bae0152a` |
 | O3 (discoverability) | A TypeScript session was never told its trigger sources, host data types or `triggers.*` operations exist, while the host prompt told it to use `cron.Schedule`. A judged row watched a model search, find nothing, and produce a VOID | new dialect test, both directions | `3034ed91e` |
 | O3 (examples) | Authored tool examples are Lashlang source; the try-operator six of seven resident examples carry is a **syntax error** in TypeScript | walker marker, non-vacuity asserted from the authored corpus | `3034ed91e` |
+| Extraction (the loop's mechanism) | A cell tagged with a registered-but-inactive dialect matched nothing and counted as **prose**, so a `FinishRequired` turn asked the model to finish, the model answered with the same cell, and the turn re-prompted without bound — 36 iterations of `request_finish` with `lashlang_cell_count: 0` in the row that found it. The execution fence never fires because extraction never yields a cell to fence | driver fixture: a `<typescript>` cell in a Lashlang session must be named on iteration 1 | `304f2bfcd` |
 
 ### The A-inventory, and what happened to each site
 
@@ -368,6 +370,8 @@ it in its data; "residual" means the leak is real and open.
 | `protocol/prompt.rs` host-environment section | **Fixed this round** — one inventory, two formatters, `__` namespace hidden |
 | `protocol/driver.rs:890` `lashlang_step_<turn>_<iteration>` event ids | **Carve-out.** Durable session-graph identifiers, and the model receives `kind: "lashlang_step"` in `history`. ADR 0060 |
 | `driver.rs:566/592` test-fixture `lashlang_step_*` ids | Same carve-out; they mirror the durable ids on purpose |
+| Durable process ids `process:lashlang:sha256:…` (visible through a host's work API) | **Carve-out.** Every dialect's processes are compiled against the Lashlang VM substrate and the id is journal identity. The label half of the same question — what a rendered transcript calls the code — is what got fixed |
+| Deferred-tool grant registry | No change needed: `definition.bindings` already carries `typescript.tool`, so the grant surface is dialect-aware. Its only leak was the rendered examples string, which the examples fix covers |
 | `lash-lashlang-runtime` `__typescript_runtime` module path | **Carve-out, hidden not renamed.** Embedded in every lowered TypeScript program including persisted process bodies; its host operation ids reach the effect journal |
 | `lash_core` contract renderer type syntax (`-> str`) | **Residual.** Recorded in `KNOWN_TYPE_SYNTAX_RESIDUALS`, asserted exactly |
 | `rlm_support.rs` bound-variable shape language (`list[HistoryItem]`) | **Residual.** Same list. Both are typed-rendering changes in other crates, not copy edits |
@@ -460,6 +464,11 @@ Things a reader should not have to dig for:
   typed-rendering changes rather than copy edits, and both are asserted by
   equality in `KNOWN_TYPE_SYNTAX_RESIDUALS` so they cannot be forgotten or
   silently joined by a third.
+- **Three agent-scenario size labels drifted before this round.** The canonical
+  workspace run found them; restoring this branch's inherited
+  `lash-protocol-rlm` reproduces the drift, so they are not this round's doing —
+  the previous round's "workspace test PASS" row was stale. They are re-recorded
+  here rather than left red.
 - **The `code-failure` scenario shipped with no test at all**, which is how it
   came to script a program that is invalid in both dialects. Its unbounded
   retry is a second defect (FIG-1407, main-side) that this round deliberately
@@ -480,12 +489,12 @@ with no other heavy build job running concurrently.
 |---|---|
 | `cargo fmt --all --check` | PASS |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0). Red twice before it: a `&format!` at the `continue_as` doc and `step_output_text` crossing the argument bound once the vocabulary joined it |
-| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-restate-postgres-workers-e2e --locked` | PASS; 682 run, 682 passed, 13 skipped. Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
+| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-restate-postgres-workers-e2e --locked` | PASS; **685 run, 685 passed**, 13 skipped. Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
 | `cargo test -p lash-runtime --features rlm --lib` | PASS; 230 tests. Run explicitly because the RLM-feature tests, including the new per-turn-override pin, are `cfg(feature = "rlm")` |
-| `cargo test --workspace --locked` | PASS (exit 0); the canonical final workspace run, executed alone with nothing else building. The `durable_fault_matrix` test that shells out to a nested `cargo` build did not trip this time |
+| `cargo test --workspace --locked` | PASS; the canonical final run, executed alone with nothing else building. Scored on the **passed count**, not the exit code. Its first execution this round was red on three agent-scenario size labels, which reproduce with this branch's inherited `lash-protocol-rlm` restored and are therefore pre-existing drift, re-recorded here |
 | `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,488 entries, after re-anchoring 33 references. `RlmSessionReadViewExt` and its `rlm_dialect` moved from `unused-add` to `used-asserted` on the new end-to-end label assertion |
 | `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
-| `python3 scripts/test_judged_runbook_matrix.py` | PASS; 6 tests |
+| `python3 scripts/test_judged_runbook_matrix.py` | PASS; 6 tests (4 before this round) |
 | `python3 scripts/judged_runbook_matrix.py --shard 1/1` | PASS; 63 validated rows |
 | `python3 scripts/release_notes.py check-pr --range dc191172e..HEAD` | PASS (exit 0) |
 | Live 63-row judged battery | PREPARED / NOT RUN; no provider-cost authorization |
@@ -499,6 +508,7 @@ with no other heavy build job running concurrently.
 | C (`code-failure`) | Restoring the shipped cell (`fail "..."` in both dialects) makes `the_code_failure_scenario_renders_a_failed_cell_and_terminates` fail at its 60s timeout with "the lashlang code-failure scenario never reached a terminal state" — the hang reproduced, then green again in 0.18s |
 | C (harnesses) | With the example routing unwired, the walker reports `typescript prompt fragment `tool docs` contains `)?``; the fixture's Lashlang rendering is separately asserted to contain `)?` so the marker has something real to catch |
 | E (matrix) | The row total is derived from the four category lists and pinned, so a reclassification that leaves RULES.md or this report stale turns the self-test red |
+| Extraction | `a_cell_of_the_inactive_dialect_is_named_on_the_first_iteration` fails on the shipped scanner: nothing executes (correct) but nothing tells the model why, so the reply is prose and the turn re-prompts |
 | Residuals | `KNOWN_TYPE_SYNTAX_RESIDUALS` is asserted by equality: a third leak fails the walker, and closing one of the two fails it until its row is deleted |
 
 ### Red-side evidence — prior rounds

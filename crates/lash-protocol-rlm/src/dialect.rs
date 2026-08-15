@@ -220,12 +220,6 @@ pub(crate) trait RlmDialect: Send + Sync {
     fn stream_cell_end_event_name(&self) -> &'static str;
 }
 
-/// Every language id the registry can activate. The source of truth for
-/// extraction's recognition list.
-pub(crate) fn registered_language_ids() -> &'static [&'static str] {
-    &[lashlang::LANGUAGE_ID, typescript::LANGUAGE_ID]
-}
-
 #[derive(Clone)]
 pub(crate) struct RlmDialectRegistry {
     dialects: Arc<BTreeMap<&'static str, Arc<dyn RlmDialect>>>,
