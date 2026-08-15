@@ -319,3 +319,20 @@ pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
         )),
     }
 }
+
+/// The dialect a turn actually resolved, for prompt copy that has to be written
+/// in one language.
+///
+/// ADR 0060: host copy follows the session's own dialect. This reads the same
+/// resolved options the executor is handed, so a store that outlived a
+/// configuration change is described in the dialect it is running rather than
+/// the one this process was started with.
+pub(crate) fn rlm_dialect_from_turn_options(
+    options: &lash_core::ProtocolTurnOptions,
+) -> lash::rlm::RlmDialect {
+    options
+        .decode::<lash_rlm_types::RlmCreateExtras>()
+        .ok()
+        .and_then(|extras| extras.dialect)
+        .unwrap_or_default()
+}
