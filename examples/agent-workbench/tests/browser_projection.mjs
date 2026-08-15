@@ -1248,6 +1248,9 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       validateModel() {},
       knownWebState: null,
       knownSessionLabel: null,
+      // The dialect badge the snapshot paints: it reads the session's recorded
+      // dialect out of the same snapshot this block applies.
+      sessionDialect: element(),
       renderUsage() {},
       renderQueuedWork() {},
       renderStateTranscript() {},

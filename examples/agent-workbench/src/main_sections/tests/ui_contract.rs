@@ -16,6 +16,27 @@ fn workbench_renders_scoped_tabs_and_trigger_lifecycle_controls() {
     assert!(ui::INDEX_HTML.contains("scopedSessionId"));
 }
 
+/// The session panel is a selector plus a create form, and the create form's
+/// dialect menu is filled from `/api/sessions`, never written into the page.
+/// A hardcoded menu is a second source of truth for what the substrate can run.
+#[test]
+fn workbench_ui_renders_the_session_roster_and_a_dialect_choice() {
+    assert!(ui::INDEX_HTML.contains("id=\"sessionSelect\""));
+    assert!(ui::INDEX_HTML.contains("id=\"newSessionForm\""));
+    assert!(ui::INDEX_HTML.contains("id=\"newSessionDialect\""));
+    assert!(ui::INDEX_HTML.contains("id=\"sessionDialect\""));
+    assert!(ui::INDEX_HTML.contains("async function loadSessions"));
+    assert!(ui::INDEX_HTML.contains("async function switchToSession"));
+    assert!(ui::INDEX_HTML.contains("\"/api/sessions/select\""));
+    assert!(ui::INDEX_HTML.contains("sessionDialect.textContent = state.settings.rlm_dialect"));
+    for language_id in lash::rlm::RlmDialect::ALL {
+        assert!(
+            !ui::INDEX_HTML.contains(&format!("<option value=\"{}\"", language_id.language_id())),
+            "the dialect menu must come from the backend, not from static options"
+        );
+    }
+}
+
 #[test]
 fn workbench_ui_renders_accounts_panel() {
     assert!(ui::INDEX_HTML.contains("id=\"accountsView\""));
