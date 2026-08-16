@@ -1717,6 +1717,58 @@ async fn codex_websocket_output_started_error_stops_provider_handle_retry() {
 }
 
 #[tokio::test]
+async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
+    // Regression law for FIG-1414: on the old ordering (empty allocation frame
+    // first), a >50ms stall between frames caused the stream chunk timeout to
+    // snapshot output_started=false and retry unsafely. Under the hardened
+    // ordering, the first observable frame itself is paid-output evidence, so
+    // any subsequent stall or idle window halts the retry ladder immediately
+    // without re-buying.
+    let ws = spawn_scripted_websocket(vec![
+        ScriptedWsAction::IdleAfterStart {
+            message_id: "msg_paid",
+            text: "paid partial",
+        },
+        ScriptedWsAction::Complete {
+            response_id: "resp_second",
+            message_id: "msg_second",
+            text: "second generation",
+        },
+    ])
+    .await;
+    let http = spawn_http_sse("resp_http", "msg_http", "fallback").await;
+    let provider =
+        websocket_test_provider(CodexTransport::Websocket, http.url.clone(), ws.url.clone())
+            .with_options(ProviderOptions {
+                reliability: ProviderReliability::codex()
+                    .request_timeout(Some(RequestTimeout::Millis(5_000)))
+                    .stream_chunk_timeout_ms(Some(50))
+                    .max_attempts(2)
+                    .base_delay_ms(0)
+                    .max_delay_ms(0),
+                ..ProviderOptions::default()
+            });
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let result = handle
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .await;
+
+    assert_eq!(
+        ws.captured().len(),
+        1,
+        "paid WebSocket output must not be re-bought"
+    );
+    let failure = result.expect_err("output-started WebSocket failure must stop the ladder");
+    assert_eq!(
+        failure.code.as_deref(),
+        Some("unsafe_retry_after_output_started")
+    );
+    assert!(!failure.retryable);
+    assert_eq!(http.captured_len(), 0);
+}
+
+#[tokio::test]
 async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tolerated() {
     let action = ScriptedWsAction::CloseAfterStart {
         response_id: "resp_partial",
