@@ -160,7 +160,10 @@ async fn stream_turn_as_ndjson(session: &LashSession) -> anyhow::Result<Vec<u8>>
 
     let errors = sink.take_errors();
     if !errors.is_empty() {
-        anyhow::bail!("remote stream write failed: {}", errors.join("; "));
+        anyhow::bail!(
+            "remote stream write or encode failed: {}",
+            errors.join("; ")
+        );
     }
 
     sink.into_inner()

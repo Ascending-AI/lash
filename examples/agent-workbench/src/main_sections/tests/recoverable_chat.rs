@@ -761,26 +761,30 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/browser_projection.mjs");
     let trigger_identities = browser_projection_trigger_identities();
-    let usage_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
-        lash::TurnEvent::Usage {
-            protocol_iteration: 2,
-            usage: lash::usage::TokenUsage {
-                input_tokens: 11,
-                output_tokens: 7,
-                cache_read_input_tokens: 3,
-                cache_write_input_tokens: 2,
-                reasoning_output_tokens: 5,
-            },
-            cumulative: lash::usage::TokenUsage {
-                input_tokens: 31,
-                output_tokens: 17,
-                cache_read_input_tokens: 13,
-                cache_write_input_tokens: 12,
-                reasoning_output_tokens: 9,
-            },
+    let to_event_value = |event: lash::TurnEvent| {
+        serde_json::to_value(
+            lash::remote::usage::RemoteTurnEvent::try_from(event)
+                .expect("convert browser turn event"),
+        )
+        .expect("serialize browser turn event")
+    };
+    let usage_event = to_event_value(lash::TurnEvent::Usage {
+        protocol_iteration: 2,
+        usage: lash::usage::TokenUsage {
+            input_tokens: 11,
+            output_tokens: 7,
+            cache_read_input_tokens: 3,
+            cache_write_input_tokens: 2,
+            reasoning_output_tokens: 5,
         },
-    ))
-    .expect("serialize browser usage event");
+        cumulative: lash::usage::TokenUsage {
+            input_tokens: 31,
+            output_tokens: 17,
+            cache_read_input_tokens: 13,
+            cache_write_input_tokens: 12,
+            reasoning_output_tokens: 9,
+        },
+    });
     assert_eq!(
         usage_event,
         serde_json::json!({
@@ -806,17 +810,10 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     assert_eq!(usage_event["protocol_iteration"], 2);
     assert_eq!(usage_event["usage"]["input_tokens"], 11);
     assert_eq!(usage_event["cumulative"]["input_tokens"], 31);
-    let reset_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
-        lash::TurnEvent::ModelAttemptReset {
-            assistant_prose_correlation_ids: vec![lash::TurnActivityId::new(
-                "prose-superseded",
-            )],
-            reasoning_correlation_ids: vec![lash::TurnActivityId::new(
-                "reasoning-superseded",
-            )],
-        },
-    ))
-    .expect("serialize browser attempt-reset event");
+    let reset_event = to_event_value(lash::TurnEvent::ModelAttemptReset {
+        assistant_prose_correlation_ids: vec![lash::TurnActivityId::new("prose-superseded")],
+        reasoning_correlation_ids: vec![lash::TurnActivityId::new("reasoning-superseded")],
+    });
     assert_eq!(
         reset_event,
         serde_json::json!({
@@ -828,15 +825,12 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     assert_eq!(reset_event["type"], "model_attempt_reset");
     assert_eq!(reset_event["assistant_prose_correlation_ids"][0], "prose-superseded");
     assert_eq!(reset_event["reasoning_correlation_ids"][0], "reasoning-superseded");
-    let retry_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
-        lash::TurnEvent::RetryStatus {
-            wait_seconds: 2,
-            attempt: 1,
-            max_attempts: 3,
-            reason: "deterministic retry law".to_string(),
-        },
-    ))
-    .expect("serialize browser retry-status event");
+    let retry_event = to_event_value(lash::TurnEvent::RetryStatus {
+        wait_seconds: 2,
+        attempt: 1,
+        max_attempts: 3,
+        reason: "deterministic retry law".to_string(),
+    });
     assert_eq!(
         retry_event,
         serde_json::json!({
@@ -852,12 +846,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     assert_eq!(retry_event["attempt"], 1);
     assert_eq!(retry_event["max_attempts"], 3);
     assert_eq!(retry_event["reason"], "deterministic retry law");
-    let error_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
-        lash::TurnEvent::Error {
-            message: "provider exhausted deterministic retries".to_string(),
-        },
-    ))
-    .expect("serialize browser provider-error event");
+    let error_event = to_event_value(lash::TurnEvent::Error {
+        message: "provider exhausted deterministic retries".to_string(),
+    });
     assert_eq!(
         error_event,
         serde_json::json!({
@@ -865,86 +856,65 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
             "message": "provider exhausted deterministic retries",
         })
     );
-    let code_started_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
-        lash::TurnEvent::CodeBlockStarted {
-            language: "lashlang".to_string(),
-            code: "web.search({ query: \"FIG-1350\" })".to_string(),
-            graph_key: None,
-        },
-    ))
-    .expect("serialize browser code-start event");
-    let tool_started_event = serde_json::to_value(lash::remote::usage::RemoteTurnEvent::from(
-        lash::TurnEvent::ToolCallStarted {
-            call_id: Some("tool-call-1".to_string()),
-            name: "search_web".to_string(),
-            args: serde_json::json!({ "query": "FIG-1350" }),
-            graph_key: None,
-            parent_call_id: None,
-        },
-    ))
-    .expect("serialize browser tool-start event");
-    let tool_completed_event = serde_json::to_value(
-        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::ToolCallCompleted {
-            call_id: Some("tool-call-1".to_string()),
-            name: "search_web".to_string(),
-            args: serde_json::json!({ "query": "FIG-1350" }),
-            output: lash::tools::ToolCallOutput::success(lash::tools::ToolValue::from(
-                serde_json::json!({ "results": [{ "title": "judged row" }] }),
-            )),
-            duration_ms: 4,
-            graph_key: None,
-            parent_call_id: None,
-        }),
-    )
-    .expect("serialize browser tool-complete event");
-    let no_id_tool_started_event = serde_json::to_value(
-        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::ToolCallStarted {
-            call_id: None,
-            name: "search_web".to_string(),
-            args: serde_json::json!({ "query": "FIG-1350 no id" }),
-            graph_key: None,
-            parent_call_id: None,
-        }),
-    )
-    .expect("serialize browser no-id tool-start event");
-    let no_id_tool_completed_event = serde_json::to_value(
-        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::ToolCallCompleted {
-            call_id: None,
-            name: "search_web".to_string(),
-            args: serde_json::json!({ "query": "FIG-1350 no id" }),
-            output: lash::tools::ToolCallOutput::success(lash::tools::ToolValue::from(
-                serde_json::json!({ "results": [{ "title": "no-id row" }] }),
-            )),
-            duration_ms: 5,
-            graph_key: None,
-            parent_call_id: None,
-        }),
-    )
-    .expect("serialize browser no-id tool-complete event");
-    let code_completed_event = serde_json::to_value(
-        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::CodeBlockCompleted {
-            language: "lashlang".to_string(),
-            output: "completed".to_string(),
-            error: None,
-            success: true,
-            duration_ms: 9,
-            tool_call_ids: vec!["tool-call-1".to_string()],
-            graph_key: None,
-        }),
-    )
-    .expect("serialize browser code-complete event");
-    let no_id_code_completed_event = serde_json::to_value(
-        lash::remote::usage::RemoteTurnEvent::from(lash::TurnEvent::CodeBlockCompleted {
-            language: "lashlang".to_string(),
-            output: "completed without call id".to_string(),
-            error: None,
-            success: true,
-            duration_ms: 10,
-            tool_call_ids: Vec::new(),
-            graph_key: None,
-        }),
-    )
-    .expect("serialize browser no-id code-complete event");
+    let code_started_event = to_event_value(lash::TurnEvent::CodeBlockStarted {
+        language: "lashlang".to_string(),
+        code: "web.search({ query: \"FIG-1350\" })".to_string(),
+        graph_key: None,
+    });
+    let tool_started_event = to_event_value(lash::TurnEvent::ToolCallStarted {
+        call_id: Some("tool-call-1".to_string()),
+        name: "search_web".to_string(),
+        args: serde_json::json!({ "query": "FIG-1350" }),
+        graph_key: None,
+        parent_call_id: None,
+    });
+    let tool_completed_event = to_event_value(lash::TurnEvent::ToolCallCompleted {
+        call_id: Some("tool-call-1".to_string()),
+        name: "search_web".to_string(),
+        args: serde_json::json!({ "query": "FIG-1350" }),
+        output: lash::tools::ToolCallOutput::success(lash::tools::ToolValue::from(
+            serde_json::json!({ "results": [{ "title": "judged row" }] }),
+        )),
+        duration_ms: 4,
+        graph_key: None,
+        parent_call_id: None,
+    });
+    let no_id_tool_started_event = to_event_value(lash::TurnEvent::ToolCallStarted {
+        call_id: None,
+        name: "search_web".to_string(),
+        args: serde_json::json!({ "query": "FIG-1350 no id" }),
+        graph_key: None,
+        parent_call_id: None,
+    });
+    let no_id_tool_completed_event = to_event_value(lash::TurnEvent::ToolCallCompleted {
+        call_id: None,
+        name: "search_web".to_string(),
+        args: serde_json::json!({ "query": "FIG-1350 no id" }),
+        output: lash::tools::ToolCallOutput::success(lash::tools::ToolValue::from(
+            serde_json::json!({ "results": [{ "title": "no-id row" }] }),
+        )),
+        duration_ms: 5,
+        graph_key: None,
+        parent_call_id: None,
+    });
+    let code_completed_event = to_event_value(lash::TurnEvent::CodeBlockCompleted {
+        language: "lashlang".to_string(),
+        output: "completed".to_string(),
+        error: None,
+        success: true,
+        duration_ms: 9,
+        tool_call_ids: vec!["tool-call-1".to_string()],
+        graph_key: None,
+    });
+    let no_id_code_completed_event = to_event_value(lash::TurnEvent::CodeBlockCompleted {
+        language: "lashlang".to_string(),
+        output: "completed without call id".to_string(),
+        error: None,
+        success: true,
+        duration_ms: 10,
+        tool_call_ids: Vec::new(),
+        graph_key: None,
+    });
     let turn_events = serde_json::json!({
         "usage": usage_event,
         "reset": reset_event,

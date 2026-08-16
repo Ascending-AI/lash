@@ -1,18 +1,21 @@
 use lash_sansio::sync::{LockResultExt, MutexExt};
 impl RemoteTurnActivity {
-    pub fn from_core(sequence: u64, activity: lash_core::TurnActivity) -> Self {
+    pub fn from_core(
+        sequence: u64,
+        activity: lash_core::TurnActivity,
+    ) -> Result<Self, RemoteProtocolError> {
         let lash_core::TurnActivity {
             id: lash_core::TurnActivityId(id),
             correlation_id: lash_core::TurnActivityId(correlation_id),
             event,
         } = activity;
-        Self {
+        Ok(Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             sequence,
             id: id.to_string(),
             correlation_id: correlation_id.to_string(),
-            event: RemoteTurnEvent::from(event),
-        }
+            event: RemoteTurnEvent::try_from(event)?,
+        })
     }
 }
 
@@ -101,7 +104,10 @@ impl From<&lash_core::TurnInputApplication> for RemoteTurnInputApplication {
 }
 
 impl RemoteSessionObservationEvent {
-    pub fn from_core(sequence: u64, event: Arc<lash_core::SessionObservationEvent>) -> Self {
+    pub fn from_core(
+        sequence: u64,
+        event: Arc<lash_core::SessionObservationEvent>,
+    ) -> Result<Self, RemoteProtocolError> {
         let lash_core::SessionObservationEvent {
             session_id,
             replay_incarnation_id,
@@ -113,7 +119,7 @@ impl RemoteSessionObservationEvent {
         let payload = match payload {
             lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
                 RemoteSessionObservationEventPayload::TurnActivity {
-                    activity: Box::new(RemoteTurnActivity::from_core(sequence, activity.clone())),
+                    activity: Box::new(RemoteTurnActivity::from_core(sequence, activity.clone())?),
                 }
             }
             // The committed read view is a local handle; only the commit
@@ -139,7 +145,7 @@ impl RemoteSessionObservationEvent {
                 }
             }
         };
-        Self {
+        Ok(Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: session_id.clone(),
             replay_incarnation_id: replay_incarnation_id.clone(),
@@ -147,7 +153,7 @@ impl RemoteSessionObservationEvent {
             revision: revision.as_u64(),
             cursor: cursor.to_string(),
             event: payload,
-        }
+        })
     }
 }
 
@@ -180,36 +186,38 @@ impl From<lash_core::facade_support::LiveReplayGap> for RemoteLiveReplayGap {
     }
 }
 
-impl From<lash_core::TurnEvent> for RemoteTurnEvent {
-    fn from(value: lash_core::TurnEvent) -> Self {
+impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: lash_core::TurnEvent) -> Result<Self, RemoteProtocolError> {
         match value {
             lash_core::TurnEvent::QueuedWorkStarted {
                 boundary,
                 batch_ids,
                 causes,
-            } => Self::RuntimeDiagnostic {
+            } => Ok(Self::RuntimeDiagnostic {
                 kind: "queued_work_started".to_string(),
                 data: serde_json::json!({
                     "boundary": boundary,
                     "batch_ids": batch_ids,
                     "causes": causes,
                 }),
-            },
+            }),
             lash_core::TurnEvent::ModelRequestStarted { protocol_iteration } => {
-                Self::ModelRequestStarted { protocol_iteration }
+                Ok(Self::ModelRequestStarted { protocol_iteration })
             }
             lash_core::TurnEvent::AssistantProseDelta { text } => {
-                Self::AssistantProseDelta {
+                Ok(Self::AssistantProseDelta {
                     text: text.to_string(),
-                }
+                })
             }
-            lash_core::TurnEvent::ReasoningDelta { text } => Self::ReasoningDelta {
+            lash_core::TurnEvent::ReasoningDelta { text } => Ok(Self::ReasoningDelta {
                 text: text.to_string(),
-            },
+            }),
             lash_core::TurnEvent::ModelAttemptReset {
                 assistant_prose_correlation_ids,
                 reasoning_correlation_ids,
-            } => Self::ModelAttemptReset {
+            } => Ok(Self::ModelAttemptReset {
                 assistant_prose_correlation_ids: assistant_prose_correlation_ids
                     .into_iter()
                     .map(|id| id.0.to_string())
@@ -218,19 +226,19 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
                     .into_iter()
                     .map(|id| id.0.to_string())
                     .collect(),
-            },
-            lash_core::TurnEvent::ModelCallRecorded { record } => Self::ModelCallRecorded {
+            }),
+            lash_core::TurnEvent::ModelCallRecorded { record } => Ok(Self::ModelCallRecorded {
                 record: record.into(),
-            },
+            }),
             lash_core::TurnEvent::CodeBlockStarted {
                 language,
                 code,
                 graph_key,
-            } => Self::CodeBlockStarted {
+            } => Ok(Self::CodeBlockStarted {
                 language,
                 code,
                 graph_key,
-            },
+            }),
             lash_core::TurnEvent::CodeBlockCompleted {
                 language,
                 output,
@@ -239,7 +247,7 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
                 duration_ms,
                 tool_call_ids,
                 graph_key,
-            } => Self::CodeBlockCompleted {
+            } => Ok(Self::CodeBlockCompleted {
                 language,
                 output,
                 error,
@@ -247,20 +255,20 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
                 duration_ms,
                 tool_call_ids,
                 graph_key,
-            },
+            }),
             lash_core::TurnEvent::ToolCallStarted {
                 call_id,
                 name,
                 args,
                 graph_key,
                 parent_call_id,
-            } => Self::ToolCallStarted {
+            } => Ok(Self::ToolCallStarted {
                 call_id,
                 name,
                 args,
                 graph_key,
                 parent_call_id,
-            },
+            }),
             lash_core::TurnEvent::ToolCallCompleted {
                 call_id,
                 name,
@@ -269,34 +277,34 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
                 duration_ms,
                 graph_key,
                 parent_call_id,
-            } => Self::ToolCallCompleted {
+            } => Ok(Self::ToolCallCompleted {
                 call_id,
                 name,
                 args,
-                output: serde_json::to_value(output).unwrap_or(serde_json::Value::Null),
+                output: encode_remote_json(output, "RemoteTurnEvent", "output")?,
                 duration_ms,
                 graph_key,
                 parent_call_id,
-            },
+            }),
             lash_core::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
-                Self::ToolIntentOutcome {
+                Ok(Self::ToolIntentOutcome {
                     call_id,
                     outcome: outcome.into(),
-                }
+                })
             }
-            lash_core::TurnEvent::FinalValue { value } => Self::FinalValue { value },
+            lash_core::TurnEvent::FinalValue { value } => Ok(Self::FinalValue { value }),
             lash_core::TurnEvent::ToolValue { tool_name, value } => {
-                Self::ToolValue { tool_name, value }
+                Ok(Self::ToolValue { tool_name, value })
             }
             lash_core::TurnEvent::Usage {
                 protocol_iteration,
                 usage,
                 cumulative,
-            } => Self::Usage {
+            } => Ok(Self::Usage {
                 protocol_iteration,
                 usage: usage.into(),
                 cumulative: cumulative.into(),
-            },
+            }),
             lash_core::TurnEvent::ChildUsage {
                 session_id,
                 source,
@@ -304,48 +312,48 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
                 protocol_iteration,
                 usage,
                 cumulative,
-            } => Self::ChildUsage {
+            } => Ok(Self::ChildUsage {
                 session_id,
                 source,
                 model,
                 protocol_iteration,
                 usage: usage.into(),
                 cumulative: cumulative.into(),
-            },
+            }),
             lash_core::TurnEvent::RetryStatus {
                 wait_seconds,
                 attempt,
                 max_attempts,
                 reason,
-            } => Self::RetryStatus {
+            } => Ok(Self::RetryStatus {
                 wait_seconds,
                 attempt,
                 max_attempts,
                 reason,
-            },
-            lash_core::TurnEvent::PluginRuntime { plugin_id, event } => Self::RuntimeDiagnostic {
+            }),
+            lash_core::TurnEvent::PluginRuntime { plugin_id, event } => Ok(Self::RuntimeDiagnostic {
                 kind: "plugin_runtime".to_string(),
                 data: serde_json::json!({
                     "plugin_id": plugin_id,
                     "event": event,
                 }),
-            },
+            }),
             lash_core::TurnEvent::QueuedInputAccepted { applications } => {
-                Self::TurnInputApplied {
+                Ok(Self::TurnInputApplied {
                     applications: applications.iter().map(Into::into).collect(),
-                }
+                })
             }
             lash_core::TurnEvent::QueuedMessagesCommitted {
                 messages,
                 checkpoint,
-            } => Self::RuntimeDiagnostic {
+            } => Ok(Self::RuntimeDiagnostic {
                 kind: "queued_messages_committed".to_string(),
                 data: serde_json::json!({
                     "messages": messages,
                     "checkpoint": checkpoint,
                 }),
-            },
-            lash_core::TurnEvent::Error { message } => Self::Error { message },
+            }),
+            lash_core::TurnEvent::Error { message } => Ok(Self::Error { message }),
         }
     }
 }
@@ -353,7 +361,7 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
 pub fn replay_collected_activities(
     activities: impl IntoIterator<Item = lash_core::TurnActivity>,
     first_sequence: u64,
-) -> Vec<RemoteTurnActivity> {
+) -> Result<Vec<RemoteTurnActivity>, RemoteProtocolError> {
     activities
         .into_iter()
         .enumerate()
@@ -401,7 +409,13 @@ impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink for 
     {
         Box::pin(async move {
             let sequence = self.next_sequence.fetch_add(1, Ordering::SeqCst);
-            let remote = RemoteTurnActivity::from_core(sequence, activity);
+            let remote = match RemoteTurnActivity::from_core(sequence, activity) {
+                Ok(remote) => remote,
+                Err(err) => {
+                    self.errors.lock_recover().push(err.to_string());
+                    return;
+                }
+            };
             let result = {
                 let mut writer = self
                     .writer

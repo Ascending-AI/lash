@@ -118,7 +118,7 @@ pub(crate) async fn stream_raw_activities(
         let errors = remote_events.take_errors();
         if !errors.is_empty() {
             eprintln!(
-                "agent-service raw activity stream write failed: {}",
+                "agent-service raw activity stream write or encode failed: {}",
                 errors.join("; ")
             );
         }
