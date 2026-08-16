@@ -7600,11 +7600,14 @@ usage = "examples/agent-workbench/src/main_sections/routes.rs:160#lash::attachme
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
+# The Workbench evidence below intentionally exercises its PNG-only upload surface.
+# Provider transport MIME coverage is maintained by the deterministic laws in the
+# provider crates and is not a claim that Lash's generic AttachmentSource is PNG-only.
 symbol = "lash::attachments::MediaType"
 kind = "struct"
 availability = "default+all-features"
 aliases = ["lash_core::MediaType"]
-area = "sessions-turns"
+area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
@@ -7615,7 +7618,7 @@ symbol = "lash::attachments::MediaType::as_str"
 kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::MediaType::as_str"]
-area = "sessions-turns"
+area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:260#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:260#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
@@ -7625,7 +7628,7 @@ symbol = "lash::attachments::MediaType::family"
 kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::MediaType::family"]
-area = "sessions-turns"
+area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:115#assert_eq!(normalized_media_type.family(), \"image\");"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:115#assert_eq!(normalized_media_type.family(), \"image\");"
@@ -7635,7 +7638,7 @@ symbol = "lash::attachments::MediaType::is_image"
 kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::MediaType::is_image"]
-area = "sessions-turns"
+area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
@@ -7645,7 +7648,7 @@ symbol = "lash::attachments::MediaType::parse"
 kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::MediaType::parse"]
-area = "sessions-turns"
+area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"

@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod attachment_tests;
 mod config;
 #[cfg(all(test, feature = "testing"))]
 mod conformance_route;
@@ -784,25 +786,6 @@ mod tests {
                 json!({"fileData": {"fileUri": "files/123"}})
             );
         }
-    }
-
-    #[test]
-    fn google_rejects_gif_attachment_at_request_boundary() {
-        let mut req = request(None);
-        req.attachments = vec![AttachmentSource::inline(
-            lash_core::MediaType::parse("image/gif").unwrap(),
-            vec![0x47, 0x49, 0x46],
-        )];
-
-        let err = GoogleOAuthProvider::validate_attachments(&req)
-            .expect_err("gif should be rejected for Gemini");
-
-        assert_eq!(
-            err.code.as_deref(),
-            Some("unsupported_attachment_capability")
-        );
-        assert!(err.message.contains("Google Gemini"));
-        assert!(err.message.contains("image/gif"));
     }
 
     #[test]

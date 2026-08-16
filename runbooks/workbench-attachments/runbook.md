@@ -14,6 +14,27 @@ runtime [`normalize_input_items`](../../crates/lash-core/src/runtime/io.rs) pers
 bytes, and the provider adapter materializes the resulting stored source. Generic document
 support is available in Lash but is not enabled by this workbench surface.
 
+This PNG boundary belongs to the **WORKBENCH upload surface**, not to Lash's provider
+contract. The transport capability source of truth is
+[`lash-core/src/llm/transport.rs`](../../crates/lash-core/src/llm/transport.rs): OpenAI
+Responses and Chat, Anthropic Messages, and Google Gemini each enforce their own image/file
+allowlists (with Google's additional audio/text/video family support). A syntactically valid
+MIME outside the selected transport's allowlist returns the typed
+`unsupported_attachment_capability` refusal before wire serialization; it is not silently
+dropped or left for a provider HTTP error.
+
+| Surface | Attachment boundary |
+|---------|---------------------|
+| Agent Workbench upload | `image/png` only |
+| OpenAI Responses | `OPENAI_IMAGE_MIMES` + `OPENAI_FILE_MIMES` |
+| OpenAI-compatible Chat Completions | `OPENAI_IMAGE_MIMES` |
+| Anthropic Messages | `ANTHROPIC_IMAGE_MIMES` + `ANTHROPIC_FILE_MIMES` |
+| Google Gemini | `GOOGLE_IMAGE_MIMES` + `GOOGLE_FILE_MIMES` + `GOOGLE_MEDIA_FAMILIES` |
+
+The fixture laws for the transport allowlists live with the provider crates. The runbook's
+`image/png` assertions therefore judge the Workbench boundary and one supported transport
+intersection; they are not a claim that Lash accepts only PNG.
+
 **Real tokens.** The referenced turn uses OpenRouter. Judge attachment plumbing and
 cross-surface identity, not the quality of the model's image description.
 

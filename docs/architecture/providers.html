@@ -80,6 +80,25 @@
 
         <div class="section">
           <div class="section-header">
+            <h2>Attachment MIME Boundaries</h2>
+            <p>Attachment sources are MIME-tagged in the Lash contract, but materialization is a transport capability decision. The Agent Workbench intentionally exposes a PNG-only upload control; that host-surface boundary must not be confused with the per-provider allowlists enforced before a request reaches the wire.</p>
+          </div>
+          <div class="table">
+            <table>
+              <thead><tr><th>Transport</th><th>Capability source</th><th>Wire shape</th></tr></thead>
+              <tbody>
+                <tr><td>OpenAI Responses</td><td><code>OPENAI_IMAGE_MIMES</code> + <code>OPENAI_FILE_MIMES</code></td><td><code>input_image.image_url</code> for images; <code>input_file.file_data</code> for files</td></tr>
+                <tr><td>OpenAI-compatible Chat</td><td><code>OPENAI_IMAGE_MIMES</code></td><td><code>image_url.url</code></td></tr>
+                <tr><td>Anthropic Messages</td><td><code>ANTHROPIC_IMAGE_MIMES</code> + <code>ANTHROPIC_FILE_MIMES</code></td><td><code>image</code> or <code>document</code> base64 source blocks</td></tr>
+                <tr><td>Google Gemini</td><td><code>GOOGLE_IMAGE_MIMES</code> + <code>GOOGLE_FILE_MIMES</code> + <code>GOOGLE_MEDIA_FAMILIES</code></td><td><code>inlineData.mimeType</code> for inline/stored bytes; provider files use <code>fileData</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Every allowlisted image/file MIME has a deterministic provider fixture law. A valid but unsupported MIME or source combination returns <code>unsupported_attachment_capability</code> with <code>ProviderFailureKind::Validation</code>; adapters do not silently drop the attachment or delegate this contract to a raw provider error. Live provider probes are not part of this contract.</p>
+        </div>
+
+        <div class="section">
+          <div class="section-header">
             <h2>Host-Supplied Cache-Control Dialects</h2>
             <p>For OpenAI-compatible Chat Completions, the host attaches <code>ModelCapability.cache_control</code> to the selected model route. <code>None</code> emits no marker; <code>CacheControlDialect::Anthropic</code> and <code>::Gemini</code> select the exact wire placement. Model ids and endpoint URLs are never inspected. Shared <code>ProviderOptions.cache_retention</code> then controls whether and how long the selected dialect caches:</p>
           </div>
