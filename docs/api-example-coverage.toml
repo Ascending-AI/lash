@@ -4904,8 +4904,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::independent", "lash_core::TurnActivity::independent"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1377#sink.emit(TurnActivity::independent("
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1396#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1381#sink.emit(TurnActivity::independent("
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1400#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivity::new"
@@ -4914,7 +4914,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::new", "lash_core::TurnActivity::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1363#sink.emit(TurnActivity::new("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1367#sink.emit(TurnActivity::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -4944,7 +4944,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId", "lash_core::TurnActivityId"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1364#lash::TurnActivityId::new(\"prior\"),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1368#lash::TurnActivityId::new(\"prior\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -4963,7 +4963,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId::new", "lash_core::TurnActivityId::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1364#lash::TurnActivityId::new(\"prior\"),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1368#lash::TurnActivityId::new(\"prior\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5513,7 +5513,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta", "lash_core::TurnEvent::AssistantProseDelta"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1294#TurnEvent::AssistantProseDelta {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1298#TurnEvent::AssistantProseDelta {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5523,8 +5523,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta::text", "lash_core::TurnEvent::AssistantProseDelta::text"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1366#text: \"kept \".into(),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1396#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1370#text: \"kept \".into(),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1400#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage"
@@ -23802,7 +23802,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessAwaitOutput::terminal_status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1141#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1145#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:209#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -25295,7 +25295,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:900#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:904#status: lash::process::ProcessStatusFilter::Any,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:209#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -27325,7 +27325,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatusFilter"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:900#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:904#status: lash::process::ProcessStatusFilter::Any,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -27720,7 +27720,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::process_work_driver::ProcessWorkDriver"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1111#state.process_work_driver.await_terminal(&process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1115#state.process_work_driver.await_terminal(&process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:150#lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!(\"done\")"
 
 [[api]]
@@ -27739,7 +27739,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::process_work_driver::ProcessWorkDriver::await_terminal"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1111#state.process_work_driver.await_terminal(&process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1115#state.process_work_driver.await_terminal(&process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:150#lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!(\"done\")"
 
 [[api]]
@@ -27890,7 +27890,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:899#.snapshot_all(&lash::process::ProcessListFilter {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:903#.snapshot_all(&lash::process::ProcessListFilter {"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:209#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -31479,7 +31479,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1223#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1227#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31488,7 +31488,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1223#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1227#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31497,7 +31497,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1223#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1227#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1221, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -31524,7 +31524,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1264#gap: Box::new(gap),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1268#gap: Box::new(gap),"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:724#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -31533,7 +31533,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1254#Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1258#Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:724#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -34342,7 +34342,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1224#let event = RemoteSessionObservationEvent::from_core(sequence, event);"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1228#let event = RemoteSessionObservationEvent::from_core(sequence, event);"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1222, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -59341,7 +59341,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1160#state.lashlang_execution.graphs(),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1164#state.lashlang_execution.graphs(),"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1258, inside `list_lashlang_graphs`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `list_lashlang_graphs` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -61639,7 +61639,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::for_session"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1493#.for_session(session_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1497#.for_session(session_id),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -62795,7 +62795,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1468#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1472#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
