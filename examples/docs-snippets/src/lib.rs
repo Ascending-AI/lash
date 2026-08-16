@@ -33,6 +33,8 @@ mod execution_modes;
 #[cfg(test)]
 mod fig1294_ingress;
 #[cfg(test)]
+mod fig1313_drain_policy;
+#[cfg(test)]
 mod fig1348_selected_drain;
 mod index;
 mod operations;
