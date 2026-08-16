@@ -88,6 +88,20 @@ pub struct DefaultProviderFailureClassifier;
 
 impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
     fn classify(&self, mut failure: ProviderFailure) -> ProviderFailure {
+        // Driver-owned semantic evidence is conclusive. `Http`, a bare status,
+        // and its mirrored numeric code are the generic wire envelope, not a
+        // provider classification, so text fallbacks remain available there.
+        let retryability_classified = failure.retryability_is_classified();
+        let structurally_classified = !matches!(
+            failure.kind,
+            ProviderFailureKind::Unknown | ProviderFailureKind::Http
+        ) || failure.terminal_reason
+            != LlmTerminalReason::ProviderError
+            || failure
+                .code
+                .as_deref()
+                .is_some_and(|code| code.parse::<u16>().is_err())
+            || retryability_classified;
         if let Some(status) = failure.status.or_else(|| {
             failure
                 .code
@@ -95,25 +109,32 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
                 .and_then(|code| code.parse::<u16>().ok())
         }) {
             failure.status = Some(status);
+            let generic_kind = matches!(
+                failure.kind,
+                ProviderFailureKind::Unknown | ProviderFailureKind::Http
+            );
             if failure.kind == ProviderFailureKind::Unknown {
                 failure.kind = ProviderFailureKind::Http;
             }
-            failure.retryable = matches!(status, 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504);
-            if status == 429 {
+            if !retryability_classified {
+                failure.retryable = matches!(status, 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504);
+            }
+            if status == 429 && generic_kind {
                 // Provider-side throttling. `Quota` + `retryable: true` is the
                 // combination `ProviderHandle`'s retry ladder defers to as a
                 // throttle; hard quota exhaustion (the text markers below)
                 // downgrades to `retryable: false`.
                 failure.kind = ProviderFailureKind::Quota;
-            } else if matches!(status, 401 | 403) {
+            } else if matches!(status, 401 | 403) && generic_kind {
                 failure.kind = ProviderFailureKind::Auth;
-            } else if matches!(status, 400 | 413 | 422) {
+            } else if matches!(status, 400 | 413 | 422) && generic_kind {
                 failure.kind = ProviderFailureKind::Validation;
             }
         } else if matches!(
             failure.kind,
             ProviderFailureKind::Transport | ProviderFailureKind::Timeout
-        ) {
+        ) && !retryability_classified
+        {
             failure.retryable = true;
         }
 
@@ -128,7 +149,10 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
                 .unwrap_or_default()
         )
         .to_ascii_lowercase();
-        if is_context_overflow_text(&haystack) {
+        // Raw-text overflow matching is a compatibility fallback only. It may
+        // classify an otherwise unknown failure, but it must never reinterpret
+        // structured provider evidence.
+        if !structurally_classified && is_context_overflow_text(&haystack) {
             failure.kind = ProviderFailureKind::Validation;
             failure.retryable = false;
             failure.terminal_reason = LlmTerminalReason::ContextOverflow;
@@ -145,28 +169,37 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
             && !haystack.contains("quota exceeded for metric")
             && !haystack.contains("retrydelay")
             && !haystack.contains("please retry");
-        if haystack.contains("insufficient_quota")
-            || haystack.contains("usage_limit_reached")
-            || haystack.contains("usage_not_included")
-            || haystack.contains("credit balance is too low")
-            || google_hard_quota
-        {
-            failure.kind = ProviderFailureKind::Quota;
-            failure.retryable = false;
+        if !structurally_classified {
+            if haystack.contains("insufficient_quota")
+                || haystack.contains("usage_limit_reached")
+                || haystack.contains("usage_not_included")
+                || haystack.contains("credit balance is too low")
+                || google_hard_quota
+            {
+                failure.kind = ProviderFailureKind::Quota;
+                failure.retryable = false;
+            }
+            if haystack.contains("content_filter")
+                || haystack.contains("prohibited_content")
+                || haystack.contains("safety")
+                || haystack.contains("sensitive")
+            {
+                failure.terminal_reason = LlmTerminalReason::ContentFilter;
+            }
+            if haystack.contains("model_not_found")
+                || haystack.contains("unsupported model")
+                || haystack.contains("does not exist")
+            {
+                failure.kind = ProviderFailureKind::Unsupported;
+                failure.retryable = false;
+            }
         }
-        if haystack.contains("content_filter")
-            || haystack.contains("prohibited_content")
-            || haystack.contains("safety")
-            || haystack.contains("sensitive")
+        if !structurally_classified
+            && failure.kind == ProviderFailureKind::Unknown
+            && failure.terminal_reason == LlmTerminalReason::ProviderError
         {
-            failure.terminal_reason = LlmTerminalReason::ContentFilter;
-        }
-        if haystack.contains("model_not_found")
-            || haystack.contains("unsupported model")
-            || haystack.contains("does not exist")
-        {
-            failure.kind = ProviderFailureKind::Unsupported;
-            failure.retryable = false;
+            // Ambiguous text is not enough evidence to terminate the turn.
+            failure.retryable = true;
         }
         failure
     }

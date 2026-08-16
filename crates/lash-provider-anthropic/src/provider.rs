@@ -79,6 +79,7 @@ impl Provider for AnthropicProvider {
         let request_body_bytes = serde_json::to_vec(&body).map_err(|err| {
             LlmTransportError::new(format!("Failed to serialize Anthropic body: {err}"))
                 .with_kind(ProviderFailureKind::Validation)
+                .retryable(false)
         })?;
         emit_provider_request_trace(
             provider_trace.as_ref(),

@@ -151,7 +151,7 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
         .expect("error-path provider request trace");
     assert_auth_material_absent(&error_event);
     assert_eq!(
-        error.request_body.as_deref(),
+        error.request_body.as_ref().map(|body| body.as_str()),
         Some(error_event.raw.as_str())
     );
     let error_capture = format!("{error:?}");

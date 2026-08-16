@@ -187,15 +187,19 @@ pub(crate) async fn complete(
         .await
         .unwrap_or_default();
         let message = format!("{} with {}", endpoint.request_failed_prefix(), status);
-        // Retryability is decided centrally by the provider failure
-        // classifier from the attached HTTP status; no inline override here.
-        return Err(http_error_envelope(
+        // Preserve the provider's typed error code before the shared status
+        // classifier runs; exact overflow codes are authoritative.
+        let mut failure = http_error_envelope(
             message,
             status,
             headers,
-            text,
+            text.clone(),
             Some(request_body_for_error),
-        ));
+        );
+        if let Ok(value) = serde_json::from_str::<Value>(&text) {
+            failure = classify_openai_error(&value, failure);
+        }
+        return Err(failure);
     }
 
     let provider_request_id = first_header_value(&resp.headers, "x-request-id").map(str::to_string);
@@ -250,7 +254,7 @@ pub(crate) async fn complete(
         Err(mut failure) => {
             let response_metadata = capture.into_metadata();
             if failure.request_body.is_none() {
-                failure.request_body = Some(request_body_for_error.clone());
+                failure.request_body = Some(Box::new(request_body_for_error.clone()));
             }
             if let Some(partial) = failure.partial_response.as_deref_mut()
                 && partial.request_body.is_none()

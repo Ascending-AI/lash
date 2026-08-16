@@ -493,7 +493,7 @@ impl RuntimeTurnDriver<'_> {
                                 raw: error.raw.map(|raw| *raw),
                                 code: error.code,
                                 terminal_reason: error.terminal_reason,
-                                request_body: error.request_body,
+                                request_body: error.request_body.map(|body| *body),
                                 partial_response: error.partial_response,
                             });
                         }
@@ -649,7 +649,7 @@ impl RuntimeTurnDriver<'_> {
                                 raw: e.raw.map(|raw| *raw),
                                 code: e.code,
                                 terminal_reason: e.terminal_reason,
-                                request_body: e.request_body,
+                                request_body: e.request_body.map(|body| *body),
                                 partial_response: e.partial_response,
                             });
                         }

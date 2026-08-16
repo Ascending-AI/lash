@@ -8,6 +8,22 @@ use sha2::{Digest, Sha256};
 const GEMINI_FILES_UPLOAD_URL: &str =
     "https://generativelanguage.googleapis.com/upload/v1beta/files";
 
+fn upload_http_error_envelope(
+    message: impl Into<String>,
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: impl Into<String>,
+) -> LlmTransportError {
+    let failure = http_error_envelope(message, status, headers, body, None);
+    if status == 413 {
+        failure
+            .with_kind(ProviderFailureKind::Validation)
+            .retryable(false)
+    } else {
+        failure
+    }
+}
+
 impl GoogleOAuthProvider {
     fn upload_cache_key(
         credential_scope_seed: &str,
@@ -133,12 +149,11 @@ impl GoogleOAuthProvider {
             )
             .await
             .unwrap_or_default();
-            return Err(http_error_envelope(
+            return Err(upload_http_error_envelope(
                 format!("Gemini Files upload start failed with {}", status),
                 status,
                 headers,
                 body,
-                None,
             ));
         }
 
@@ -147,6 +162,7 @@ impl GoogleOAuthProvider {
                 LlmTransportError::new(
                     "Gemini Files upload start response missing x-goog-upload-url header",
                 )
+                .retryable(false)
             })?
             .to_string();
 
@@ -174,12 +190,11 @@ impl GoogleOAuthProvider {
             )
             .await
             .unwrap_or_default();
-            return Err(http_error_envelope(
+            return Err(upload_http_error_envelope(
                 format!("Gemini Files upload finalize failed with {}", status),
                 status,
                 headers,
                 body,
-                None,
             ));
         }
 
@@ -273,6 +288,7 @@ mod error_detail_tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use lash_core::provider::{DefaultProviderFailureClassifier, ProviderFailureClassifier};
     use lash_llm_transport::{LlmHttpBody, LlmHttpResponse};
     use lash_sansio::sync::MutexExt;
 
@@ -333,6 +349,16 @@ mod error_detail_tests {
     }
 
     #[tokio::test]
+    async fn upload_missing_url_is_explicitly_non_retryable() {
+        let error = upload_with(vec![response(200, Vec::new(), "")]).await;
+
+        assert!(!error.retryable);
+        assert!(error.retryability_is_classified());
+        let failure = DefaultProviderFailureClassifier.classify(error);
+        assert!(!failure.retryable);
+    }
+
+    #[tokio::test]
     async fn upload_finalize_error_surfaces_api_message() {
         let error = upload_with(vec![
             response(
@@ -351,5 +377,21 @@ mod error_detail_tests {
         ])
         .await;
         assert!(error.message.contains("upload finalize detail"));
+    }
+
+    #[tokio::test]
+    async fn upload_413_request_too_large_is_non_retryable_validation() {
+        let error = upload_with(vec![response(
+            413,
+            Vec::new(),
+            r#"{"error":{"message":"Request too large: attachment exceeds upload limit"}}"#,
+        )])
+        .await;
+
+        let failure = DefaultProviderFailureClassifier.classify(error);
+
+        assert_eq!(failure.kind, ProviderFailureKind::Validation);
+        assert!(!failure.retryable);
+        assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
     }
 }

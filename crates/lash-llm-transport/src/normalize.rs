@@ -467,7 +467,10 @@ mod tests {
             err.raw.as_deref().map(String::as_str),
             Some(r#"{"error":"rate limited"}"#)
         );
-        assert_eq!(err.request_body.as_deref(), Some(r#"{"model":"m"}"#));
+        assert_eq!(
+            err.request_body.as_ref().map(|body| body.as_str()),
+            Some(r#"{"model":"m"}"#)
+        );
         assert_eq!(
             err.retry_after,
             Some(std::time::Duration::from_secs(7)),
