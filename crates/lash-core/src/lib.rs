@@ -105,6 +105,7 @@ pub mod facade_support {
         registry.resolve_catalog_contract(name)
     }
 
+    pub use crate::attachments::AttachmentGcFence;
     pub use crate::attachments::AttachmentProducer;
     pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;
@@ -458,8 +459,9 @@ pub enum EffectJournalAddressing {
 
 // Re-exports
 pub use attachments::{
-    AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
-    AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
+    AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore,
+    AttachmentStoreError, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
+    StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence,
@@ -923,10 +925,11 @@ pub(crate) use session_model::RuntimeSessionPolicy;
 pub use session_model::{NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
-    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseClaimNonce, LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence,
-    SelectedQueuedWorkClaimOutcome, SessionAdmission, SessionBinding, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
+    AttachmentManifestEntry, AttachmentWriteFence, BlobRef, GcReport, LeaseClaimNonce,
+    LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SelectedQueuedWorkClaimOutcome,
+    SessionAdmission, SessionBinding, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
     SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
     StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
