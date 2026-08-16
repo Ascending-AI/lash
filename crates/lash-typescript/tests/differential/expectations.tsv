@@ -146,18 +146,18 @@ opus	144	accept	"({a:1}).a"	"1"	-
 opus	145	accept	"({a:1}).b"	"undefined"	-
 opus	146	accept	"({a:1})['a']"	"1"	-
 opus	147	accept	"void 0"	"undefined"	-
-opus	148	reject	"2 ** 3"	"8"	TS_EXPONENTIATION_UNSUPPORTED
-opus	149	reject	"1 & 3"	"1"	TS_BITWISE_UNSUPPORTED
-opus	150	reject	"1 | 2"	"3"	TS_BITWISE_UNSUPPORTED
-opus	151	reject	"1 ^ 3"	"2"	TS_BITWISE_UNSUPPORTED
-opus	152	reject	"~1"	"-2"	TS_BITWISE_UNSUPPORTED
-opus	153	reject	"1 << 2"	"4"	TS_BITWISE_UNSUPPORTED
-opus	154	reject	"8 >> 2"	"2"	TS_BITWISE_UNSUPPORTED
-opus	155	reject	"-8 >>> 2"	"1073741822"	TS_BITWISE_UNSUPPORTED
+opus	148	accept	"2 ** 3"	"8"	-
+opus	149	accept	"1 & 3"	"1"	-
+opus	150	accept	"1 | 2"	"3"	-
+opus	151	accept	"1 ^ 3"	"2"	-
+opus	152	accept	"~1"	"-2"	-
+opus	153	accept	"1 << 2"	"4"	-
+opus	154	accept	"8 >> 2"	"2"	-
+opus	155	accept	"-8 >>> 2"	"1073741822"	-
 opus	156	reject	"(1, 2)"	"2"	TS_SEQUENCE_UNSUPPORTED
-opus	157	reject	"'a' in ({a:1})"	"true"	TS_IN_OPERATOR_UNSUPPORTED
-opus	158	reject	"1 instanceof Object"	"false"	TS_INSTANCEOF_UNSUPPORTED
-opus	159	reject	"delete ({a:1}).a"	"true"	TS_DELETE_UNSUPPORTED
+opus	157	accept	"'a' in ({a:1})"	"true"	-
+opus	158	accept	"1 instanceof Object"	"false"	-
+opus	159	accept	"delete ({a:1}).a"	"true"	-
 opus	160	accept	"true ? 1 : 2"	"1"	-
 opus	161	accept	"(() => 1)()"	"1"	-
 opus	162	accept	"((x: number) => x + 1)(1)"	"2"	-
@@ -344,3 +344,34 @@ findings	55	accept	"'abc'.replace('', '-')"	"-abc"	-
 findings	56	accept	"'café'.replaceAll('', '.')"	".c.a.f.é."	-
 findings	57	accept	"'ab'.replaceAll('', '[$`|$\\']')"	"[|ab]a[a|b]b[ab|]"	-
 findings	58	reject	"'ab'.map((x) => x)"	"ERR<TypeError>"	TS_METHOD_UNSUPPORTED
+findings	59	accept	"(() => { const {a, n:[b=4], ...r}={a:1,n:[undefined],z:3}; return `${a}|${b}|${r.z}`; })()"	"1|4|3"	-
+findings	60	accept	"(() => { const [a,,...r]=[1,2,3,4]; return `${a}|${r.join(',')}`; })()"	"1|3,4"	-
+findings	61	accept	"(() => { let a=0,b=0; [a,b]=[3,4]; return `${a}|${b}`; })()"	"3|4"	-
+findings	62	accept	"(() => { let n=0; const a=null; const v=a?.b[n++].c; return `${v}|${n}`; })()"	"undefined|0"	-
+findings	63	accept	"(() => { const f=undefined; return f?.(); })()"	"undefined"	-
+findings	64	accept	"(() => { let i=0; const a=[2]; const old=a[i++]++; a[0] **= 3; return `${old}|${a[0]}|${i}`; })()"	"2|27|1"	-
+findings	65	accept	"(() => { let n=0; n ||= 4; n &&= 6; n ??= 8; return n; })()"	"6"	-
+findings	66	accept	"(() => { let n=2; return `${n++}|${++n}|${n--}|${--n}`; })()"	"2|4|4|2"	-
+findings	67	accept	"(() => [...'ab','c'].join(''))()"	"abc"	-
+findings	68	accept	"(() => { function f(a,b,c){return `${a}${b}${c}`;} return f(...['a','b'],'c'); })()"	"abc"	-
+findings	69	accept	"(() => Object.keys({x:1,...{2:'n',y:2},['z']:3}).join(','))()"	"2,x,y,z"	-
+findings	70	accept	"(() => { function f(a=1,b=a+1,...r){return `${a}|${b}|${r.join(',')}`;} return f(undefined,undefined,3,4); })()"	"1|2|3,4"	-
+findings	71	accept	"(() => { try { throw {x:3}; } catch ({x}) { return x; } })()"	"3"	-
+findings	72	accept	"(() => { try { throw 3; } catch { return 4; } })()"	"4"	-
+findings	73	accept	"(() => { const e=new TypeError('bad',{cause:7}); return `${e.name}|${e.message}|${e.cause}`; })()"	"TypeError|bad|7"	-
+findings	74	accept	"(() => { const e=new RangeError(); return `${e instanceof RangeError}|${e instanceof Error}|${[] instanceof Array}`; })()"	"true|true|true"	-
+findings	75	accept	"(() => { let out=''; switch(2){case 1:out+='a';break;default:out+='d';case 2:out+='b';case 3:out+='c';} return out; })()"	"bc"	-
+findings	76	accept	"(() => { let out=''; for(const k in {b:1,1:2,a:3}) out+=k; return out; })()"	"1ba"	-
+findings	77	accept	"(() => `${'0' in [1]}|${'a' in {a:1}}` )()"	"true|true"	-
+findings	78	accept	"(() => { let i=0; do { i++; } while(i<2); return i; })()"	"2"	-
+findings	79	accept	"(() => `${-1 >>> 1}|${2147483647 << 1}|${~0}|${5 & 3}|${5 | 2}|${5 ^ 1}`)()"	"2147483647|-2|-1|1|7|4"	-
+findings	80	accept	"(() => [...[4,5].entries()].map(x=>x.join(':')).join(','))()"	"0:4,1:5"	-
+findings	81	accept	"(() => { function f(){ const before=x; if(true){var x=3;} return `${before}|${x}`; } return f(); })()"	"undefined|3"	-
+findings	82	accept	"(() => { const k='x'; const n=2; const o={n,[k]:1,f(){return this;}}; return `${o.n}|${o.x}`; })()"	"2|1"	-
+findings	83	accept	"(() => 0xff + 0o10 + 0b10 + 1_000)()"	"1265"	-
+findings	84	accept	"(() => { 'use strict'; return 3; })()"	"3"	-
+findings	85	accept	"(() => { function f(){ return this; } return f(); })()"	"undefined"	-
+findings	86	accept	"(() => { const o={a:1,b:2}; const p=o; const ok=delete o.a; return `${ok}|${'a' in p}|${p.b}`; })()"	"true|false|2"	-
+findings	87	accept	"(() => [0,1,2].filter(Boolean).join(','))()"	"1,2"	-
+findings	88	accept	"(() => { const [a,b]=Array.from([7,8].values()); return `${a}|${b}`; })()"	"7|8"	-
+findings	89	accept	"(() => { const m=new Map([['a',1]]); return Object.fromEntries(m.entries()).a; })()"	"1"	-

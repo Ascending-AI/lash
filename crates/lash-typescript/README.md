@@ -6,13 +6,17 @@ which lowers into `lashlang::Program`. Runtime type annotations are erased.
 
 ## Dialect contract
 
-The accepted v1 surface is deliberately bounded: `let`/`const`, functions and
-arrows with immutable captures, blocks, `if`, `while`, the canonical
-`for (let i = start; i < end; i++)` form, `for...of`, `break`, `continue`,
-`try`/`catch`/`finally`, `throw`, `return`, arrays, records, field/index access
-and assignment, calls, primitive unary/arithmetic/comparison/equality/logical
-operators, conditionals, templates, array/string `.length`, the standard-library
-inventory below, and free `console.log` calls. `console.log`
+The accepted v1 surface is deliberately bounded, but includes ordinary model-authored
+constructs: `let`/`const`/`var` (including multiple declarations), functions and
+async helpers, blocks, `if`, `while`, `do...while`, the canonical
+`for (let i = start; i < end; i++)` form, `for...of`, `for...in`, `switch`,
+`break`, `continue`, `try`/`catch`/`finally`, `throw`, `return`, destructuring in
+every binding and assignment position, defaults/rest, optional chains, array/call/object
+spread, compound/logical assignment, update operators, arrays, records, and calls.
+Arithmetic includes exponentiation and ECMA `ToInt32`/`ToUint32` bitwise and shift
+operators. `in` is an own-property query because dialect objects have no prototypes;
+`instanceof` accepts the Error family, Map, Set, Date, RegExp, Array, and Object.
+`console.log`
 accepts any arity and prints its arguments after ECMA `ToString` conversion,
 joined by one space; lexical bindings named `console` take precedence.
 Accepted operations follow ECMA-262 coercion, truthiness, operand-return, and
@@ -21,9 +25,10 @@ erased after parsing or used for signature/type work.
 
 Cells are scripts and may use top-level `await` for tools, process handles,
 `sleep`, `Promise.all`, and `Promise.allSettled`; `waitSignal` is
-process-only and rejects at the cell top level by name. General async
-function authoring remains a named rejection; the one async function literal
-surface is the `run` field of a top-level literal `defineProcess` definition.
+process-only and rejects at the cell top level by name. Async functions and arrows
+are accepted when every awaited value is transitively grounded in this agent surface;
+`await Promise.all(xs.map(async x => ...))` uses the durable sequential async-map
+driver. Promise chaining, synthetic promises, `race`, and `any` remain named rejects.
 Tool calls require `await` and use explicit `typescript.tool` module paths;
 their prompt signatures return `Promise<T>`. Unknown module paths participate
 in the executor's deferred tool-resolution path.
@@ -55,20 +60,19 @@ This is a runtime-system constraint, not an alternate semantics.
 
 `Date.now()` and `Math.random()` are host effects, so their result is recorded
 at the same journal boundary as other effects and replay never samples the VM's
-clock or RNG. `new Date()` rejects with `TS_NEW_UNSUPPORTED`.
+clock or RNG. The Error family plus Map, Set, Date, and RegExp are the explicit
+exceptions to the general `new` rejection.
 
 Everything outside the accepted surface is rejected with a stable `TS_*`
 diagnostic. Most rejection is static; the deviation register names every
 shape-dependent runtime rejection. The executable inventories in
 `tests/rejections.rs`, `tests/structural_contract.rs`, and the checked-in Node
 differential suite under `tests/differential/` are the source of truth. In
-particular, v1 excludes classes, generators, general async functions, `var`,
-destructuring, `for...in` and non-canonical classic `for` forms, modules/imports, JSX, enums, namespaces,
-decorators, `eval`/`Function`, prototype access, accessors, methods, regular
-expressions, BigInt, spread, optional chaining, compound assignment operators
-(`x += 1` and `a[0] += 5` alike reject with
-`TS_ASSIGNMENT_OPERATOR_UNSUPPORTED`), and operators not represented by the
-accepted VM semantics. Identifiers beginning with `__typescript_` are reserved for the
+particular, v1 excludes classes, generators, non-canonical classic `for` forms,
+modules/imports, JSX, enums, namespaces, decorators, `eval`/`Function`, prototype
+access, accessors, regex literals, BigInt, sequence expressions, labels, `for await`,
+and arbitrary constructors or `instanceof` right-hand sides. Identifiers beginning
+with `__typescript_` are reserved for the
 lowerer's generated bindings and reject with `TS_RESERVED_IDENTIFIER`.
 Mutually recursive function declarations reject with
 `TS_MUTUAL_RECURSION_UNSUPPORTED`; a function *expression* may still be named
@@ -135,10 +139,9 @@ language semantics:
 - Cyclic heap objects are rejected at durable capture. Shared acyclic object
   identity is preserved byte-for-byte. Cycle-capable durable graph encoding is
   deferred; the front-end does not silently copy a cycle.
-- Mutable lexical captures reject with `TS_MUTABLE_CAPTURE_UNSUPPORTED` until
-  durable lexical cells exist. Both captured reads and captured writes take the
-  same rejection path. Immutable captures and mutation through captured object
-  references are supported.
+- Captures are by value. A closure may read a `let` (including a classic-for
+  iteration value), but assigning to a captured lexical binding still rejects
+  with `TS_MUTABLE_CAPTURE_UNSUPPORTED` until durable lexical cells exist.
 - The host boundary is JSON-shaped: object properties whose value is
   `undefined` are omitted and array elements become `null`; incoming JSON
   cannot manufacture `undefined`.
@@ -157,6 +160,19 @@ language semantics:
   Negative and other non-index writes would create named object properties and
   reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; neither path mutates an
   element.
+- Deleting an object field preserves aliases and returns the ECMA boolean.
+  Deleting a present dense-array index would create a hole, so it rejects at
+  runtime with `TS_DELETE_ARRAY_INDEX_UNSUPPORTED` and directs the author to
+  `splice(index, 1)`.
+- Async array callbacks run sequentially in v1
+  (`TS_ASYNC_MAP_SEQUENTIAL_V1`): result order matches Node, while callback
+  interleaving and shared-mutation order can differ.
+- Direct `globalThis.name` reads, top-level writes, nested-path mutation,
+  membership, and deletion share the same durable session slots as top-level
+  bindings. A direct assignment
+  to `globalThis.name` from inside a function rejects until the runtime exposes
+  a root-global set operation; pass a session-state object and mutate its nested
+  fields instead.
 - `console.log` is host-defined rather than ECMA-262, and prints ECMA
   `ToString` of each argument. Node's inspector formatting is not reproduced:
   `console.log({a: 1})` prints `[object Object]` where Node prints `{ a: 1 }`.
@@ -171,10 +187,32 @@ language semantics:
 No other semantic deviation is intentionally accepted for an operation in the
 surface below.
 
+## Syntax, iteration, and Node traps
+
+SWC parses modern TypeScript syntax, including ASI, comments, trailing commas,
+Unicode escapes, numeric separators, and hexadecimal/octal/binary literals.
+Annotations, interfaces, type aliases, generics, `as`, `satisfies`, and non-null
+assertions are erased. Enums, decorators, and namespaces are parsed but reject
+as `TS_ENUM_UNSUPPORTED`, `TS_DECORATOR_UNSUPPORTED`, and
+`TS_NAMESPACE_UNSUPPORTED`. `"use strict"` is an accepted no-op; functions see
+`this` as `undefined`, top-level `this` rejects, and `arguments` rejects with a
+rest-parameter replacement.
+
+Iterator-returning `.entries()`, `.keys()`, and `.values()` calls are accepted
+only when consumed directly by `for...of`, spread, `Array.from`, `new Map`/`Set`,
+or `Object.fromEntries`; bind `[...expr]` when the values must outlive that sink.
+Property enumeration has one order everywhere: integer-like keys first, then
+other strings in insertion order.
+
+The dialect intentionally reproduces these frequently surprising Node results:
+`arr[-1]` is `undefined`; `typeof null` is `"object"`; `Object.keys(new Map())`
+and `{...new Map()}` are empty; object string coercion is `"[object Object]"`;
+string `.length` counts UTF-16 units while `for...of` walks code points.
+
 ## Standard-library inventory
 
-The v1 inventory contains 64 method names: 37 static methods and
-27 instance method names (with `toString`, `concat`, `includes`,
+The v1 inventory contains 65 method names: 37 static methods and
+28 instance method names (with `toString`, `concat`, `includes`,
 `indexOf`, and `lastIndexOf` shared by more than one receiver kind).
 
 `instance_method_inventory_matches_the_lowerer` pins the list below against
@@ -189,7 +227,7 @@ The shipped static methods are `Object.keys`, `values`, `entries`,
 `floor`, `log`, `log10`, `log2`, `round`, `sin`, `tan`, `trunc`, `max`, `min`,
 `pow`, `sqrt`, and `sign`.
 
-The shipped instance methods are `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, and `valueOf`. Missing methods reject with
+The shipped instance methods are `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `filter`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, and `valueOf`. Missing methods reject with
 `TS_METHOD_UNSUPPORTED` when the receiver is statically known and with the same
 named typed runtime failure when only its runtime type is known. Mutating array
 methods are deliberately absent; index assignment remains the supported
@@ -299,10 +337,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 345 rows, of which 272 are distinct
+The Node differential table carries 376 rows, of which 303 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of the 272 unique rows rather than of 345 distinct behaviours. Both counts
+that of the 303 unique rows rather than of 376 distinct behaviours. Both counts
 are pinned against the table by `committed_row_counts_match_the_register`, and
 the generator pins each lane's own row count, so neither this paragraph nor a
 lane can drift from the corpus in silence.

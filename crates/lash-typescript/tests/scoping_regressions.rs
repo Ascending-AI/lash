@@ -61,18 +61,17 @@ fn catch_body_declarations_shadow_enclosing_function_slots() {
 
 #[test]
 fn unresolved_reads_and_arguments_reject_before_execution() {
-    for source in [
-        "finish(someTypo);",
-        "function f(): number { return arguments.length; } finish(f());",
-    ] {
-        assert_eq!(
-            lash_typescript::compile(source)
-                .expect_err("unknown binding must reject")
-                .code,
-            lash_typescript::DiagnosticCode::UnknownBinding,
-            "{source}"
-        );
-    }
+    let typo =
+        lash_typescript::compile("finish(someTypo);").expect_err("unknown binding must reject");
+    assert_eq!(typo.code, lash_typescript::DiagnosticCode::UnknownBinding);
+    let arguments =
+        lash_typescript::compile("function f(): number { return arguments.length; } finish(f());")
+            .expect_err("arguments must direct authors to rest parameters");
+    assert_eq!(
+        arguments.code,
+        lash_typescript::DiagnosticCode::ThisUnsupported
+    );
+    assert!(arguments.message.contains("...rest"));
 }
 
 #[test]

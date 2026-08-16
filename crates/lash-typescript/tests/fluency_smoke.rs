@@ -272,13 +272,12 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         "#,
     ];
 
-    // The negative control. Destructuring is one of the shapes the prompt now
-    // names as rejected; if this ever links and runs, the hit list has stopped
+    // The negative control. Classes remain outside the executable dialect; if
+    // this ever links and runs, the hit list has stopped
     // measuring anything.
     let rejected_control = r#"
-        const source = { alpha: 1, beta: 2 };
-        const { alpha, beta } = source;
-        finish(alpha + beta);
+        class Pair { value = 3; }
+        finish(new Pair().value);
     "#;
 
     let environment = fluency_environment();
@@ -328,7 +327,7 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         "the control must produce exactly one hit, or the hit list is not measuring"
     );
     assert!(
-        control_hits[0].contains("TS_DESTRUCTURING_UNSUPPORTED"),
+        control_hits[0].contains("TS_CLASS_UNSUPPORTED"),
         "the control must be rejected for the documented reason: {control_hits:?}"
     );
 }

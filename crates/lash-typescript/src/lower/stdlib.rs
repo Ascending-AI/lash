@@ -86,6 +86,7 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "codePointAt",
     "concat",
     "endsWith",
+    "filter",
     "includes",
     "indexOf",
     "join",
@@ -121,6 +122,7 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
                 | "charCodeAt"
                 | "codePointAt"
                 | "concat"
+                | "filter"
                 | "endsWith"
                 | "includes"
                 | "indexOf"

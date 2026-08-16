@@ -41,6 +41,12 @@ impl Lowerer {
             ));
         };
         let items = self.lower_expr(object)?;
+        if function.is_async {
+            return Ok(LashExpr::BuiltinCall {
+                name: "__typescript_async_map".into(),
+                args: vec![items, self.lower_expr(callback)?],
+            });
+        }
         match function.params.len() {
             1 => Ok(LashExpr::Map {
                 items: Box::new(items),

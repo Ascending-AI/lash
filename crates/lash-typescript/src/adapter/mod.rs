@@ -43,6 +43,10 @@ pub(crate) enum Stmt {
         test: Expr,
         body: Box<Stmt>,
     },
+    DoWhile {
+        body: Box<Stmt>,
+        test: Expr,
+    },
     For {
         init: Option<Box<Stmt>>,
         test: Option<Expr>,
@@ -50,9 +54,20 @@ pub(crate) enum Stmt {
         body: Box<Stmt>,
     },
     ForOf {
-        binding: String,
+        pattern: Pattern,
+        kind: Option<VarKind>,
         iterable: Expr,
         body: Box<Stmt>,
+    },
+    ForIn {
+        pattern: Pattern,
+        kind: Option<VarKind>,
+        object: Expr,
+        body: Box<Stmt>,
+    },
+    Switch {
+        discriminant: Expr,
+        cases: Vec<SwitchCase>,
     },
     Break,
     Continue,
@@ -66,26 +81,67 @@ pub(crate) enum Stmt {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VarKind {
+    Var,
     Let,
     Const,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Var {
-    pub(crate) name: String,
+    pub(crate) pattern: Pattern,
     pub(crate) init: Option<Expr>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Catch {
-    pub(crate) binding: String,
+    pub(crate) binding: Option<Pattern>,
     pub(crate) body: Vec<Stmt>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SwitchCase {
+    pub(crate) test: Option<Expr>,
+    pub(crate) consequent: Vec<Stmt>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum Pattern {
+    Ident(String),
+    Rest(Box<Pattern>),
+    Member {
+        object: Box<Expr>,
+        property: MemberProperty,
+    },
+    Assign {
+        target: Box<Pattern>,
+        default: Box<Expr>,
+    },
+    Array {
+        elements: Vec<Option<Pattern>>,
+        rest: Option<Box<Pattern>>,
+    },
+    Object {
+        properties: Vec<ObjectPatternProperty>,
+        rest: Option<Box<Pattern>>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ObjectPatternProperty {
+    pub(crate) key: PropertyKey,
+    pub(crate) value: Pattern,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum PropertyKey {
+    Static(String),
+    Computed(Box<Expr>),
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Function {
     pub(crate) name: Option<String>,
-    pub(crate) params: Vec<String>,
+    pub(crate) params: Vec<Pattern>,
     pub(crate) body: FunctionBody,
     pub(crate) is_async: bool,
 }
@@ -104,10 +160,12 @@ pub(crate) enum Expr {
     Number(f64),
     String(String),
     Ident(String),
-    Array(Vec<Expr>),
-    Object(Vec<(String, Expr)>),
+    This,
+    Array(Vec<ArrayElement>),
+    Object(Vec<ObjectProperty>),
     Assign {
         target: AssignTarget,
+        op: AssignOp,
         value: Box<Expr>,
     },
     Member {
@@ -140,12 +198,55 @@ pub(crate) enum Expr {
     Function(Function),
     Call {
         callee: Box<Expr>,
-        args: Vec<Expr>,
+        args: Vec<CallArg>,
+    },
+    New {
+        constructor: String,
+        args: Vec<CallArg>,
+    },
+    OptionalChain {
+        base: Box<Expr>,
+        operations: Vec<OptionalOperation>,
     },
     Await(Box<Expr>),
     Update {
-        name: String,
+        target: AssignTarget,
         delta: f64,
+        prefix: bool,
+    },
+    Delete {
+        object: Box<Expr>,
+        property: MemberProperty,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ArrayElement {
+    Value(Expr),
+    Spread(Expr),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ObjectProperty {
+    KeyValue(PropertyKey, Expr),
+    Spread(Expr),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum CallArg {
+    Value(Expr),
+    Spread(Expr),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum OptionalOperation {
+    Member {
+        property: MemberProperty,
+        optional: bool,
+    },
+    Call {
+        args: Vec<CallArg>,
+        optional: bool,
     },
 }
 
@@ -156,6 +257,14 @@ pub(crate) enum AssignTarget {
         object: Box<Expr>,
         property: MemberProperty,
     },
+    Pattern(Box<Pattern>),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum AssignOp {
+    Assign,
+    Binary(BinaryOp),
+    Logical(LogicalOp),
 }
 
 #[derive(Clone, Debug)]
@@ -171,15 +280,25 @@ pub(crate) enum UnaryOp {
     Not,
     TypeOf,
     Void,
+    BitNot,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BinaryOp {
     Add,
     Subtract,
     Multiply,
     Divide,
     Remainder,
+    Exponent,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
+    ShiftRightUnsigned,
+    In,
+    InstanceOf,
     StrictEqual,
     StrictNotEqual,
     LooseEqual,
@@ -347,9 +466,11 @@ fn parse_source(source: &str) -> Result<Program, Diagnostic> {
         None,
     );
     let mut parser = Parser::new_from(lexer);
-    let module = parser.parse_module().map_err(parser_diagnostic)?;
+    let module = parser
+        .parse_module()
+        .map_err(|error| parser_diagnostic(error, source))?;
     if let Some(error) = parser.take_errors().into_iter().next() {
-        return Err(parser_diagnostic(error));
+        return Err(parser_diagnostic(error, source));
     }
     Adapter::default()
         .convert_module_items(&module.body)
@@ -419,8 +540,11 @@ impl Adapter {
             stmt,
             swc::Stmt::If(_)
                 | swc::Stmt::While(_)
+                | swc::Stmt::DoWhile(_)
                 | swc::Stmt::For(_)
+                | swc::Stmt::ForIn(_)
                 | swc::Stmt::ForOf(_)
+                | swc::Stmt::Switch(_)
                 | swc::Stmt::Try(_)
                 | swc::Stmt::Decl(_)
         ) {
@@ -465,15 +589,12 @@ impl Adapter {
                     .handler
                     .as_ref()
                     .map(|handler| {
-                        let Some(swc::Pat::Ident(binding)) = handler.param.as_ref() else {
-                            return Err(Diagnostic::new(
-                                DiagnosticCode::EmptyCatchBindingUnsupported,
-                                "catch requires one identifier binding",
-                                Some(source_span(handler.span)),
-                            ));
-                        };
                         Ok(Catch {
-                            binding: binding.id.sym.to_string(),
+                            binding: handler
+                                .param
+                                .as_ref()
+                                .map(|pattern| self.convert_pattern(pattern))
+                                .transpose()?,
                             body: self.convert_statements(&handler.body.stmts)?,
                         })
                     })
@@ -493,22 +614,33 @@ impl Adapter {
                 ));
             }
             swc::Stmt::Labeled(_) => {
-                return Err(reject(DiagnosticCode::LabelUnsupported, "labels", span));
-            }
-            swc::Stmt::Switch(_) => {
-                return Err(reject(
-                    DiagnosticCode::SwitchUnsupported,
-                    "switch statements",
+                return Err(Diagnostic::new(
+                    DiagnosticCode::LabelUnsupported,
+                    "Unsupported: labeled break/continue. Extract the labeled region into a helper function and return.",
                     span,
                 ));
             }
-            swc::Stmt::DoWhile(_) => {
-                return Err(reject(
-                    DiagnosticCode::DoWhileUnsupported,
-                    "do/while statements",
-                    span,
-                ));
-            }
+            swc::Stmt::Switch(stmt) => Stmt::Switch {
+                discriminant: self.convert_expr(&stmt.discriminant)?,
+                cases: stmt
+                    .cases
+                    .iter()
+                    .map(|case| {
+                        Ok(SwitchCase {
+                            test: case
+                                .test
+                                .as_deref()
+                                .map(|test| self.convert_expr(test))
+                                .transpose()?,
+                            consequent: self.convert_statements(&case.cons)?,
+                        })
+                    })
+                    .collect::<Result<_, Diagnostic>>()?,
+            },
+            swc::Stmt::DoWhile(stmt) => Stmt::DoWhile {
+                body: Box::new(self.convert_stmt(&stmt.body)?),
+                test: self.convert_expr(&stmt.test)?,
+            },
             swc::Stmt::For(stmt) => Stmt::For {
                 init: stmt
                     .init
@@ -534,12 +666,14 @@ impl Adapter {
                     .transpose()?,
                 body: Box::new(self.convert_stmt(&stmt.body)?),
             },
-            swc::Stmt::ForIn(_) => {
-                return Err(reject(
-                    DiagnosticCode::ForInUnsupported,
-                    "for/in statements",
-                    span,
-                ));
+            swc::Stmt::ForIn(stmt) => {
+                let (pattern, kind) = self.convert_for_head(&stmt.left, span)?;
+                Stmt::ForIn {
+                    pattern,
+                    kind,
+                    object: self.convert_expr(&stmt.right)?,
+                    body: Box::new(self.convert_stmt(&stmt.body)?),
+                }
             }
             swc::Stmt::ForOf(stmt) => {
                 if stmt.is_await {
@@ -549,29 +683,10 @@ impl Adapter {
                         span,
                     ));
                 }
-                let swc::ForHead::VarDecl(decl) = &stmt.left else {
-                    return Err(reject(
-                        DiagnosticCode::ForOfUnsupported,
-                        "for/of assignment targets",
-                        span,
-                    ));
-                };
-                if decl.decls.len() != 1 || decl.kind == swc::VarDeclKind::Var {
-                    return Err(reject(
-                        DiagnosticCode::ForOfUnsupported,
-                        "for/of requires one let or const binding",
-                        span,
-                    ));
-                }
-                let swc::Pat::Ident(binding) = &decl.decls[0].name else {
-                    return Err(reject(
-                        DiagnosticCode::DestructuringUnsupported,
-                        "for/of destructuring",
-                        span,
-                    ));
-                };
+                let (pattern, kind) = self.convert_for_head(&stmt.left, span)?;
                 Stmt::ForOf {
-                    binding: binding.id.sym.to_string(),
+                    pattern,
+                    kind,
                     iterable: self.convert_expr(&stmt.right)?,
                     body: Box::new(self.convert_stmt(&stmt.body)?),
                 }
@@ -594,7 +709,11 @@ impl Adapter {
                 "decorators",
                 span,
             )),
-            swc::Decl::Class(_) => Err(reject(DiagnosticCode::ClassUnsupported, "classes", span)),
+            swc::Decl::Class(_) => Err(Diagnostic::new(
+                DiagnosticCode::ClassUnsupported,
+                "Unsupported: classes. Use functions and plain objects; for coded errors use Object.assign(new Error(message), {code}).",
+                span,
+            )),
             swc::Decl::TsEnum(_) => Err(reject(
                 DiagnosticCode::EnumUnsupported,
                 "TypeScript enums",
@@ -619,30 +738,13 @@ impl Adapter {
                         span,
                     ));
                 }
-                let kind = match decl.kind {
-                    swc::VarDeclKind::Let => VarKind::Let,
-                    swc::VarDeclKind::Const => VarKind::Const,
-                    swc::VarDeclKind::Var => {
-                        return Err(reject(
-                            DiagnosticCode::VarUnsupported,
-                            "var declarations",
-                            span,
-                        ));
-                    }
-                };
+                let kind = convert_var_kind(decl.kind);
                 let declarations = decl
                     .decls
                     .iter()
                     .map(|decl| {
-                        let swc::Pat::Ident(name) = &decl.name else {
-                            return Err(reject(
-                                DiagnosticCode::DestructuringUnsupported,
-                                "destructuring declarations",
-                                Some(source_span(decl.span)),
-                            ));
-                        };
                         Ok(Var {
-                            name: name.id.sym.to_string(),
+                            pattern: self.convert_pattern(&decl.name)?,
                             init: decl
                                 .init
                                 .as_deref()
@@ -678,6 +780,150 @@ impl Adapter {
         }
     }
 
+    fn convert_for_head(
+        &self,
+        head: &swc::ForHead,
+        span: Option<SourceSpan>,
+    ) -> Result<(Pattern, Option<VarKind>), Diagnostic> {
+        match head {
+            swc::ForHead::VarDecl(decl) => {
+                let [declaration] = decl.decls.as_slice() else {
+                    return Err(reject(
+                        DiagnosticCode::ForOfUnsupported,
+                        "for-in/of heads with multiple declarations",
+                        span,
+                    ));
+                };
+                if declaration.init.is_some() {
+                    return Err(reject(
+                        DiagnosticCode::ForOfUnsupported,
+                        "for-in/of head initializers",
+                        span,
+                    ));
+                }
+                Ok((
+                    self.convert_pattern(&declaration.name)?,
+                    Some(convert_var_kind(decl.kind)),
+                ))
+            }
+            swc::ForHead::Pat(pattern) => Ok((self.convert_pattern(pattern)?, None)),
+            swc::ForHead::UsingDecl(_) => Err(reject(
+                DiagnosticCode::UsingUnsupported,
+                "using declarations in for-in/of heads",
+                span,
+            )),
+        }
+    }
+
+    fn convert_pattern(&self, pattern: &swc::Pat) -> Result<Pattern, Diagnostic> {
+        self.with_expression_depth(Some(source_span(pattern.span())), || {
+            self.convert_pattern_inner(pattern)
+        })
+    }
+
+    fn convert_pattern_inner(&self, pattern: &swc::Pat) -> Result<Pattern, Diagnostic> {
+        let span = Some(source_span(pattern.span()));
+        Ok(match pattern {
+            swc::Pat::Ident(name) => Pattern::Ident(name.id.sym.to_string()),
+            swc::Pat::Expr(expr) => match self.convert_expr(expr)? {
+                Expr::Ident(name) => Pattern::Ident(name),
+                Expr::Member { object, property } => Pattern::Member { object, property },
+                _ => {
+                    return Err(reject(
+                        DiagnosticCode::UnsupportedExpression,
+                        "invalid destructuring assignment targets",
+                        span,
+                    ));
+                }
+            },
+            swc::Pat::Assign(pattern) => Pattern::Assign {
+                target: Box::new(self.convert_pattern(&pattern.left)?),
+                default: Box::new(self.convert_expr(&pattern.right)?),
+            },
+            swc::Pat::Rest(pattern) => Pattern::Rest(Box::new(self.convert_pattern(&pattern.arg)?)),
+            swc::Pat::Array(array) => {
+                let mut elements = Vec::new();
+                let mut rest = None;
+                for (index, element) in array.elems.iter().enumerate() {
+                    match element {
+                        Some(swc::Pat::Rest(pattern)) => {
+                            if index + 1 != array.elems.len() {
+                                return Err(reject(
+                                    DiagnosticCode::SyntaxError,
+                                    "rest elements before the end of an array pattern",
+                                    span,
+                                ));
+                            }
+                            rest = Some(Box::new(self.convert_pattern(&pattern.arg)?));
+                        }
+                        Some(pattern) => elements.push(Some(self.convert_pattern(pattern)?)),
+                        None => elements.push(None),
+                    }
+                }
+                Pattern::Array { elements, rest }
+            }
+            swc::Pat::Object(object) => {
+                let mut properties = Vec::new();
+                let mut rest = None;
+                for property in &object.props {
+                    match property {
+                        swc::ObjectPatProp::KeyValue(property) => {
+                            properties.push(ObjectPatternProperty {
+                                key: self.convert_property_key(&property.key)?,
+                                value: self.convert_pattern(&property.value)?,
+                            });
+                        }
+                        swc::ObjectPatProp::Assign(property) => {
+                            let target = Pattern::Ident(property.key.id.sym.to_string());
+                            let value = match property.value.as_deref() {
+                                Some(default) => Pattern::Assign {
+                                    target: Box::new(target),
+                                    default: Box::new(self.convert_expr(default)?),
+                                },
+                                None => target,
+                            };
+                            properties.push(ObjectPatternProperty {
+                                key: PropertyKey::Static(property.key.id.sym.to_string()),
+                                value,
+                            });
+                        }
+                        swc::ObjectPatProp::Rest(property) => {
+                            rest = Some(Box::new(self.convert_pattern(&property.arg)?));
+                        }
+                    }
+                }
+                Pattern::Object { properties, rest }
+            }
+            swc::Pat::Invalid(_) => {
+                return Err(reject(
+                    DiagnosticCode::UnsupportedExpression,
+                    "invalid binding patterns",
+                    span,
+                ));
+            }
+        })
+    }
+
+    fn convert_property_key(&self, name: &swc::PropName) -> Result<PropertyKey, Diagnostic> {
+        Ok(match name {
+            swc::PropName::Ident(name) => PropertyKey::Static(name.sym.to_string()),
+            swc::PropName::Str(name) => {
+                PropertyKey::Static(name.value.to_string_lossy().into_owned())
+            }
+            swc::PropName::Num(name) => PropertyKey::Static(name.value.to_string()),
+            swc::PropName::Computed(name) => {
+                PropertyKey::Computed(Box::new(self.convert_expr(&name.expr)?))
+            }
+            swc::PropName::BigInt(_) => {
+                return Err(reject(
+                    DiagnosticCode::BigIntUnsupported,
+                    "BigInt object keys",
+                    Some(source_span(name.span())),
+                ));
+            }
+        })
+    }
+
     fn convert_function(
         &self,
         name: Option<String>,
@@ -701,10 +947,10 @@ impl Adapter {
         let params = function
             .params
             .iter()
-            .map(|param| binding_name(&param.pat, param.span))
+            .map(|param| self.convert_pattern(&param.pat))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .filter(|param| param != "this")
+            .filter(|param| !matches!(param, Pattern::Ident(name) if name == "this"))
             .collect();
         let body = function.body.as_ref().ok_or_else(|| {
             reject(
@@ -772,16 +1018,14 @@ impl Adapter {
                     .iter()
                     .map(|element| {
                         let Some(element) = element else {
-                            return Ok(Expr::Undefined);
+                            return Ok(ArrayElement::Value(Expr::Undefined));
                         };
-                        if element.spread.is_some() {
-                            return Err(reject(
-                                DiagnosticCode::SpreadUnsupported,
-                                "array spread",
-                                Some(source_span(element.span())),
-                            ));
-                        }
-                        self.convert_expr(&element.expr)
+                        let value = self.convert_expr(&element.expr)?;
+                        Ok(if element.spread.is_some() {
+                            ArrayElement::Spread(value)
+                        } else {
+                            ArrayElement::Value(value)
+                        })
                     })
                     .collect::<Result<_, _>>()?,
             ),
@@ -807,10 +1051,10 @@ impl Adapter {
                 let params = function
                     .params
                     .iter()
-                    .map(|param| binding_name(param, param.span()))
+                    .map(|param| self.convert_pattern(param))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
-                    .filter(|param| param != "this")
+                    .filter(|param| !matches!(param, Pattern::Ident(name) if name == "this"))
                     .collect();
                 let body = match function.body.as_ref() {
                     swc::BlockStmtOrExpr::BlockStmt(block) => {
@@ -835,15 +1079,17 @@ impl Adapter {
                     swc::UnaryOp::TypeOf => UnaryOp::TypeOf,
                     swc::UnaryOp::Void => UnaryOp::Void,
                     swc::UnaryOp::Delete => {
-                        return Err(reject(DiagnosticCode::DeleteUnsupported, "delete", span));
+                        let Expr::Member { object, property } = self.convert_expr(&expr.arg)?
+                        else {
+                            return Err(reject(
+                                DiagnosticCode::SyntaxError,
+                                "Unsupported: delete on a non-member expression. Use delete object.member.",
+                                span,
+                            ));
+                        };
+                        return Ok(Expr::Delete { object, property });
                     }
-                    swc::UnaryOp::Tilde => {
-                        return Err(reject(
-                            DiagnosticCode::BitwiseUnsupported,
-                            "bitwise operators",
-                            span,
-                        ));
-                    }
+                    swc::UnaryOp::Tilde => UnaryOp::BitNot,
                 };
                 Expr::Unary {
                     op,
@@ -851,19 +1097,11 @@ impl Adapter {
                 }
             }
             swc::Expr::Bin(expr) => self.convert_binary(expr)?,
-            swc::Expr::Assign(expr) => {
-                if expr.op != swc::AssignOp::Assign {
-                    return Err(reject(
-                        DiagnosticCode::AssignmentOperatorUnsupported,
-                        "compound assignment operators",
-                        span,
-                    ));
-                }
-                Expr::Assign {
-                    target: self.convert_assign_target(&expr.left)?,
-                    value: Box::new(self.convert_expr(&expr.right)?),
-                }
-            }
+            swc::Expr::Assign(expr) => Expr::Assign {
+                target: self.convert_assign_target(&expr.left)?,
+                op: convert_assign_op(expr.op),
+                value: Box::new(self.convert_expr(&expr.right)?),
+            },
             swc::Expr::Member(member) => self.convert_member(member)?,
             swc::Expr::Cond(expr) => Expr::Conditional {
                 test: Box::new(self.convert_expr(&expr.test)?),
@@ -898,24 +1136,14 @@ impl Adapter {
                         span,
                     ));
                 }
-                let args = call
-                    .args
-                    .iter()
-                    .map(|arg| {
-                        if arg.spread.is_some() {
-                            return Err(reject(
-                                DiagnosticCode::SpreadUnsupported,
-                                "call spread",
-                                Some(source_span(arg.span())),
-                            ));
-                        }
-                        self.convert_expr(&arg.expr)
-                    })
-                    .collect::<Result<_, _>>()?;
-                Expr::Call {
-                    callee: Box::new(callee),
-                    args,
-                }
+                let args = self.convert_call_args(&call.args)?;
+                self.append_optional_operation(
+                    callee,
+                    OptionalOperation::Call {
+                        args,
+                        optional: false,
+                    },
+                )
             }
             swc::Expr::Tpl(template) => Expr::Template {
                 quasis: template
@@ -936,37 +1164,28 @@ impl Adapter {
             swc::Expr::TsAs(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::TsInstantiation(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::TsSatisfies(expr) => self.convert_expr(&expr.expr)?,
-            swc::Expr::This(_) => {
-                return Err(reject(DiagnosticCode::ThisUnsupported, "this", span));
-            }
-            swc::Expr::Update(update) => {
-                let swc::Expr::Ident(name) = update.arg.as_ref() else {
+            swc::Expr::This(_) => Expr::This,
+            swc::Expr::Update(update) => Expr::Update {
+                target: self.convert_update_target(&update.arg)?,
+                delta: if update.op == swc::UpdateOp::PlusPlus {
+                    1.0
+                } else {
+                    -1.0
+                },
+                prefix: update.prefix,
+            },
+            swc::Expr::New(new) => {
+                let swc::Expr::Ident(constructor) = new.callee.as_ref() else {
                     return Err(reject(
-                        DiagnosticCode::UpdateUnsupported,
-                        "update operators on non-identifiers",
+                        DiagnosticCode::NewUnsupported,
+                        "new with a non-built-in constructor",
                         span,
                     ));
                 };
-                if !update.prefix {
-                    // In statement/update position the discarded postfix value is
-                    // observationally identical to the assignment below. Other
-                    // positions are rejected by the lowerer's statement contract.
+                Expr::New {
+                    constructor: constructor.sym.to_string(),
+                    args: self.convert_call_args(new.args.as_deref().unwrap_or_default())?,
                 }
-                Expr::Update {
-                    name: name.sym.to_string(),
-                    delta: if update.op == swc::UpdateOp::PlusPlus {
-                        1.0
-                    } else {
-                        -1.0
-                    },
-                }
-            }
-            swc::Expr::New(_) => {
-                return Err(reject(
-                    DiagnosticCode::NewUnsupported,
-                    "new expressions",
-                    span,
-                ));
             }
             swc::Expr::Seq(_) => {
                 return Err(reject(
@@ -983,7 +1202,11 @@ impl Adapter {
                 ));
             }
             swc::Expr::Class(_) => {
-                return Err(reject(DiagnosticCode::ClassUnsupported, "classes", span));
+                return Err(Diagnostic::new(
+                    DiagnosticCode::ClassUnsupported,
+                    "Unsupported: classes. Use functions and plain objects; for coded errors use Object.assign(new Error(message), {code}).",
+                    span,
+                ));
             }
             swc::Expr::Yield(_) => {
                 return Err(reject(DiagnosticCode::YieldUnsupported, "yield", span));
@@ -1005,13 +1228,7 @@ impl Adapter {
                     span,
                 ));
             }
-            swc::Expr::OptChain(_) => {
-                return Err(reject(
-                    DiagnosticCode::OptionalChainingUnsupported,
-                    "optional chaining",
-                    span,
-                ));
-            }
+            swc::Expr::OptChain(chain) => self.convert_optional_chain(chain)?,
             swc::Expr::PrivateName(_) => {
                 return Err(reject(
                     DiagnosticCode::PrivateNameUnsupported,
@@ -1036,20 +1253,20 @@ impl Adapter {
         })
     }
 
-    fn convert_property(&self, property: &swc::PropOrSpread) -> Result<(String, Expr), Diagnostic> {
+    fn convert_property(&self, property: &swc::PropOrSpread) -> Result<ObjectProperty, Diagnostic> {
         let swc::PropOrSpread::Prop(property) = property else {
-            return Err(reject(
-                DiagnosticCode::SpreadUnsupported,
-                "object spread",
-                Some(source_span(property.span())),
-            ));
+            let swc::PropOrSpread::Spread(spread) = property else {
+                unreachable!()
+            };
+            return Ok(ObjectProperty::Spread(self.convert_expr(&spread.expr)?));
         };
         match property.as_ref() {
-            swc::Prop::Shorthand(name) => {
-                Ok((name.sym.to_string(), Expr::Ident(name.sym.to_string())))
-            }
-            swc::Prop::KeyValue(property) => Ok((
-                property_name(&property.key)?,
+            swc::Prop::Shorthand(name) => Ok(ObjectProperty::KeyValue(
+                PropertyKey::Static(name.sym.to_string()),
+                Expr::Ident(name.sym.to_string()),
+            )),
+            swc::Prop::KeyValue(property) => Ok(ObjectProperty::KeyValue(
+                self.convert_property_key(&property.key)?,
                 self.convert_expr(&property.value)?,
             )),
             swc::Prop::Getter(_) | swc::Prop::Setter(_) => Err(reject(
@@ -1057,10 +1274,9 @@ impl Adapter {
                 "getters/setters",
                 Some(source_span(property.span())),
             )),
-            swc::Prop::Method(_) => Err(reject(
-                DiagnosticCode::ObjectMethodUnsupported,
-                "object methods",
-                Some(source_span(property.span())),
+            swc::Prop::Method(method) => Ok(ObjectProperty::KeyValue(
+                self.convert_property_key(&method.key)?,
+                Expr::Function(self.convert_function(None, &method.function)?),
             )),
             swc::Prop::Assign(_) => Err(reject(
                 DiagnosticCode::UnsupportedExpression,
@@ -1074,7 +1290,6 @@ impl Adapter {
         use swc::BinaryOp as S;
         let left = Box::new(self.convert_expr(&expr.left)?);
         let right = Box::new(self.convert_expr(&expr.right)?);
-        let span = Some(source_span(expr.span));
         Ok(match expr.op {
             S::LogicalAnd => Expr::Logical {
                 left,
@@ -1098,6 +1313,15 @@ impl Adapter {
                     S::Mul => BinaryOp::Multiply,
                     S::Div => BinaryOp::Divide,
                     S::Mod => BinaryOp::Remainder,
+                    S::Exp => BinaryOp::Exponent,
+                    S::BitAnd => BinaryOp::BitAnd,
+                    S::BitOr => BinaryOp::BitOr,
+                    S::BitXor => BinaryOp::BitXor,
+                    S::LShift => BinaryOp::ShiftLeft,
+                    S::RShift => BinaryOp::ShiftRight,
+                    S::ZeroFillRShift => BinaryOp::ShiftRightUnsigned,
+                    S::In => BinaryOp::In,
+                    S::InstanceOf => BinaryOp::InstanceOf,
                     S::EqEqEq => BinaryOp::StrictEqual,
                     S::NotEqEq => BinaryOp::StrictNotEqual,
                     S::EqEq => BinaryOp::LooseEqual,
@@ -1106,33 +1330,8 @@ impl Adapter {
                     S::LtEq => BinaryOp::LessEqual,
                     S::Gt => BinaryOp::Greater,
                     S::GtEq => BinaryOp::GreaterEqual,
-                    S::Exp => {
-                        return Err(reject(
-                            DiagnosticCode::ExponentiationUnsupported,
-                            "exponentiation",
-                            span,
-                        ));
-                    }
-                    S::In => {
-                        return Err(reject(
-                            DiagnosticCode::InOperatorUnsupported,
-                            "in operator",
-                            span,
-                        ));
-                    }
-                    S::InstanceOf => {
-                        return Err(reject(
-                            DiagnosticCode::InstanceOfUnsupported,
-                            "instanceof",
-                            span,
-                        ));
-                    }
-                    _ => {
-                        return Err(reject(
-                            DiagnosticCode::BitwiseUnsupported,
-                            "bitwise/shift operators",
-                            span,
-                        ));
+                    S::LogicalOr | S::LogicalAnd | S::NullishCoalescing => {
+                        unreachable!("logical operators are classified above")
                     }
                 };
                 Expr::Binary { left, op, right }
@@ -1171,10 +1370,105 @@ impl Adapter {
                 ));
             }
         };
-        Ok(Expr::Member {
-            object: Box::new(object),
-            property,
+        Ok(self.append_optional_operation(
+            object,
+            OptionalOperation::Member {
+                property,
+                optional: false,
+            },
+        ))
+    }
+
+    fn convert_call_args(&self, args: &[swc::ExprOrSpread]) -> Result<Vec<CallArg>, Diagnostic> {
+        args.iter()
+            .map(|arg| {
+                let value = self.convert_expr(&arg.expr)?;
+                Ok(if arg.spread.is_some() {
+                    CallArg::Spread(value)
+                } else {
+                    CallArg::Value(value)
+                })
+            })
+            .collect()
+    }
+
+    fn append_optional_operation(&self, base: Expr, operation: OptionalOperation) -> Expr {
+        match base {
+            Expr::OptionalChain {
+                base,
+                mut operations,
+            } => {
+                operations.push(operation);
+                Expr::OptionalChain { base, operations }
+            }
+            base => match operation {
+                OptionalOperation::Member {
+                    property,
+                    optional: false,
+                } => Expr::Member {
+                    object: Box::new(base),
+                    property,
+                },
+                OptionalOperation::Call {
+                    args,
+                    optional: false,
+                } => Expr::Call {
+                    callee: Box::new(base),
+                    args,
+                },
+                operation => Expr::OptionalChain {
+                    base: Box::new(base),
+                    operations: vec![operation],
+                },
+            },
+        }
+    }
+
+    fn convert_optional_chain(&self, chain: &swc::OptChainExpr) -> Result<Expr, Diagnostic> {
+        Ok(match chain.base.as_ref() {
+            swc::OptChainBase::Member(member) => {
+                let object = self.convert_expr(&member.obj)?;
+                let property = match &member.prop {
+                    swc::MemberProp::Ident(name) => MemberProperty::Field(name.sym.to_string()),
+                    swc::MemberProp::Computed(property) => {
+                        MemberProperty::Index(Box::new(self.convert_expr(&property.expr)?))
+                    }
+                    swc::MemberProp::PrivateName(_) => {
+                        return Err(reject(
+                            DiagnosticCode::PrivateNameUnsupported,
+                            "private names",
+                            Some(source_span(member.span)),
+                        ));
+                    }
+                };
+                self.append_optional_operation(
+                    object,
+                    OptionalOperation::Member {
+                        property,
+                        optional: chain.optional,
+                    },
+                )
+            }
+            swc::OptChainBase::Call(call) => self.append_optional_operation(
+                self.convert_expr(&call.callee)?,
+                OptionalOperation::Call {
+                    args: self.convert_call_args(&call.args)?,
+                    optional: chain.optional,
+                },
+            ),
         })
+    }
+
+    fn convert_update_target(&self, expr: &swc::Expr) -> Result<AssignTarget, Diagnostic> {
+        match self.convert_expr(expr)? {
+            Expr::Ident(name) => Ok(AssignTarget::Ident(name)),
+            Expr::Member { object, property } => Ok(AssignTarget::Member { object, property }),
+            _ => Err(reject(
+                DiagnosticCode::UnsupportedExpression,
+                "Unsupported: update on a non-assignment target. Assign the expression to a variable first.",
+                Some(source_span(expr.span())),
+            )),
+        }
     }
 
     fn convert_assign_target(
@@ -1191,56 +1485,56 @@ impl Adapter {
                 Expr::Member { object, property } => Ok(AssignTarget::Member { object, property }),
                 _ => unreachable!(),
             },
+            swc::AssignTarget::Pat(pattern) => {
+                let pattern: swc::Pat = pattern.clone().into();
+                Ok(AssignTarget::Pattern(Box::new(
+                    self.convert_pattern(&pattern)?,
+                )))
+            }
             _ => Err(reject(
-                DiagnosticCode::DestructuringUnsupported,
-                "destructuring or wrapped assignment targets",
+                DiagnosticCode::UnsupportedExpression,
+                "Unsupported: this assignment target. Assign to an identifier, member, index, or destructuring pattern.",
                 Some(source_span(target.span())),
             )),
         }
     }
 }
 
-fn binding_name(pattern: &swc::Pat, span: Span) -> Result<String, Diagnostic> {
-    match pattern {
-        swc::Pat::Ident(name) => Ok(name.id.sym.to_string()),
-        swc::Pat::Assign(_) => Err(reject(
-            DiagnosticCode::ParameterDefaultUnsupported,
-            "default parameters",
-            Some(source_span(span)),
-        )),
-        swc::Pat::Rest(_) => Err(reject(
-            DiagnosticCode::ParameterRestUnsupported,
-            "rest parameters",
-            Some(source_span(span)),
-        )),
-        _ => Err(reject(
-            DiagnosticCode::DestructuringUnsupported,
-            "destructuring parameters",
-            Some(source_span(span)),
-        )),
+fn convert_var_kind(kind: swc::VarDeclKind) -> VarKind {
+    match kind {
+        swc::VarDeclKind::Var => VarKind::Var,
+        swc::VarDeclKind::Let => VarKind::Let,
+        swc::VarDeclKind::Const => VarKind::Const,
     }
 }
 
-fn property_name(name: &swc::PropName) -> Result<String, Diagnostic> {
-    match name {
-        swc::PropName::Ident(name) => Ok(name.sym.to_string()),
-        swc::PropName::Str(name) => Ok(name.value.to_string_lossy().into_owned()),
-        swc::PropName::Num(name) => Ok(name.value.to_string()),
-        swc::PropName::Computed(name) => Err(reject(
-            DiagnosticCode::ComputedPropertyUnsupported,
-            "computed object keys",
-            Some(source_span(name.span)),
-        )),
-        swc::PropName::BigInt(name) => Err(reject(
-            DiagnosticCode::BigIntUnsupported,
-            "BigInt object keys",
-            Some(source_span(name.span)),
-        )),
+fn convert_assign_op(op: swc::AssignOp) -> AssignOp {
+    use swc::AssignOp as S;
+    match op {
+        S::Assign => AssignOp::Assign,
+        S::AddAssign => AssignOp::Binary(BinaryOp::Add),
+        S::SubAssign => AssignOp::Binary(BinaryOp::Subtract),
+        S::MulAssign => AssignOp::Binary(BinaryOp::Multiply),
+        S::DivAssign => AssignOp::Binary(BinaryOp::Divide),
+        S::ModAssign => AssignOp::Binary(BinaryOp::Remainder),
+        S::ExpAssign => AssignOp::Binary(BinaryOp::Exponent),
+        S::BitAndAssign => AssignOp::Binary(BinaryOp::BitAnd),
+        S::BitOrAssign => AssignOp::Binary(BinaryOp::BitOr),
+        S::BitXorAssign => AssignOp::Binary(BinaryOp::BitXor),
+        S::LShiftAssign => AssignOp::Binary(BinaryOp::ShiftLeft),
+        S::RShiftAssign => AssignOp::Binary(BinaryOp::ShiftRight),
+        S::ZeroFillRShiftAssign => AssignOp::Binary(BinaryOp::ShiftRightUnsigned),
+        S::AndAssign => AssignOp::Logical(LogicalOp::And),
+        S::OrAssign => AssignOp::Logical(LogicalOp::Or),
+        S::NullishAssign => AssignOp::Logical(LogicalOp::Nullish),
     }
 }
 
-fn parser_diagnostic(error: swc_ecma_parser::error::Error) -> Diagnostic {
-    let message = error.kind().msg().to_string();
+fn parser_diagnostic(error: swc_ecma_parser::error::Error, source: &str) -> Diagnostic {
+    let mut message = error.kind().msg().to_string();
+    if source.split_whitespace().any(|word| word == "raise") {
+        message.push_str("; JavaScript uses `throw new Error(...)`, not `raise Error(...)`");
+    }
     let code = if message.contains("'with' statement") {
         DiagnosticCode::WithUnsupported
     } else {

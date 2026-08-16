@@ -1,0 +1,674 @@
+use super::*;
+
+impl Lowerer {
+    pub(super) fn lower_call(
+        &mut self,
+        callee: &Expr,
+        args: &[CallArg],
+    ) -> Result<LashExpr, Diagnostic> {
+        if args
+            .iter()
+            .any(|argument| matches!(argument, CallArg::Spread(_)))
+        {
+            let callee = self.lower_expr(callee)?;
+            return self.lower_dynamic_call_value(callee, args);
+        }
+        let plain_args = args
+            .iter()
+            .map(|argument| match argument {
+                CallArg::Value(value) => value.clone(),
+                CallArg::Spread(_) => unreachable!(),
+            })
+            .collect::<Vec<_>>();
+        let args = plain_args.as_slice();
+        if let Expr::Ident(name) = callee
+            && !self.has_binding(name)
+        {
+            if matches!(name.as_str(), "String" | "Number" | "Boolean") {
+                let value = args
+                    .first()
+                    .map(|value| self.lower_expr(value))
+                    .transpose()?;
+                return Ok(match (name.as_str(), value) {
+                    ("String", None) => LashExpr::String("".into()),
+                    ("String", Some(value)) => js_add(LashExpr::String("".into()), value),
+                    ("Number", None) => LashExpr::Number(0.0),
+                    ("Number", Some(value)) => js_unary(JavaScriptUnaryOp::Plus, value),
+                    ("Boolean", None) => LashExpr::Bool(false),
+                    ("Boolean", Some(value)) => js_unary(
+                        JavaScriptUnaryOp::Not,
+                        js_unary(JavaScriptUnaryOp::Not, value),
+                    ),
+                    _ => unreachable!(),
+                });
+            }
+            if matches!(name.as_str(), "parseInt" | "parseFloat") {
+                let expected = if name == "parseInt" { 1..=2 } else { 1..=1 };
+                if !expected.contains(&args.len()) {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        format!(
+                            "{name} expects {} argument(s)",
+                            if name == "parseInt" {
+                                "one or two"
+                            } else {
+                                "one"
+                            }
+                        ),
+                        None,
+                    ));
+                }
+                let mut values = vec![LashExpr::String(
+                    if name == "parseInt" {
+                        "Number.parseInt"
+                    } else {
+                        "Number.parseFloat"
+                    }
+                    .into(),
+                )];
+                values.extend(
+                    args.iter()
+                        .map(|value| self.lower_expr(value))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: values,
+                });
+            }
+            if matches!(name.as_str(), "isNaN" | "isFinite") {
+                let [value] = args else {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        format!("{name} expects one argument"),
+                        None,
+                    ));
+                };
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![
+                        LashExpr::String(
+                            if name == "isNaN" {
+                                "Number.isNaN"
+                            } else {
+                                "Number.isFinite"
+                            }
+                            .into(),
+                        ),
+                        js_unary(JavaScriptUnaryOp::Plus, self.lower_expr(value)?),
+                    ],
+                });
+            }
+            if matches!(
+                name.as_str(),
+                "encodeURIComponent"
+                    | "decodeURIComponent"
+                    | "encodeURI"
+                    | "decodeURI"
+                    | "btoa"
+                    | "atob"
+            ) {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    format!(
+                        "Unsupported: {name}. Perform deterministic URI or base64 conversion in a host tool until the pure codec lowering lands."
+                    ),
+                    None,
+                ));
+            }
+            if name == "structuredClone" {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    "Unsupported: structuredClone. For JSON-shaped data use JSON.parse(JSON.stringify(value)).",
+                    None,
+                ));
+            }
+            if matches!(
+                name.as_str(),
+                "Error"
+                    | "TypeError"
+                    | "RangeError"
+                    | "SyntaxError"
+                    | "ReferenceError"
+                    | "URIError"
+                    | "EvalError"
+                    | "AggregateError"
+            ) {
+                let args = args.iter().cloned().map(CallArg::Value).collect::<Vec<_>>();
+                return self.lower_constructor(name, &args);
+            }
+            return match (name.as_str(), args) {
+                ("finish", [_]) if self.process_depth > 0 => Err(Diagnostic::new(
+                    DiagnosticCode::UnsupportedExpression,
+                    "finish is cell-only; return from defineProcess.run so enclosing finally blocks execute",
+                    None,
+                )),
+                ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
+                ("print", [value]) => Ok(LashExpr::Print(Box::new(self.lower_expr(value)?))),
+                ("wake", [value]) => Ok(LashExpr::Wake(Box::new(self.lower_expr(value)?))),
+                ("wake", [run, Expr::String(signal), payload]) => Ok(LashExpr::SignalRun {
+                    run: Box::new(self.lower_expr(run)?),
+                    name: signal.as_str().into(),
+                    payload: Box::new(self.lower_expr(payload)?),
+                }),
+                ("sleep", [milliseconds]) if self.await_depth > 0 => {
+                    Ok(LashExpr::SleepFor(Box::new(self.lower_expr(milliseconds)?)))
+                }
+                ("waitSignal", [Expr::String(name)]) if self.await_depth > 0 => {
+                    Ok(LashExpr::WaitSignal {
+                        name: name.as_str().into(),
+                    })
+                }
+                ("start", [Expr::Ident(target)]) => self.lower_start(target, &[]),
+                ("start", [Expr::Ident(target), Expr::Object(entries)]) => {
+                    self.lower_start(target, entries)
+                }
+                ("registerTrigger", [config]) if self.await_depth > 0 => {
+                    Ok(LashExpr::ReceiverCall {
+                        receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
+                            vec!["triggers".into()],
+                        ))),
+                        operation: "register".into(),
+                        args: vec![self.lower_expr(config)?],
+                    })
+                }
+                ("defineProcess", _) => Err(Diagnostic::new(
+                    DiagnosticCode::ProcessDefinitionNotTopLevel,
+                    "defineProcess must initialize a top-level binding",
+                    None,
+                )),
+                ("sleep" | "waitSignal" | "registerTrigger", _) if self.await_depth == 0 => {
+                    Err(Diagnostic::new(
+                        DiagnosticCode::AwaitRequired,
+                        format!("agent primitive `{name}` requires await"),
+                        None,
+                    ))
+                }
+                (
+                    "finish" | "print" | "wake" | "sleep" | "waitSignal" | "start"
+                    | "registerTrigger",
+                    _,
+                ) => Err(Diagnostic::new(
+                    DiagnosticCode::UnsupportedExpression,
+                    format!("invalid arguments for agent primitive `{name}`"),
+                    None,
+                )),
+                _ => Ok(LashExpr::Call {
+                    function: Box::new(self.lower_expr(callee)?),
+                    args: args
+                        .iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<_, _>>()?,
+                }),
+            };
+        }
+        if let Expr::Member {
+            object,
+            property: MemberProperty::Field(method),
+        } = callee
+        {
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "crypto")
+                && method == "randomUUID"
+                && !self.has_binding("crypto")
+            {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    "Unsupported: crypto.randomUUID. Use a journaled host tool that returns an identifier.",
+                    None,
+                ));
+            }
+            if matches!(method.as_str(), "then" | "catch" | "finally") {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    "Unsupported: Promise chaining with .then/.catch/.finally. Use direct await and try/catch/finally.",
+                    None,
+                ));
+            }
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "Promise")
+                && !self.has_binding("Promise")
+            {
+                match method.as_str() {
+                    "race" | "any" => {
+                        return Err(Diagnostic::new(
+                            DiagnosticCode::MethodUnsupported,
+                            format!(
+                                "Unsupported: Promise.{method} requires durable partial-settlement ordering (FIG-1416). Use Promise.all/Promise.allSettled, or await durable sleep for timeout patterns."
+                            ),
+                            None,
+                        ));
+                    }
+                    "resolve" | "reject" => {
+                        return Err(Diagnostic::new(
+                            DiagnosticCode::MethodUnsupported,
+                            format!(
+                                "Unsupported: Promise.{method}. Await values directly and use throw/try-catch for failures."
+                            ),
+                            None,
+                        ));
+                    }
+                    "all" | "allSettled" if self.await_depth == 0 => {
+                        return Err(Diagnostic::new(
+                            DiagnosticCode::AwaitRequired,
+                            format!("Promise.{method} must be awaited directly"),
+                            None,
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            if method == "localeCompare" {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    "Unsupported: localeCompare/Intl ordering is host-dependent. Use (a < b ? -1 : a > b ? 1 : 0).",
+                    None,
+                ));
+            }
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "console") && method == "log"
+            {
+                if !self.has_binding("console") {
+                    let mut lowered = args
+                        .iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter();
+                    let joined = lowered.next().map_or_else(
+                        || LashExpr::String("".into()),
+                        |first| js_add(LashExpr::String("".into()), first),
+                    );
+                    let joined = lowered.fold(joined, |joined, value| {
+                        js_add(js_add(joined, LashExpr::String(" ".into())), value)
+                    });
+                    return Ok(LashExpr::Print(Box::new(joined)));
+                }
+                if self.has_binding("console") {
+                    return Ok(LashExpr::Call {
+                        function: Box::new(self.lower_expr(callee)?),
+                        args: args
+                            .iter()
+                            .map(|arg| self.lower_expr(arg))
+                            .collect::<Result<_, _>>()?,
+                    });
+                }
+            }
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "Date")
+                && method == "now"
+                && args.is_empty()
+                && !self.has_binding("Date")
+            {
+                return Ok(LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
+                    "now",
+                ))));
+            }
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "Math")
+                && method == "random"
+                && args.is_empty()
+                && !self.has_binding("Math")
+            {
+                return Ok(LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
+                    "random",
+                ))));
+            }
+            if matches!(method.as_str(), "entries" | "keys" | "values")
+                && static_stdlib_owner(object).is_none()
+                && self.iterable_sink_depth > 0
+            {
+                let exotic = match object.as_ref() {
+                    Expr::New { constructor, .. }
+                        if matches!(constructor.as_str(), "Map" | "Set") =>
+                    {
+                        true
+                    }
+                    Expr::Ident(name) => self
+                        .binding(name)
+                        .ok()
+                        .and_then(|binding| self.iterable_kinds.get(&binding.internal))
+                        .is_some(),
+                    _ => false,
+                };
+                let receiver = self.temporary("iterator_receiver");
+                let receiver_value = self.lower_expr(object)?;
+                let variable = || LashExpr::Variable(receiver.as_str().into());
+                if exotic {
+                    return Ok(LashExpr::Block(vec![
+                        LashExpr::Assign {
+                            target: AssignTarget::variable(receiver.as_str().into()),
+                            expr: Box::new(receiver_value),
+                        },
+                        LashExpr::BuiltinCall {
+                            name: "__typescript_stdlib".into(),
+                            args: vec![LashExpr::String(method.as_str().into()), variable()],
+                        },
+                    ]));
+                }
+                let array = match method.as_str() {
+                    "values" => LashExpr::BuiltinCall {
+                        name: "__typescript_stdlib".into(),
+                        args: vec![
+                            LashExpr::String("Lash.ArrayFromIterable".into()),
+                            variable(),
+                        ],
+                    },
+                    "entries" => {
+                        let pair = self.temporary("array_entry");
+                        let at = |index| LashExpr::Index {
+                            target: Box::new(LashExpr::Variable(pair.as_str().into())),
+                            index: Box::new(LashExpr::Number(index)),
+                        };
+                        LashExpr::Map {
+                            items: Box::new(LashExpr::BuiltinCall {
+                                name: "__typescript_stdlib".into(),
+                                args: vec![LashExpr::String("__enumerate".into()), variable()],
+                            }),
+                            function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
+                                name: None,
+                                params: vec![pair.as_str().into()],
+                                captures: Vec::new(),
+                                body: Box::new(LashExpr::List(vec![at(1.0), at(0.0)])),
+                            }))),
+                        }
+                    }
+                    "keys" => {
+                        let key = self.temporary("array_key");
+                        LashExpr::Map {
+                            items: Box::new(LashExpr::BuiltinCall {
+                                name: "__typescript_stdlib".into(),
+                                args: vec![LashExpr::String("Object.keys".into()), variable()],
+                            }),
+                            function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
+                                name: None,
+                                params: vec![key.as_str().into()],
+                                captures: Vec::new(),
+                                body: Box::new(LashExpr::JavaScriptUnary {
+                                    op: JavaScriptUnaryOp::Plus,
+                                    expr: Box::new(LashExpr::Variable(key.as_str().into())),
+                                }),
+                            }))),
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                return Ok(LashExpr::Block(vec![
+                    LashExpr::Assign {
+                        target: AssignTarget::variable(receiver.as_str().into()),
+                        expr: Box::new(receiver_value),
+                    },
+                    array,
+                ]));
+            }
+            if matches!(method.as_str(), "entries" | "keys" | "values")
+                && static_stdlib_owner(object).is_none()
+                && self.iterable_sink_depth == 0
+            {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    "Unsupported: iterator methods may only be consumed directly by for-of / spread / Array.from / new Map|Set / Object.fromEntries — wrap: [...expr]",
+                    None,
+                ));
+            }
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "Array")
+                && method == "from"
+                && !self.has_binding("Array")
+            {
+                let [value] = args else {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::MethodUnsupported,
+                        "Unsupported: Array.from mapping callbacks. Use Array.from(iterable).map(callback).",
+                        None,
+                    ));
+                };
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![
+                        LashExpr::String("Lash.ArrayFromIterable".into()),
+                        self.lower_iterable_sink(value)?,
+                    ],
+                });
+            }
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "Object")
+                && method == "fromEntries"
+                && !self.has_binding("Object")
+            {
+                let [value] = args else {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        "Object.fromEntries expects one iterable",
+                        None,
+                    ));
+                };
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![
+                        LashExpr::String("Object.fromEntries".into()),
+                        self.lower_iterable_sink(value)?,
+                    ],
+                });
+            }
+            if method == "filter" {
+                let [callback] = args else {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        "Array.filter expects one callback",
+                        None,
+                    ));
+                };
+                let receiver = self.temporary("filter_receiver");
+                let entry = self.temporary("filter_entry");
+                let receiver_value = self.lower_expr(object)?;
+                let callback = self.lower_expr(callback)?;
+                let item = LashExpr::Index {
+                    target: Box::new(LashExpr::Variable(entry.as_str().into())),
+                    index: Box::new(LashExpr::Number(0.0)),
+                };
+                let index = LashExpr::Index {
+                    target: Box::new(LashExpr::Variable(entry.as_str().into())),
+                    index: Box::new(LashExpr::Number(1.0)),
+                };
+                return Ok(LashExpr::Block(vec![
+                    LashExpr::Assign {
+                        target: AssignTarget::variable(receiver.as_str().into()),
+                        expr: Box::new(receiver_value),
+                    },
+                    LashExpr::ListComprehension {
+                        element: Box::new(item.clone()),
+                        clauses: vec![
+                            ListComprehensionClause::For {
+                                binding: entry.as_str().into(),
+                                iterable: LashExpr::BuiltinCall {
+                                    name: "__typescript_stdlib".into(),
+                                    args: vec![
+                                        LashExpr::String("__enumerate".into()),
+                                        LashExpr::Variable(receiver.as_str().into()),
+                                    ],
+                                },
+                            },
+                            ListComprehensionClause::If {
+                                condition: LashExpr::Call {
+                                    function: Box::new(callback),
+                                    args: vec![
+                                        item,
+                                        index,
+                                        LashExpr::Variable(receiver.as_str().into()),
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                ]));
+            }
+            if let Some(static_owner) = static_stdlib_owner(object)
+                && !self.has_binding(static_owner)
+                && is_static_stdlib_method(static_owner, method)
+            {
+                let mut builtin_args =
+                    vec![LashExpr::String(format!("{static_owner}.{method}").into())];
+                builtin_args.extend(
+                    args.iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: builtin_args,
+                });
+            }
+            // A literal receiver that cannot carry this method is decided here,
+            // before any per-method lowering. `map` used to be routed ahead of
+            // this check and so skipped it, leaving `"ab".map(f)` to fail at run
+            // time with a shaping error instead of being named — one receiver
+            // shape short of the classification claim.
+            if is_instance_stdlib_method(method)
+                && has_literal_stdlib_receiver(object)
+                && !literal_supports_instance_method(object, method)
+            {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    format!("method `{method}` is unavailable on this literal receiver"),
+                    None,
+                ));
+            }
+            // `map` drives a guest callback, so it cannot go through the
+            // stdlib builtin: that exports every argument across the host
+            // boundary, which refuses a function value. The VM already owns
+            // functions, frames and an in-VM map driver, so lower to that.
+            if method == "map" {
+                return self.lower_array_map(object, args);
+            }
+            if is_instance_stdlib_method(method) {
+                let mut builtin_args = vec![
+                    LashExpr::String(method.as_str().into()),
+                    self.lower_expr(object)?,
+                ];
+                builtin_args.extend(
+                    args.iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: builtin_args,
+                });
+            }
+
+            if method.starts_with(|character: char| character.is_ascii_uppercase())
+                && module_path(object)
+                    .and_then(|path| path.first().cloned())
+                    .is_some_and(|root| !self.has_binding(&root))
+            {
+                return Ok(LashExpr::ReceiverCall {
+                    receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
+                        module_path(object)
+                            .expect("constructor path checked above")
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                    ))),
+                    operation: method.as_str().into(),
+                    args: args
+                        .iter()
+                        .map(|arg| self.lower_expr(arg))
+                        .collect::<Result<_, _>>()?,
+                });
+            }
+
+            // Classify by method name before the tool-call branch. A receiver
+            // that is not a module authority — a chained call, a local binding,
+            // a computed member, a literal — can never dispatch a tool, so an
+            // unadvertised method there is a missing method and must say so.
+            // Falling through reported it as a tool call needing `await`, and
+            // under `await` it lowered and failed at the host untyped.
+            let receiver_is_module_authority = module_path(object)
+                .and_then(|path| path.first().cloned())
+                .is_some_and(|root| !self.has_binding(&root));
+            if matches!(object.as_ref(), Expr::Ident(owner) if is_known_runtime_global(owner) && !self.has_binding(owner))
+                || has_literal_stdlib_receiver(object)
+                || (!receiver_is_module_authority && !is_instance_stdlib_method(method))
+            {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    format!("method `{method}` is not in the TypeScript runtime surface"),
+                    None,
+                ));
+            }
+
+            if self.await_depth == 0 {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::AwaitRequired,
+                    format!(
+                        "tool call `{method}` must appear under await or Promise.all/allSettled"
+                    ),
+                    None,
+                ));
+            }
+            let receiver = if let Some(path) = module_path(object)
+                && path
+                    .first()
+                    .is_some_and(|root| !self.has_binding(root.as_str()))
+            {
+                LashExpr::ResourceRef(ResourceRefExpr::unresolved(
+                    path.into_iter().map(Into::into).collect(),
+                ))
+            } else {
+                self.lower_expr(object)?
+            };
+            return Ok(LashExpr::ReceiverCall {
+                receiver: Box::new(receiver),
+                operation: method.as_str().into(),
+                args: args
+                    .iter()
+                    .map(|arg| self.lower_expr(arg))
+                    .collect::<Result<_, _>>()?,
+            });
+        }
+        if let Expr::Ident(name) = callee
+            && let Some(binding) = self
+                .scopes
+                .iter()
+                .rev()
+                .find_map(|scope| scope.bindings.get(name))
+            && self.async_bindings.contains(&binding.internal)
+            && self.await_depth == 0
+        {
+            return Err(Diagnostic::new(
+                DiagnosticCode::AwaitRequired,
+                format!("async helper `{name}` must be awaited directly"),
+                None,
+            ));
+        }
+        Ok(LashExpr::Call {
+            function: Box::new(self.lower_expr(callee)?),
+            args: args
+                .iter()
+                .map(|arg| self.lower_expr(arg))
+                .collect::<Result<_, _>>()?,
+        })
+    }
+    fn lower_start(
+        &mut self,
+        target: &str,
+        entries: &[ObjectProperty],
+    ) -> Result<LashExpr, Diagnostic> {
+        let Some(process) = self.process_bindings.get(target).cloned() else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessTargetStaticRequired,
+                format!("`{target}` is not a top-level defineProcess binding"),
+                None,
+            ));
+        };
+        Ok(LashExpr::StartProcess(ProcessStartExpr {
+            process: process.into(),
+            args: entries
+                .iter()
+                .map(|property| match property {
+                    ObjectProperty::KeyValue(PropertyKey::Static(name), value) => {
+                        Ok((name.as_str().into(), self.lower_expr(value)?))
+                    }
+                    _ => Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        "start arguments require static properties without spread",
+                        None,
+                    )),
+                })
+                .collect::<Result<_, Diagnostic>>()?,
+        }))
+    }
+}

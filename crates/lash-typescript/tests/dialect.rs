@@ -168,7 +168,6 @@ fn unsupported_constructs_have_stable_named_diagnostics() {
     let cases = [
         ("class A {}", Code::ClassUnsupported),
         ("function* f() {}", Code::GeneratorUnsupported),
-        ("async function f() {}", Code::AsyncUnsupported),
         ("enum E { A }", Code::EnumUnsupported),
         ("namespace N {}", Code::NamespaceUnsupported),
         ("const r = /x/;", Code::RegExpUnsupported),
@@ -180,8 +179,6 @@ fn unsupported_constructs_have_stable_named_diagnostics() {
             Code::AccessorUnsupported,
         ),
         ("import('x')", Code::DynamicImportUnsupported),
-        ("const x = { ...other };", Code::SpreadUnsupported),
-        ("const x = other?.value;", Code::OptionalChainingUnsupported),
         ("const x = this;", Code::ThisUnsupported),
     ];
     for (source, expected) in cases {

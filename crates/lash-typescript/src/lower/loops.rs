@@ -60,7 +60,7 @@ impl Lowerer {
             ));
         };
         let Some(Expr::Update {
-            name: update_name,
+            target: TsAssignTarget::Ident(update_name),
             delta,
             ..
         }) = update
@@ -71,8 +71,14 @@ impl Lowerer {
                 None,
             ));
         };
-        if condition_name != &declaration.name || update_name != &declaration.name || *delta != 1.0
-        {
+        let Some(declaration_name) = single_pattern_name(&declaration.pattern) else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for requires one identifier binding",
+                None,
+            ));
+        };
+        if condition_name != declaration_name || update_name != declaration_name || *delta != 1.0 {
             return Err(Diagnostic::new(
                 DiagnosticCode::ForUnsupported,
                 "classic for binding, condition, and update must name the same identifier",
@@ -81,11 +87,11 @@ impl Lowerer {
         }
 
         self.scopes.push(Scope::default());
-        self.declare(&declaration.name, BindingKind::Let, true, false)?;
-        let internal = self.binding(&declaration.name)?.internal.clone();
+        self.declare(declaration_name, BindingKind::Let, true, false)?;
+        let internal = self.binding(declaration_name)?.internal.clone();
         let start = self.lower_expr(start)?;
         let condition = self.lower_expr(test.expect("validated classic for condition"))?;
-        let update = self.lower_update_statement(&declaration.name, *delta)?;
+        let update = self.lower_update_statement(declaration_name, *delta)?;
         self.loop_depth += 1;
         self.continue_epilogues.push(Some(update.clone()));
         let body = self.lower_stmt_block(body)?;
@@ -165,9 +171,18 @@ pub(super) fn continue_under_finally(
                         .any(|stmt| continue_under_finally(stmt, protected, nested_loop_depth))
                 })
         }
-        Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::ForOf { body, .. } => {
+        Stmt::While { body, .. }
+        | Stmt::DoWhile { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::ForOf { body, .. }
+        | Stmt::ForIn { body, .. } => {
             continue_under_finally(body, protected, nested_loop_depth + 1)
         }
+        Stmt::Switch { cases, .. } => cases.iter().any(|case| {
+            case.consequent
+                .iter()
+                .any(|stmt| continue_under_finally(stmt, protected, nested_loop_depth))
+        }),
         Stmt::Empty
         | Stmt::Expr(_)
         | Stmt::Var { .. }
@@ -197,11 +212,19 @@ fn mentions_binding(expr: &Expr, binding: &str) -> bool {
     }
     match expr {
         Expr::Ident(name) => name.as_str() == binding,
-        Expr::Array(items) => any(items, binding),
-        Expr::Object(entries) => entries
-            .iter()
-            .any(|(_, value)| mentions_binding(value, binding)),
-        Expr::Assign { value, target } => {
+        Expr::Array(items) => items.iter().any(|item| match item {
+            ArrayElement::Value(value) | ArrayElement::Spread(value) => {
+                mentions_binding(value, binding)
+            }
+        }),
+        Expr::Object(entries) => entries.iter().any(|property| match property {
+            ObjectProperty::KeyValue(key, value) => {
+                matches!(key, PropertyKey::Computed(key) if mentions_binding(key, binding))
+                    || mentions_binding(value, binding)
+            }
+            ObjectProperty::Spread(value) => mentions_binding(value, binding),
+        }),
+        Expr::Assign { value, target, .. } => {
             mentions_binding(value, binding)
                 || match target {
                     TsAssignTarget::Member { object, property } => {
@@ -212,6 +235,7 @@ fn mentions_binding(expr: &Expr, binding: &str) -> bool {
                             }
                     }
                     TsAssignTarget::Ident(name) => name.as_str() == binding,
+                    TsAssignTarget::Pattern(pattern) => pattern_mentions_binding(pattern, binding),
                 }
         }
         Expr::Unary { value, .. } | Expr::Await(value) => mentions_binding(value, binding),
@@ -235,7 +259,30 @@ fn mentions_binding(expr: &Expr, binding: &str) -> bool {
                 || mentions_binding(alternate, binding)
         }
         Expr::Template { expressions, .. } => any(expressions, binding),
-        Expr::Call { callee, args } => mentions_binding(callee, binding) || any(args, binding),
+        Expr::Call { callee, args } => {
+            mentions_binding(callee, binding)
+                || args.iter().any(|arg| match arg {
+                    CallArg::Value(value) | CallArg::Spread(value) => {
+                        mentions_binding(value, binding)
+                    }
+                })
+        }
+        Expr::New { args, .. } => args.iter().any(|arg| match arg {
+            CallArg::Value(value) | CallArg::Spread(value) => mentions_binding(value, binding),
+        }),
+        Expr::OptionalChain { base, operations } => {
+            mentions_binding(base, binding)
+                || operations.iter().any(|operation| match operation {
+                    OptionalOperation::Member { property, .. } => {
+                        matches!(property, MemberProperty::Index(index) if mentions_binding(index, binding))
+                    }
+                    OptionalOperation::Call { args, .. } => args.iter().any(|arg| match arg {
+                        CallArg::Value(value) | CallArg::Spread(value) => {
+                            mentions_binding(value, binding)
+                        }
+                    }),
+                })
+        }
         Expr::Function(function) => match &function.body {
             FunctionBody::Block(statements) => statements
                 .iter()
@@ -246,8 +293,53 @@ fn mentions_binding(expr: &Expr, binding: &str) -> bool {
         | Expr::Null
         | Expr::Bool(_)
         | Expr::Number(_)
-        | Expr::String(_)
-        | Expr::Update { .. } => false,
+        | Expr::String(_) => false,
+        Expr::This => false,
+        Expr::Update { target, .. } => assign_target_mentions_binding(target, binding),
+        Expr::Delete { object, property } => {
+            mentions_binding(object, binding)
+                || matches!(property, MemberProperty::Index(index) if mentions_binding(index, binding))
+        }
+    }
+}
+
+fn assign_target_mentions_binding(target: &TsAssignTarget, binding: &str) -> bool {
+    match target {
+        TsAssignTarget::Ident(name) => name == binding,
+        TsAssignTarget::Member { object, property } => {
+            mentions_binding(object, binding)
+                || matches!(property, MemberProperty::Index(index) if mentions_binding(index, binding))
+        }
+        TsAssignTarget::Pattern(pattern) => pattern_mentions_binding(pattern, binding),
+    }
+}
+
+fn pattern_mentions_binding(pattern: &Pattern, binding: &str) -> bool {
+    match pattern {
+        Pattern::Ident(name) => name == binding,
+        Pattern::Rest(target) => pattern_mentions_binding(target, binding),
+        Pattern::Member { object, property } => {
+            mentions_binding(object, binding)
+                || matches!(property, MemberProperty::Index(index) if mentions_binding(index, binding))
+        }
+        Pattern::Assign { target, default } => {
+            pattern_mentions_binding(target, binding) || mentions_binding(default, binding)
+        }
+        Pattern::Array { elements, rest } => {
+            elements
+                .iter()
+                .flatten()
+                .any(|pattern| pattern_mentions_binding(pattern, binding))
+                || rest
+                    .as_deref()
+                    .is_some_and(|pattern| pattern_mentions_binding(pattern, binding))
+        }
+        Pattern::Object { properties, rest } => properties.iter().any(|property| {
+            matches!(&property.key, PropertyKey::Computed(key) if mentions_binding(key, binding))
+                || pattern_mentions_binding(&property.value, binding)
+        }) || rest
+            .as_deref()
+            .is_some_and(|pattern| pattern_mentions_binding(pattern, binding)),
     }
 }
 
@@ -299,12 +391,16 @@ fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
         }
         match expr {
             // Boxing it in a literal keeps a live reference to it.
-            Expr::Array(items) => items
-                .iter()
-                .any(|item| names_iterable_directly(item, binding)),
-            Expr::Object(entries) => entries
-                .iter()
-                .any(|(_, value)| names_iterable_directly(value, binding)),
+            Expr::Array(items) => items.iter().any(|item| match item {
+                ArrayElement::Value(value) | ArrayElement::Spread(value) => {
+                    names_iterable_directly(value, binding)
+                }
+            }),
+            Expr::Object(entries) => entries.iter().any(|property| match property {
+                ObjectProperty::KeyValue(_, value) | ObjectProperty::Spread(value) => {
+                    names_iterable_directly(value, binding)
+                }
+            }),
             _ => false,
         }
     }
@@ -318,7 +414,7 @@ fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
                     .map(|_| {
                         format!(
                             "binds `{binding}`, the iterable this loop is walking, to `{}`",
-                            declaration.name
+                            single_pattern_name(&declaration.pattern).unwrap_or("a pattern")
                         )
                     })
             }),
@@ -334,9 +430,15 @@ fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
                 ..
             } => walk(consequent, binding)
                 .or_else(|| alternate.as_deref().and_then(|stmt| walk(stmt, binding))),
-            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::ForOf { body, .. } => {
-                walk(body, binding)
-            }
+            Stmt::While { body, .. }
+            | Stmt::DoWhile { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::ForOf { body, .. }
+            | Stmt::ForIn { body, .. } => walk(body, binding),
+            Stmt::Switch { cases, .. } => cases
+                .iter()
+                .flat_map(|case| &case.consequent)
+                .find_map(|stmt| walk(stmt, binding)),
             Stmt::Try {
                 body,
                 catch,
@@ -385,7 +487,11 @@ fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
                     found = Some(format!(
                         "calls `{binding}.{method}()`, which may mutate the iterable this loop is walking"
                     ));
-                } else if args.iter().any(|arg| mentions_binding(arg, binding)) {
+                } else if args.iter().any(|arg| match arg {
+                    CallArg::Value(value) | CallArg::Spread(value) => {
+                        mentions_binding(value, binding)
+                    }
+                }) {
                     found = Some(format!(
                         "passes `{binding}`, the iterable this loop is walking, to a call that may mutate it"
                     ));
@@ -422,6 +528,9 @@ fn statement_expressions(stmt: &Stmt) -> Box<dyn Iterator<Item = &Expr> + '_> {
         Stmt::While { test, body } => {
             Box::new(std::iter::once(test).chain(statement_expressions(body)))
         }
+        Stmt::DoWhile { body, test } => {
+            Box::new(statement_expressions(body).chain(std::iter::once(test)))
+        }
         Stmt::For {
             init,
             test,
@@ -437,6 +546,21 @@ fn statement_expressions(stmt: &Stmt) -> Box<dyn Iterator<Item = &Expr> + '_> {
         Stmt::ForOf { iterable, body, .. } => {
             Box::new(std::iter::once(iterable).chain(statement_expressions(body)))
         }
+        Stmt::ForIn { object, body, .. } => {
+            Box::new(std::iter::once(object).chain(statement_expressions(body)))
+        }
+        Stmt::Switch {
+            discriminant,
+            cases,
+        } => Box::new(
+            std::iter::once(discriminant)
+                .chain(cases.iter().filter_map(|case| case.test.as_ref()))
+                .chain(
+                    cases
+                        .iter()
+                        .flat_map(|case| case.consequent.iter().flat_map(statement_expressions)),
+                ),
+        ),
         Stmt::Try {
             body,
             catch,
@@ -470,9 +594,19 @@ fn visit_expressions<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
     visit(expr);
     let mut walk = |expr: &'a Expr| visit_expressions(expr, visit);
     match expr {
-        Expr::Array(items) => items.iter().for_each(walk),
-        Expr::Object(entries) => entries.iter().for_each(|(_, value)| walk(value)),
-        Expr::Assign { value, target } => {
+        Expr::Array(items) => items.iter().for_each(|item| match item {
+            ArrayElement::Value(value) | ArrayElement::Spread(value) => walk(value),
+        }),
+        Expr::Object(entries) => entries.iter().for_each(|property| match property {
+            ObjectProperty::KeyValue(key, value) => {
+                if let PropertyKey::Computed(key) = key {
+                    walk(key);
+                }
+                walk(value);
+            }
+            ObjectProperty::Spread(value) => walk(value),
+        }),
+        Expr::Assign { value, target, .. } => {
             walk(value);
             if let TsAssignTarget::Member { object, property } = target {
                 walk(object);
@@ -504,7 +638,31 @@ fn visit_expressions<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         Expr::Template { expressions, .. } => expressions.iter().for_each(walk),
         Expr::Call { callee, args } => {
             walk(callee);
-            args.iter().for_each(walk);
+            args.iter().for_each(|arg| match arg {
+                CallArg::Value(value) | CallArg::Spread(value) => walk(value),
+            });
+        }
+        Expr::New { args, .. } => args.iter().for_each(|arg| match arg {
+            CallArg::Value(value) | CallArg::Spread(value) => walk(value),
+        }),
+        Expr::OptionalChain { base, operations } => {
+            walk(base);
+            for operation in operations {
+                match operation {
+                    OptionalOperation::Member {
+                        property: MemberProperty::Index(index),
+                        ..
+                    } => walk(index),
+                    OptionalOperation::Member { .. } => {}
+                    OptionalOperation::Call { args, .. } => {
+                        for arg in args {
+                            match arg {
+                                CallArg::Value(value) | CallArg::Spread(value) => walk(value),
+                            }
+                        }
+                    }
+                }
+            }
         }
         Expr::Function(function) => match &function.body {
             FunctionBody::Block(statements) => statements
@@ -519,6 +677,20 @@ fn visit_expressions<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         | Expr::Number(_)
         | Expr::String(_)
         | Expr::Ident(_)
-        | Expr::Update { .. } => {}
+        | Expr::This => {}
+        Expr::Update { target, .. } => {
+            if let TsAssignTarget::Member { object, property } = target {
+                walk(object);
+                if let MemberProperty::Index(index) = property {
+                    walk(index);
+                }
+            }
+        }
+        Expr::Delete { object, property } => {
+            walk(object);
+            if let MemberProperty::Index(index) = property {
+                walk(index);
+            }
+        }
     }
 }

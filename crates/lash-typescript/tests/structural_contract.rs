@@ -23,25 +23,14 @@ impl ExecutionHost for PrintHost {
 }
 
 #[test]
-fn unsupported_parameter_and_declare_shapes_have_precise_diagnostics() {
-    let cases = [
-        (
-            "function f(value = 1) { return value; }",
-            DiagnosticCode::ParameterDefaultUnsupported,
-        ),
-        (
-            "function f(...values) { return 1; }",
-            DiagnosticCode::ParameterRestUnsupported,
-        ),
-        (
-            "declare const value: number;",
-            DiagnosticCode::DeclareUnsupported,
-        ),
-    ];
-    for (source, expected) in cases {
-        let error = lash_typescript::compile(source).expect_err("shape must reject");
-        assert_eq!(error.code, expected, "source: {source}");
-    }
+fn parameter_defaults_and_rest_are_accepted_while_declare_stays_rejected() {
+    lash_typescript::compile(
+        "function f(value = 1, ...values) { return value + values.length; } finish(f());",
+    )
+    .expect("parameter defaults and rest compile");
+    let error = lash_typescript::compile("declare const value: number;")
+        .expect_err("ambient declarations remain outside executable cells");
+    assert_eq!(error.code, DiagnosticCode::DeclareUnsupported);
 }
 
 #[test]

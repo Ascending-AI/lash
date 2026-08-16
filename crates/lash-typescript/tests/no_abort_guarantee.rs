@@ -309,6 +309,42 @@ fn oversized_sources_reject_by_name() {
         .expect("a source at the bound compiles");
 }
 
+#[test]
+fn newly_accepted_constructs_survive_without_the_preflight() {
+    let depth = 500;
+    let sources = [
+        format!("const x = a{};", "?.b".repeat(depth)),
+        format!(
+            "const {}x{} = {};",
+            "[".repeat(depth),
+            "]".repeat(depth),
+            "[".repeat(depth) + "1" + &"]".repeat(depth)
+        ),
+        format!(
+            "const x = {}[1]{};",
+            "[...".repeat(depth),
+            "]".repeat(depth)
+        ),
+        format!(
+            "let x=0; finish({}x{});",
+            "(~".repeat(depth),
+            ")".repeat(depth)
+        ),
+        format!(
+            "{}finish(1);{}",
+            "do { switch(1) { case 1: ".repeat(depth),
+            "break; } } while(false);".repeat(depth)
+        ),
+    ];
+    for source in sources {
+        assert!(source.len() <= lash_typescript::MAX_SOURCE_BYTES);
+        match lash_typescript::parse_without_nesting_preflight(&source) {
+            Ok(_) => {}
+            Err(error) => assert!(!error.code.as_str().is_empty()),
+        }
+    }
+}
+
 // The fuzz generator, kept in step with `grammar_coverage.rs` by construction:
 // both draw from the same deterministic stream.
 struct Prng(u64);

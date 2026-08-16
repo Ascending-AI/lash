@@ -17,11 +17,6 @@ rejection_test!(
     "function* f() {}",
     Code::GeneratorUnsupported
 );
-rejection_test!(
-    rejects_async_functions,
-    "async function f() {}",
-    Code::AsyncUnsupported
-);
 rejection_test!(rejects_with, "with ({}) {}", Code::WithUnsupported);
 rejection_test!(rejects_eval, "eval('1');", Code::EvalUnsupported);
 rejection_test!(
@@ -82,30 +77,12 @@ rejection_test!(
     Code::ImportExportUnsupported
 );
 rejection_test!(rejects_jsx, "const x = <div />;", Code::JsxUnsupported);
-rejection_test!(rejects_var, "var x = 1;", Code::VarUnsupported);
 rejection_test!(rejects_using, "using x = resource;", Code::UsingUnsupported);
 rejection_test!(
-    rejects_array_destructuring,
-    "const [x] = value;",
-    Code::DestructuringUnsupported
+    rejects_arbitrary_new,
+    "new WeakMap();",
+    Code::NewUnsupported
 );
-rejection_test!(
-    rejects_object_destructuring,
-    "const {x} = value;",
-    Code::DestructuringUnsupported
-);
-rejection_test!(
-    rejects_object_spread,
-    "const x = { ...value };",
-    Code::SpreadUnsupported
-);
-rejection_test!(rejects_call_spread, "f(...value);", Code::SpreadUnsupported);
-rejection_test!(
-    rejects_optional_chaining,
-    "const x = value?.field;",
-    Code::OptionalChainingUnsupported
-);
-rejection_test!(rejects_new, "new Date();", Code::NewUnsupported);
 rejection_test!(
     rejects_unsupported_await,
     "await 1;",
@@ -158,26 +135,6 @@ rejection_test!(
     Code::ProcessConfigLiteralRequired
 );
 rejection_test!(
-    rejects_switch,
-    "switch (x) { case 1: break; }",
-    Code::SwitchUnsupported
-);
-rejection_test!(
-    rejects_do_while,
-    "do {} while (false);",
-    Code::DoWhileUnsupported
-);
-rejection_test!(
-    rejects_for_in,
-    "for (const key in value) {}",
-    Code::ForInUnsupported
-);
-rejection_test!(
-    rejects_delete,
-    "delete value.field;",
-    Code::DeleteUnsupported
-);
-rejection_test!(
     rejects_yield,
     "function* f() { yield 1; }",
     Code::GeneratorUnsupported
@@ -187,16 +144,6 @@ rejection_test!(
     "tag`value`;",
     Code::TaggedTemplateUnsupported
 );
-rejection_test!(
-    rejects_computed_properties,
-    "const x = { [key]: 1 };",
-    Code::ComputedPropertyUnsupported
-);
-rejection_test!(
-    rejects_object_methods,
-    "const x = { method() {} };",
-    Code::ObjectMethodUnsupported
-);
 rejection_test!(rejects_super, "super();", Code::SuperUnsupported);
 rejection_test!(
     rejects_meta_properties,
@@ -205,29 +152,9 @@ rejection_test!(
 );
 rejection_test!(rejects_bigint, "const x = 1n;", Code::BigIntUnsupported);
 rejection_test!(
-    rejects_compound_assignment,
-    "x += 1;",
-    Code::AssignmentOperatorUnsupported
-);
-rejection_test!(
     rejects_sequence,
     "const x = (1, 2);",
     Code::SequenceUnsupported
-);
-rejection_test!(
-    rejects_bitwise,
-    "const x = 1 | 2;",
-    Code::BitwiseUnsupported
-);
-rejection_test!(
-    rejects_exponentiation,
-    "const x = 2 ** 3;",
-    Code::ExponentiationUnsupported
-);
-rejection_test!(
-    rejects_in_operator,
-    "const x = 'a' in value;",
-    Code::InOperatorUnsupported
 );
 rejection_test!(
     rejects_instanceof,
@@ -235,17 +162,6 @@ rejection_test!(
     Code::InstanceOfUnsupported
 );
 rejection_test!(rejects_debugger, "debugger;", Code::DebuggerUnsupported);
-rejection_test!(
-    rejects_empty_catch_binding,
-    "try {} catch {}",
-    Code::EmptyCatchBindingUnsupported
-);
-
-rejection_test!(
-    rejects_compound_index_assignment,
-    "const a = [1]; a[0] += 5;",
-    Code::AssignmentOperatorUnsupported
-);
 rejection_test!(
     rejects_reserved_generated_identifier,
     "const __typescript_0_a = 1;",
@@ -256,6 +172,10 @@ rejection_test!(
 fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
     for source in [
         "let x = 0; x++; finish(x);",
+        "let x = 1; const old = x++; finish(old);",
+        "var x = 1; const {a} = {a:2}; finish([x,a]);",
+        "const x = { ...{a:1}, ['b']:2, f(){return 3;} }; finish(x?.a);",
+        "switch(1){case 1: break;} do {} while(false);",
         "for (let i = 0; i < 1; i++) {}",
         "const values = [1]; for (const value of values) { print(value); }",
         "await web.fetch({ url: 'https://example.com' });",
@@ -267,12 +187,6 @@ fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
         lash_typescript::validate(source).expect(source);
     }
 }
-
-rejection_test!(
-    rejects_update_in_value_position,
-    "let x = 1; const old = x++;",
-    Code::UpdateUnsupported
-);
 
 /// The register must name exactly what the lowerer accepts.
 ///
@@ -328,7 +242,7 @@ fn instance_method_inventory_matches_the_lowerer() {
         "the stated instance-method count must match the documented list"
     );
     for candidate in [
-        "sort", "pop", "push", "shift", "unshift", "reduce", "filter", "flat", "substr",
+        "sort", "pop", "push", "shift", "unshift", "reduce", "flat", "substr",
     ] {
         assert!(
             !lash_typescript::accepts_instance_method(candidate),
