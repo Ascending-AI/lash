@@ -364,9 +364,11 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// no JSON or compatibility read path.
 /// Version 35 adds queued-work batch identity and coalescing metadata.
 /// Version 36 adds the runtime-minted executor discriminator and store-authored
-/// lease term to session lease rows. Older databases are rejected and recreated;
-/// there is no compatibility read path.
-pub(crate) const SCHEMA_VERSION: i32 = 36;
+/// lease term to session lease rows.
+/// Version 37 adds the attachment GC fence's per-digest condemnation table.
+/// Older databases are rejected and recreated; there is no compatibility read
+/// path.
+pub(crate) const SCHEMA_VERSION: i32 = 37;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
