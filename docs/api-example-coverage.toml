@@ -34342,7 +34342,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1228#let event = RemoteSessionObservationEvent::from_core(sequence, event);"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1228#let event = match RemoteSessionObservationEvent::from_core(sequence, event) {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1222, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
