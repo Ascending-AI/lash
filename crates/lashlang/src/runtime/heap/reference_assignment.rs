@@ -1,5 +1,5 @@
 use super::*;
-use crate::runtime::{javascript_array_index, javascript_to_string};
+use crate::runtime::javascript_array_index_key;
 
 impl Heap {
     pub(crate) fn assign_path_reference(
@@ -35,10 +35,9 @@ impl Heap {
                         .get(index_cursor)
                         .ok_or(RuntimeError::MissingAssignmentIndex)?;
                     index_cursor += 1;
-                    let index = javascript_array_index(index).ok_or_else(|| {
-                        RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
-                            key: javascript_to_string(index),
-                        }
+                    let key = self.javascript_to_string(index)?;
+                    let index = javascript_array_index_key(&key).ok_or_else(|| {
+                        RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key }
                     })?;
                     values
                         .get(index)
@@ -82,9 +81,9 @@ impl Heap {
             CompiledAssignPathStep::Field(field) => names[field].text.as_ref() == "lastIndex",
             CompiledAssignPathStep::Index => indexes
                 .get(index_cursor)
-                .map(coerce_string)
+                .map(|index| self.javascript_to_string(index))
                 .transpose()?
-                .is_some_and(|key| key.as_ref() == "lastIndex"),
+                .is_some_and(|key| key == "lastIndex"),
         };
         if is_last_index && matches!(self.get(target_id)?, HeapObject::RegExp(_)) {
             let imported = self.import_values(vec![value], 1)?.remove(0);
@@ -114,10 +113,9 @@ impl Heap {
                 let index = indexes
                     .get(index_cursor)
                     .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                let index = javascript_array_index(index).ok_or_else(|| {
-                    RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
-                        key: javascript_to_string(index),
-                    }
+                let key = self.javascript_to_string(index)?;
+                let index = javascript_array_index_key(&key).ok_or_else(|| {
+                    RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key }
                 })?;
                 if index > values.len() {
                     return Err(RuntimeError::ValidationFailed {

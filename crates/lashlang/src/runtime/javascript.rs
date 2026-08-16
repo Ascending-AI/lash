@@ -282,10 +282,6 @@ pub(crate) fn javascript_to_string(value: &Value) -> String {
     }
 }
 
-pub(crate) fn javascript_array_index(index: &Value) -> Option<usize> {
-    javascript_array_index_key(&javascript_to_string(index))
-}
-
 pub(crate) fn javascript_array_index_key(key: &str) -> Option<usize> {
     if key.is_empty() || (key.len() > 1 && key.starts_with('0')) {
         return None;

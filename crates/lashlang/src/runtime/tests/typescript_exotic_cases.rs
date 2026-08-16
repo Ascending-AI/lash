@@ -202,6 +202,102 @@ async fn reference_index_keys_use_heap_aware_string_coercion() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn reference_array_index_keys_are_symmetric_for_reads_and_writes() {
+    let program = Program::block(vec![
+        ts_assign(
+            "array",
+            Expr::List(vec![Expr::Record(vec![("x".into(), Expr::Number(1.0))])]),
+        ),
+        ts_assign("key", Expr::List(vec![Expr::Number(0.0)])),
+        ts_assign(
+            "before",
+            Expr::Field {
+                target: Box::new(Expr::Index {
+                    target: Box::new(Expr::Variable("array".into())),
+                    index: Box::new(Expr::Variable("key".into())),
+                }),
+                field: "x".into(),
+            },
+        ),
+        Expr::Assign {
+            target: crate::AssignTarget {
+                root: "array".into(),
+                steps: vec![
+                    crate::AssignPathStep::Index(Expr::Variable("key".into())),
+                    crate::AssignPathStep::Field("x".into()),
+                ],
+            },
+            expr: Box::new(Expr::Number(2.0)),
+        },
+        ts_assign(
+            "after_nested_write",
+            Expr::Field {
+                target: Box::new(Expr::Index {
+                    target: Box::new(Expr::Variable("array".into())),
+                    index: Box::new(Expr::Variable("key".into())),
+                }),
+                field: "x".into(),
+            },
+        ),
+        Expr::Assign {
+            target: crate::AssignTarget {
+                root: "array".into(),
+                steps: vec![crate::AssignPathStep::Index(Expr::Variable("key".into()))],
+            },
+            expr: Box::new(Expr::Record(vec![("x".into(), Expr::Number(3.0))])),
+        },
+        Expr::Finish(Box::new(Expr::List(vec![
+            Expr::Variable("before".into()),
+            Expr::Variable("after_nested_write".into()),
+            Expr::Field {
+                target: Box::new(Expr::Index {
+                    target: Box::new(Expr::Variable("array".into())),
+                    index: Box::new(Expr::Variable("key".into())),
+                }),
+                field: "x".into(),
+            },
+        ]))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0),].into()
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reference_object_key_nested_array_write_returns_a_deterministic_error() {
+    let program = Program::block(vec![
+        ts_assign(
+            "array",
+            Expr::List(vec![Expr::Record(vec![("x".into(), Expr::Number(1.0))])]),
+        ),
+        ts_assign("key", Expr::Record(Vec::new())),
+        Expr::Assign {
+            target: crate::AssignTarget {
+                root: "array".into(),
+                steps: vec![
+                    crate::AssignPathStep::Index(Expr::Variable("key".into())),
+                    crate::AssignPathStep::Field("x".into()),
+                ],
+            },
+            expr: Box::new(Expr::Number(2.0)),
+        },
+    ]);
+    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
+        .expect("compile object index-key assignment regression");
+    assert_eq!(
+        execute(&compiled, &mut State::new(), &Host)
+            .await
+            .expect_err("object-key nested array assignment must fail"),
+        RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
+            key: "[object Object]".into(),
+        }
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn date_reference_index_key_uses_the_pending_string_coercion_error() {
     let program = Program::block(vec![
         ts_assign("record", Expr::Record(Vec::new())),
