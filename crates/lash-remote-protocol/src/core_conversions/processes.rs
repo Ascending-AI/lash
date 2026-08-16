@@ -1081,6 +1081,14 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             session_id,
             autonomous,
             turn_budget,
+            // The no-progress budget is host-owned live policy and is
+            // deliberately absent from the remote process wire: its default is
+            // bounded, so a peer that never hears the value resolves to the
+            // bound. Omission can therefore only fail safe — it can drop an
+            // explicit `Unbounded` opt-out, never an explicit bound. Carrying
+            // it would be a `REMOTE_PROTOCOL_VERSION` shape change for a knob
+            // the peer's own host configuration already supplies.
+            no_progress_budget: _,
             prompt,
             generation,
         } = value;
@@ -1133,6 +1141,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             session_id,
             autonomous,
             turn_budget: turn_budget.into(),
+            no_progress_budget: lash_core::NoProgressBudget::default(),
             prompt: prompt.into(),
             generation: generation.try_into()?,
         })

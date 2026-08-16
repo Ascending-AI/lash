@@ -12,11 +12,12 @@ use lash_sansio::PluginMessage;
 
 pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{
-    ConversationRecord, ErrorEnvelope, MAIN_AGENT_INTRO, Message, MessageRole, Part, PartKind,
-    PromptBuiltin, PromptSlot, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
-    ProtocolEvent, PruneState, SessionStreamEvent, TokenUsage, TokenUsageOverflow, TurnBudget,
-    TurnTerminationPolicyState, default_prompt_template, make_error_envelope, make_error_event,
-    reassign_part_ids, render_prompt, render_transcript_prompt, shared_parts,
+    ConversationRecord, ErrorEnvelope, MAIN_AGENT_INTRO, Message, MessageRole, NoProgressBudget,
+    Part, PartKind, PromptBuiltin, PromptSlot, PromptTemplate, PromptTemplateEntry,
+    PromptTemplateSection, ProtocolEvent, PruneState, SessionStreamEvent, TokenUsage,
+    TokenUsageOverflow, TurnBudget, TurnTerminationPolicyState, default_prompt_template,
+    make_error_envelope, make_error_event, reassign_part_ids, render_prompt,
+    render_transcript_prompt, shared_parts,
 };
 
 pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;
@@ -104,6 +105,16 @@ pub struct SessionPolicy {
     /// Required turn-budget decision. A host must choose either a non-zero
     /// bound or explicit unbounded execution; absence is never interpreted.
     pub turn_budget: TurnBudget,
+    /// Bound on consecutive provider attempts within one turn that commit no
+    /// successful execution.
+    ///
+    /// Host-owned live policy in the sense of ADR 0030: it is reconciled from
+    /// the host's configuration on every reopen and is deliberately not
+    /// persisted with the session head, so a host that changes the bound
+    /// changes it for sessions already on disk. Its default is bounded, so a
+    /// carrier that predates the field resolves to the bound rather than to a
+    /// loop.
+    pub no_progress_budget: NoProgressBudget,
     pub prompt: crate::PromptLayer,
     /// Caller-owned generation intent applied to every LLM call this session
     /// makes. It lives on the policy rather than on a single turn because it
@@ -131,6 +142,7 @@ impl SessionPolicy {
             session_id: None,
             autonomous: false,
             turn_budget,
+            no_progress_budget: NoProgressBudget::default(),
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
         }
@@ -169,6 +181,9 @@ impl serde::Serialize for SessionPolicy {
         use serde::ser::SerializeStruct;
 
         let mut fields = 5;
+        if self.no_progress_budget != NoProgressBudget::default() {
+            fields += 1;
+        }
         if !self.prompt.is_empty() {
             fields += 1;
         }
@@ -181,6 +196,9 @@ impl serde::Serialize for SessionPolicy {
         state.serialize_field("session_id", &self.session_id)?;
         state.serialize_field("autonomous", &self.autonomous)?;
         state.serialize_field("turn_budget", &self.turn_budget)?;
+        if self.no_progress_budget != NoProgressBudget::default() {
+            state.serialize_field("no_progress_budget", &self.no_progress_budget)?;
+        }
         if !self.prompt.is_empty() {
             state.serialize_field("prompt", &self.prompt)?;
         }
@@ -209,6 +227,8 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             autonomous: bool,
             turn_budget: TurnBudget,
             #[serde(default)]
+            no_progress_budget: NoProgressBudget,
+            #[serde(default)]
             prompt: crate::PromptLayer,
             #[serde(default)]
             generation: crate::GenerationOptions,
@@ -230,6 +250,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             session_id: wire.session_id,
             autonomous: wire.autonomous,
             turn_budget: wire.turn_budget,
+            no_progress_budget: wire.no_progress_budget,
             prompt: wire.prompt,
             generation: wire.generation,
         })
@@ -313,6 +334,9 @@ pub struct SessionSpec {
     pub provider_id: Option<String>,
     pub model: Option<ModelSpec>,
     pub turn_budget: Option<TurnBudget>,
+    /// Bound on consecutive unproductive provider attempts. `None` keeps the
+    /// bound the base policy already carries.
+    pub no_progress_budget: Option<NoProgressBudget>,
     pub prompt: Option<crate::PromptLayer>,
     /// Generation intent for every LLM call the session makes. `None` inherits
     /// the base policy's options unchanged; `Some` applies a
@@ -330,6 +354,7 @@ impl SessionSpec {
             provider_id: None,
             model: None,
             turn_budget: None,
+            no_progress_budget: None,
             prompt: None,
             generation: None,
         }
@@ -356,6 +381,13 @@ impl SessionSpec {
 
     pub fn turn_budget(mut self, turn_budget: TurnBudget) -> Self {
         self.turn_budget = Some(turn_budget);
+        self
+    }
+
+    /// Bound consecutive provider attempts that commit no successful
+    /// execution, or opt the session out of that bound.
+    pub fn no_progress_budget(mut self, no_progress_budget: NoProgressBudget) -> Self {
+        self.no_progress_budget = Some(no_progress_budget);
         self
     }
 
@@ -401,6 +433,9 @@ impl SessionSpec {
         }
         if let Some(turn_budget) = self.turn_budget {
             policy.turn_budget = turn_budget;
+        }
+        if let Some(no_progress_budget) = self.no_progress_budget {
+            policy.no_progress_budget = no_progress_budget;
         }
         if let Some(prompt) = self.prompt.as_ref() {
             policy.prompt = prompt.clone();
@@ -488,6 +523,44 @@ mod tests {
             err.to_string().contains("missing field `turn_budget`"),
             "missing policy field should name turn_budget: {err}"
         );
+    }
+
+    /// FIG-1407: the no-progress budget is an additive policy field, and a
+    /// policy that never mentions it must serialize byte-for-byte as before —
+    /// the persisted policy is part of the process-execution identity
+    /// preimage, so a silently widened default shape would re-key every
+    /// process.
+    #[test]
+    fn a_default_no_progress_budget_is_absent_from_the_serialized_policy() {
+        let value = serde_json::to_value(SessionPolicy::new(crate::TurnBudget::Unbounded))
+            .expect("serialize policy");
+        assert!(
+            value.get("no_progress_budget").is_none(),
+            "the default bound must not widen the persisted shape: {value}"
+        );
+
+        let decoded: SessionPolicy = serde_json::from_value(value).expect("decode policy");
+        assert_eq!(
+            decoded.no_progress_budget,
+            NoProgressBudget::default(),
+            "a carrier that predates the field resolves to the bound"
+        );
+    }
+
+    /// An explicit host choice — including the opt-out — survives the round
+    /// trip, which is what makes it a policy rather than a constant.
+    #[test]
+    fn an_explicit_no_progress_budget_round_trips() {
+        for budget in [NoProgressBudget::bounded(3), NoProgressBudget::Unbounded] {
+            let policy = SessionPolicy {
+                no_progress_budget: budget,
+                ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            };
+            let value = serde_json::to_value(&policy).expect("serialize policy");
+            assert!(value.get("no_progress_budget").is_some(), "{value}");
+            let decoded: SessionPolicy = serde_json::from_value(value).expect("decode policy");
+            assert_eq!(decoded.no_progress_budget, budget);
+        }
     }
 
     #[test]

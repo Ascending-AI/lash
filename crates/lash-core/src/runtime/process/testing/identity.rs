@@ -42,6 +42,7 @@ fn process_execution_env_identity_golden_corpus() {
         session_id: Some("session".to_string()),
         autonomous: true,
         turn_budget: crate::TurnBudget::bounded(1),
+        no_progress_budget: Default::default(),
         prompt: crate::PromptLayer::with_template(crate::PromptTemplate::new(vec![])),
         generation: crate::GenerationOptions {
             output_token_cap: std::num::NonZeroUsize::new(1024),

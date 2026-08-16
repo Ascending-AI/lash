@@ -991,3 +991,326 @@ fn a_lashlang_cell_in_a_typescript_session_is_named_the_same_way() {
     });
     assert!(told, "messages: {:#?}", machine.messages());
 }
+
+// === FIG-1407: the no-progress budget ===
+//
+// A turn whose attempts never commit an error-free execution used to re-call
+// the provider for as long as the turn budget allowed, which in a workbench
+// running `TurnBudget::Unbounded` was forever: one measured send bought 1,223
+// provider calls in 4m36s and committed nothing. These drive the real machine
+// to a terminal state and count the calls.
+
+/// Drive `machine` until it is done or `max_llm_calls` provider calls have
+/// been answered, answering each call with `reply` and each exec with
+/// `exec_result`. Returns the number of provider calls the machine made.
+fn drive_stalling_turn(
+    machine: &mut TurnMachine,
+    reply: &str,
+    exec_result: Option<lash_sansio::ExecResponse>,
+    max_llm_calls: usize,
+) -> StalledTurn {
+    let mut llm_calls = 0;
+    let mut outcome = None;
+    let mut effects = drain_effects(machine);
+    loop {
+        outcome = outcome.or_else(|| find_turn_outcome(&effects));
+        if let Some((messages, _)) = find_done(&effects) {
+            return StalledTurn {
+                llm_calls,
+                outcome,
+                messages: messages.iter().cloned().collect(),
+            };
+        }
+        if let Some(llm_id) = find_llm_call(&effects).copied() {
+            assert!(
+                llm_calls < max_llm_calls,
+                "the turn made {llm_calls} provider calls without terminating"
+            );
+            llm_calls += 1;
+            machine.handle_response(Response::LlmComplete {
+                id: llm_id,
+                text_streamed: false,
+                result: Ok(rlm_response(vec![text_part(reply)])),
+            });
+        } else if let Some(exec_id) = effects.iter().find_map(|effect| match effect {
+            Effect::ExecCode { id, .. } => Some(*id),
+            _ => None,
+        }) {
+            let result = exec_result
+                .clone()
+                .expect("the turn executed a cell the fixture did not script");
+            machine.handle_response(Response::ExecResult {
+                id: exec_id,
+                result: Ok(result),
+            });
+        } else if let Some((checkpoint_id, _)) = find_checkpoint(&effects) {
+            machine.handle_response(Response::Checkpoint {
+                id: checkpoint_id,
+                delivery: sansio::CheckpointDelivery::default(),
+            });
+        } else {
+            panic!("the turn is neither done nor waiting on anything it can be answered with");
+        }
+        effects = drain_effects(machine);
+    }
+}
+
+struct StalledTurn {
+    llm_calls: usize,
+    outcome: Option<lash_sansio::TurnOutcome>,
+    messages: Vec<Message>,
+}
+
+impl StalledTurn {
+    /// The transcript record the turn closed on, if it says why it stopped.
+    fn stop_message(&self) -> Option<&Part> {
+        self.messages.iter().find_map(|message| {
+            message
+                .parts
+                .iter()
+                .find(|part| part.content.contains("no-progress budget is exhausted"))
+        })
+    }
+}
+
+fn find_turn_outcome(effects: &[Effect]) -> Option<lash_sansio::TurnOutcome> {
+    effects.iter().find_map(|effect| match effect {
+        Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome.clone()),
+        _ => None,
+    })
+}
+
+fn config_with_no_progress_budget(max_attempts: usize) -> TurnMachineConfig {
+    let mut config = test_config();
+    config.no_progress_budget = lash_core::NoProgressBudget::bounded(max_attempts);
+    config
+}
+
+/// A cell that never closes never executes, so it commits nothing. Before the
+/// budget existed this turn had no terminating branch at all.
+#[test]
+fn a_reply_that_never_yields_a_cell_stops_at_the_no_progress_budget() {
+    let mut machine = TurnMachine::new(
+        config_with_no_progress_budget(4),
+        vec![user_message("do the thing")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let stalled = drive_stalling_turn(&mut machine, "<lashlang>\nfinish \"ok\"", None, 32);
+
+    assert_eq!(
+        stalled.llm_calls, 4,
+        "the bound is the number of provider calls"
+    );
+    assert_eq!(
+        stalled.outcome,
+        Some(lash_core::facade_support::TurnOutcome::Stopped(
+            lash_core::facade_support::TurnStop::MaxTurns
+        )),
+        "exhaustion is terminal for the turn"
+    );
+    assert!(
+        stalled.stop_message().is_some(),
+        "the transcript says why the turn stopped: {:#?}",
+        stalled.messages
+    );
+}
+
+/// The same bound, in the other dialect.
+#[test]
+fn a_typescript_reply_that_never_yields_a_cell_stops_at_the_no_progress_budget() {
+    let mut config = test_config_with_dialect("typescript");
+    config.no_progress_budget = lash_core::NoProgressBudget::bounded(3);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("do the thing")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let stalled = drive_stalling_turn(&mut machine, "<typescript>\nfinish(\"ok\");", None, 32);
+
+    assert_eq!(
+        stalled.llm_calls, 3,
+        "the bound is the number of provider calls"
+    );
+    assert_eq!(
+        stalled.outcome,
+        Some(lash_core::facade_support::TurnOutcome::Stopped(
+            lash_core::facade_support::TurnStop::MaxTurns
+        )),
+    );
+}
+
+/// The measured `code-failure` shape: the cell parses out of the reply and
+/// runs, and raises every time. It commits a trajectory entry per attempt, so
+/// "appended something" is not progress — an error-free execution is.
+#[test]
+fn a_cell_that_only_ever_raises_stops_at_the_no_progress_budget() {
+    let mut machine = TurnMachine::new(
+        config_with_no_progress_budget(5),
+        vec![user_message("do the thing")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let stalled = drive_stalling_turn(
+        &mut machine,
+        &lashlang_block("fail \"deterministic durable process failure\""),
+        Some(exec_response(
+            &[],
+            Some("`fail` is only valid inside a process"),
+            None,
+        )),
+        32,
+    );
+
+    assert_eq!(
+        stalled.llm_calls, 5,
+        "the bound is the number of provider calls"
+    );
+    assert_eq!(
+        stalled.outcome,
+        Some(lash_core::facade_support::TurnOutcome::Stopped(
+            lash_core::facade_support::TurnStop::MaxTurns
+        )),
+    );
+}
+
+/// An error-free execution is progress, and progress resets the count. A turn
+/// that keeps getting real work done never approaches the bound however many
+/// bad attempts are interleaved.
+#[test]
+fn an_error_free_execution_resets_the_no_progress_count() {
+    let mut machine = TurnMachine::new(
+        config_with_no_progress_budget(3),
+        vec![user_message("do the thing")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let unclosed = "<lashlang>\nfinish \"ok\"";
+    let mut effects = drain_effects(&mut machine);
+
+    // Two stalls, one short of the bound.
+    for _ in 0..2 {
+        let llm_id = *find_llm_call(&effects).expect("llm call");
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(rlm_response(vec![text_part(unclosed)])),
+        });
+        effects = drain_effects(&mut machine);
+        let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint");
+        machine.handle_response(Response::Checkpoint {
+            id: checkpoint_id,
+            delivery: sansio::CheckpointDelivery::default(),
+        });
+        effects = drain_effects(&mut machine);
+    }
+    assert!(
+        find_done(&effects).is_none(),
+        "two stalls must not exhaust a bound of three"
+    );
+
+    // One attempt that executes cleanly without finishing the turn.
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part(&lashlang_block(
+            "print \"working\"",
+        ))])),
+    });
+    effects = drain_effects(&mut machine);
+    let exec_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ExecCode { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("exec code");
+    machine.handle_response(Response::ExecResult {
+        id: exec_id,
+        result: Ok(exec_response(&["working"], None, None)),
+    });
+    effects = drain_effects(&mut machine);
+    let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: sansio::CheckpointDelivery::default(),
+    });
+    effects = drain_effects(&mut machine);
+    assert!(find_done(&effects).is_none(), "the turn is still running");
+
+    // The count restarted: two more stalls still do not exhaust the bound, and
+    // the third does. Six provider calls in a turn bounded at three.
+    for _ in 0..2 {
+        let llm_id = *find_llm_call(&effects).expect("llm call");
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(rlm_response(vec![text_part(unclosed)])),
+        });
+        effects = drain_effects(&mut machine);
+        let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint");
+        machine.handle_response(Response::Checkpoint {
+            id: checkpoint_id,
+            delivery: sansio::CheckpointDelivery::default(),
+        });
+        effects = drain_effects(&mut machine);
+    }
+    assert!(
+        find_done(&effects).is_none(),
+        "the reset must have restarted the count at the clean execution"
+    );
+
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part(unclosed)])),
+    });
+    effects = drain_effects(&mut machine);
+    assert!(find_done(&effects).is_some(), "the third stall exhausts it");
+    assert_eq!(
+        find_turn_outcome(&effects),
+        Some(lash_core::facade_support::TurnOutcome::Stopped(
+            lash_core::facade_support::TurnStop::MaxTurns
+        )),
+    );
+}
+
+/// A host may still opt a deployment out of the bound.
+#[test]
+fn an_unbounded_no_progress_budget_keeps_re_asking() {
+    let mut config = test_config();
+    config.no_progress_budget = lash_core::NoProgressBudget::Unbounded;
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("do the thing")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let unclosed = "<lashlang>\nfinish \"ok\"";
+    let mut effects = drain_effects(&mut machine);
+    for _ in 0..20 {
+        let llm_id = *find_llm_call(&effects).expect("llm call");
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(rlm_response(vec![text_part(unclosed)])),
+        });
+        effects = drain_effects(&mut machine);
+        let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint");
+        machine.handle_response(Response::Checkpoint {
+            id: checkpoint_id,
+            delivery: sansio::CheckpointDelivery::default(),
+        });
+        effects = drain_effects(&mut machine);
+    }
+    assert!(
+        find_done(&effects).is_none(),
+        "an explicit opt-out is honored"
+    );
+}

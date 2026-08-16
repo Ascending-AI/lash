@@ -920,8 +920,8 @@ pub use session_graph::{
 };
 pub(crate) use session_model::RuntimeSessionPolicy;
 
+pub use session_model::{NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
-pub use session_model::{SessionPolicy, TurnBudget};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
     LeaseClaimNonce, LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence,

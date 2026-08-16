@@ -61,6 +61,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
         model: "test-model".to_string(),
         max_context_tokens: None,
         turn_budget: lash_core::TurnBudget::Unbounded,
+        no_progress_budget: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         generation: lash_core::GenerationOptions::default(),

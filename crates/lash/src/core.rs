@@ -1016,6 +1016,17 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Bound the consecutive provider attempts a turn may spend without
+    /// committing a successful execution.
+    ///
+    /// Unset, sessions carry [`lash_core::NoProgressBudget::default`], which is
+    /// bounded. Pass [`lash_core::NoProgressBudget::Unbounded`] to opt a
+    /// deployment out of the bound deliberately.
+    pub fn no_progress_budget(mut self, no_progress_budget: lash_core::NoProgressBudget) -> Self {
+        self.session_spec = self.session_spec.no_progress_budget(no_progress_budget);
+        self
+    }
+
     /// Generation options — output token cap, temperature, seed — carried by
     /// every LLM call in every session this core opens.
     pub fn generation(mut self, generation: lash_core::GenerationOptions) -> Self {

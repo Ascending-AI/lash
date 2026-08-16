@@ -2617,7 +2617,9 @@ mod tests {
                     .collect()
             }
 
-            let first = capture(
+            // Boxed because the awaited future crosses clippy's large-future
+            // threshold once the turn config carries its budgets.
+            let first = Box::pin(capture(
                 r#"
                 process remember(tick: timer.Tick) { finish tick.fired_at }
                 morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
@@ -2626,9 +2628,11 @@ mod tests {
                 await triggers.register({ source: evening, target: remember, inputs: { tick: trigger.event } })?
                 finish true
                 "#,
-            )
+            ))
             .await;
-            let second = capture(
+            // Boxed because the awaited future crosses clippy's large-future
+            // threshold once the turn config carries its budgets.
+            let second = Box::pin(capture(
                 r#"
                 process remember(tick: timer.Tick) { finish tick.fired_at }
                 morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
@@ -2637,7 +2641,7 @@ mod tests {
                 await triggers.register({ source: morning, target: remember, inputs: { tick: trigger.event } })?
                 finish true
                 "#,
-            )
+            ))
             .await;
 
             let first_keys = first

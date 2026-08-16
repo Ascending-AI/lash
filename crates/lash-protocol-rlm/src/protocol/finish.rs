@@ -167,3 +167,28 @@ pub(super) fn validate_finish_value(value: &Value, schema: &Value) -> Result<(),
     }
     Ok(())
 }
+
+/// The transcript record left behind when a turn exhausts its no-progress
+/// budget.
+///
+/// It is a system message rather than dialect copy because it addresses no
+/// language construct: the turn is over, and nothing will read it as an
+/// instruction to repair.
+pub(super) fn no_progress_stop_message(id: String, attempts: usize) -> Message {
+    Message {
+        id: id.clone(),
+        role: MessageRole::System,
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            format!(
+                "Stopped after {attempts} consecutive model responses that executed nothing. \
+                 The turn's no-progress budget is exhausted; no further model calls were made."
+            ),
+            None,
+        )]),
+        origin: Some(lash_core::MessageOrigin::Plugin {
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            transient: false,
+        }),
+    }
+}

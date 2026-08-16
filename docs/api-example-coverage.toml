@@ -43474,7 +43474,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:227#.with_deferred_tool_resolver(deferred_tools.resolver())"
+usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:238#.with_deferred_tool_resolver(deferred_tools.resolver())"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -76214,3 +76214,139 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only durable reconstruction plumbing: PluginHost copies this field into PluginSessionContext and the RLM factory resolves its pinned dialect before restore. Application examples exercise the facade dialect selector and persisted result, not this factory-internal carrier."
+
+[[api]]
+symbol = "lash::LashCoreBuilder::no_progress_budget"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCoreBuilder::no_progress_budget"]
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/embedding_advanced.rs:377#.no_progress_budget(lash::NoProgressBudget::bounded(12))"
+reason = "The advanced-embedding snippet configures the bound on the core builder, but the executed assertion observes only that the builder resolves; the enforced outcome is asserted against the resolved policy and the driver instead."
+
+[[api]]
+symbol = "lash::NoProgressBudget"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash::prelude::NoProgressBudget", "lash_core::NoProgressBudget"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:16#assert_eq!(lash::NoProgressBudget::Unbounded.max_attempts(), None);"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:16#assert_eq!(lash::NoProgressBudget::Unbounded.max_attempts(), None);"
+reason = "The workbench budget fixture observes the contract that distinguishes the two states: an opted-out budget reports no bound."
+
+[[api]]
+symbol = "lash::NoProgressBudget::Bounded"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::prelude::NoProgressBudget::Bounded", "lash_core::NoProgressBudget::Bounded"]
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:21#let lash::NoProgressBudget::Bounded(bound) = lash::NoProgressBudget::bounded(7) else {"
+reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape. The bound it carries is asserted through the field row."
+
+[[api]]
+symbol = "lash::NoProgressBudget::Bounded::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::NoProgressBudget::Bounded::0", "lash_core::NoProgressBudget::Bounded::0"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:21#let lash::NoProgressBudget::Bounded(bound) = lash::NoProgressBudget::bounded(7) else {"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:24#assert_eq!(bound.get(), 7);"
+reason = "The workbench budget fixture reads the carried bound out of the variant and observes the value the host asked for."
+
+[[api]]
+symbol = "lash::NoProgressBudget::DEFAULT_MAX_ATTEMPTS"
+kind = "assoc_const"
+availability = "default+all-features"
+aliases = [
+  "lash::prelude::NoProgressBudget::DEFAULT_MAX_ATTEMPTS",
+  "lash_core::NoProgressBudget::DEFAULT_MAX_ATTEMPTS",
+]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:14#let documented_default = Some(lash::NoProgressBudget::DEFAULT_MAX_ATTEMPTS);"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:15#assert_eq!(default_attempts, documented_default);"
+reason = "The workbench budget fixture observes that the documented constant is the bound an unconfigured budget actually resolves to, which is the whole claim the constant makes."
+
+[[api]]
+symbol = "lash::NoProgressBudget::Unbounded"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::prelude::NoProgressBudget::Unbounded", "lash_core::NoProgressBudget::Unbounded"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:19#assert!(!lash::NoProgressBudget::Unbounded.is_exhausted_by(10_000));"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:19#assert!(!lash::NoProgressBudget::Unbounded.is_exhausted_by(10_000));"
+reason = "The opt-out is exercised for what it promises: no attempt count exhausts it."
+
+[[api]]
+symbol = "lash::NoProgressBudget::bounded"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::NoProgressBudget::bounded", "lash_core::NoProgressBudget::bounded"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:17#assert!(lash::NoProgressBudget::bounded(12).is_exhausted_by(12));"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:17#assert!(lash::NoProgressBudget::bounded(12).is_exhausted_by(12));"
+reason = "The constructor is observed through the bound it produces rather than through its own return shape."
+
+[[api]]
+symbol = "lash::NoProgressBudget::is_exhausted_by"
+kind = "function"
+availability = "default+all-features"
+aliases = [
+  "lash::prelude::NoProgressBudget::is_exhausted_by",
+  "lash_core::NoProgressBudget::is_exhausted_by",
+]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:18#assert!(!lash::NoProgressBudget::bounded(12).is_exhausted_by(11));"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:18#assert!(!lash::NoProgressBudget::bounded(12).is_exhausted_by(11));"
+reason = "Both sides of the boundary are observed: the bound is reached at its value and not before it."
+
+[[api]]
+symbol = "lash::NoProgressBudget::max_attempts"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::NoProgressBudget::max_attempts", "lash_core::NoProgressBudget::max_attempts"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:16#assert_eq!(lash::NoProgressBudget::Unbounded.max_attempts(), None);"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:16#assert_eq!(lash::NoProgressBudget::Unbounded.max_attempts(), None);"
+reason = "The accessor is observed reporting the absence of a bound, which is the answer a host branches on."
+
+[[api]]
+symbol = "lash::SessionSpec::no_progress_budget"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSpec::no_progress_budget"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:34#assert_eq!(spec.no_progress_budget, expected_workbench_bound);"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:34#assert_eq!(spec.no_progress_budget, expected_workbench_bound);"
+reason = "The workbench budget fixture reads the overlay field back and observes that it records the bound the host asked for rather than a resolved default."
+
+[[api]]
+symbol = "lash::SessionSpec::no_progress_budget"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSpec::no_progress_budget"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:49#.no_progress_budget(lash::NoProgressBudget::Unbounded)"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:52#assert_eq!(opted_out_budget, lash::NoProgressBudget::Unbounded);"
+reason = "The overlay setter is observed through resolution: a spec that names the opt-out resolves a policy carrying it."
+
+[[api]]
+symbol = "lash::runtime::SessionPolicy::no_progress_budget"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SessionPolicy::no_progress_budget"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:39#let resolved_attempts = policy.no_progress_budget.max_attempts();"
+assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:40#assert_eq!(resolved_attempts, Some(WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS));"
+reason = "The resolved session policy is observed carrying the workbench's own bound, which is the value the turn driver enforces."
