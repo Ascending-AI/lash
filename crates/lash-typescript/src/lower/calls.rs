@@ -572,7 +572,7 @@ impl Lowerer {
                     name: "__typescript_stdlib".into(),
                     args: vec![
                         LashExpr::String("Lash.ArrayFromIterable".into()),
-                        self.lower_regexp_iterable_sink(value)?,
+                        self.lower_iterable_sink(value)?,
                     ],
                 };
                 return if mapping_args.is_empty() {

@@ -252,3 +252,6 @@ new Set('a'.matchAll(/a/g)).size
 (() => { const xs=[1,2]; const ys=xs; ys.push(3); return `${xs.length}|${ys.length}`; })()
 (() => { const xs=[1,2,3]; const out=[]; while (xs.length > 0) { out.push(xs.shift()); } return out.join(','); })()
 (() => { const xs=[]; xs.unshift(1); xs.push(2); return `${xs.join(',')}|${xs.pop()}|${xs.shift()}|${xs.length}`; })()
+new Map('a1b2'.matchAll(/([a-z])(\d)/g)).size
+JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(\d)/g)))
+new Set('a1b2'.matchAll(/[a-z]/g)).size

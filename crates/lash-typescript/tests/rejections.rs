@@ -53,13 +53,24 @@ fn retained_match_all_iterator_has_a_sink_repair() {
 
 #[test]
 fn match_all_rejects_non_contract_iterable_sinks() {
+    // `new Map`/`Set` and `Object.fromEntries` are contract sinks — the same
+    // five the collection iterators take. What is still refused is a position
+    // that lets the iterator outlive its materialization.
     for source in [
-        "new Set('a'.matchAll(/a/g));",
-        "new Map('a'.matchAll(/a/g));",
-        "Object.fromEntries('a'.matchAll(/a/g));",
+        "const it = 'a'.matchAll(/a/g);",
+        "const wrap = { it: 'a'.matchAll(/a/g) };",
+        "function take(x: unknown) { } take('a'.matchAll(/a/g));",
+        "finish('a'.matchAll(/a/g));",
     ] {
         let error = lash_typescript::validate(source).expect_err(source);
         assert_eq!(error.code, Code::RegexIteratorPosition, "{error}");
+    }
+    for source in [
+        "new Set('a'.matchAll(/a/g));",
+        "new Map('a1'.matchAll(/([a-z])(\\d)/g));",
+        "Object.fromEntries('a1'.matchAll(/([a-z])(\\d)/g));",
+    ] {
+        lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
     }
 }
 

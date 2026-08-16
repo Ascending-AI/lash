@@ -14,7 +14,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 254],
+  ['findings', 'findings-expressions.txt', 257],
 ];
 
 const rejected = new Map([
@@ -25,7 +25,6 @@ const rejected = new Map([
   ["/a/d", 'TS_REGEX_INDICES_FLAG_UNSUPPORTED'],
   ["/a/v", 'TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED'],
   ['new RegExp(/a/g)', 'TS_NEW_UNSUPPORTED'],
-  ["new Set('a'.matchAll(/a/g)).size", 'TS_REGEX_ITERATOR_POSITION'],
 ]);
 
 const runtimeRejected = new Map([

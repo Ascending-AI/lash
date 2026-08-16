@@ -135,17 +135,14 @@ impl Lowerer {
         Ok(true)
     }
 
+    /// Lowers `value` in a position that materializes an iterable at once.
+    ///
+    /// There is one such position list, not two. `matchAll` used to accept
+    /// three of these sinks while the collection iterators accepted five, for
+    /// no reason either side could state: every sink here is a bounded
+    /// materialization, which is the whole property the restriction exists to
+    /// guarantee.
     pub(super) fn lower_iterable_sink(&mut self, value: &Expr) -> Result<LashExpr, Diagnostic> {
-        self.iterable_sink_depth += 1;
-        let result = self.lower_expr(value);
-        self.iterable_sink_depth -= 1;
-        result
-    }
-
-    pub(super) fn lower_regexp_iterable_sink(
-        &mut self,
-        value: &Expr,
-    ) -> Result<LashExpr, Diagnostic> {
         self.iterable_sink_depth += 1;
         self.regexp_iterable_sink_depth += 1;
         let result = self.lower_expr(value);
@@ -244,7 +241,7 @@ impl Lowerer {
             let next = match element {
                 ArrayElement::Value(value) => LashExpr::List(vec![self.lower_expr(value)?]),
                 ArrayElement::Spread(value) => {
-                    let value = self.lower_regexp_iterable_sink(value)?;
+                    let value = self.lower_iterable_sink(value)?;
                     Self::iterable_copy(value)
                 }
             };
@@ -295,7 +292,7 @@ impl Lowerer {
         let source = if keys {
             self.lower_expr(source)?
         } else {
-            self.lower_regexp_iterable_sink(source)?
+            self.lower_iterable_sink(source)?
         };
         let iterable = if keys {
             Self::stdlib_call("Object.keys", vec![source])
@@ -908,7 +905,7 @@ impl Lowerer {
             let next = match argument {
                 CallArg::Value(value) => LashExpr::List(vec![self.lower_expr(value)?]),
                 CallArg::Spread(value) => {
-                    let value = self.lower_regexp_iterable_sink(value)?;
+                    let value = self.lower_iterable_sink(value)?;
                     Self::iterable_copy(value)
                 }
             };

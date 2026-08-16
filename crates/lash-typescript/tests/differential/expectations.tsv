@@ -516,7 +516,7 @@ findings	227	accept	"(() => `${/^b/m.test('a\\nb')}|${/a.b/s.test('a\\nb')}`)()"
 findings	228	accept	"(() => { const a=[0]; return 'xx'.replace(/x/g,()=>{a[0]=a[0]+1; return a;}); })()"	"12"	-
 findings	229	accept	"(() => { const o={}; o['\\0lash.regexp.match']=true; o.length=1e100; return `${Array.isArray(o)}|${Object.keys(o).includes('\\0lash.regexp.match')}`; })()"	"false|true"	-
 findings	230	reject	"new RegExp(/a/g)"	"/a/g"	TS_NEW_UNSUPPORTED
-findings	231	reject	"new Set('a'.matchAll(/a/g)).size"	"1"	TS_REGEX_ITERATOR_POSITION
+findings	231	accept	"new Set('a'.matchAll(/a/g)).size"	"1"	-
 findings	232	accept	"(() => { const m=/(?<x>a)(b)/.exec('ab'); m[0]='changed'; m.index=7; m['input']='input'; m.groups={x:'group'}; m.length=1; return `${m[0]}|${m.index}|${m.input}|${m.groups.x}|${m.length}`; })()"	"changed|7|input|group|1"	-
 findings	233	accept	"(() => { const m=new Map([['a',1],['b',2],['d',4]]);const out=[];m.forEach((v,k)=>{out[out.length]=k+v;if(k==='a'&&v===1){m.delete('b');m.set('c',3);m.delete('a');m.set('a',10);}});return out.join(','); })()"	"a1,d4,c3,a10"	-
 findings	234	accept	"(() => { const s=new Set([1,2,4]);const out=[];const state={first:true};s.forEach(v=>{out[out.length]=v;if(state.first){state.first=false;s.delete(2);s.add(3);s.delete(1);s.add(1);}});return out.join(','); })()"	"1,4,3,1"	-
@@ -540,3 +540,6 @@ findings	251	accept	"(() => { const out=[]; [1,2,3].map(v=>{out.push(v); return 
 findings	252	accept	"(() => { const xs=[1,2]; const ys=xs; ys.push(3); return `${xs.length}|${ys.length}`; })()"	"3|3"	-
 findings	253	accept	"(() => { const xs=[1,2,3]; const out=[]; while (xs.length > 0) { out.push(xs.shift()); } return out.join(','); })()"	"1,2,3"	-
 findings	254	accept	"(() => { const xs=[]; xs.unshift(1); xs.push(2); return `${xs.join(',')}|${xs.pop()}|${xs.shift()}|${xs.length}`; })()"	"1,2|2|1|0"	-
+findings	255	accept	"new Map('a1b2'.matchAll(/([a-z])(\\d)/g)).size"	"2"	-
+findings	256	accept	"JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(\\d)/g)))"	"{\"a1\":\"a\",\"b2\":\"b\"}"	-
+findings	257	accept	"new Set('a1b2'.matchAll(/[a-z]/g)).size"	"2"	-

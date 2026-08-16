@@ -62,7 +62,7 @@ feature	dynamic-import	rejected	TS_DYNAMIC_IMPORT_UNSUPPORTED	const m = import('
 feature	error-cause	accepted	-	-
 feature	error-stack-accessor	skip	ticket-ruling:FIG-1413:error-stack-accessor	-
 feature	Error.isError	rejected	TS_METHOD_UNSUPPORTED	Error.isError(new Error('x'));
-feature	explicit-resource-management	skip	ticket-ruling:FIG-1413:explicit-resource-management	-
+feature	explicit-resource-management	skip	ticket-ruling:FIG-1413:explicit-resource-management — using/dispose semantics are a second, implicit termination path competing with the process finally-block contract that already owns durable cleanup	-
 feature	exponentiation	accepted	-	-
 feature	export-defer	rejected	TS_IMPORT_EXPORT_UNSUPPORTED	probe-exempt:deferred-export syntax does not parse in the pinned SWC, so the probe would pin TS_SYNTAX_ERROR rather than the ruling
 feature	export-star-as-namespace-from-module	rejected	TS_IMPORT_EXPORT_UNSUPPORTED	export * as ns from 'mod';
@@ -105,7 +105,7 @@ feature	Intl.RelativeTimeFormat	skip	ticket-ruling:FIG-1413:Intl.RelativeTimeFor
 feature	Intl.Segmenter	skip	ticket-ruling:FIG-1413:Intl.Segmenter	-
 feature	IsHTMLDDA	skip	ticket-ruling:FIG-1413:IsHTMLDDA	-
 feature	iterator-chunking	skip	ticket-ruling:FIG-1413:iterator-chunking	-
-feature	iterator-helpers	skip	ticket-ruling:FIG-1413:iterator-helpers	-
+feature	iterator-helpers	skip	ticket-ruling:FIG-1413:iterator-helpers — lazy iterator pipelines keep suspended iteration state alive across a park, and the dialect's answer is that every iterator is materialized at a bounded sink instead	-
 feature	iterator-includes	skip	ticket-ruling:FIG-1413:iterator-includes	-
 feature	iterator-sequencing	skip	ticket-ruling:FIG-1413:iterator-sequencing	-
 feature	Iterator.prototype.join	skip	ticket-ruling:FIG-1413:Iterator.prototype.join	-
@@ -134,9 +134,9 @@ feature	promise-with-resolvers	skip	ticket-ruling:FIG-1413:promise-with-resolver
 feature	Promise.allSettled	accepted	-	-
 feature	Promise.any	rejected	TS_METHOD_UNSUPPORTED	Promise.any([1]);
 feature	Promise.prototype.finally	rejected	TS_METHOD_UNSUPPORTED	const p: any = 1; p.finally(() => { });
-feature	Proxy	skip	ticket-ruling:FIG-1413:Proxy	-
+feature	Proxy	skip	ticket-ruling:FIG-1413:Proxy — an interposed handler makes every property access an arbitrary guest computation, which the durable snapshot cannot represent and the effect model cannot bound	-
 feature	proxy-missing-checks	skip	ticket-ruling:FIG-1413:proxy-missing-checks	-
-feature	Reflect	skip	ticket-ruling:FIG-1413:Reflect	-
+feature	Reflect	skip	ticket-ruling:FIG-1413:Reflect — the reflection surface is defined over the prototype chain and property descriptors, neither of which the dense-record value model has	-
 feature	Reflect.construct	skip	ticket-ruling:FIG-1413:Reflect.construct	-
 feature	Reflect.set	skip	ticket-ruling:FIG-1413:Reflect.set	-
 feature	Reflect.setPrototypeOf	skip	ticket-ruling:FIG-1413:Reflect.setPrototypeOf	-
@@ -171,7 +171,7 @@ feature	String.prototype.toWellFormed	rejected	TS_METHOD_UNSUPPORTED	'a'.toWellF
 feature	String.prototype.trimEnd	accepted	-	-
 feature	String.prototype.trimStart	accepted	-	-
 feature	super	rejected	TS_SUPER_UNSUPPORTED	const o = { m() { super.x; } };
-feature	Symbol	skip	ticket-ruling:FIG-1413:Symbol	-
+feature	Symbol	skip	ticket-ruling:FIG-1413:Symbol — symbols are unforgeable identities with no serialized form, so a durable record keyed by one could not be written down or resumed	-
 feature	Symbol.asyncIterator	skip	ticket-ruling:FIG-1413:Symbol.asyncIterator	-
 feature	Symbol.hasInstance	skip	ticket-ruling:FIG-1413:Symbol.hasInstance	-
 feature	Symbol.isConcatSpreadable	skip	ticket-ruling:FIG-1413:Symbol.isConcatSpreadable	-
@@ -189,7 +189,7 @@ feature	Symbol.unscopables	skip	ticket-ruling:FIG-1413:Symbol.unscopables	-
 feature	symbols-as-weakmap-keys	skip	ticket-ruling:FIG-1413:symbols-as-weakmap-keys	-
 feature	tail-call-optimization	skip	ticket-ruling:FIG-1413:tail-call-optimization	-
 feature	template	accepted	-	-
-feature	Temporal	skip	ticket-ruling:FIG-1413:Temporal	-
+feature	Temporal	skip	ticket-ruling:FIG-1413:Temporal — the whole surface is time-zone and calendar data, which is host-dependent for the same reason the locale surfaces are rejected	-
 feature	top-level-await	accepted	-	-
 feature	TypedArray	skip	ticket-ruling:FIG-1413:TypedArray	-
 feature	TypedArray.prototype.at	skip	ticket-ruling:FIG-1413:TypedArray.prototype.at	-
@@ -200,7 +200,7 @@ feature	Uint8Array	skip	ticket-ruling:FIG-1413:Uint8Array	-
 feature	uint8array-base64	rejected	TS_METHOD_UNSUPPORTED	Uint8Array.fromBase64('AAA=');
 feature	Uint8ClampedArray	skip	ticket-ruling:FIG-1413:Uint8ClampedArray	-
 feature	upsert	skip	ticket-ruling:FIG-1413:upsert	-
-feature	WeakMap	skip	ticket-ruling:FIG-1413:WeakMap	-
+feature	WeakMap	skip	ticket-ruling:FIG-1413:WeakMap — weak references answer to a garbage collector's timing, which is exactly the nondeterminism a replayable journal cannot carry	-
 feature	WeakRef	skip	ticket-ruling:FIG-1413:WeakRef	-
 feature	WeakSet	skip	ticket-ruling:FIG-1413:WeakSet	-
 feature	well-formed-json-stringify	rejected	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED	JSON.stringify('\ud800');

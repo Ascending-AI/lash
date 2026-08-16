@@ -837,3 +837,59 @@ fn a_cycle_is_a_guest_type_error_in_json_and_a_named_refusal_at_the_boundary() {
         "the boundary refusal must state the constraint: {rendered}"
     );
 }
+
+/// `matchAll` is accepted in all five iterable sinks, not three.
+///
+/// The collection iterators took `for...of`, spread, `Array.from`,
+/// `new Map`/`Set`, and `Object.fromEntries`; `matchAll` took the first three.
+/// Every position on that list is a bounded materialization — the whole
+/// property the restriction exists to guarantee — so the asymmetry had nothing
+/// behind it, and the two extra sinks are exactly where a match-pair iterator
+/// is most useful.
+#[test]
+fn match_all_is_accepted_in_every_iterable_sink() {
+    assert_eq!(
+        finished("finish(new Map('a1b2'.matchAll(/([a-z])(\\d)/g)).size);"),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        finished("finish(new Set('a1b2'.matchAll(/[a-z]/g)).size);"),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        finished(
+            "finish(JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(\\d)/g))));"
+        ),
+        Value::String(r#"{"a1":"a","b2":"b"}"#.into())
+    );
+
+    // A retained iterator is still refused, and the repair now names all five.
+    let error = lash_typescript::validate("const it = 'a'.matchAll(/a/g);")
+        .expect_err("a retained matchAll iterator must refuse");
+    let rendered = error.to_string();
+    assert!(rendered.contains("new Map|Set"), "{rendered}");
+    assert!(rendered.contains("Object.fromEntries"), "{rendered}");
+}
+
+/// `lastIndex` applies ECMA `ToLength` at the write, so reading it straight
+/// back does not return what was stored.
+///
+/// ECMA makes `lastIndex` an ordinary writable data property and coerces on
+/// use; Node therefore reads back `-1` and `Infinity` verbatim. Storing the
+/// coerced value is what keeps it a durable integer, and the coerced value is
+/// what every accepted operation would have used anyway — so the divergence is
+/// confined to the read-back, and this test is what keeps that claim true.
+#[test]
+fn last_index_read_back_is_the_tolength_value_not_the_written_one() {
+    for (source, expected) in [
+        ("const r = /a/g; r.lastIndex = -1; finish(r.lastIndex);", 0.0),
+        ("const r = /a/g; r.lastIndex = 2.7; finish(r.lastIndex);", 2.0),
+        ("const r = /a/g; r.lastIndex = NaN; finish(r.lastIndex);", 0.0),
+        (
+            "const r = /a/g; r.lastIndex = Infinity; finish(r.lastIndex);",
+            9_007_199_254_740_991.0,
+        ),
+    ] {
+        assert_eq!(finished(source), Value::Number(expected), "{source}");
+    }
+}

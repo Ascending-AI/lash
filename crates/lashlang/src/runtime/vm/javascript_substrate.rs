@@ -294,6 +294,10 @@ fn heap_sequence(heap: &Heap, value: &Value) -> Result<Vec<Value>, RuntimeError>
     Ok(match value {
         Value::Ref(id) => match heap.get(*id)? {
             HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+            // An exec/`matchAll` result is an array in ECMA, and `new Map` of a
+            // `matchAll` reads its first two slots exactly as it would any
+            // other entry pair.
+            HeapObject::RegExpMatch(result) => result.items.clone(),
             object => {
                 return Err(js_stdlib_error(format!(
                     "{} is not an iterable constructor input",

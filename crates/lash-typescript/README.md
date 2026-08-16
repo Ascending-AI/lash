@@ -229,9 +229,16 @@ language semantics:
   RegExp match that would produce one therefore fails closed as
   `TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED`; add `u` or avoid matching half
   of an astral character.
-- `matchAll` is accepted only in a direct iterable sink (`for...of`, spread, or
-  `Array.from`) and otherwise rejects as `TS_REGEX_ITERATOR_POSITION` with a
-  spread repair. This keeps the iterator from becoming durable state. The
+- `lastIndex` applies ECMA `ToLength` at the **write**, not at the read. ECMA
+  makes it an ordinary writable data property and coerces on use, so Node reads
+  back exactly what was stored: `r.lastIndex = -1` reads `-1`, and `Infinity`
+  reads `Infinity`. Here the same writes read back `0` and `2 ** 53 - 1`. The
+  coerced value is what every accepted operation would have used anyway, so the
+  divergence is confined to reading the property straight back; storing the
+  clamp is what keeps `lastIndex` a durable integer rather than an arbitrary
+  double the snapshot has to carry.
+- `matchAll` is accepted only in a direct iterable sink and otherwise rejects as
+  `TS_REGEX_ITERATOR_POSITION` with a spread repair. This keeps the iterator from becoming durable state. The
   shared sink lowers the operation as one bounded materialization, so a later
   `break` in `for...of` does not make matching lazy; matcher fuel is charged for
   the complete direct-sink operation.
@@ -373,9 +380,13 @@ literals; decorators and namespaces are parsed but reject as
 `this` as `undefined`, top-level `this` rejects, and `arguments` rejects with a
 rest-parameter replacement.
 
-Iterator-returning `.entries()`, `.keys()`, and `.values()` calls are accepted
-only when consumed directly by `for...of`, spread, `Array.from`, `new Map`/`Set`,
-or `Object.fromEntries`; bind `[...expr]` when the values must outlive that sink.
+Iterator-returning `.entries()`, `.keys()`, and `.values()` calls, and
+`matchAll`, are accepted only when consumed directly by `for...of`, spread,
+`Array.from`, `new Map`/`Set`, or `Object.fromEntries`; bind `[...expr]` when the
+values must outlive that sink. There is one sink list, not two: every position on
+it is a bounded materialization, which is the whole property the restriction
+exists to guarantee, so `matchAll` accepting three of the five was an asymmetry
+with nothing behind it.
 Property enumeration has one order everywhere: integer-like keys first, then
 other strings in insertion order.
 
@@ -585,7 +596,7 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 541 rows, of which 468 are distinct
+The Node differential table carries 544 rows, of which 471 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
 that of the 448 unique rows rather than of 521 distinct behaviours. Both counts
