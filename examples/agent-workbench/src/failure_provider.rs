@@ -149,8 +149,7 @@ impl DevProviderScenario {
 start FIG425_deterministic_failure()
 finish "started deterministic failing process""#,
                 // `fail` is Lashlang's process-only failure keyword and has no
-                // direct TypeScript twin: `new Error` is refused
-                // (`TS_NEW_UNSUPPORTED`), so the honest form is an uncaught
+                // direct TypeScript twin, so the honest form is an uncaught
                 // throw of a supported value.
                 r#"const FIG425_deterministic_failure = defineProcess({
   name: "FIG425_deterministic_failure",

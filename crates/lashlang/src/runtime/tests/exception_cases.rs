@@ -243,6 +243,18 @@ async fn execution_terminals_bypass_a_surrounding_catch() {
         Err(RuntimeError::InstructionBudgetExceeded { .. })
     ));
 
+    // The terminal bypasses both guest handlers: the catch cannot swallow it,
+    // and the finally cannot replace it with its own arbitrary completion.
+    let catch_and_finally = exception_finish(exception_try(
+        loop_body.clone(),
+        Some(("error", Expr::Number(999.0))),
+        Some(Expr::Throw(Box::new(Expr::String("finally ran".into())))),
+    ));
+    assert!(matches!(
+        run_exception_program(catch_and_finally, &instruction_env).await,
+        Err(RuntimeError::InstructionBudgetExceeded { .. })
+    ));
+
     let deadline_env =
         ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
             ExecutionBound::Unbounded,

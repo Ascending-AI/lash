@@ -112,6 +112,22 @@ fn mixed_delimiters_share_one_source_nesting_budget() {
 }
 
 #[test]
+fn nested_stdlib_callbacks_share_the_source_nesting_budget() {
+    lash_typescript::parse(
+        "const a=[3,1,2]; finish(a.sort((x,y)=>[x,y].reduce((n,v)=>n+v,0)).join(','));",
+    )
+    .expect("a sort comparator calling reduce is an ordinary bounded callback tree");
+
+    let nested = format!(
+        "finish([1].map({}x{}));",
+        "x => [x].filter(".repeat(40),
+        ")".repeat(40)
+    );
+    let error = lash_typescript::parse(&nested).expect_err("nested callbacks must be bounded");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+}
+
+#[test]
 fn sequential_statement_forms_do_not_accumulate_source_nesting() {
     // Statement keywords open a recursive form that closes with the statement.
     // A flat sequence of them is one level deep however long the sequence is.
@@ -130,11 +146,8 @@ fn sequential_statement_forms_do_not_accumulate_source_nesting() {
             panic!("flat statement sequences parse: {}", error.code.as_str())
         });
     }
-    // Statement forms outside the accepted surface still reject on their own
-    // terms rather than on an accumulated nesting budget.
-    let error = lash_typescript::parse(&"do { const a = 1; } while (0); ".repeat(200))
-        .expect_err("do/while is outside the surface");
-    assert_eq!(error.code.as_str(), "TS_DO_WHILE_UNSUPPORTED");
+    lash_typescript::parse(&"do { const a = 1; } while (0); ".repeat(200))
+        .expect("flat do/while statements do not accumulate nesting");
     let error = lash_typescript::parse(&format!("{}finish(1);", "if (1) ".repeat(200)))
         .expect_err("brace-free statement nesting must still reject");
     assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
@@ -748,4 +761,37 @@ fn lexical_forms_do_not_cause_false_rejections() {
         lash_typescript::parse(&source)
             .unwrap_or_else(|error| panic!("{name} must parse: {}", error.code.as_str()));
     }
+}
+
+#[test]
+fn newly_accepted_constructs_share_the_source_nesting_budget() {
+    let optional = format!("const x = a{};", "?.b".repeat(100));
+    let error = lash_typescript::parse(&optional).expect_err("optional-chain depth is charged");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+
+    let pattern = format!(
+        "const {}x{} = {};",
+        "[".repeat(100),
+        "]".repeat(100),
+        "[".repeat(100) + "1" + &"]".repeat(100)
+    );
+    let error = lash_typescript::parse(&pattern).expect_err("pattern depth is charged");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+
+    let spread = format!("const x = {}[1]{};", "[...".repeat(100), "]".repeat(100));
+    let error = lash_typescript::parse(&spread).expect_err("spread depth is charged");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+
+    let date = format!("finish({}0{});", "new Date(".repeat(100), ")".repeat(100));
+    let error = lash_typescript::parse(&date).expect_err("Date constructor depth is charged");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+
+    let enumeration = format!(
+        "enum E {{ A = {}1{} }} finish(E.A);",
+        "(".repeat(100),
+        ")".repeat(100)
+    );
+    let error =
+        lash_typescript::parse(&enumeration).expect_err("enum initializer depth is charged");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
 }

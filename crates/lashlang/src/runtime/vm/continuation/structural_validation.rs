@@ -131,6 +131,54 @@ pub(super) fn validate_continuation(
                 validate_values(captures, &format!("heap closure {}", id.get()))?;
                 validate_heap_references(&continuation.heap.heap, captures)?;
             }
+            HeapObject::Map(map) => {
+                for (index, (key, value)) in map.entries.iter().enumerate() {
+                    validate_value(key, &format!("heap Map {} key {index}", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, key)?;
+                    validate_value(value, &format!("heap Map {} value {index}", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, value)?;
+                }
+            }
+            HeapObject::Set(set) => {
+                validate_values(&set.values, &format!("heap Set {}", id.get()))?;
+                validate_heap_references(&continuation.heap.heap, &set.values)?;
+            }
+            HeapObject::RegExp(regexp) => {
+                if regexp.last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
+                    return Err(ContinuationError::UnserializableValue {
+                        location: format!("heap RegExp {}", id.get()),
+                        variant: "lastIndex beyond JavaScript's maximum safe length",
+                    });
+                }
+            }
+            HeapObject::RegExpMatch(result) => {
+                validate_values(&result.items, &format!("heap RegExp match {}", id.get()))?;
+                validate_heap_references(&continuation.heap.heap, &result.items)?;
+                for (name, value) in [
+                    ("index", &result.index),
+                    ("input", &result.input),
+                    ("groups", &result.groups),
+                ] {
+                    validate_value(value, &format!("heap RegExp match {} {name}", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, value)?;
+                }
+            }
+            HeapObject::Date(_) => {}
+            HeapObject::Error(error) => {
+                if let Some(cause) = &error.cause {
+                    validate_value(cause, &format!("heap {} error cause", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, cause)?;
+                }
+                if let Some(errors) = &error.errors {
+                    validate_value(errors, &format!("heap {} aggregate errors", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, errors)?;
+                }
+            }
+            HeapObject::Url(url) => {
+                validate_value(&url.search_params, &format!("heap URL {} params", id.get()))?;
+                validate_heap_reference(&continuation.heap.heap, &url.search_params)?;
+            }
+            HeapObject::UrlSearchParams(_) => {}
         }
     }
     for (depth, frame) in continuation.frame_stack.iter().enumerate() {
@@ -159,24 +207,46 @@ pub(super) fn validate_continuation(
             validate_heap_reference(&continuation.heap.heap, value)?;
         }
         validate_iterator_invariants(&frame.iterator_stack, frame.slots.len(), Some(depth))?;
-        if let VmFrameReturnContinuation::Map {
+        if let VmFrameReturnContinuation::Callback {
             function,
-            items,
+            calls,
             next_index,
             results,
+            completion,
+            allow_effects: _,
+            live_url_search_params,
         } = &frame.return_target
         {
-            if *next_index > items.len() || results.len().saturating_add(1) != *next_index {
+            let result_cursor_is_valid = match completion {
+                VmCallbackCompletion::Collect => results.len().saturating_add(1) == *next_index,
+                VmCallbackCompletion::Discard => *next_index >= 1 && results.is_empty(),
+            };
+            let live_cursor_is_valid = if *live_url_search_params {
+                calls.len() == 1
+                    && matches!(calls.first(), Some(Value::Ref(id)) if matches!(continuation.heap.heap.get(*id), Ok(HeapObject::UrlSearchParams(_))))
+                    && matches!(completion, VmCallbackCompletion::Discard)
+            } else {
+                *next_index <= calls.len()
+                    && calls.iter().all(|call| matches!(call, Value::Tuple(_)))
+            };
+            if !live_cursor_is_valid || !result_cursor_is_valid {
                 return Err(ContinuationError::UnserializableValue {
-                    location: format!("frame {depth} map callback"),
+                    location: format!("frame {depth} callback"),
                     variant: "invalid callback cursor",
                 });
             }
-            validate_value(function, &format!("frame {depth} map function"))?;
+            if !*live_url_search_params && calls.iter().any(|call| !matches!(call, Value::Tuple(_)))
+            {
+                return Err(ContinuationError::UnserializableValue {
+                    location: format!("frame {depth} callback"),
+                    variant: "invalid callback arguments",
+                });
+            }
+            validate_value(function, &format!("frame {depth} callback function"))?;
             validate_heap_reference(&continuation.heap.heap, function)?;
-            validate_values(items, &format!("frame {depth} map items"))?;
-            validate_heap_references(&continuation.heap.heap, items)?;
-            validate_values(results, &format!("frame {depth} map results"))?;
+            validate_values(calls, &format!("frame {depth} callback calls"))?;
+            validate_heap_references(&continuation.heap.heap, calls)?;
+            validate_values(results, &format!("frame {depth} callback results"))?;
             validate_heap_references(&continuation.heap.heap, results)?;
         }
     }

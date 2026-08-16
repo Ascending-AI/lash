@@ -6,7 +6,7 @@ use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 
-use super::{Value, is_truthy};
+use super::{Value, debug_assert_exported_value, is_truthy};
 
 pub(crate) const MAX_JAVASCRIPT_STRING_BYTES: usize = 8 * 1024 * 1024;
 
@@ -177,6 +177,10 @@ pub(crate) fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
         Value::Record(_) | Value::Image(_) | Value::Resource(_) => {
             Value::String("[object Object]".into())
         }
+        Value::Ref(_) => {
+            debug_assert_exported_value("scalar JavaScript primitive coercion");
+            Value::String("[object Object]".into())
+        }
         other => other.clone(),
     }
 }
@@ -188,6 +192,10 @@ pub(crate) fn javascript_to_number(value: &Value) -> f64 {
         Value::Bool(value) => u8::from(*value).into(),
         Value::Number(value) => *value,
         Value::String(value) => javascript_string_to_number(value),
+        // Heap-aware VM paths resolve references before reaching this scalar
+        // fallback. Keeping the fallback total prevents an accidentally
+        // unhandled reference or projection from recursing unchanged forever.
+        Value::Ref(_) | Value::Projected(_) => f64::NAN,
         value => javascript_to_number(&javascript_to_primitive_string_or_number(value)),
     }
 }
@@ -263,6 +271,10 @@ pub(crate) fn javascript_to_string(value: &Value) -> String {
         Value::Number(value) if *value == 0.0 => "0".to_string(),
         Value::Number(value) => javascript_number_to_string(*value),
         Value::String(value) => value.to_string(),
+        Value::Ref(_) | Value::Projected(_) => {
+            debug_assert_exported_value("scalar JavaScript string coercion");
+            "[object Object]".to_string()
+        }
         value => match javascript_to_primitive_string_or_number(value) {
             Value::String(value) => value.to_string(),
             primitive => javascript_to_string(&primitive),
@@ -270,8 +282,7 @@ pub(crate) fn javascript_to_string(value: &Value) -> String {
     }
 }
 
-pub(crate) fn javascript_array_index(index: &Value) -> Option<usize> {
-    let key = javascript_to_string(index);
+pub(crate) fn javascript_array_index_key(key: &str) -> Option<usize> {
     if key.is_empty() || (key.len() > 1 && key.starts_with('0')) {
         return None;
     }
@@ -390,66 +401,8 @@ fn compare_utf16(left: &str, right: &str) -> std::cmp::Ordering {
 }
 
 fn javascript_number_to_string(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value == f64::INFINITY {
-        return "Infinity".to_string();
-    }
-    if value == f64::NEG_INFINITY {
-        return "-Infinity".to_string();
-    }
-    if value == 0.0 {
-        return "0".to_string();
-    }
-
-    let negative = value.is_sign_negative();
-    let mut buffer = ryu::Buffer::new();
-    let rendered = buffer.format_finite(value.abs());
-    let (mantissa, explicit_exponent) = rendered
-        .split_once(['e', 'E'])
-        .map_or((rendered, 0), |(mantissa, exponent)| {
-            (mantissa, exponent.parse::<i32>().expect("ryu exponent"))
-        });
-    let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
-    let mut digits = mantissa
-        .bytes()
-        .filter(|byte| *byte != b'.')
-        .map(char::from)
-        .collect::<String>();
-    while digits.len() > 1 && digits.ends_with('0') && mantissa.contains('.') {
-        digits.pop();
-    }
-    let n = decimal + explicit_exponent;
-    let k = digits.len() as i32;
-    let mut output = String::new();
-    if negative {
-        output.push('-');
-    }
-    if k <= n && n <= 21 {
-        output.push_str(&digits);
-        output.extend(std::iter::repeat_n('0', (n - k) as usize));
-    } else if 0 < n && n <= 21 {
-        let split = n as usize;
-        output.push_str(&digits[..split]);
-        output.push('.');
-        output.push_str(&digits[split..]);
-    } else if -6 < n && n <= 0 {
-        output.push_str("0.");
-        output.extend(std::iter::repeat_n('0', (-n) as usize));
-        output.push_str(&digits);
-    } else {
-        output.push(digits.as_bytes()[0] as char);
-        if digits.len() > 1 {
-            output.push('.');
-            output.push_str(&digits[1..]);
-        }
-        let exponent = n - 1;
-        output.push('e');
-        if exponent >= 0 {
-            output.push('+');
-        }
-        output.push_str(&exponent.to_string());
-    }
-    output
+    // Boa's `ryu-js` implements ECMA-262 Number::toString directly. Every
+    // scalar number-to-string consumer stays on this choke point: template
+    // interpolation/String, concatenation, array join, and JSON serialization.
+    ryu_js::Buffer::new().format(value).to_string()
 }

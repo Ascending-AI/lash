@@ -428,3 +428,87 @@ fn the_two_vocabularies_are_actually_different() {
     assert!(foreign_markers("typescript").contains(&"<lashlang>"));
     assert!(foreign_markers("lashlang").contains(&"<typescript>"));
 }
+
+/// Every construct family the dialect accepts is mentioned somewhere in the
+/// assembled TypeScript prompt.
+///
+/// The standard-library section is generated from the signature table, so a new
+/// method reaches the prompt by construction. The *hand-written* sections are
+/// where drift lives: async helpers, the `URL`/`URLSearchParams` constructors,
+/// and the widened `instanceof` targets were all shipped and accepted while the
+/// prose still described the surface without them — a model reading this prompt
+/// would not have written any of the three. Nothing failed, because nothing was
+/// looking.
+///
+/// The check is deliberately coarse: one family, a few tokens, at least one of
+/// which must appear. It cannot verify the prose is *good*; it can only make
+/// silent omission impossible. The list is explicit and maintained — widening
+/// the accepted surface means adding a row here, which is the point.
+const TYPESCRIPT_PROMPT_CONSTRUCT_FAMILIES: &[(&str, &[&str])] = &[
+    ("async functions", &["Async functions", "async function"]),
+    ("async fan-out", &[".map(async"]),
+    (
+        "promise aggregation",
+        &["Promise.all", "Promise.allSettled"],
+    ),
+    ("URL construction", &["new URL("]),
+    ("URLSearchParams construction", &["new URLSearchParams("]),
+    ("instanceof targets", &["instanceof"]),
+    ("Error family", &["Error-family", "Error family"]),
+    ("Map and Set", &["Map/Set", "new Map"]),
+    ("Date", &["Date"]),
+    ("RegExp literals and construction", &["new RegExp("]),
+    ("regexp string methods", &["matchAll"]),
+    ("destructuring", &["destructuring"]),
+    ("optional chaining", &["optional chaining"]),
+    ("spread", &["spread"]),
+    ("enums", &["enums"]),
+    ("for...of", &["for...of"]),
+    ("for...in", &["for...in"]),
+    ("switch", &["`switch`", "switch"]),
+    ("durable processes", &["defineProcess"]),
+    ("durable sleep", &["sleep("]),
+    ("signals", &["waitSignal"]),
+    ("triggers", &["registerTrigger"]),
+    ("session state", &["globalThis."]),
+    ("console", &["console.log"]),
+    ("finish", &["finish("]),
+    ("journaled clock", &["Date.now()"]),
+    ("journaled randomness", &["Math.random"]),
+    (
+        "standard library statics",
+        &["Object.entries", "JSON.parse"],
+    ),
+    (
+        "standard library instance methods",
+        &["instance.map", "instance.reduce"],
+    ),
+];
+
+#[test]
+fn every_accepted_construct_family_is_named_in_the_assembled_prompt() {
+    let dialect = crate::dialect::typescript_test_dialect();
+    let prompt = assembled_prompt_fragments(&dialect)
+        .into_iter()
+        .map(|(_, fragment)| fragment)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let missing = TYPESCRIPT_PROMPT_CONSTRUCT_FAMILIES
+        .iter()
+        .filter(|(_, tokens)| !tokens.iter().any(|token| prompt.contains(token)))
+        .map(|(family, tokens)| format!("{family} (none of {tokens:?})"))
+        .collect::<Vec<_>>();
+    assert!(
+        missing.is_empty(),
+        "the assembled TypeScript prompt never mentions: {missing:?}"
+    );
+
+    // The list is the check. Shrinking it silently would retire the guarantee,
+    // so its size is pinned alongside it.
+    assert_eq!(
+        TYPESCRIPT_PROMPT_CONSTRUCT_FAMILIES.len(),
+        29,
+        "adding or removing a construct family is a deliberate change"
+    );
+}

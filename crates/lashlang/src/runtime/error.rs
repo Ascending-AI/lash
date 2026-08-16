@@ -63,12 +63,18 @@ pub enum RuntimeError {
     /// Function values cannot cross host-facing value boundaries.
     #[error("function values cannot cross a lashlang host boundary")]
     FunctionValueAtHostBoundary,
+    /// JavaScript exotic objects have no detached host-facing value shape.
+    #[error("JavaScript {kind} values cannot cross a lashlang host boundary")]
+    JavaScriptExoticAtHostBoundary { kind: String },
     /// Effects from callbacks require a resumable builtin protocol not yet present.
     #[error("effects are not supported inside builtin callbacks")]
     EffectInBuiltinCallback,
     /// Active VM execution exceeded its explicit instruction budget.
     #[error("lashlang instruction budget of {limit} instructions exceeded")]
     InstructionBudgetExceeded { limit: u64 },
+    /// RegExp execution consumed its deterministic bytecode/backtrack budget.
+    #[error("regular expression execution budget of {limit} steps exceeded")]
+    RegExpBudgetExceeded { limit: u64 },
     /// Active VM execution exceeded its explicit deadline.
     #[error("lashlang execution deadline of {limit_ms}ms exceeded")]
     ExecutionDeadlineExceeded { limit_ms: u128 },
@@ -95,8 +101,27 @@ pub enum RuntimeError {
     #[error("lashlang heap reference {id} reached {context} before it was exported")]
     UnexportedHeapReference { id: u64, context: Cow<'static, str> },
     /// A host boundary cannot represent cyclic heap values.
-    #[error("lashlang heap value contains a cycle through object {id}")]
+    ///
+    /// Durable state and the host boundary both carry value *trees*: a
+    /// snapshot has no way to name "the object two levels up". A cycle is
+    /// therefore usable inside a cell — `JSON.stringify` even reports it the
+    /// way ECMA does — but a durable binding that still holds one when the
+    /// cell ends cannot be written down, and that is what this says.
+    #[error(
+        "lashlang heap value contains a cycle through object {id}; durable state and host \
+         boundaries carry value trees, so break the cycle before the cell ends (hold a key or \
+         index instead of the parent object)"
+    )]
     CyclicHostValue { id: u64 },
+    /// A value tree is nested deeper than a durable boundary will ever accept.
+    ///
+    /// The ceiling is the persisted-graph one (`MAX_SNAPSHOT_VALUE_DEPTH`), so
+    /// a value that cannot be snapshotted also cannot be exported or coerced.
+    /// Enforcing it on the runtime walks is what keeps those walks — which are
+    /// recursive — inside the product stack budget instead of aborting the
+    /// host process on a value the durable boundary would have refused anyway.
+    #[error("lashlang value nesting depth limit of {limit} levels exceeded")]
+    ValueDepthLimitExceeded { limit: usize },
     /// Execution referenced a binding that is not defined.
     #[error("unknown name `{name}`")]
     UndefinedVariable { name: String },
@@ -450,8 +475,10 @@ impl RuntimeError {
             Self::UnknownFunction { .. } => ErrorTaxonomy::Catchable,
             Self::ClosureCaptureCountMismatch { .. } => ErrorTaxonomy::Catchable,
             Self::FunctionValueAtHostBoundary => ErrorTaxonomy::Catchable,
+            Self::JavaScriptExoticAtHostBoundary { .. } => ErrorTaxonomy::Catchable,
             Self::EffectInBuiltinCallback => ErrorTaxonomy::Catchable,
             Self::InstructionBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::RegExpBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::ExecutionDeadlineExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::MemoryLimitExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::HostCancelled => ErrorTaxonomy::UncatchableTerminal,
@@ -459,6 +486,10 @@ impl RuntimeError {
             Self::HeapIdExhausted => ErrorTaxonomy::Catchable,
             Self::UnexportedHeapReference { .. } => ErrorTaxonomy::Catchable,
             Self::CyclicHostValue { .. } => ErrorTaxonomy::Catchable,
+            // Classified like the snapshot boundary classifies it: a refusal of
+            // the whole value, not a failure a guest handler can absorb and
+            // continue past with the same over-deep value still in hand.
+            Self::ValueDepthLimitExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::UndefinedVariable { .. } => ErrorTaxonomy::Catchable,
             Self::NonListIteration => ErrorTaxonomy::Catchable,
             Self::SessionProcessAdminOutsideProcess { .. } => ErrorTaxonomy::Catchable,
@@ -573,8 +604,10 @@ impl RuntimeError {
             Self::UnknownFunction { .. } => "UnknownFunction",
             Self::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
             Self::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            Self::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
             Self::EffectInBuiltinCallback => "EffectInBuiltinCallback",
             Self::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+            Self::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
             Self::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
             Self::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
             Self::HostCancelled => "HostCancelled",
@@ -582,6 +615,7 @@ impl RuntimeError {
             Self::HeapIdExhausted => "HeapIdExhausted",
             Self::UnexportedHeapReference { .. } => "UnexportedHeapReference",
             Self::CyclicHostValue { .. } => "CyclicHostValue",
+            Self::ValueDepthLimitExceeded { .. } => "ValueDepthLimitExceeded",
             Self::UndefinedVariable { .. } => "UndefinedVariable",
             Self::NonListIteration => "NonListIteration",
             Self::SessionProcessAdminOutsideProcess { .. } => "SessionProcessAdminOutsideProcess",
@@ -716,6 +750,7 @@ impl RuntimeError {
         matches!(
             self,
             Self::InstructionBudgetExceeded { .. }
+                | Self::RegExpBudgetExceeded { .. }
                 | Self::ExecutionDeadlineExceeded { .. }
                 | Self::MemoryLimitExceeded { .. }
                 | Self::FrameDepthExceeded { .. }
@@ -750,8 +785,10 @@ mod tests {
                 actual: 2,
             },
             RuntimeError::FunctionValueAtHostBoundary,
+            RuntimeError::JavaScriptExoticAtHostBoundary { kind: "Map".into() },
             RuntimeError::EffectInBuiltinCallback,
             RuntimeError::InstructionBudgetExceeded { limit: 10 },
+            RuntimeError::RegExpBudgetExceeded { limit: 1_000_000 },
             RuntimeError::ExecutionDeadlineExceeded { limit_ms: 20 },
             RuntimeError::UndefinedVariable {
                 name: "name".into(),
@@ -992,6 +1029,7 @@ mod tests {
                 context: "string formatting".into(),
             },
             RuntimeError::CyclicHostValue { id: 7 },
+            RuntimeError::ValueDepthLimitExceeded { limit: 64 },
             RuntimeError::UncaughtException {
                 value: crate::Value::Null,
             },
@@ -1041,11 +1079,17 @@ mod tests {
                 RuntimeError::FunctionValueAtHostBoundary => {
                     "function values cannot cross a lashlang host boundary"
                 }
+                RuntimeError::JavaScriptExoticAtHostBoundary { .. } => {
+                    "JavaScript Map values cannot cross a lashlang host boundary"
+                }
                 RuntimeError::EffectInBuiltinCallback => {
                     "effects are not supported inside builtin callbacks"
                 }
                 RuntimeError::InstructionBudgetExceeded { .. } => {
                     "lashlang instruction budget of 10 instructions exceeded"
+                }
+                RuntimeError::RegExpBudgetExceeded { .. } => {
+                    "regular expression execution budget of 1000000 steps exceeded"
                 }
                 RuntimeError::ExecutionDeadlineExceeded { .. } => {
                     "lashlang execution deadline of 20ms exceeded"
@@ -1062,7 +1106,12 @@ mod tests {
                     "lashlang heap reference 7 reached string formatting before it was exported"
                 }
                 RuntimeError::CyclicHostValue { .. } => {
-                    "lashlang heap value contains a cycle through object 7"
+                    "lashlang heap value contains a cycle through object 7; durable state and \
+                     host boundaries carry value trees, so break the cycle before the cell ends \
+                     (hold a key or index instead of the parent object)"
+                }
+                RuntimeError::ValueDepthLimitExceeded { .. } => {
+                    "lashlang value nesting depth limit of 64 levels exceeded"
                 }
                 RuntimeError::UndefinedVariable { .. } => "unknown name `name`",
                 RuntimeError::NonListIteration => "`for` expects a list or tuple",
@@ -1293,7 +1342,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 112] = [
+    const RUNTIME_ERROR_CODES: [&str; 115] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1301,8 +1350,10 @@ mod tests {
         "UnknownFunction",
         "ClosureCaptureCountMismatch",
         "FunctionValueAtHostBoundary",
+        "JavaScriptExoticAtHostBoundary",
         "EffectInBuiltinCallback",
         "InstructionBudgetExceeded",
+        "RegExpBudgetExceeded",
         "ExecutionDeadlineExceeded",
         "MemoryLimitExceeded",
         "HostCancelled",
@@ -1310,6 +1361,7 @@ mod tests {
         "HeapIdExhausted",
         "UnexportedHeapReference",
         "CyclicHostValue",
+        "ValueDepthLimitExceeded",
         "UndefinedVariable",
         "NonListIteration",
         "SessionProcessAdminOutsideProcess",
@@ -1423,8 +1475,10 @@ mod tests {
             RuntimeError::UnknownFunction { .. } => "UnknownFunction",
             RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
             RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            RuntimeError::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
             RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
             RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+            RuntimeError::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
             RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
             RuntimeError::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
             RuntimeError::HostCancelled => "HostCancelled",
@@ -1432,6 +1486,7 @@ mod tests {
             RuntimeError::HeapIdExhausted => "HeapIdExhausted",
             RuntimeError::UnexportedHeapReference { .. } => "UnexportedHeapReference",
             RuntimeError::CyclicHostValue { .. } => "CyclicHostValue",
+            RuntimeError::ValueDepthLimitExceeded { .. } => "ValueDepthLimitExceeded",
             RuntimeError::UndefinedVariable { .. } => "UndefinedVariable",
             RuntimeError::NonListIteration => "NonListIteration",
             RuntimeError::SessionProcessAdminOutsideProcess { .. } => {

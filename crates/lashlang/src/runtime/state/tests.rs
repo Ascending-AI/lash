@@ -341,9 +341,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x46, 0xf4, 0xf9, 0x31, 0x8e, 0x6e, 0x73, 0x76, 0x19, 0xe1, 0xe1, 0xa6, 0x8f, 0x8f,
-            0xf2, 0x15, 0xa3, 0xb0, 0x25, 0x78, 0x44, 0xf4, 0x97, 0xc4, 0x28, 0x24, 0xba, 0xbd,
-            0x96, 0x6e, 0xe3, 0x38,
+            0x49, 0x17, 0x7a, 0x18, 0xcb, 0x4a, 0x20, 0x1b, 0x2e, 0x90, 0x2d, 0x69, 0xba, 0x5c,
+            0x25, 0xa8, 0xb9, 0x25, 0x3c, 0x04, 0x84, 0x4e, 0x0a, 0x32, 0xf4, 0xf1, 0xd6, 0x31,
+            0x89, 0x71, 0x4f, 0x87,
         ]
     );
 }
@@ -357,7 +357,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e04a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e06a7676c6f62616c7390");
 }
 
 #[test]
@@ -432,6 +432,35 @@ fn canonical_heap_with(
 
 fn named_bytes(wire: &CanonicalSnapshot) -> Vec<u8> {
     rmp_serde::to_vec_named(wire).expect("encode test wire")
+}
+
+/// The snapshot version fence refuses the format one step behind the current
+/// one, not just an absurd number.
+///
+/// Off-by-one is the version a fence actually meets in production — the deploy
+/// that straddles a bump — so the case worth pinning is `current - 1`, on a
+/// wire that is otherwise entirely valid and decodes cleanly at the current
+/// version.
+#[test]
+fn a_snapshot_one_version_behind_is_refused_by_the_fence() {
+    let mut globals = Record::new();
+    globals.insert("total".to_string(), Value::Number(3.0));
+    let bytes = Snapshot::new(globals)
+        .to_canonical_bytes()
+        .expect("encode a snapshot");
+    Snapshot::from_canonical_bytes(&bytes).expect("the current version must decode");
+
+    let mut wire: CanonicalSnapshot = rmp_serde::from_slice(&bytes).expect("decode the wire");
+    wire.version = LASHLANG_SNAPSHOT_VERSION - 1;
+    let error = Snapshot::from_canonical_bytes(&named_bytes(&wire))
+        .expect_err("the previous snapshot version must be refused");
+    assert_eq!(
+        error,
+        SnapshotDecodeError::VersionMismatch {
+            expected: LASHLANG_SNAPSHOT_VERSION,
+            found: LASHLANG_SNAPSHOT_VERSION - 1,
+        }
+    );
 }
 
 #[test]
@@ -789,4 +818,199 @@ fn canonical_decode_rejects_a_heap_chain_deeper_than_the_value_limit() {
             limit: MAX_SNAPSHOT_VALUE_DEPTH
         }
     );
+}
+
+#[test]
+fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() {
+    let mut heap = Heap::default();
+    let shared = heap
+        .allocate_list(vec![Value::String("shared".into())])
+        .expect("shared object");
+    let regexp = heap
+        .allocate_regexp("a+".to_string(), "gim".to_string())
+        .expect("RegExp");
+    let Value::Ref(regexp_id) = regexp else {
+        unreachable!()
+    };
+    heap.set_regexp_last_index(regexp_id, 7)
+        .expect("set lastIndex");
+    let regexp_slot = heap.id_to_slot[&regexp_id];
+    let HeapObject::RegExp(regexp_object) = &mut heap.slots[regexp_slot]
+        .as_mut()
+        .expect("RegExp slot")
+        .object
+    else {
+        unreachable!()
+    };
+    regexp_object.compiled_program = Some(Box::new(super::super::heap::RegExpProgramCache {
+        program: regress::Regex::new("a+").expect("compiled test regexp"),
+    }));
+    let match_groups = heap
+        .allocate_record(
+            [("word".to_string(), Value::String("aaa".into()))]
+                .into_iter()
+                .collect(),
+        )
+        .expect("match groups");
+    let regexp_match = heap
+        .allocate_regexp_match(
+            vec![Value::String("aaa".into())],
+            Value::Number(4.0),
+            Value::String("xxxxaaa".into()),
+            match_groups,
+        )
+        .expect("RegExp match");
+
+    let map = heap
+        .allocate_map(vec![
+            (Value::String("first".into()), shared.clone()),
+            (Value::String("second".into()), Value::Number(f64::NAN)),
+        ])
+        .expect("Map");
+    let set = heap
+        .allocate_set(vec![shared.clone(), Value::Number(-0.0)])
+        .expect("Set");
+    let date = heap.allocate_date(f64::NAN).expect("Date");
+    let error = heap
+        .allocate_error(
+            ErrorKind::TypeError,
+            "bad".to_string(),
+            Some(shared.clone()),
+            None,
+        )
+        .expect("Error");
+    let mut roots = Record::new();
+    roots.insert("map".to_string(), map.clone());
+    roots.insert("map_alias".to_string(), map);
+    roots.insert("set".to_string(), set);
+    roots.insert("regexp".to_string(), regexp);
+    roots.insert("regexp_match".to_string(), regexp_match);
+    roots.insert("date".to_string(), date);
+    roots.insert("error".to_string(), error);
+    let snapshot = Snapshot {
+        globals: Record::new(),
+        runtime_globals: roots,
+        heap,
+        reference_semantics: true,
+    };
+
+    let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
+    let restored = Snapshot::from_canonical_bytes(&bytes).expect("decode snapshot");
+    assert_eq!(
+        restored.runtime_globals.get("map"),
+        restored.runtime_globals.get("map_alias"),
+        "two roots to one Map must still alias"
+    );
+    let Value::Ref(map_id) = restored.runtime_globals["map"] else {
+        unreachable!()
+    };
+    let entries = restored
+        .heap
+        .map_entries(map_id)
+        .expect("Map entries")
+        .expect("Map kind");
+    assert_eq!(entries[0].0, Value::String("first".into()));
+    assert_eq!(entries[1].0, Value::String("second".into()));
+    let Value::Ref(restored_regexp) = restored.runtime_globals["regexp"] else {
+        unreachable!()
+    };
+    let regexp_slot = restored.heap.id_to_slot[&restored_regexp];
+    let HeapObject::RegExp(regexp) = &restored.heap.slots[regexp_slot]
+        .as_ref()
+        .expect("restored RegExp slot")
+        .object
+    else {
+        unreachable!()
+    };
+    assert_eq!(regexp.last_index, 7);
+    assert!(
+        regexp.compiled_program.is_none(),
+        "compiled matcher cache must never be serialized"
+    );
+    let Value::Ref(restored_match) = restored.runtime_globals["regexp_match"] else {
+        unreachable!()
+    };
+    let match_slot = restored.heap.id_to_slot[&restored_match];
+    let HeapObject::RegExpMatch(regexp_match) = &restored.heap.slots[match_slot]
+        .as_ref()
+        .expect("restored RegExp match slot")
+        .object
+    else {
+        unreachable!()
+    };
+    assert_eq!(regexp_match.items, vec![Value::String("aaa".into())]);
+    assert_eq!(regexp_match.index, Value::Number(4.0));
+    assert_eq!(regexp_match.input, Value::String("xxxxaaa".into()));
+    assert_eq!(restored.to_canonical_bytes().expect("re-encode"), bytes);
+}
+
+#[test]
+fn snapshot_decode_rejects_regexp_last_index_above_maximum_safe_length() {
+    let id = HeapId::from_counter(1);
+    let object = HeapObject::RegExp(RegExpObject {
+        pattern: "a+".to_string(),
+        flags: "g".to_string(),
+        last_index: crate::runtime::heap::MAX_JAVASCRIPT_LENGTH + 1,
+        compiled_program: None,
+    });
+    let mut wire = canonical_heap_with(
+        vec![CanonicalBinding {
+            name: "regexp".to_string(),
+            value: CanonicalValue::Ref { value: id },
+        }],
+        vec![CanonicalHeapEntry {
+            id,
+            object: CanonicalHeapObject::RegExp {
+                pattern: "a+".to_string(),
+                flags: "g".to_string(),
+                last_index: crate::runtime::heap::MAX_JAVASCRIPT_LENGTH + 1,
+            },
+        }],
+        2,
+        1,
+        object.logical_bytes(),
+    );
+    wire.heap.as_mut().expect("heap").reference_semantics = true;
+    let error = Snapshot::from_canonical_bytes(&named_bytes(&wire))
+        .expect_err("out-of-range lastIndex must not decode");
+    assert!(error.to_string().contains("maximum safe length"), "{error}");
+}
+
+#[test]
+fn lashlang_forest_validation_rejects_every_typescript_exotic_kind() {
+    for object in [
+        HeapObject::RegExp(RegExpObject {
+            pattern: String::new(),
+            flags: String::new(),
+            last_index: 0,
+            compiled_program: None,
+        }),
+        HeapObject::RegExpMatch(crate::runtime::RegExpMatchObject {
+            items: Vec::new(),
+            index: Value::Number(0.0),
+            input: Value::String(String::new().into()),
+            groups: Value::Null,
+        }),
+        HeapObject::Map(MapObject {
+            entries: Vec::new(),
+        }),
+        HeapObject::Set(SetObject { values: Vec::new() }),
+        HeapObject::Date(DateObject { milliseconds: 0.0 }),
+        HeapObject::Error(ErrorObject {
+            kind: ErrorKind::Error,
+            message: String::new(),
+            cause: None,
+            errors: None,
+        }),
+    ] {
+        let mut heap = Heap::default();
+        let root = heap.allocate(object).expect("exotic object");
+        let mut roots = PersistedRoots::default();
+        roots.durable("root", &root);
+        assert!(heap.validate_persisted_graph(&roots).is_ok());
+        let reason = heap
+            .validate_persisted_forest(&roots)
+            .expect_err("Lashlang forest must reject TypeScript exotic kinds");
+        assert!(reason.contains("Lashlang forest"), "{reason}");
+    }
 }

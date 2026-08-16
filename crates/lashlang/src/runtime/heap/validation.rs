@@ -7,7 +7,39 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Heap, HeapId, Value, value_refs};
+use super::{Heap, HeapId, HeapObject, Value, canonical_regexp_flags, same_value_zero, value_refs};
+use crate::runtime::RuntimeError;
+use crate::runtime::state::MAX_SNAPSHOT_VALUE_DEPTH;
+
+/// The deepest value nesting any runtime value walk will follow.
+///
+/// It is the durable boundary's ceiling (`MAX_SNAPSHOT_VALUE_DEPTH`), reused
+/// rather than restated: a value nested deeper than a snapshot will accept has
+/// no future anyway, and the walks that materialize a value — export at the
+/// instruction boundary, at the terminal-exit boundary, and JavaScript's
+/// object-to-primitive coercion — are recursive. Bounding them at the same
+/// number turns an over-deep value into a deterministic typed refusal at the
+/// first walk that touches it, instead of a stack overflow that aborts the
+/// whole host process.
+///
+/// Enforced on the walks rather than on heap mutation because depth is not an
+/// incrementally maintainable property of this heap: reference semantics let a
+/// member assignment close a cycle or re-parent a whole subtree, so a per-object
+/// depth would have to be recomputed upward through the parent edges on every
+/// mutation, and is undefined for a cyclic graph. The walk knows its own depth
+/// for free.
+pub(crate) const MAX_RUNTIME_VALUE_DEPTH: usize = MAX_SNAPSHOT_VALUE_DEPTH;
+
+/// Rejects one level deeper than the ceiling, so callers can descend by
+/// checking before they recurse.
+pub(crate) fn ensure_value_depth(depth: usize) -> Result<(), RuntimeError> {
+    if depth > MAX_RUNTIME_VALUE_DEPTH {
+        return Err(RuntimeError::ValueDepthLimitExceeded {
+            limit: MAX_RUNTIME_VALUE_DEPTH,
+        });
+    }
+    Ok(())
+}
 
 /// The roots a persisted heap is validated against.
 ///
@@ -169,6 +201,7 @@ impl Heap {
                 let object = self
                     .get(id)
                     .map_err(|_| format!("dangling heap reference {}", id.get()))?;
+                validate_exotic_invariants(self, id, object)?;
                 colors.insert(id, 1);
                 stack.push((id, true));
                 for child in object.child_refs().into_iter().rev() {
@@ -209,6 +242,25 @@ impl Heap {
         &self,
         roots: &PersistedRoots<'_>,
     ) -> Result<(), String> {
+        if let Some((id, object)) = self.objects_in_id_order().find(|(_, object)| {
+            matches!(
+                object,
+                super::HeapObject::RegExp(_)
+                    | super::HeapObject::RegExpMatch(_)
+                    | super::HeapObject::Map(_)
+                    | super::HeapObject::Set(_)
+                    | super::HeapObject::Date(_)
+                    | super::HeapObject::Error(_)
+                    | super::HeapObject::Url(_)
+                    | super::HeapObject::UrlSearchParams(_)
+            )
+        }) {
+            return Err(format!(
+                "Lashlang forest cannot contain TypeScript {} object {}",
+                object.kind_name(),
+                id.get()
+            ));
+        }
         let mut owners = BTreeMap::<HeapId, String>::new();
         for (name, root) in &roots.durable {
             for id in value_refs(root) {
@@ -222,6 +274,136 @@ impl Heap {
         }
         self.validate_persisted_graph(roots)
     }
+}
+
+fn validate_exotic_invariants(heap: &Heap, id: HeapId, object: &HeapObject) -> Result<(), String> {
+    match object {
+        HeapObject::RegExp(regexp) => {
+            crate::runtime::validate_typescript_regexp(&regexp.pattern, &regexp.flags).map_err(
+                |error| {
+                    format!(
+                        "RegExp object {} violates TypeScript bounds: {}",
+                        id.get(),
+                        error.diagnostic_code()
+                    )
+                },
+            )?;
+            let canonical = canonical_regexp_flags(&regexp.flags)
+                .map_err(|reason| format!("RegExp object {} has {reason}", id.get()))?;
+            if canonical != regexp.flags {
+                return Err(format!(
+                    "RegExp object {} flags must be in canonical order",
+                    id.get()
+                ));
+            }
+        }
+        HeapObject::Map(map) => {
+            for (index, (key, _)) in map.entries.iter().enumerate() {
+                if map.entries[..index]
+                    .iter()
+                    .any(|(candidate, _)| same_value_zero(candidate, key))
+                {
+                    return Err(format!(
+                        "Map object {} contains a duplicate SameValueZero key",
+                        id.get()
+                    ));
+                }
+            }
+        }
+        HeapObject::Set(set) => {
+            for (index, value) in set.values.iter().enumerate() {
+                if set.values[..index]
+                    .iter()
+                    .any(|candidate| same_value_zero(candidate, value))
+                {
+                    return Err(format!(
+                        "Set object {} contains a duplicate SameValueZero value",
+                        id.get()
+                    ));
+                }
+            }
+        }
+        HeapObject::Error(error) => {
+            if error.kind == super::ErrorKind::AggregateError && error.errors.is_none() {
+                return Err(format!(
+                    "AggregateError object {} is missing its errors list",
+                    id.get()
+                ));
+            }
+            if error.kind != super::ErrorKind::AggregateError && error.errors.is_some() {
+                return Err(format!(
+                    "{} object {} carries AggregateError errors",
+                    error.kind.name(),
+                    id.get()
+                ));
+            }
+            if let Some(errors) = &error.errors
+                && !matches!(
+                    errors,
+                    Value::Ref(errors_id)
+                        if matches!(heap.get(*errors_id), Ok(HeapObject::List(_)))
+                )
+            {
+                return Err(format!(
+                    "AggregateError object {} errors must reference a JavaScript list",
+                    id.get()
+                ));
+            }
+        }
+        HeapObject::Url(url) => {
+            let parsed = super::url_objects::parse_url(&url.href, None)
+                .map_err(|_| format!("URL object {} has an invalid href", id.get()))?;
+            if parsed.as_str() != url.href {
+                return Err(format!("URL object {} href is not canonical", id.get()));
+            }
+            let Value::Ref(params_id) = url.search_params else {
+                return Err(format!(
+                    "URL object {} searchParams must be a heap reference",
+                    id.get()
+                ));
+            };
+            let HeapObject::UrlSearchParams(params) = heap
+                .get(params_id)
+                .map_err(|_| format!("URL object {} has dangling searchParams", id.get()))?
+            else {
+                return Err(format!(
+                    "URL object {} searchParams must reference URLSearchParams",
+                    id.get()
+                ));
+            };
+            let parsed_entries = parsed
+                .query()
+                .map_or_else(Vec::new, super::url_objects::parse_params_string);
+            if parsed_entries != params.entries {
+                return Err(format!(
+                    "URL object {} and its URLSearchParams entries disagree",
+                    id.get()
+                ));
+            }
+        }
+        HeapObject::UrlSearchParams(_) => {
+            let owners = heap
+                .objects_in_id_order()
+                .filter(|(_, object)| {
+                    matches!(
+                        object,
+                        HeapObject::Url(super::UrlObject {
+                            search_params: Value::Ref(candidate),
+                            ..
+                        }) if *candidate == id
+                    )
+                })
+                .count();
+            if owners > 1 {
+                return Err(format!(
+                    "URLSearchParams object {} is linked to more than one URL",
+                    id.get()
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn claim_owner(

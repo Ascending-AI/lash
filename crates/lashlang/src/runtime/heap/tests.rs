@@ -125,3 +125,254 @@ fn child_mutation_invalidates_materialized_ancestor_cache() {
         )
     );
 }
+
+#[test]
+fn map_and_set_use_same_value_zero_without_reordering_updates() {
+    let mut heap = Heap::default();
+    let Value::Ref(map) = heap.allocate_map(Vec::new()).expect("Map") else {
+        unreachable!()
+    };
+    heap.map_set(map, Value::Number(f64::NAN), Value::String("first".into()))
+        .expect("insert NaN");
+    heap.map_set(map, Value::Number(-0.0), Value::String("zero".into()))
+        .expect("insert negative zero");
+    heap.map_set(
+        map,
+        Value::Number(f64::NAN),
+        Value::String("updated".into()),
+    )
+    .expect("update NaN");
+    heap.map_set(map, Value::Number(0.0), Value::String("same zero".into()))
+        .expect("update zero");
+    let entries = heap.map_entries(map).expect("read Map").expect("Map kind");
+    assert_eq!(entries.len(), 2);
+    assert!(matches!(entries[0].0, Value::Number(value) if value.is_nan()));
+    assert_eq!(entries[0].1, Value::String("updated".into()));
+    assert!(matches!(entries[1].0, Value::Number(value) if value.to_bits() == 0.0_f64.to_bits()));
+    assert_eq!(entries[1].1, Value::String("same zero".into()));
+
+    let Value::Ref(set) = heap.allocate_set(Vec::new()).expect("Set") else {
+        unreachable!()
+    };
+    for value in [f64::NAN, f64::NAN, -0.0, 0.0] {
+        heap.set_add(set, Value::Number(value))
+            .expect("add Set value");
+    }
+    let values = heap.set_values(set).expect("read Set").expect("Set kind");
+    assert_eq!(values.len(), 2);
+    assert!(matches!(values[0], Value::Number(value) if value.is_nan()));
+    assert!(matches!(values[1], Value::Number(value) if value.to_bits() == 0.0_f64.to_bits()));
+}
+
+#[test]
+fn exotic_member_apis_import_inline_compounds_before_storage() {
+    let mut heap = Heap::default();
+    let inline_list = || Value::List(vec![Value::Number(1.0)].into());
+    let inline_record = || {
+        Value::Record(std::sync::Arc::new({
+            let mut record = Record::new();
+            record.insert("nested".to_string(), Value::Bool(true));
+            record
+        }))
+    };
+
+    let Value::Ref(map) = heap
+        .allocate_map(vec![(inline_list(), inline_record())])
+        .expect("Map imports constructor members")
+    else {
+        unreachable!()
+    };
+    let entries = heap.map_entries(map).expect("read Map").expect("Map");
+    assert!(matches!(entries[0], (Value::Ref(_), Value::Ref(_))));
+
+    heap.map_set(map, inline_record(), inline_list())
+        .expect("Map.set imports members");
+    let entries = heap.map_entries(map).expect("read Map").expect("Map");
+    assert!(
+        entries
+            .iter()
+            .all(|(key, value)| matches!(key, Value::Ref(_)) && matches!(value, Value::Ref(_)))
+    );
+
+    let Value::Ref(set) = heap
+        .allocate_set(vec![inline_list()])
+        .expect("Set imports constructor values")
+    else {
+        unreachable!()
+    };
+    heap.set_add(set, inline_record())
+        .expect("Set.add imports values");
+    assert!(
+        heap.set_values(set)
+            .expect("read Set")
+            .expect("Set")
+            .iter()
+            .all(|value| matches!(value, Value::Ref(_)))
+    );
+}
+
+#[test]
+fn map_object_keys_compare_by_heap_identity() {
+    let mut heap = Heap::default();
+    let first = heap.allocate_list(Vec::new()).expect("first key");
+    let second = heap.allocate_list(Vec::new()).expect("second key");
+    let Value::Ref(map) = heap.allocate_map(Vec::new()).expect("Map") else {
+        unreachable!()
+    };
+    heap.map_set(map, first.clone(), Value::Number(1.0))
+        .expect("first object key");
+    heap.map_set(map, second.clone(), Value::Number(2.0))
+        .expect("second object key");
+    assert_eq!(
+        heap.map_get(map, &first).expect("lookup"),
+        Some(Value::Number(1.0))
+    );
+    assert_eq!(
+        heap.map_get(map, &second).expect("lookup"),
+        Some(Value::Number(2.0))
+    );
+    assert_eq!(
+        heap.map_entries(map).expect("entries").expect("Map").len(),
+        2
+    );
+}
+
+#[test]
+fn exotic_kinds_have_deterministic_logical_byte_charges() {
+    let regexp = HeapObject::RegExp(RegExpObject {
+        pattern: "ab".to_string(),
+        flags: "gi".to_string(),
+        last_index: 0,
+        compiled_program: None,
+    });
+    let map = HeapObject::Map(MapObject {
+        entries: vec![(Value::String("k".into()), Value::Number(1.0))],
+    });
+    let set = HeapObject::Set(SetObject {
+        values: vec![Value::String("v".into())],
+    });
+    let date = HeapObject::Date(DateObject { milliseconds: 1.0 });
+    let error = HeapObject::Error(ErrorObject {
+        kind: ErrorKind::TypeError,
+        message: "bad".to_string(),
+        cause: Some(Value::Number(1.0)),
+        errors: None,
+    });
+    assert_eq!(
+        regexp.logical_bytes(),
+        OBJECT_HEADER_BYTES + 2 + 2 + 3 * VALUE_SLOT_BYTES + 8
+    );
+    assert_eq!(
+        map.logical_bytes(),
+        OBJECT_HEADER_BYTES
+            + COLLECTION_ENTRY_BYTES
+            + value_logical_bytes(&Value::String("k".into()))
+            + value_logical_bytes(&Value::Number(1.0))
+    );
+    assert_eq!(
+        set.logical_bytes(),
+        OBJECT_HEADER_BYTES
+            + COLLECTION_ENTRY_BYTES
+            + value_logical_bytes(&Value::String("v".into()))
+    );
+    assert_eq!(
+        date.logical_bytes(),
+        OBJECT_HEADER_BYTES + VALUE_SLOT_BYTES + 8
+    );
+    assert_eq!(
+        error.logical_bytes(),
+        OBJECT_HEADER_BYTES + 3 + VALUE_SLOT_BYTES + value_logical_bytes(&Value::Number(1.0))
+    );
+}
+
+#[test]
+fn exotic_host_boundary_errors_are_not_reported_as_function_values() {
+    let mut heap = Heap::default();
+    let values = [
+        heap.allocate_regexp("a".to_string(), "g".to_string())
+            .expect("RegExp"),
+        heap.allocate_map(Vec::new()).expect("Map"),
+        heap.allocate_set(Vec::new()).expect("Set"),
+        heap.allocate_date(0.0).expect("Date"),
+        heap.allocate_error(ErrorKind::Error, String::new(), None, None)
+            .expect("Error"),
+    ];
+    for value in values {
+        assert!(matches!(
+            heap.export_for_instruction(&value),
+            Err(RuntimeError::JavaScriptExoticAtHostBoundary { .. })
+        ));
+    }
+}
+
+/// The budget's per-slot charge is the real slot size, not a guess that
+/// happened to be four times too small.
+#[test]
+fn value_slot_bytes_covers_the_real_value_slot() {
+    assert!(
+        std::mem::size_of::<Value>() as u64 <= VALUE_SLOT_BYTES,
+        "VALUE_SLOT_BYTES ({VALUE_SLOT_BYTES}) must charge at least what a Value slot really \
+         costs ({}); a variant grew the enum, so raise the charge with it",
+        std::mem::size_of::<Value>(),
+    );
+}
+
+/// The array pre-charge and the charge the committed list actually carries are
+/// the same arithmetic. They are written twice — once ahead of building the
+/// `Vec`, once from the built object — and a drift between them is either a
+/// pre-charge that lets an over-budget array through or one that refuses an
+/// array the heap would have accepted.
+#[test]
+fn the_list_pre_charge_matches_what_the_committed_list_is_charged() {
+    let mut heap = Heap::default();
+    for len in [0_usize, 1, 7, 64] {
+        let committed = HeapObject::List(vec![Value::Undefined; len]).logical_bytes();
+        let limit = heap.live_logical_bytes().saturating_add(committed);
+        heap.set_limit(limit);
+        heap.ensure_list_allocation_len(len)
+            .unwrap_or_else(|error| panic!("len {len} must pre-charge within {limit}: {error}"));
+        heap.set_limit(limit.saturating_sub(1));
+        assert!(
+            heap.ensure_list_allocation_len(len).is_err(),
+            "len {len} must not pre-charge under the exact committed charge"
+        );
+    }
+}
+
+/// A chain of `refs` heap objects, innermost holding a scalar leaf.
+fn ref_chain(heap: &mut Heap, refs: usize) -> Value {
+    let mut value = heap
+        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .expect("allocate the innermost link");
+    for _ in 1..refs {
+        value = heap
+            .allocate(HeapObject::List(vec![value]))
+            .expect("allocate a chain link");
+    }
+    value
+}
+
+/// The export cache must charge a cached subtree exactly what walking it would
+/// have charged. `materialized` is rebuilt empty on restore, so a warm cache is
+/// a live cell and a cold one is a resumed cell: a divergence at the ceiling is
+/// the same value exporting on one side of a park and refusing on the other.
+#[test]
+fn a_warm_export_cache_charges_the_same_depth_as_a_cold_walk() {
+    let mut heap = Heap::default();
+    let at_ceiling = ref_chain(&mut heap, validation::MAX_RUNTIME_VALUE_DEPTH);
+    heap.export_for_instruction(&at_ceiling)
+        .expect("a chain at the ceiling must export on a cold cache");
+    heap.export_for_instruction(&at_ceiling)
+        .expect("a chain at the ceiling must export on a warm cache");
+
+    let mut heap = Heap::default();
+    let over_ceiling = ref_chain(&mut heap, validation::MAX_RUNTIME_VALUE_DEPTH + 1);
+    assert!(matches!(
+        heap.export_for_instruction(&over_ceiling),
+        Err(RuntimeError::ValueDepthLimitExceeded { .. })
+    ));
+    assert!(matches!(
+        heap.export_for_instruction(&over_ceiling),
+        Err(RuntimeError::ValueDepthLimitExceeded { .. })
+    ));
+}

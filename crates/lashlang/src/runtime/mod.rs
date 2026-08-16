@@ -50,12 +50,17 @@ pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
     HeapId,
 };
-pub(crate) use heap::{Heap, HeapObject, HeapRestoreWire, PersistedRoots};
+pub(crate) use heap::{
+    DateObject, ErrorKind, ErrorObject, Heap, HeapObject, HeapRestoreWire, MapObject,
+    PersistedRoots, RegExpMatchObject, RegExpObject, SetObject, UrlObject, UrlSearchParamsObject,
+    canonical_regexp_flags, regexp_source, regexp_string,
+};
 pub use host::{
-    AbilityOp, AbilityResult, DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds,
-    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ProcessEvent,
-    ProcessEventKind, ProcessSignal, ProcessStart, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchResult, ResourceOperationResult, Sleep, SleepKind,
+    AbilityOp, AbilityResult, DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH,
+    ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+    ExecutionMode, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
+    SleepKind,
 };
 #[allow(unused_imports)]
 pub(crate) use instruction::*;
@@ -73,9 +78,12 @@ pub(crate) use schema::{
 pub(crate) use vm::SlotState;
 #[allow(unused_imports)]
 pub use vm::{
-    ContinuationError, Vm, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
+    ContinuationError, TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
+    TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
+    TypeScriptRegExpValidationError, Vm, VmContinuation, VmFinallyCompletionContinuation,
+    VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
+    validate_typescript_regexp, validate_typescript_regexp_shape,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

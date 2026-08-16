@@ -97,7 +97,9 @@ pub(super) fn instruction_heap_plan(
         | I::Intrinsic(IntrinsicOp::PushAssign(_))
         | I::MakeClosure { .. }
         | I::Call { .. }
+        | I::CallDynamic
         | I::Map
+        | I::AsyncMap
         | I::Return
         | I::Throw
         | I::BuildTuple(_)
@@ -108,10 +110,19 @@ pub(super) fn instruction_heap_plan(
         | I::Duplicate
         | I::JavaScriptUnary(_)
         | I::JavaScriptBinary(_)
+        | I::Pop
         | I::Intrinsic(
             IntrinsicOp::JavaScriptSplit
             | IntrinsicOp::JavaScriptJoin
-            | IntrinsicOp::JavaScriptStdlib(_),
+            | IntrinsicOp::JavaScriptStdlib(_)
+            | IntrinsicOp::JavaScriptHeapNew(_)
+            | IntrinsicOp::JavaScriptHeapInstanceOf
+            | IntrinsicOp::JavaScriptHeapDeleteMember
+            | IntrinsicOp::JavaScriptRegExp(_)
+            | IntrinsicOp::JavaScriptGlobalDelete
+            | IntrinsicOp::JavaScriptGlobalHas
+            | IntrinsicOp::JavaScriptGlobalSet
+            | IntrinsicOp::JavaScriptUriCodec(_),
         )
         | I::IsNullish => InstructionHeapPlan::heap_native(),
         I::StoreName(_) => InstructionHeapPlan::heap_native(),
@@ -149,7 +160,6 @@ pub(super) fn instruction_heap_plan(
         | I::JumpIfFalse(_)
         | I::JumpIfTrue(_)
         | I::Unary(_)
-        | I::Pop
         | I::BeginIter(_) => InstructionHeapPlan::stack(Top(1)),
 
         // Two-operand opcodes.
@@ -251,7 +261,9 @@ mod tests {
                 captures: 1,
             },
             I::Call { argc: 1 },
+            I::CallDynamic,
             I::Map,
+            I::AsyncMap,
             I::Return,
         ];
         for (index, instruction) in function_opcodes.into_iter().enumerate() {

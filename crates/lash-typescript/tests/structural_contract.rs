@@ -23,38 +23,34 @@ impl ExecutionHost for PrintHost {
 }
 
 #[test]
-fn unsupported_parameter_and_declare_shapes_have_precise_diagnostics() {
-    let cases = [
-        (
-            "function f(value = 1) { return value; }",
-            DiagnosticCode::ParameterDefaultUnsupported,
-        ),
-        (
-            "function f(...values) { return 1; }",
-            DiagnosticCode::ParameterRestUnsupported,
-        ),
-        (
-            "declare const value: number;",
-            DiagnosticCode::DeclareUnsupported,
-        ),
-    ];
-    for (source, expected) in cases {
-        let error = lash_typescript::compile(source).expect_err("shape must reject");
-        assert_eq!(error.code, expected, "source: {source}");
-    }
+fn parameter_defaults_and_rest_are_accepted_while_declare_stays_rejected() {
+    lash_typescript::compile(
+        "function f(value = 1, ...values) { return value + values.length; } finish(f());",
+    )
+    .expect("parameter defaults and rest compile");
+    let error = lash_typescript::compile("declare const value: number;")
+        .expect_err("ambient declarations remain outside executable cells");
+    assert_eq!(error.code, DiagnosticCode::DeclareUnsupported);
 }
 
 #[test]
-fn console_log_accepts_zero_and_multiple_arguments_with_to_string_joining() {
-    let program =
-        lash_typescript::compile("console.log(); console.log(1, null, [2, 3]); finish(0);")
-            .expect("console.log arities compile");
+fn console_methods_accept_zero_and_multiple_arguments_with_to_string_joining() {
+    let program = lash_typescript::compile(
+        "console.log(); console.warn(1, null, [2, 3]); console.error('e'); console.info('i'); console.debug('d'); finish(0);",
+    )
+    .expect("console method arities compile");
     let host = PrintHost::default();
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
         .expect("console.log arities execute");
     assert_eq!(
         *host.0.lock().expect("print journal"),
-        vec![Value::String("".into()), Value::String("1 null 2,3".into())]
+        vec![
+            Value::String("".into()),
+            Value::String("1 null 2,3".into()),
+            Value::String("e".into()),
+            Value::String("i".into()),
+            Value::String("d".into()),
+        ]
     );
 }
 

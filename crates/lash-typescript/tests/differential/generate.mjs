@@ -1,8 +1,11 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const NODE_VERSION = 'v25.2.1';
+const TYPESCRIPT_VERSION = '7.0.2';
 if (process.version !== NODE_VERSION) {
   throw new Error(`oracle requires Node ${NODE_VERSION}, got ${process.version}`);
 }
@@ -11,25 +14,17 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 58],
+  ['findings', 'findings-expressions.txt', 259],
 ];
 
 const rejected = new Map([
   ["'ab'.map((x) => x)", 'TS_METHOD_UNSUPPORTED'],
-  ['2 ** 3', 'TS_EXPONENTIATION_UNSUPPORTED'],
-  ['1 & 3', 'TS_BITWISE_UNSUPPORTED'],
-  ['1 | 2', 'TS_BITWISE_UNSUPPORTED'],
-  ['1 ^ 3', 'TS_BITWISE_UNSUPPORTED'],
-  ['~1', 'TS_BITWISE_UNSUPPORTED'],
-  ['1 << 2', 'TS_BITWISE_UNSUPPORTED'],
-  ['8 >> 2', 'TS_BITWISE_UNSUPPORTED'],
-  ['-8 >>> 2', 'TS_BITWISE_UNSUPPORTED'],
   ['(1, 2)', 'TS_SEQUENCE_UNSUPPORTED'],
-  ["'a' in ({a:1})", 'TS_IN_OPERATOR_UNSUPPORTED'],
-  ['1 instanceof Object', 'TS_INSTANCEOF_UNSUPPORTED'],
-  ['delete ({a:1}).a', 'TS_DELETE_UNSUPPORTED'],
   ['null ?? 1 || 2', 'TS_SYNTAX_ERROR'],
   ["'\\uD800'", 'TS_LONE_SURROGATE_LITERAL_UNSUPPORTED'],
+  ["/a/d", 'TS_REGEX_INDICES_FLAG_UNSUPPORTED'],
+  ["/a/v", 'TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED'],
+  ['new RegExp(/a/g)', 'TS_NEW_UNSUPPORTED'],
 ]);
 
 const runtimeRejected = new Map([
@@ -46,6 +41,20 @@ const runtimeRejected = new Map([
     'TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED',
   ],
   ["'\\uD83D\\uDE00'[0]", 'TS_LONE_SURROGATE_UNSUPPORTED'],
+  ["(() => /./.exec('😀')[0])()", 'TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED'],
+  // Node's `JSON.parse` creates `__proto__` as an ordinary own data property.
+  // This value model has no prototype chain, so every read of that name already
+  // refused; the key is now refused where the value enters instead, so a parsed
+  // object can never hold a key that `Object.keys` lists and nothing can read
+  // back. A registered over-rejection, not a conformance claim.
+  [
+    'JSON.stringify(JSON.parse(\'{"__proto__":1,"a":2}\'))',
+    'TS_PROTOTYPE_MUTATION_UNSUPPORTED',
+  ],
+  [
+    'Object.keys(JSON.parse(\'{"a":1,"__proto__":2}\')).join(\',\')',
+    'TS_PROTOTYPE_MUTATION_UNSUPPORTED',
+  ],
 ]);
 
 function expressions(file, expectedCount) {
@@ -66,9 +75,45 @@ function eraseTypesForNode(expression) {
 
 function nodeString(expression) {
   try {
+    if (/\b(?:const\s+)?enum\b/u.test(expression)) {
+      return typescriptNodeString(expression);
+    }
     return String(eval(`(${eraseTypesForNode(expression)})`));
   } catch (error) {
     return `ERR<${error.constructor.name}>`;
+  }
+}
+
+function typescriptNodeString(expression) {
+  const work = mkdtempSync(join(tmpdir(), 'lash-typescript-oracle-'));
+  try {
+    const input = join(work, 'oracle.ts');
+    writeFileSync(input, `const __result = String(${expression});\n__result;\n`);
+    const compile = spawnSync(
+      'npx',
+      [
+        '--yes',
+        '--package',
+        `typescript@${TYPESCRIPT_VERSION}`,
+        'tsc',
+        '--target',
+        'esnext',
+        '--outDir',
+        work,
+        input,
+        '--pretty',
+        'false',
+      ],
+      { encoding: 'utf8' },
+    );
+    if (compile.status !== 0) {
+      throw new Error(
+        `TypeScript ${TYPESCRIPT_VERSION} oracle compile failed:\n${compile.stdout}${compile.stderr}`,
+      );
+    }
+    return String(eval(readFileSync(join(work, 'oracle.js'), 'utf8')));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
 }
 

@@ -83,11 +83,12 @@ fn committed_node_expectations_match_the_accepted_dialect() {
 
 /// The register quotes the corpus's size, and a quoted number decays.
 ///
-/// It had already decayed once — the register claimed 310 rows and 237 distinct
-/// expressions while the table held 345 and 272 — which is the same failure as
-/// the hand-maintained method inventory: a count restated in prose beside the
-/// thing it counts, with nothing making them agree. This asserts the register's
-/// two numbers against the table itself.
+/// It had already decayed twice. First the register claimed 310 rows and 237
+/// distinct expressions while the table held 345 and 272; then a check that
+/// pinned only the paragraph's *first* two numbers let the second pair drift to
+/// 448 and 521, numbers matching nothing at all. Pinning a subset is what let
+/// the rest rot, so this reads every number in the paragraph and requires the
+/// whole sequence — total, distinct, distinct, total — to be the table's own.
 #[test]
 fn committed_row_counts_match_the_register() {
     let table = std::fs::read_to_string(concat!(
@@ -104,28 +105,21 @@ fn committed_row_counts_match_the_register() {
 
     let register = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
         .expect("the register is readable");
-    let claim = register
+    let paragraph = register
         .split("The Node differential table carries ")
         .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
         .expect("the register states the table's size");
-    let claimed_total = claim
-        .split(' ')
-        .next()
-        .and_then(|count| count.parse::<usize>().ok())
-        .expect("the register states a row count");
-    let claimed_distinct = claim
-        .split("of which ")
-        .nth(1)
-        .and_then(|rest| rest.split(' ').next())
-        .and_then(|count| count.parse::<usize>().ok())
-        .expect("the register states a distinct-expression count");
+    let claimed = paragraph
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.parse::<usize>().expect("a register count parses"))
+        .collect::<Vec<_>>();
 
     assert_eq!(
-        claimed_total, total,
-        "the register claims {claimed_total} rows; the table has {total}"
-    );
-    assert_eq!(
-        claimed_distinct, distinct,
-        "the register claims {claimed_distinct} distinct expressions; the table has {distinct}"
+        claimed,
+        vec![total, distinct, distinct, total],
+        "the register's counts are {claimed:?}; the table has {total} rows and \
+         {distinct} distinct expressions"
     );
 }

@@ -159,9 +159,10 @@ impl Compiler {
     fn compile_pending_functions(&mut self) {
         let mut next = 0;
         while next < self.pending_functions.len() {
-            let definition = self.pending_functions[next]
+            let pending = self.pending_functions[next]
                 .take()
                 .expect("pending function is compiled once");
+            let definition = pending.definition;
             debug_assert_eq!(next, self.functions.len());
 
             let root_slots =
@@ -190,6 +191,7 @@ impl Compiler {
                 entry_ip,
                 end_ip,
                 parameter_count: definition.params.len(),
+                parameter_model: pending.parameter_model,
                 capture_count: definition.captures.len(),
                 self_slot,
                 parameter_slots: parameter_slots.into_boxed_slice(),

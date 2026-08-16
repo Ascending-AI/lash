@@ -7,7 +7,10 @@
 # slow gets --no-verify'd and rots.
 # docs/pagefind is a generated search index; scenarios/ holds replay
 # fixtures whose bytes are load-bearing. Neither should be "fixed".
-exclude: '^(docs/pagefind/|scenarios/)'
+# The vendored Test262 corpus (tests, upstream harness, LICENSE) is kept
+# byte-for-byte at its pinned upstream commit and sync-verified; "fixing"
+# its whitespace breaks the byte-comparison.
+exclude: '^(docs/pagefind/|scenarios/|crates/lash-typescript/tests/test262/(test/|harness/|LICENSE))'
 repos:
   - repo: builtin
     hooks:

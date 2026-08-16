@@ -30,14 +30,16 @@ lash-core = { workspace = true }
 lash-sansio = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
+regress = { workspace = true }
 rustc-hash = "2"
 rmp-serde = { workspace = true }
-ryu = { workspace = true }
+ryu-js = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 sha2 = { workspace = true }
 smallvec = "1"
 thiserror = "2"
+url = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }

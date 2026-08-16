@@ -62,7 +62,7 @@ fn abort_corpus() -> Vec<(String, String)> {
     // originally aborted. The distinct-label shape below carries the full bound.
     let duplicate_label_limit = 8 * 1024;
     // Grouped by the review round that found each shape.
-    let mut corpus: Vec<(String, String)> = Vec::with_capacity(32);
+    let mut corpus: Vec<(String, String)> = Vec::with_capacity(40);
     // Round 1: prefix operators, ternary and binary chains, delimiters.
     corpus.push(("round1-not".into(), fill("finish(", "!", "1);", "")));
     corpus.push((
@@ -75,6 +75,10 @@ fn abort_corpus() -> Vec<(String, String)> {
     corpus.push(("round1-paren".into(), fill("finish(", "(", "1", ")")));
     corpus.push(("round1-bracket".into(), fill("const x = ", "[", "1", "]")));
     corpus.push(("round1-brace".into(), fill("const x = ", "{a:", "1", "}")));
+    corpus.push((
+        "wpb-nested-array-callback".into(),
+        fill("finish([1].map(", "x => [x].filter(", "x => true", ")"),
+    ));
     // Round 3: prefix keywords across lines, postfix chains.
     corpus.push((
         "round3-typeof-newline".into(),
@@ -309,6 +313,52 @@ fn oversized_sources_reject_by_name() {
         .expect("a source at the bound compiles");
 }
 
+#[test]
+fn newly_accepted_constructs_survive_without_the_preflight() {
+    let depth = 500;
+    let sources = [
+        format!("const x = a{};", "?.b".repeat(depth)),
+        format!(
+            "const {}x{} = {};",
+            "[".repeat(depth),
+            "]".repeat(depth),
+            "[".repeat(depth) + "1" + &"]".repeat(depth)
+        ),
+        format!(
+            "const x = {}[1]{};",
+            "[...".repeat(depth),
+            "]".repeat(depth)
+        ),
+        format!(
+            "let x=0; finish({}x{});",
+            "(~".repeat(depth),
+            ")".repeat(depth)
+        ),
+        format!(
+            "{}finish(1);{}",
+            "do { switch(1) { case 1: ".repeat(depth),
+            "break; } } while(false);".repeat(depth)
+        ),
+        format!(
+            "finish({}0{});",
+            "new Date(".repeat(depth),
+            ")".repeat(depth)
+        ),
+        format!(
+            "enum E {{ A = {}1{} }} finish(E.A);",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        ),
+    ];
+    for source in sources {
+        assert!(source.len() <= lash_typescript::MAX_SOURCE_BYTES);
+        match lash_typescript::parse_without_nesting_preflight(&source) {
+            Ok(_) => {}
+            Err(error) => assert!(!error.code.as_str().is_empty()),
+        }
+    }
+}
+
 // The fuzz generator, kept in step with `grammar_coverage.rs` by construction:
 // both draw from the same deterministic stream.
 struct Prng(u64);
@@ -426,4 +476,93 @@ fn an_unavailable_reservation_is_a_resource_diagnostic() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// RegExp parsing has its own bounded preflight and must fail closed before a
+/// hostile literal can drive the backing parser or executor into an abort.
+#[test]
+fn regexp_size_depth_and_giant_quantifiers_fail_without_aborting() {
+    let too_long = format!("/{}/;", "a".repeat(4_097));
+    let error = lash_typescript::validate(&too_long).expect_err("long RegExp must reject");
+    assert_eq!(error.code.as_str(), "TS_REGEX_PATTERN_TOO_LONG");
+
+    let too_deep = format!("/{}a{}/;", "(".repeat(33), ")".repeat(33));
+    let error = lash_typescript::validate(&too_deep).expect_err("deep RegExp must reject");
+    assert_eq!(error.code.as_str(), "TS_REGEX_PATTERN_NESTING_LIMIT");
+
+    for pattern in [
+        "/a{1,999999999999999999999999999999}/;",
+        "/(?:a{999999999999999999999999999999})+b/;",
+        "/(?=(a+)+$)a{999999999999999999999999999999}/;",
+    ] {
+        match lash_typescript::validate(pattern) {
+            Ok(()) => {}
+            Err(error) => assert!(
+                error.code.as_str().starts_with("TS_REGEX_"),
+                "hostile RegExp has a named diagnostic: {error}"
+            ),
+        }
+    }
+}
+
+/// The guarantee has a runtime half: an *accepted* cell must not be able to
+/// name an allocation that takes the process down either.
+///
+/// Source size bounds what the parser sees; it bounds nothing about what the
+/// program then asks the heap for. `Array.from({ length: N })` is the shortest
+/// expression in the language that names an arbitrary allocation — eleven
+/// bytes of source per order of magnitude — so every N here must come back as
+/// a named diagnostic or a value, never as an abort or an OOM kill. The host
+/// below states no bounds at all, which is the shape of every host that has
+/// not thought about memory.
+#[test]
+fn guest_named_allocations_fail_without_aborting() {
+    struct UnboundedHost;
+
+    impl lashlang::ExecutionHost for UnboundedHost {
+        async fn perform(
+            &self,
+            op: lashlang::AbilityOp,
+        ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+            match op {
+                lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityResult::Value(value)),
+                _ => Err(lashlang::ExecutionHostError::new("unsupported ability")),
+            }
+        }
+    }
+
+    let lengths = [
+        "0",
+        "1000",
+        "-1",
+        "NaN",
+        "2 ** 31",
+        "2 ** 32 - 1",
+        "2 ** 32",
+        "1e12",
+        "Number.MAX_SAFE_INTEGER",
+        "Infinity",
+    ];
+    for length in lengths {
+        for source in [
+            format!("finish(Array.from({{ length: {length} }}).length);"),
+            format!("finish(Array.from({{ length: {length} }}, (_, i: number) => i).length);"),
+            format!("finish(Array.of(...Array.from({{ length: {length} }})).length);"),
+        ] {
+            let Ok(program) = lash_typescript::compile(&source) else {
+                continue;
+            };
+            let outcome = futures::executor::block_on(lashlang::execute(
+                &program,
+                &mut lashlang::State::new(),
+                &UnboundedHost,
+            ));
+            if let Err(error) = outcome {
+                assert!(
+                    !error.to_string().is_empty(),
+                    "an over-budget allocation must fail by name: {source}"
+                );
+            }
+        }
+    }
 }

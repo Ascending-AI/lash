@@ -153,12 +153,87 @@ pub(crate) fn read_javascript_index_direct(
     target: Value,
     index: Value,
 ) -> Result<Value, RuntimeError> {
+    let key = javascript_to_string(&index);
+    read_javascript_index_direct_with_key(target, &key)
+}
+
+/// Property names whose ECMA meaning is the prototype chain.
+///
+/// The value model is dense records with no prototypes, so none of these names
+/// has anything to read or mutate here. Every statically written form is
+/// rejected by the TypeScript adapter; a computed key is only knowable at the
+/// access, and the two honest answers there are `undefined` — silently
+/// divergent from node, where `o[k]` with `k === '__proto__'` yields the
+/// prototype and `o[k] = v` changes what the object inherits — or a named
+/// rejection. It rejects.
+pub(crate) fn is_prototype_chain_key(key: &str) -> bool {
+    matches!(
+        key,
+        "__proto__"
+            | "__defineGetter__"
+            | "__defineSetter__"
+            | "__lookupGetter__"
+            | "__lookupSetter__"
+    )
+}
+
+pub(crate) fn prototype_chain_key_error(key: &str) -> Option<RuntimeError> {
+    is_prototype_chain_key(key).then(|| RuntimeError::ValidationFailed {
+        reason: format!(
+            "TS_PROTOTYPE_MUTATION_UNSUPPORTED: `{key}` reaches the prototype chain, which this value model does not have"
+        ),
+    })
+}
+
+/// Refuses a prototype-chain name carried as a data key by a value entering the
+/// runtime from outside the guest — parsed JSON, a host or tool result, a
+/// decoded wire heap.
+///
+/// The read guard above is only half of it. Nothing inside the guest can build
+/// such a key, but an external value could arrive already carrying one, and
+/// then `Object.keys` listed it while every read and `JSON.stringify` refused
+/// it: an enumerable key nothing could read and nothing could serialize,
+/// reachable from ordinary untrusted-JSON round-tripping. Refusing at entry
+/// makes the over-rejection uniform instead of stranding a value in a shape
+/// with no way out. Node parses `"__proto__"` as an ordinary data property, so
+/// this is a registered divergence rather than a conformance claim.
+pub(crate) fn prototype_chain_data_key_error(value: &Value) -> Option<RuntimeError> {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Record(record) => {
+                for entry in record.entries.iter() {
+                    if is_prototype_chain_key(&entry.name) {
+                        return Some(RuntimeError::ValidationFailed {
+                            reason: format!(
+                                "TS_PROTOTYPE_MUTATION_UNSUPPORTED: `{}` names the prototype chain, which this value model does not have, so a value entering from JSON.parse or a host result cannot carry it as a data key",
+                                entry.name
+                            ),
+                        });
+                    }
+                    pending.push(&entry.value);
+                }
+            }
+            Value::List(values) | Value::Tuple(values) => pending.extend(values.iter()),
+            _ => {}
+        }
+    }
+    None
+}
+
+pub(crate) fn read_javascript_index_direct_with_key(
+    target: Value,
+    key: &str,
+) -> Result<Value, RuntimeError> {
+    if let Some(error) = prototype_chain_key_error(key) {
+        return Err(error);
+    }
     match target {
-        Value::List(values) | Value::Tuple(values) => Ok(javascript_array_index(&index)
+        Value::List(values) | Value::Tuple(values) => Ok(javascript_array_index_key(key)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined)),
         Value::String(value) => {
-            let Some(index) = javascript_array_index(&index) else {
+            let Some(index) = javascript_array_index_key(key) else {
                 return Ok(Value::Undefined);
             };
             let Some(unit) = value.encode_utf16().nth(index) else {
@@ -170,10 +245,7 @@ pub(crate) fn read_javascript_index_direct(
                     reason: "TS_LONE_SURROGATE_UNSUPPORTED: string indexing produced an unrepresentable lone surrogate".to_string(),
                 })
         }
-        Value::Record(record) => Ok(record
-            .get(&javascript_to_string(&index))
-            .cloned()
-            .unwrap_or(Value::Undefined)),
+        Value::Record(record) => Ok(record.get(key).cloned().unwrap_or(Value::Undefined)),
         Value::Null | Value::Undefined => Err(RuntimeError::CannotIndex {
             actual: value_type_name(&target).to_string(),
         }),
@@ -186,6 +258,11 @@ pub(crate) fn read_javascript_heap_field(
     id: HeapId,
     field: &Name,
 ) -> Result<Value, RuntimeError> {
+    if field.text.as_ref() == "lastIndex"
+        && let Some(last_index) = heap.regexp_last_index(id)?
+    {
+        return Ok(Value::Number(last_index as f64));
+    }
     Ok(match heap.get(id)? {
         HeapObject::Record(record) => record
             .get_symbol(field.symbol)
@@ -193,6 +270,44 @@ pub(crate) fn read_javascript_heap_field(
             .unwrap_or(Value::Undefined),
         HeapObject::List(values) | HeapObject::Tuple(values) if field.text.as_ref() == "length" => {
             Value::Number(values.len() as f64)
+        }
+        HeapObject::RegExp(regexp) => match field.text.as_ref() {
+            "source" => Value::String(regexp_source(regexp).into()),
+            "flags" => Value::String(regexp.flags.as_str().into()),
+            "global" => Value::Bool(regexp.flags.contains('g')),
+            "ignoreCase" => Value::Bool(regexp.flags.contains('i')),
+            "multiline" => Value::Bool(regexp.flags.contains('m')),
+            "sticky" => Value::Bool(regexp.flags.contains('y')),
+            "unicode" => Value::Bool(regexp.flags.contains('u')),
+            _ => Value::Undefined,
+        },
+        HeapObject::RegExpMatch(result) => match field.text.as_ref() {
+            "length" => Value::Number(result.items.len() as f64),
+            "index" => result.index.clone(),
+            "input" => result.input.clone(),
+            "groups" => result.groups.clone(),
+            _ => Value::Undefined,
+        },
+        HeapObject::Map(map) if field.text.as_ref() == "size" => {
+            Value::Number(map.entries.len() as f64)
+        }
+        HeapObject::Set(set) if field.text.as_ref() == "size" => {
+            Value::Number(set.values.len() as f64)
+        }
+        HeapObject::Error(error) => match field.text.as_ref() {
+            "name" => Value::String(error.kind.name().into()),
+            "message" => Value::String(error.message.as_str().into()),
+            "cause" => error.cause.clone().unwrap_or(Value::Undefined),
+            "errors" if error.kind == ErrorKind::AggregateError => {
+                error.errors.clone().unwrap_or(Value::Undefined)
+            }
+            _ => Value::Undefined,
+        },
+        HeapObject::Url(_) => heap
+            .url_property(id, field.text.as_ref())?
+            .unwrap_or(Value::Undefined),
+        HeapObject::UrlSearchParams(params) if field.text.as_ref() == "size" => {
+            Value::Number(params.entries.len() as f64)
         }
         _ => Value::Undefined,
     })
@@ -203,14 +318,50 @@ pub(crate) fn read_javascript_heap_index(
     id: HeapId,
     index: &Value,
 ) -> Result<Value, RuntimeError> {
+    let key = heap.javascript_to_string(index)?;
+    if let Some(error) = prototype_chain_key_error(&key) {
+        return Err(error);
+    }
     Ok(match heap.get(id)? {
-        HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index(index)
+        HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index_key(&key)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined),
-        HeapObject::Record(record) => record
-            .get(&javascript_to_string(index))
-            .cloned()
-            .unwrap_or(Value::Undefined),
+        HeapObject::Record(record) => record.get(&key).cloned().unwrap_or(Value::Undefined),
+        HeapObject::RegExp(regexp) => match key.as_str() {
+            "lastIndex" => Value::Number(regexp.last_index as f64),
+            "source" => Value::String(regexp_source(regexp).into()),
+            "flags" => Value::String(regexp.flags.as_str().into()),
+            "global" => Value::Bool(regexp.flags.contains('g')),
+            "ignoreCase" => Value::Bool(regexp.flags.contains('i')),
+            "multiline" => Value::Bool(regexp.flags.contains('m')),
+            "sticky" => Value::Bool(regexp.flags.contains('y')),
+            "unicode" => Value::Bool(regexp.flags.contains('u')),
+            _ => Value::Undefined,
+        },
+        HeapObject::RegExpMatch(result) => match key.as_str() {
+            "length" => Value::Number(result.items.len() as f64),
+            "index" => result.index.clone(),
+            "input" => result.input.clone(),
+            "groups" => result.groups.clone(),
+            _ => javascript_array_index_key(&key)
+                .and_then(|index| result.items.get(index).cloned())
+                .unwrap_or(Value::Undefined),
+        },
+        HeapObject::Map(map) if key == "size" => Value::Number(map.entries.len() as f64),
+        HeapObject::Set(set) if key == "size" => Value::Number(set.values.len() as f64),
+        HeapObject::Error(error) => match key.as_str() {
+            "name" => Value::String(error.kind.name().into()),
+            "message" => Value::String(error.message.as_str().into()),
+            "cause" => error.cause.clone().unwrap_or(Value::Undefined),
+            "errors" if error.kind == ErrorKind::AggregateError => {
+                error.errors.clone().unwrap_or(Value::Undefined)
+            }
+            _ => Value::Undefined,
+        },
+        HeapObject::Url(_) => heap.url_property(id, &key)?.unwrap_or(Value::Undefined),
+        HeapObject::UrlSearchParams(params) if key == "size" => {
+            Value::Number(params.entries.len() as f64)
+        }
         _ => Value::Undefined,
     })
 }

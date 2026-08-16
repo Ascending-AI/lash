@@ -32,9 +32,22 @@ pub enum AbilityResult {
 }
 
 impl AbilityResult {
+    /// Takes the host's value, refusing one that carries a prototype-chain name
+    /// as a data key.
+    ///
+    /// A host result is the second way such a key can enter — a tool result, an
+    /// awaited process result, a signal payload — and this is the seam every
+    /// ability's value passes through. See
+    /// `access::prototype_chain_data_key_error` for why entry rather than the
+    /// first read is where it is refused.
     pub fn into_value(self, op: &'static str) -> Result<Value, ExecutionHostError> {
         match self {
-            Self::Value(value) => Ok(value),
+            Self::Value(value) => {
+                match crate::runtime::access::prototype_chain_data_key_error(&value) {
+                    Some(error) => Err(ExecutionHostError::new(format!("{op} returned {error}"))),
+                    None => Ok(value),
+                }
+            }
             Self::ResourceOperationBatch(_) => Err(ExecutionHostError::new(format!(
                 "{op} returned a resource operation batch result"
             ))),
@@ -326,6 +339,24 @@ pub struct ExecutionBounds {
 pub const DEFAULT_MAX_VM_FRAME_DEPTH: std::num::NonZeroU64 =
     std::num::NonZeroU64::new(1_024).expect("the default frame depth is nonzero");
 
+/// The logical-memory ceiling an execution gets when its host does not state
+/// one.
+///
+/// Generous rather than tight: it is not a policy, it is the backstop that
+/// keeps a host which never thought about memory from handing the guest the
+/// whole machine. Before it existed the trait default was `Unbounded`, which
+/// set the heap's limit to `u64::MAX` and made every pre-charge — including
+/// the one array construction relies on — arithmetically incapable of
+/// tripping, so `Array.from({ length: 1e9 })` walked the process into the
+/// OOM killer instead of returning `MemoryLimitExceeded`.
+///
+/// 512 MiB is well above anything a real cell holds (the heap's own standalone
+/// default is 64 MiB) and well below what a host process can absorb. A host
+/// that genuinely wants no ceiling still overrides `execution_bounds` with
+/// `ExecutionBound::Unbounded` — the point is that it must say so.
+pub const DEFAULT_HOST_MEMORY_LIMIT_BYTES: std::num::NonZeroU64 =
+    std::num::NonZeroU64::new(512 * 1024 * 1024).expect("the default memory limit is nonzero");
+
 impl ExecutionBounds {
     /// Builds a bound set.
     ///
@@ -356,6 +387,16 @@ impl ExecutionBounds {
     ) -> Self {
         self.memory_limit = memory_limit;
         self
+    }
+
+    /// Unbounded time and instructions with the default memory ceiling: what a
+    /// host gets when it does not override `execution_bounds`.
+    pub const fn memory_bounded_default() -> Self {
+        Self::new(
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+            ExecutionBound::Bounded(DEFAULT_HOST_MEMORY_LIMIT_BYTES),
+        )
     }
 
     pub const fn unbounded() -> Self {
@@ -393,8 +434,10 @@ pub trait ExecutionHost: Sync {
         false
     }
 
+    /// Time and instructions are the host's business; memory is not left
+    /// open. See [`DEFAULT_HOST_MEMORY_LIMIT_BYTES`].
     fn execution_bounds(&self) -> ExecutionBounds {
-        ExecutionBounds::unbounded()
+        ExecutionBounds::memory_bounded_default()
     }
 
     /// Cheap cooperative cancellation probe. Like execution bounds, this is a
@@ -566,5 +609,44 @@ impl ExecutionHostError {
         Self {
             message: message.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct BareHost;
+
+    impl ExecutionHost for BareHost {
+        async fn perform(&self, _op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+            Err(ExecutionHostError::new("no abilities"))
+        }
+    }
+
+    /// A host that says nothing about memory still gets a ceiling.
+    ///
+    /// This is the pin on the defect, not on the number: with `Unbounded` here
+    /// the heap's limit becomes `u64::MAX` and every pre-charge in the runtime
+    /// — including the one that stands between `Array.from({ length })` and the
+    /// OOM killer — becomes arithmetically incapable of tripping.
+    #[test]
+    fn the_default_host_is_memory_bounded() {
+        assert!(
+            matches!(
+                BareHost.execution_bounds().memory_limit,
+                ExecutionBound::Bounded(limit) if limit == DEFAULT_HOST_MEMORY_LIMIT_BYTES
+            ),
+            "the default execution bounds must carry a finite memory ceiling"
+        );
+    }
+
+    /// Opting out stays possible, and stays explicit.
+    #[test]
+    fn a_host_can_still_declare_unbounded_memory() {
+        assert!(matches!(
+            ExecutionBounds::unbounded().memory_limit,
+            ExecutionBound::Unbounded
+        ));
     }
 }

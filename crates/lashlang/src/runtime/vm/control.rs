@@ -270,11 +270,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let result = match step {
                 Ok(VmStep::Continue) => Ok(None),
                 Ok(VmStep::Effect(effect)) => {
-                    if self
-                        .frames
-                        .iter()
-                        .any(|frame| matches!(frame.return_target, super::ReturnTarget::Map(_)))
-                    {
+                    if self.frames.iter().any(|frame| {
+                        matches!(
+                            &frame.return_target,
+                            super::ReturnTarget::Callback(callback)
+                                if !callback.allow_effects
+                        )
+                    }) {
                         self.route_runtime_error(
                             RuntimeError::EffectInBuiltinCallback,
                             instruction_ip,
@@ -465,7 +467,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
             StackExport::Top(window) => {
                 let start = self.stack.len().saturating_sub(window);
                 for index in start..self.stack.len() {
-                    let exported = self.heap.export_for_instruction(&self.stack[index])?;
+                    let exported = if self.reference_semantics
+                        && matches!(
+                            instruction,
+                            super::Instruction::Pop
+                                | super::Instruction::ToBool
+                                | super::Instruction::JumpIfFalse(_)
+                                | super::Instruction::JumpIfTrue(_)
+                                | super::Instruction::Unary(_)
+                                | super::Instruction::Binary(_)
+                                | super::Instruction::BeginIter(_)
+                        )
+                        && matches!(
+                            &self.stack[index],
+                            Value::Ref(id) if self.heap.is_javascript_vm_object(*id)?
+                        ) {
+                        self.stack[index].clone()
+                    } else {
+                        self.heap.export_for_instruction(&self.stack[index])?
+                    };
                     self.stack[index] = exported;
                 }
             }
@@ -494,7 +514,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     /// Imports every inline compound left in VM state into the heap.
     ///
-    /// This runs after each instruction, so its cost has to be proportional to
+    /// This pass is load-bearing for exotic members: constructor and mutation
+    /// APIs also import defensively, while this guarantees values produced by
+    /// ordinary instructions are heap references before a later exotic call
+    /// can store them. It runs after each instruction, so its cost has to be proportional to
     /// what the instruction could have changed, not to the data the VM happens
     /// to hold. The operand stack and the slot table are bounded by the
     /// program's shape, but iterator cursors and the extra-globals record are

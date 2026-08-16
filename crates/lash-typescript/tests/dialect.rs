@@ -142,6 +142,39 @@ fn return_runs_and_can_be_replaced_by_finally() {
 }
 
 #[test]
+fn type_level_typescript_syntax_is_erased_while_namespaces_and_decorators_reject() {
+    assert_eq!(
+        finished(
+            r#"
+            interface Box<T> { value: T }
+            type Numeric = number;
+            function identity<T>(value: T): T { return value; }
+            const value: Numeric = (identity<number>(2) as number)!;
+            finish(value satisfies Numeric);
+            "#,
+        ),
+        Value::Number(2.0)
+    );
+    for (source, code) in [
+        (
+            "namespace N {}",
+            lash_typescript::DiagnosticCode::NamespaceUnsupported,
+        ),
+        (
+            "@sealed class C {}",
+            lash_typescript::DiagnosticCode::DecoratorUnsupported,
+        ),
+    ] {
+        assert_eq!(
+            lash_typescript::compile(source)
+                .expect_err("runtime-emitting TypeScript syntax must reject")
+                .code,
+            code
+        );
+    }
+}
+
+#[test]
 fn undefined_erases_at_the_json_boundary() {
     let value = finished("finish([undefined, { absent: undefined, present: null }]);");
     assert_eq!(
@@ -168,10 +201,7 @@ fn unsupported_constructs_have_stable_named_diagnostics() {
     let cases = [
         ("class A {}", Code::ClassUnsupported),
         ("function* f() {}", Code::GeneratorUnsupported),
-        ("async function f() {}", Code::AsyncUnsupported),
-        ("enum E { A }", Code::EnumUnsupported),
         ("namespace N {}", Code::NamespaceUnsupported),
-        ("const r = /x/;", Code::RegExpUnsupported),
         ("eval('1')", Code::EvalUnsupported),
         ("new Function('return 1')", Code::NewUnsupported),
         ("label: while (true) break label;", Code::LabelUnsupported),
@@ -180,8 +210,6 @@ fn unsupported_constructs_have_stable_named_diagnostics() {
             Code::AccessorUnsupported,
         ),
         ("import('x')", Code::DynamicImportUnsupported),
-        ("const x = { ...other };", Code::SpreadUnsupported),
-        ("const x = other?.value;", Code::OptionalChainingUnsupported),
         ("const x = this;", Code::ThisUnsupported),
     ];
     for (source, expected) in cases {
@@ -445,6 +473,10 @@ mod durability {
         "if (1) { const branch = 2; } print('x'); finish('done');",
         "try { const attempted = 1; } finally { const cleaned = 2; } print('x'); finish('done');",
         "const g = function self(n: number): number { if (n <= 0) { return 0; } return self(n - 1); }; print('x'); finish(`${g(3)}`);",
+        "const key = { id: 1 }; const map = new Map([[key, 'value']]); const alias = map; print('x'); finish(`${alias.get(key)}|${alias === map}`);",
+        "const set = new Set([NaN, -0, 2]); const alias = set; print('x'); finish(`${alias.has(NaN)}|${alias === set}`);",
+        "const date = new Date('2000-02-29T12:34:56.789Z'); const alias = date; print('x'); finish(`${alias.toISOString()}|${alias === date}`);",
+        "enum Status { Ready, Done = 4 } const alias = Status; print('x'); finish(`${alias.Ready}|${alias[4]}`);",
     ];
 
     fn suspended_continuation_json(source: &str) -> String {
@@ -505,6 +537,38 @@ mod durability {
         for source in DURABLE_CORPUS {
             suspend_and_snapshot(source);
         }
+    }
+
+    #[test]
+    fn map_set_and_date_aliases_survive_a_continuation_restart() {
+        futures::executor::block_on(async {
+            let source = "const key={id:1}; const map=new Map([[key,'value']]); const mapAlias=map; const set=new Set([key,NaN]); const setAlias=set; const date=new Date('2000-02-29T12:34:56.789Z'); const dateAlias=date; print('park'); finish(`${mapAlias===map}|${mapAlias.get(key)}|${setAlias===set}|${setAlias.has(key)}|${setAlias.has(NaN)}|${dateAlias===date}|${dateAlias.toISOString()}`);";
+            let program = lash_typescript::compile(source).expect("durable exotics compile");
+            let mut state = State::new();
+            let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
+            assert_eq!(
+                vm.run_process_until_effect().await.expect("run to park"),
+                VmRunOutcome::EffectCompleted
+            );
+            let encoded = serde_json::to_vec(&vm.suspend().expect("suspend exotics"))
+                .expect("encode continuation");
+            let continuation = serde_json::from_slice(&encoded).expect("decode continuation");
+            let mut resumed =
+                Vm::resume_from(continuation, &program, &Host).expect("resume exotics");
+            let VmRunOutcome::Complete(outcome) = resumed
+                .run_process_until_effect()
+                .await
+                .expect("finish after restart")
+            else {
+                panic!("the resumed program should have no second effect");
+            };
+            assert_eq!(
+                outcome,
+                ExecutionOutcome::Finished(Value::String(
+                    "true|value|true|true|true|true|2000-02-29T12:34:56.789Z".into()
+                ))
+            );
+        });
     }
 
     /// The globals an RLM session carries between turns, which is also what the
@@ -617,4 +681,55 @@ fn a_process_suspended_inside_for_of_resumes() {
             ExecutionOutcome::Finished(Value::String("6".into()))
         );
     });
+}
+
+/// An array mutated with `push` survives a park in the middle of the loop that
+/// is filling it.
+///
+/// `push`/`pop`/`shift`/`unshift` mutate a live heap array, so the half-filled
+/// array is durable state at every suspension point inside the loop. This runs
+/// to the first effect, captures the continuation, encodes and decodes it as
+/// the durable path does, resumes from the decoded form, and asserts the
+/// finished array is the one an uninterrupted run produces.
+#[test]
+fn array_mutators_survive_a_park_in_the_middle_of_the_loop() {
+    let source = "const out: number[] = []; for (let i = 0; i < 4; i++) { out.push(i); print(out.length); } out.unshift(-1); out.pop(); finish(out.join(','));";
+    let program = lash_typescript::compile(source).expect("the mutating loop should compile");
+
+    let resumed = futures::executor::block_on(async {
+        let mut state = State::new();
+        let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
+        assert_eq!(
+            vm.run_process_until_effect()
+                .await
+                .expect("run to the first print"),
+            VmRunOutcome::EffectCompleted
+        );
+        let continuation = vm.suspend().expect("capture the mid-loop continuation");
+        let encoded = serde_json::to_vec(&continuation).expect("encode the continuation");
+        let decoded = serde_json::from_slice(&encoded).expect("decode the continuation");
+        let mut vm = Vm::resume_from(decoded, &program, &Host).expect("resume mid-loop");
+        loop {
+            match vm
+                .run_process_until_effect()
+                .await
+                .expect("resume to finish")
+            {
+                VmRunOutcome::EffectCompleted => continue,
+                other => break other,
+            }
+        }
+    });
+
+    let expected = ExecutionOutcome::Finished(Value::String("-1,0,1,2".into()));
+    assert_eq!(
+        run(source),
+        expected,
+        "the uninterrupted run is the reference"
+    );
+    assert_eq!(
+        resumed,
+        VmRunOutcome::Complete(expected),
+        "the resumed run must reach the same finish"
+    );
 }

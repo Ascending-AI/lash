@@ -968,10 +968,12 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
     .expect("AST-only callback program links");
     let program = crate::compile_linked(&linked);
     let continuation = find_instruction_continuation(&program, |continuation| {
-        continuation
-            .frame_stack
-            .iter()
-            .any(|frame| matches!(frame.return_target, VmFrameReturnContinuation::Map { .. }))
+        continuation.frame_stack.iter().any(|frame| {
+            matches!(
+                frame.return_target,
+                VmFrameReturnContinuation::Callback { .. }
+            )
+        })
     })
     .await;
     let counters = continuation.occurrence_counters.clone();
@@ -994,6 +996,64 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
             .occurrence_counters
             .values()
             .any(|count| *count > 1)
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn filter_shaped_callback_parks_inside_the_shared_driver_and_resumes() {
+    let predicate = function(
+        None,
+        &["value"],
+        &[],
+        Expr::If {
+            condition: Box::new(Expr::Binary {
+                left: Box::new(variable("value")),
+                op: BinaryOp::Greater,
+                right: Box::new(Expr::Number(1.0)),
+            }),
+            then_block: Box::new(Expr::List(vec![variable("value")])),
+            else_block: Box::new(Expr::List(Vec::new())),
+        },
+    );
+    let linked = crate::LinkedModule::link(
+        Program::block(vec![
+            assign("predicate", predicate),
+            Expr::Finish(Box::new(Expr::Map {
+                items: Box::new(Expr::List(vec![
+                    Expr::Number(1.0),
+                    Expr::Number(2.0),
+                    Expr::Number(3.0),
+                ])),
+                function: Box::new(variable("predicate")),
+            })),
+        ]),
+        runtime_test_environment(),
+    )
+    .expect("filter-shaped callback program links");
+    let program = crate::compile_linked(&linked);
+    let continuation = find_instruction_continuation(&program, |continuation| {
+        continuation.frame_stack.iter().any(|frame| {
+            matches!(
+                frame.return_target,
+                VmFrameReturnContinuation::Callback { .. }
+            )
+        })
+    })
+    .await;
+    let restored: VmContinuation = serde_json::from_slice(
+        &serde_json::to_vec(&continuation).expect("serialize filter callback continuation"),
+    )
+    .expect("restore filter callback continuation");
+    assert_eq!(
+        round_trip_and_resume(&program, restored).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![
+                Value::List(Vec::new().into()),
+                Value::List(vec![Value::Number(2.0)].into()),
+                Value::List(vec![Value::Number(3.0)].into()),
+            ]
+            .into()
+        ))
     );
 }
 

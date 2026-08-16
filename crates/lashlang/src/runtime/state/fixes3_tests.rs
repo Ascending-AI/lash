@@ -77,3 +77,53 @@ fn canonical_decode_rejects_first_over_limit_value_depth_for_every_nested_shape(
         );
     }
 }
+
+/// The wire is the third value-entry path, and the only one that can present a
+/// record this runtime would never have built. `JSON.parse` and every host
+/// result refuse a prototype-chain data key now, so a snapshot carrying one is
+/// forged or predates the guard; restoring it would put back exactly the
+/// enumerable-but-unreadable key the guard exists to prevent.
+#[test]
+fn canonical_decode_refuses_a_record_key_naming_the_prototype_chain() {
+    for name in ["__proto__", "__defineGetter__", "__lookupSetter__"] {
+        let wire = CanonicalSnapshot {
+            version: LASHLANG_SNAPSHOT_VERSION,
+            globals: Some(vec![CanonicalBinding {
+                name: "root".to_string(),
+                value: CanonicalValue::Record {
+                    fields: vec![CanonicalBinding {
+                        name: name.to_string(),
+                        value: CanonicalValue::Number { value: 1.0 },
+                    }],
+                },
+            }]),
+            heap: None,
+        };
+        let error = Snapshot::from_canonical_bytes(
+            &rmp_serde::to_vec_named(&wire).expect("hand-crafted canonical wire"),
+        )
+        .expect_err("a prototype-chain record key must not decode");
+        assert!(
+            error.to_string().contains("names the prototype chain"),
+            "{name}: {error}"
+        );
+    }
+
+    let wire = CanonicalSnapshot {
+        version: LASHLANG_SNAPSHOT_VERSION,
+        globals: Some(vec![CanonicalBinding {
+            name: "root".to_string(),
+            value: CanonicalValue::Record {
+                fields: vec![CanonicalBinding {
+                    name: "__proto".to_string(),
+                    value: CanonicalValue::Number { value: 1.0 },
+                }],
+            },
+        }]),
+        heap: None,
+    };
+    Snapshot::from_canonical_bytes(
+        &rmp_serde::to_vec_named(&wire).expect("hand-crafted canonical wire"),
+    )
+    .expect("a name that merely looks similar stays an ordinary data key");
+}

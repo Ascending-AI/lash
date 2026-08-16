@@ -1,7 +1,10 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::super::{ExecutionBound, HeapObject, HeapRestoreWire, PersistedRoots};
+use super::super::{
+    DateObject, ErrorKind, ErrorObject, ExecutionBound, HeapObject, HeapRestoreWire, MapObject,
+    PersistedRoots, RegExpObject, SetObject,
+};
 use super::*;
 
 mod types;
@@ -13,7 +16,7 @@ pub use types::{
 
 use super::exceptions::PendingErrorOrigin;
 
-pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 5;
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
@@ -117,7 +120,7 @@ pub(crate) struct VmFrameContinuation {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum VmFrameReturnContinuation {
     Direct,
-    Map {
+    Callback {
         #[serde(
             serialize_with = "continuation_serde::serialize_value",
             deserialize_with = "continuation_serde::deserialize_value"
@@ -127,14 +130,25 @@ pub(crate) enum VmFrameReturnContinuation {
             serialize_with = "continuation_serde::serialize_values",
             deserialize_with = "continuation_serde::deserialize_values"
         )]
-        items: Vec<Value>,
+        calls: Vec<Value>,
         next_index: usize,
         #[serde(
             serialize_with = "continuation_serde::serialize_values",
             deserialize_with = "continuation_serde::deserialize_values"
         )]
         results: Vec<Value>,
+        completion: VmCallbackCompletion,
+        allow_effects: bool,
+        #[serde(default)]
+        live_url_search_params: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum VmCallbackCompletion {
+    Collect,
+    Discard,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -199,6 +213,7 @@ impl Default for VmHeapContinuation {
 mod continuation_serde {
     use super::*;
     use crate::HeapId;
+    use crate::runtime::heap::{UrlObject, UrlSearchParamsObject};
 
     const NUMBER_WIRE_VERSION: u32 = 1;
     const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
@@ -232,6 +247,29 @@ mod continuation_serde {
         bits: u64,
     }
 
+    fn number_to_wire(value: f64) -> NumberWire {
+        NumberWire {
+            version: NUMBER_WIRE_VERSION,
+            bits: if value.is_nan() {
+                CANONICAL_NAN_BITS
+            } else {
+                value.to_bits()
+            },
+        }
+    }
+
+    fn number_from_wire(value: NumberWire) -> Result<f64, &'static str> {
+        if value.version != NUMBER_WIRE_VERSION {
+            return Err("unsupported continuation number wire version");
+        }
+        let number = f64::from_bits(value.bits);
+        Ok(if number.is_nan() {
+            f64::from_bits(CANONICAL_NAN_BITS)
+        } else {
+            number
+        })
+    }
+
     #[derive(Serialize, Deserialize)]
     struct HeapWire {
         next_id: u64,
@@ -263,6 +301,39 @@ mod continuation_serde {
             function: u32,
             captures: Vec<ValueWire>,
         },
+        RegExp {
+            pattern: String,
+            flags: String,
+            last_index: u64,
+        },
+        RegExpMatch {
+            items: Vec<ValueWire>,
+            index: ValueWire,
+            input: ValueWire,
+            groups: ValueWire,
+        },
+        Map {
+            entries: Vec<(ValueWire, ValueWire)>,
+        },
+        Set {
+            values: Vec<ValueWire>,
+        },
+        Date {
+            milliseconds: NumberWire,
+        },
+        Error {
+            error_kind: ErrorKind,
+            message: String,
+            cause: Option<ValueWire>,
+            errors: Option<ValueWire>,
+        },
+        Url {
+            href: String,
+            search_params: ValueWire,
+        },
+        UrlSearchParams {
+            entries: Vec<(String, String)>,
+        },
     }
 
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
@@ -270,14 +341,7 @@ mod continuation_serde {
             Value::Null => ValueWire::Null,
             Value::Undefined => ValueWire::Undefined,
             Value::Bool(value) => ValueWire::Bool(*value),
-            Value::Number(value) => ValueWire::Number(NumberWire {
-                version: NUMBER_WIRE_VERSION,
-                bits: if value.is_nan() {
-                    CANONICAL_NAN_BITS
-                } else {
-                    value.to_bits()
-                },
-            }),
+            Value::Number(value) => ValueWire::Number(number_to_wire(*value)),
             Value::String(value) => ValueWire::String(value.to_string()),
             Value::Image(value) => ValueWire::Image((**value).clone()),
             Value::Resource(value) => ValueWire::Resource(value.clone()),
@@ -298,17 +362,7 @@ mod continuation_serde {
             ValueWire::Null => Value::Null,
             ValueWire::Undefined => Value::Undefined,
             ValueWire::Bool(value) => Value::Bool(value),
-            ValueWire::Number(value) => {
-                if value.version != NUMBER_WIRE_VERSION {
-                    return Err("unsupported continuation number wire version");
-                }
-                let number = f64::from_bits(value.bits);
-                Value::Number(if number.is_nan() {
-                    f64::from_bits(CANONICAL_NAN_BITS)
-                } else {
-                    number
-                })
-            }
+            ValueWire::Number(value) => Value::Number(number_from_wire(value)?),
             ValueWire::String(value) => Value::String(value.into()),
             ValueWire::Image(value) => Value::Image(Box::new(value)),
             ValueWire::Resource(value) => Value::Resource(value),
@@ -368,6 +422,51 @@ mod continuation_serde {
                     .map(value_to_wire)
                     .collect::<Result<_, _>>()?,
             },
+            HeapObject::RegExp(regexp) => HeapObjectWire::RegExp {
+                pattern: regexp.pattern.clone(),
+                flags: regexp.flags.clone(),
+                last_index: regexp.last_index,
+            },
+            HeapObject::RegExpMatch(result) => HeapObjectWire::RegExpMatch {
+                items: result
+                    .items
+                    .iter()
+                    .map(value_to_wire)
+                    .collect::<Result<_, _>>()?,
+                index: value_to_wire(&result.index)?,
+                input: value_to_wire(&result.input)?,
+                groups: value_to_wire(&result.groups)?,
+            },
+            HeapObject::Map(map) => HeapObjectWire::Map {
+                entries: map
+                    .entries
+                    .iter()
+                    .map(|(key, value)| Ok((value_to_wire(key)?, value_to_wire(value)?)))
+                    .collect::<Result<_, &'static str>>()?,
+            },
+            HeapObject::Set(set) => HeapObjectWire::Set {
+                values: set
+                    .values
+                    .iter()
+                    .map(value_to_wire)
+                    .collect::<Result<_, _>>()?,
+            },
+            HeapObject::Date(date) => HeapObjectWire::Date {
+                milliseconds: number_to_wire(date.milliseconds),
+            },
+            HeapObject::Error(error) => HeapObjectWire::Error {
+                error_kind: error.kind,
+                message: error.message.clone(),
+                cause: error.cause.as_ref().map(value_to_wire).transpose()?,
+                errors: error.errors.as_ref().map(value_to_wire).transpose()?,
+            },
+            HeapObject::Url(url) => HeapObjectWire::Url {
+                href: url.href.clone(),
+                search_params: value_to_wire(&url.search_params)?,
+            },
+            HeapObject::UrlSearchParams(params) => HeapObjectWire::UrlSearchParams {
+                entries: params.entries.clone(),
+            },
         })
     }
 
@@ -395,6 +494,73 @@ mod continuation_serde {
                     .map(value_from_wire)
                     .collect::<Result<_, _>>()?,
             },
+            HeapObjectWire::RegExp {
+                pattern,
+                flags,
+                last_index,
+            } => {
+                crate::runtime::validate_typescript_regexp(&pattern, &flags)
+                    .map_err(|_| "RegExp pattern or flags violate TypeScript bounds")?;
+                if last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
+                    return Err("RegExp last_index exceeds JavaScript's maximum safe length");
+                }
+                HeapObject::RegExp(RegExpObject {
+                    pattern,
+                    flags,
+                    last_index,
+                    compiled_program: None,
+                })
+            }
+            HeapObjectWire::RegExpMatch {
+                items,
+                index,
+                input,
+                groups,
+            } => HeapObject::RegExpMatch(RegExpMatchObject {
+                items: items
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<_, _>>()?,
+                index: value_from_wire(index)?,
+                input: value_from_wire(input)?,
+                groups: value_from_wire(groups)?,
+            }),
+            HeapObjectWire::Map { entries } => HeapObject::Map(MapObject {
+                entries: entries
+                    .into_iter()
+                    .map(|(key, value)| Ok((value_from_wire(key)?, value_from_wire(value)?)))
+                    .collect::<Result<_, &'static str>>()?,
+            }),
+            HeapObjectWire::Set { values } => HeapObject::Set(SetObject {
+                values: values
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<_, _>>()?,
+            }),
+            HeapObjectWire::Date { milliseconds } => HeapObject::Date(DateObject {
+                milliseconds: number_from_wire(milliseconds)?,
+            }),
+            HeapObjectWire::Error {
+                error_kind,
+                message,
+                cause,
+                errors,
+            } => HeapObject::Error(ErrorObject {
+                kind: error_kind,
+                message,
+                cause: cause.map(value_from_wire).transpose()?,
+                errors: errors.map(value_from_wire).transpose()?,
+            }),
+            HeapObjectWire::Url {
+                href,
+                search_params,
+            } => HeapObject::Url(UrlObject {
+                href,
+                search_params: value_from_wire(search_params)?,
+            }),
+            HeapObjectWire::UrlSearchParams { entries } => {
+                HeapObject::UrlSearchParams(UrlSearchParamsObject { entries })
+            }
         })
     }
 
@@ -807,11 +973,17 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 .collect::<Result<Vec<_>, _>>()?;
             let return_target = match &frame.return_target {
                 ReturnTarget::Direct => VmFrameReturnContinuation::Direct,
-                ReturnTarget::Map(callback) => VmFrameReturnContinuation::Map {
+                ReturnTarget::Callback(callback) => VmFrameReturnContinuation::Callback {
                     function: callback.function.clone(),
-                    items: callback.items.clone(),
+                    calls: callback.calls.clone(),
                     next_index: callback.next_index,
                     results: callback.results.clone(),
+                    completion: match callback.completion {
+                        CallbackCompletion::Collect => VmCallbackCompletion::Collect,
+                        CallbackCompletion::Discard => VmCallbackCompletion::Discard,
+                    },
+                    allow_effects: callback.allow_effects,
+                    live_url_search_params: callback.live_url_search_params,
                 },
             };
             frame_stack.push(VmFrameContinuation {
@@ -1084,16 +1256,25 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 extras_heapified: false,
                 return_target: match frame.return_target {
                     VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
-                    VmFrameReturnContinuation::Map {
+                    VmFrameReturnContinuation::Callback {
                         function,
-                        items,
+                        calls,
                         next_index,
                         results,
-                    } => ReturnTarget::Map(MapCallback {
+                        completion,
+                        allow_effects,
+                        live_url_search_params,
+                    } => ReturnTarget::Callback(CallbackDriver {
                         function,
-                        items,
+                        calls,
                         next_index,
                         results,
+                        completion: match completion {
+                            VmCallbackCompletion::Collect => CallbackCompletion::Collect,
+                            VmCallbackCompletion::Discard => CallbackCompletion::Discard,
+                        },
+                        allow_effects,
+                        live_url_search_params,
                     }),
                 },
             })
@@ -1177,6 +1358,49 @@ mod tests {
 
     mod program_validation;
 
+    /// The version fence refuses the format one step behind the current one,
+    /// not just an absurd number.
+    ///
+    /// Off-by-one is the version a fence actually meets in production — the
+    /// deploy that straddles a bump — and it is the one a fence written as
+    /// `< SOME_FLOOR` or `!= 0` would wave through. Both the structural
+    /// validator and the wire decoder are checked; `resume_from` restates the
+    /// same comparison a third time.
+    #[test]
+    fn a_continuation_one_format_version_behind_is_refused() {
+        let previous = VM_CONTINUATION_FORMAT_VERSION - 1;
+        let mut continuation = empty_continuation(Heap::default());
+        continuation.format_version = previous;
+
+        let error = validate_continuation(&continuation)
+            .expect_err("the previous format version must be refused");
+        assert_eq!(
+            error,
+            ContinuationError::FormatVersionMismatch {
+                expected: VM_CONTINUATION_FORMAT_VERSION,
+                found: previous,
+            }
+        );
+
+        // The same wire deserialized rather than hand-built: the decode refuses
+        // before anything reads a field it might not have.
+        let wire = serde_json::to_string(&continuation).expect("serialize");
+        let decode_error = serde_json::from_str::<VmContinuation>(&wire)
+            .expect_err("decoding the previous format version must fail");
+        assert!(
+            decode_error.to_string().contains(&previous.to_string())
+                && decode_error
+                    .to_string()
+                    .contains(&VM_CONTINUATION_FORMAT_VERSION.to_string()),
+            "the decode error must name both versions: {decode_error}"
+        );
+
+        // And the current version still validates, so the assertion above is
+        // about the version and nothing else.
+        validate_continuation(&empty_continuation(Heap::default()))
+            .expect("the current format version validates");
+    }
+
     #[test]
     fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
         // A cyclic object used to validate "by identity" and resume. Under the
@@ -1257,6 +1481,23 @@ mod tests {
         };
         assert_eq!(nan.to_bits(), 0x7ff8_0000_0000_0000);
         assert_eq!(negative_zero.to_bits(), (-0.0_f64).to_bits());
+    }
+
+    #[test]
+    fn continuation_decode_rejects_regexp_last_index_above_maximum_safe_length() {
+        let mut heap = Heap::default();
+        let regexp = heap
+            .allocate_regexp("a+".to_string(), "g".to_string())
+            .expect("RegExp");
+        let mut continuation = empty_continuation(heap);
+        continuation.reference_semantics = true;
+        continuation.operand_stack.push(regexp);
+        let mut wire = serde_json::to_value(&continuation).expect("continuation wire");
+        wire["heap"]["objects"][0]["object"]["last_index"] =
+            serde_json::json!(crate::runtime::heap::MAX_JAVASCRIPT_LENGTH + 1);
+        let error = serde_json::from_value::<VmContinuation>(wire)
+            .expect_err("out-of-range lastIndex must not decode");
+        assert!(error.to_string().contains("maximum safe length"), "{error}");
     }
 
     #[test]

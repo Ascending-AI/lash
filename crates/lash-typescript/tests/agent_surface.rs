@@ -2,6 +2,7 @@ use lashlang::{
     AbilityOp, AbilityResult, Declaration, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, ResourceOperationBatchResult, ResourceOperationResult, State, Value, Vm, VmRunOutcome,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Host;
 
@@ -343,6 +344,56 @@ impl ExecutionHost for SettledHost {
     }
 }
 
+struct SequentialAsyncMapHost {
+    calls: AtomicUsize,
+}
+
+impl ExecutionHost for SequentialAsyncMapHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperation(_) => {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(AbilityResult::Value(Value::String("ok".into())))
+                } else {
+                    Err(ExecutionHostError::new("boom"))
+                }
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new(
+                "unexpected sequential async-map ability",
+            )),
+        }
+    }
+}
+
+#[test]
+fn promise_all_settled_async_map_catches_each_effect_failure_and_continues() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(
+        "finish(await Promise.allSettled(['a','b'].map(async url => await web.fetch({url}))));",
+        &environment,
+    )
+    .expect("allSettled async map should link");
+    let host = SequentialAsyncMapHost {
+        calls: AtomicUsize::new(0),
+    };
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &host,
+    ))
+    .expect("an individual callback rejection must not abort the async map");
+    assert_eq!(host.calls.load(Ordering::SeqCst), 2);
+    let ExecutionOutcome::Finished(Value::List(items)) = outcome else {
+        panic!("allSettled async map returns a list, got {outcome:?}");
+    };
+    assert_eq!(items.len(), 2);
+    let rendered = format!("{items:?}");
+    assert!(rendered.contains("fulfilled"), "{rendered}");
+    assert!(rendered.contains("rejected"), "{rendered}");
+    assert!(rendered.contains("boom"), "{rendered}");
+}
+
 #[test]
 fn promise_all_executes_on_the_shared_aggregate_batch_machine() {
     let mut catalog = lashlang::LashlangHostCatalog::new();
@@ -489,6 +540,26 @@ fn time_and_randomness_are_host_effects_instead_of_vm_nondeterminism() {
             "now": 1_723_456,
             "random": 0.25
         })))
+    );
+}
+
+#[test]
+fn argless_date_uses_the_same_journaled_clock_effect_as_date_now() {
+    let program = lash_typescript::compile(
+        "const d=new Date(); finish(`${d.getTime()}|${Date.now()}|${d.toISOString()}`);",
+    )
+    .expect("argless Date should compile through the runtime clock");
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &program,
+        &mut State::new(),
+        &RuntimeValueHost,
+    ))
+    .expect("argless Date should execute through the host");
+    assert_eq!(
+        outcome,
+        ExecutionOutcome::Finished(Value::String(
+            "1723456|1723456|1970-01-01T00:28:43.456Z".into()
+        ))
     );
 }
 
@@ -974,20 +1045,19 @@ fn lashlang_aggregates_still_select_in_input_order() {
     );
 }
 
-/// Settlement order is consumed inside a single `perform` and never persisted,
-/// so the durable continuation and snapshot formats must be untouched by this
-/// change. If a later change does put batch state in a continuation, this pin
-/// is the reminder that the format versions have to move with it.
+/// Settlement order is consumed inside a single `perform` and never persisted.
+/// Snapshot v6 is independently required by the durable RegExp match-array
+/// kind; the aggregate rule still does not move the VM ABI.
 #[test]
 fn settlement_order_does_not_reach_the_continuation_format() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        4,
-        "the snapshot format does not carry batch settlement state"
+        6,
+        "snapshot v6 carries the durable RegExp match-array kind"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v5",
+        "lashlang-vm-abi-v6",
         "the compiled-batch selection rule moved the VM ABI"
     );
 }
@@ -1224,18 +1294,28 @@ fn array_map_runs_its_callback_in_the_vm() {
     );
 }
 
-/// Shapes whose callback arity is not statically known reject by name rather
-/// than lowering something the VM's exact-arity check cannot run.
+/// Callback arity is ordinary ECMAScript call arity: named functions and
+/// three-argument callbacks are valid, while a missing callback rejects.
 #[test]
-fn array_map_rejects_shapes_it_cannot_run() {
-    let environment = two_leaf_web_environment();
+fn array_map_accepts_ecma_callback_shapes_and_rejects_a_missing_callback() {
+    assert_eq!(
+        run_typescript(
+            "function d(x: number): number { return x * 2; } finish([1,2].map(d).join('-'));"
+        ),
+        Value::String("2-4".into())
+    );
+    assert_eq!(
+        run_typescript("finish([1,2].map((x, i, all) => x+i+all.length).join('-'));"),
+        Value::String("3-5".into())
+    );
     for source in [
-        "function d(x: number): number { return x * 2; } finish([1,2].map(d).join('-'));",
-        "finish([1,2].map((x, i, all) => x).join('-'));",
         "finish([1,2].map().join('-'));",
+        "finish([1,2].filter().join('-'));",
+        "finish([1,2].reduce());",
     ] {
+        let environment = two_leaf_web_environment();
         let error = lash_typescript::link(source, &environment)
-            .expect_err("an unrunnable map shape must reject at link time");
+            .expect_err("a missing callback must reject at link time");
         assert_eq!(error.code.as_str(), "TS_METHOD_UNSUPPORTED", "{source}");
     }
 }
@@ -1326,5 +1406,69 @@ fn map_callbacks_cannot_perform_effects() {
     assert!(
         rejected.code.as_str().starts_with("TS_"),
         "the rejection is named: {rejected}"
+    );
+}
+
+/// Every `Math.random()` draw crosses the journal, in order, so a replayed turn
+/// reproduces the sequence it drew the first time.
+///
+/// This is the one accepted operation with no oracle: pinning it against Node
+/// is impossible by construction. The property that makes it admissible in a
+/// durable program is not the distribution but the seam — the VM samples no
+/// RNG of its own, so a host serving a recorded journal replays the run
+/// exactly. If a draw were ever computed in-VM, the second run below would
+/// still succeed while the host's draw count fell short.
+#[test]
+fn math_random_draws_replay_from_the_journal_in_order() {
+    struct JournalHost {
+        recorded: Vec<f64>,
+        served: std::sync::Mutex<usize>,
+    }
+
+    impl ExecutionHost for JournalHost {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+            match op {
+                AbilityOp::ResourceOperation(operation) => {
+                    assert_eq!(operation.operation.as_str(), "random");
+                    let mut cursor = self.served.lock().expect("journal cursor");
+                    let value = *self
+                        .recorded
+                        .get(*cursor)
+                        .expect("the journal has a recorded draw for every call");
+                    *cursor += 1;
+                    Ok(AbilityResult::Value(Value::Number(value)))
+                }
+                AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+                _ => Err(ExecutionHostError::new("unexpected ability")),
+            }
+        }
+    }
+
+    let recorded = vec![0.125, 0.5, 0.875, 0.0];
+    let program = lash_typescript::compile(
+        "const out: number[] = []; for (let i = 0; i < 4; i++) { out[out.length] = Math.random(); } finish(out.join(','));",
+    )
+    .expect("a journaled random sequence should compile");
+
+    let mut results = Vec::new();
+    for _ in 0..2 {
+        let host = JournalHost {
+            recorded: recorded.clone(),
+            served: std::sync::Mutex::new(0),
+        };
+        let outcome =
+            futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+                .expect("a journaled random sequence should execute");
+        assert_eq!(
+            *host.served.lock().expect("journal cursor"),
+            recorded.len(),
+            "every draw must reach the host"
+        );
+        results.push(outcome);
+    }
+    assert_eq!(results[0], results[1], "replay must reproduce the sequence");
+    assert_eq!(
+        results[0],
+        ExecutionOutcome::Finished(Value::String("0.125,0.5,0.875,0".into()))
     );
 }

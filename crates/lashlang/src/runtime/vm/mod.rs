@@ -17,7 +17,14 @@ mod effects;
 mod exceptions;
 mod heap_plan;
 mod javascript;
+mod javascript_array;
+mod javascript_codec;
+mod javascript_date;
 mod javascript_json;
+pub(crate) mod javascript_regexp;
+mod javascript_stdlib;
+mod javascript_substrate;
+mod javascript_url;
 mod reference_assignment;
 
 #[cfg(test)]
@@ -33,7 +40,13 @@ pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
 use control::{VmMode, VmStep};
 use effects::VmEffect;
 use exceptions::{ExceptionHandler, FinallyCompletion, FinallyState};
+pub use javascript_regexp::{
+    TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
+    TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
+    TypeScriptRegExpValidationError, validate_typescript_regexp, validate_typescript_regexp_shape,
+};
 
+use super::heap::same_value_zero;
 use super::host::{ExecutionMode, ProcessEventKind, SleepKind};
 use super::record::{Record, record_with_capacity};
 use super::schema::{
@@ -41,19 +54,21 @@ use super::schema::{
 };
 use super::value::ProjectedValue;
 use super::{
-    Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap, HeapObject,
-    ImageValue, Instruction, InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    Chunk, ClosureParameterModel, CompiledProgram, DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, ExecutionHost,
+    ExecutionOutcome, ExecutionScratch, Heap, HeapId, HeapObject, ImageValue, Instruction,
+    InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
     LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, PersistedRoots,
-    ProfileAccumulator, ProfileReport, ProjectedBindings, ResourceHandle, RuntimeError, State,
-    Value, add_assign_index_number, add_values, as_number, assign_path, eval_binary_values,
-    eval_compare_values, eval_javascript_binary, eval_javascript_unary, eval_number_binary_values,
-    eval_number_compare_values, eval_number_numeric_binary_value, execute_compiled_format,
-    execute_compiled_format_direct, execute_compiled_format_one_number_compact_direct,
-    execute_intrinsic, execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values,
-    javascript_join, javascript_split, materialize_projected_async, materialize_value,
-    range_bounds, range_bounds_async, read_field_direct, read_index_direct,
-    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
-    read_javascript_index_direct, unwrap_tool_result, unwrap_type_value,
+    ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject, ResourceHandle,
+    RuntimeError, State, Value, add_assign_index_number, add_values, as_number, assign_path,
+    eval_binary_values, eval_compare_values, eval_javascript_binary, eval_javascript_unary,
+    eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
+    execute_compiled_format, execute_compiled_format_direct,
+    execute_compiled_format_one_number_compact_direct, execute_intrinsic,
+    execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values, javascript_join,
+    javascript_split, materialize_projected_async, materialize_value, range_bounds,
+    range_bounds_async, read_field_direct, read_index_direct, read_javascript_field_direct,
+    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct_with_key,
+    regexp_string, unwrap_tool_result, unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -249,13 +264,6 @@ pub struct Vm<'a, H> {
 pub(super) struct ActiveLashlangExecutionNode {
     pub(super) site: LashlangExecutionSite,
     pub(super) occurrence: u64,
-}
-
-fn validation_plan_cache_entry(schema: &Value) -> Option<(usize, Arc<Record>)> {
-    match schema {
-        Value::Record(record) => Some((Arc::as_ptr(record) as usize, record.clone())),
-        _ => None,
-    }
 }
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
@@ -457,37 +465,51 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     }
                 }
             }
+            Instruction::CallDynamic => self.execute_dynamic_call()?,
             Instruction::Map => {
                 let function = self.pop_stack()?;
                 let items = self.pop_stack()?;
-                let items = self.heap.export_for_instruction(&items)?;
-                let items = match items {
-                    Value::List(values) | Value::Tuple(values) => values
-                        .iter()
-                        // This is the one isolation boundary: each callback
-                        // borrows its already-independent item.
-                        .map(|value| self.heap.isolate_value(value))
-                        .collect::<Result<Vec<_>, _>>()?,
+                let items = match &items {
+                    Value::Ref(id) if self.reference_semantics => match self.heap.get(*id)? {
+                        HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                        HeapObject::RegExpMatch(result) => result.items.clone(),
+                        object => {
+                            return Err(RuntimeError::ShapingListRequired {
+                                builtin: "map".into(),
+                                actual: object.kind_name().to_string(),
+                            });
+                        }
+                    },
+                    Value::List(values) | Value::Tuple(values) => values.to_vec(),
                     value => {
-                        return Err(RuntimeError::ShapingListRequired {
-                            builtin: "map".into(),
-                            actual: super::value_type_name(&value).to_string(),
-                        });
+                        let exported = self.heap.export_for_instruction(value)?;
+                        let (Value::List(values) | Value::Tuple(values)) = exported else {
+                            return Err(RuntimeError::ShapingListRequired {
+                                builtin: "map".into(),
+                                actual: super::value_type_name(value).to_string(),
+                            });
+                        };
+                        values.to_vec()
                     }
                 };
+                let items = items
+                    .iter()
+                    // This is the one isolation boundary: each callback
+                    // borrows its already-independent item.
+                    .map(|value| self.heap.isolate_value(value))
+                    .collect::<Result<Vec<_>, _>>()?;
                 if items.is_empty() {
                     self.stack.push(Value::List(Vec::new().into()));
                 } else {
-                    let first = items[0].clone();
-                    let callback = MapCallback {
-                        function: function.clone(),
-                        items,
-                        next_index: 1,
-                        results: Vec::new(),
-                    };
-                    self.begin_function_call(function, vec![first], ReturnTarget::Map(callback))?;
+                    self.begin_callback_driver(
+                        function,
+                        items.into_iter().map(|item| vec![item]).collect(),
+                        true,
+                        false,
+                    )?;
                 }
             }
+            Instruction::AsyncMap => self.execute_async_map()?,
             Instruction::Return => self.return_from_function()?,
             Instruction::PushHandler {
                 handler,
@@ -619,7 +641,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                self.stack.push(Value::Bool(is_truthy(&value)));
+                self.stack
+                    .push(Value::Bool(self.is_truthy_for_dialect(&value)?));
             }
             Instruction::Jump(target) => self.ip = target,
             Instruction::JumpIfFalse(target) => {
@@ -631,7 +654,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                if !is_truthy(&value) {
+                if !self.is_truthy_for_dialect(&value)? {
                     self.observe_branch_selection(
                         self.current_instruction_ip(),
                         ProcessBranchSelection::Else,
@@ -737,7 +760,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                if is_truthy(&value) {
+                if self.is_truthy_for_dialect(&value)? {
                     self.observe_branch_selection(
                         self.current_instruction_ip(),
                         ProcessBranchSelection::Then,
@@ -1005,7 +1028,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             Instruction::Index => {
-                let index = self.pop_stack()?;
+                let index = materialize_projected_async(self.pop_stack()?).await;
                 let target = self.pop_stack()?;
                 let value = match target {
                     Value::Projected(projected) => {
@@ -1060,7 +1083,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     }
                     UnaryOp::Not => Value::Bool(match &value {
                         Value::Projected(_) => !is_truthy_async(&value).await,
-                        _ => !is_truthy(&value),
+                        _ => !self.is_truthy_for_dialect(&value)?,
                     }),
                 };
                 self.stack.push(value);
@@ -1081,7 +1104,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy_async(&value).await,
-                    _ => is_truthy(&value),
+                    _ => self.is_truthy_for_dialect(&value)?,
                 };
                 self.stack.push(Value::Bool(truthy));
             }
@@ -1089,7 +1112,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy_async(&value).await,
-                    _ => is_truthy(&value),
+                    _ => self.is_truthy_for_dialect(&value)?,
                 };
                 if !truthy {
                     self.observe_branch_selection(
@@ -1119,7 +1142,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy_async(&value).await,
-                    _ => is_truthy(&value),
+                    _ => self.is_truthy_for_dialect(&value)?,
                 };
                 if truthy {
                     self.observe_branch_selection(
@@ -1171,7 +1194,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::BeginIter(binding) => {
                 let iterable = self.pop_stack()?;
-                let values = iterable_values(iterable).await?;
+                let values = self.iterable_values_for_dialect(iterable).await?;
                 if !values.is_empty() {
                     self.slots.ensure_assignable(
                         binding,
@@ -1277,7 +1300,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::EndIter
             | Instruction::MakeClosure { .. }
             | Instruction::Call { .. }
+            | Instruction::CallDynamic
             | Instruction::Map
+            | Instruction::AsyncMap
             | Instruction::Return
             | Instruction::PushHandler { .. }
             | Instruction::PopHandler
@@ -1301,6 +1326,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::JavaScriptSplit => self.execute_javascript_split()?,
             IntrinsicOp::JavaScriptJoin => self.execute_javascript_join()?,
             IntrinsicOp::JavaScriptStdlib(argc) => self.execute_javascript_stdlib(argc)?,
+            IntrinsicOp::JavaScriptHeapNew(argc) => self.execute_javascript_heap_new(argc)?,
+            IntrinsicOp::JavaScriptHeapInstanceOf => self.execute_javascript_instanceof()?,
+            IntrinsicOp::JavaScriptHeapDeleteMember => {
+                self.execute_javascript_heap_delete_member()?
+            }
+            IntrinsicOp::JavaScriptRegExp(argc) => self.execute_javascript_regexp(argc)?,
+            IntrinsicOp::JavaScriptGlobalDelete => self.execute_javascript_global_delete()?,
+            IntrinsicOp::JavaScriptGlobalHas => self.execute_javascript_global_has()?,
+            IntrinsicOp::JavaScriptGlobalSet => self.execute_javascript_global_set()?,
+            IntrinsicOp::JavaScriptUriCodec(codec) => self.execute_javascript_uri_codec(codec)?,
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;
@@ -1552,31 +1587,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             .slots
             .recycle_into_globals(&self.chunk.slot_names, &mut scratch.slot_values);
         Ok((globals, self.heap))
-    }
-
-    fn record_instruction_profile(&mut self, tag: InstructionProfileTag, elapsed_ns: u128) {
-        let Some(profile) = &mut self.profile else {
-            return;
-        };
-        let index = tag as usize;
-        profile.instruction_counts[index] += 1;
-        profile.instruction_times[index] += elapsed_ns;
-    }
-
-    fn record_builtin_profile(&mut self, builtin: IntrinsicOp, elapsed_ns: u128) {
-        let Some(profile) = &mut self.profile else {
-            return;
-        };
-        let index = builtin.profile_tag() as usize;
-        profile.builtin_counts[index] += 1;
-        profile.builtin_times[index] += elapsed_ns;
-    }
-
-    pub(crate) fn take_profile(&mut self) -> ProfileReport {
-        let Some(profile) = self.profile.take() else {
-            return ProfileReport::default();
-        };
-        profile.finish()
     }
 }
 include!("functions.rs");

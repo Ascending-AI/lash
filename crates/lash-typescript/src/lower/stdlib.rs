@@ -21,7 +21,7 @@ pub(super) fn static_stdlib_owner(expr: &Expr) -> Option<&str> {
     };
     matches!(
         name.as_str(),
-        "Object" | "Array" | "String" | "Number" | "JSON" | "Math"
+        "Object" | "Array" | "String" | "Number" | "JSON" | "Math" | "Map" | "Date" | "URL"
     )
     .then_some(name)
 }
@@ -29,48 +29,80 @@ pub(super) fn static_stdlib_owner(expr: &Expr) -> Option<&str> {
 pub(super) fn is_known_runtime_global(name: &str) -> bool {
     matches!(
         name,
-        "Object" | "Array" | "String" | "Number" | "JSON" | "Math" | "Date" | "Promise"
+        "Object"
+            | "Array"
+            | "String"
+            | "Number"
+            | "JSON"
+            | "Math"
+            | "Map"
+            | "Date"
+            | "Promise"
+            | "URL"
+            | "URLSearchParams"
+            | "RegExp"
     )
 }
 
+/// Every ECMA global namespace an author could reasonably call a static method
+/// on, whether or not the dialect implements it.
+///
+/// A tool module is addressed by an explicit path root, and none of these names
+/// is one. Without this list a call like `Error.isError(x)` fell through to the
+/// tool-call branch and reported `TS_AWAIT_REQUIRED` — an instruction to add
+/// `await` to a method that does not exist, which sends the reader to fix the
+/// one thing that is not wrong. The census names `TS_METHOD_UNSUPPORTED` for
+/// exactly these rows, and the census probes now hold that claim to the code.
+pub(super) fn is_ecma_global_namespace(name: &str) -> bool {
+    is_known_runtime_global(name)
+        || matches!(
+            name,
+            "Error"
+                | "AggregateError"
+                | "EvalError"
+                | "RangeError"
+                | "ReferenceError"
+                | "SyntaxError"
+                | "TypeError"
+                | "URIError"
+                | "Set"
+                | "WeakMap"
+                | "WeakSet"
+                | "WeakRef"
+                | "FinalizationRegistry"
+                | "Symbol"
+                | "Reflect"
+                | "Proxy"
+                | "BigInt"
+                | "Boolean"
+                | "Function"
+                | "Iterator"
+                | "AsyncFunction"
+                | "Temporal"
+                | "Intl"
+                | "Atomics"
+                | "ArrayBuffer"
+                | "SharedArrayBuffer"
+                | "DataView"
+                | "Int8Array"
+                | "Uint8Array"
+                | "Uint8ClampedArray"
+                | "Int16Array"
+                | "Uint16Array"
+                | "Int32Array"
+                | "Uint32Array"
+                | "Float16Array"
+                | "Float32Array"
+                | "Float64Array"
+                | "BigInt64Array"
+                | "BigUint64Array"
+        )
+}
+
 pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
-    match owner {
-        "Object" => matches!(
-            method,
-            "keys" | "values" | "entries" | "fromEntries" | "hasOwn" | "is"
-        ),
-        "Array" => matches!(method, "isArray" | "of"),
-        "String" => matches!(method, "fromCodePoint"),
-        "Number" => matches!(
-            method,
-            "isFinite" | "isInteger" | "isNaN" | "isSafeInteger" | "parseFloat" | "parseInt"
-        ),
-        "JSON" => matches!(method, "parse" | "stringify"),
-        "Math" => matches!(
-            method,
-            "abs"
-                | "acos"
-                | "asin"
-                | "cbrt"
-                | "ceil"
-                | "cos"
-                | "exp"
-                | "floor"
-                | "log"
-                | "log10"
-                | "log2"
-                | "round"
-                | "sin"
-                | "tan"
-                | "trunc"
-                | "max"
-                | "min"
-                | "pow"
-                | "sqrt"
-                | "sign"
-        ),
-        _ => false,
-    }
+    crate::signatures::STATIC_STDLIB_SIGNATURES
+        .iter()
+        .any(|signature| signature.owner == owner && signature.method == method)
 }
 
 /// Every instance standard-library method the lowerer accepts.
@@ -81,36 +113,100 @@ pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
 /// behind the lowerer was possible only while the two were separate.
 pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "at",
+    "concat",
     "charAt",
     "charCodeAt",
     "codePointAt",
-    "concat",
+    "append",
+    "add",
+    "clear",
+    "delete",
+    "entries",
+    "exec",
     "endsWith",
+    "filter",
+    "fill",
+    "find",
+    "findIndex",
+    "findLast",
+    "findLastIndex",
+    "flat",
+    "flatMap",
+    "forEach",
+    "get",
+    "getAll",
+    "has",
     "includes",
     "indexOf",
     "join",
     "lastIndexOf",
     "map",
+    "match",
+    "matchAll",
+    "every",
     "padEnd",
     "padStart",
     "repeat",
     "replace",
     "replaceAll",
+    "reduce",
+    "reduceRight",
+    "reverse",
     "slice",
+    "sort",
+    "some",
+    "splice",
+    "push",
+    "pop",
+    "shift",
+    "unshift",
     "split",
+    "search",
     "startsWith",
     "substring",
+    "toExponential",
+    "toFixed",
+    "toPrecision",
+    "toReversed",
+    "toSorted",
+    "toSpliced",
+    "set",
+    "keys",
     "toLowerCase",
     "toUpperCase",
     "toString",
     "trim",
     "trimEnd",
     "trimStart",
+    "test",
     "valueOf",
+    "values",
+    "with",
+    "hasOwnProperty",
+    "union",
+    "intersection",
+    "difference",
+    "symmetricDifference",
+    "isSubsetOf",
+    "isSupersetOf",
+    "isDisjointFrom",
+    "toJSON",
+    "getTime",
+    "getUTCFullYear",
+    "getUTCMonth",
+    "getUTCDate",
+    "getUTCDay",
+    "getUTCHours",
+    "getUTCMinutes",
+    "getUTCSeconds",
+    "getUTCMilliseconds",
+    "toISOString",
 ];
 
 pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
-    INSTANCE_STDLIB_METHODS.contains(&method)
+    crate::signatures::INSTANCE_STDLIB_SIGNATURES
+        .iter()
+        .any(|signature| signature.method == method)
 }
 
 pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> bool {
@@ -122,6 +218,8 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
                 | "codePointAt"
                 | "concat"
                 | "endsWith"
+                | "match"
+                | "matchAll"
                 | "includes"
                 | "indexOf"
                 | "lastIndexOf"
@@ -132,6 +230,7 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
                 | "replaceAll"
                 | "slice"
                 | "split"
+                | "search"
                 | "startsWith"
                 | "substring"
                 | "toLowerCase"
@@ -145,16 +244,44 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
         Expr::Array(_) => matches!(
             method,
             "at" | "concat"
+                | "every"
+                | "fill"
+                | "filter"
+                | "find"
+                | "findIndex"
+                | "findLast"
+                | "findLastIndex"
+                | "flat"
+                | "flatMap"
+                | "forEach"
                 | "includes"
                 | "indexOf"
                 | "join"
                 | "lastIndexOf"
                 | "map"
+                | "reduce"
+                | "reduceRight"
+                | "reverse"
                 | "slice"
+                | "some"
+                | "sort"
+                | "splice"
+                | "push"
+                | "pop"
+                | "shift"
+                | "unshift"
+                | "toReversed"
+                | "toSorted"
+                | "toSpliced"
                 | "toString"
+                | "with"
         ),
-        Expr::Number(_) | Expr::Bool(_) | Expr::Null | Expr::Undefined | Expr::Object(_) => {
-            matches!(method, "toString" | "valueOf")
+        Expr::Number(_) => matches!(
+            method,
+            "toExponential" | "toFixed" | "toPrecision" | "toString" | "valueOf"
+        ),
+        Expr::Bool(_) | Expr::Null | Expr::Undefined | Expr::Object(_) => {
+            matches!(method, "hasOwnProperty" | "toString" | "valueOf")
         }
         _ => true,
     }

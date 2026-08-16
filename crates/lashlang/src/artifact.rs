@@ -30,7 +30,7 @@ use crate::trigger_manifest::{
 
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v2";
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v5";
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v6";
 
 /// Durability tier established by the execution path's concrete store or host.
 #[derive(

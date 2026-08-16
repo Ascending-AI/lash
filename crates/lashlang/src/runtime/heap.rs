@@ -1,39 +1,45 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde::{Deserialize, Serialize};
 
+mod id;
+mod javascript_exotics;
+mod object;
 mod reference_assignment;
+mod url_objects;
 mod validation;
 
-pub(crate) use validation::PersistedRoots;
+#[cfg(test)]
+use object::COLLECTION_ENTRY_BYTES;
+use object::{
+    OBJECT_HEADER_BYTES, RECORD_FIELD_BYTES, VALUE_SLOT_BYTES, compound_identity,
+    value_logical_bytes,
+};
+
+pub use id::HeapId;
+#[cfg(test)]
+pub(crate) use javascript_exotics::RegExpProgramCache;
+pub(crate) use javascript_exotics::{
+    DateObject, ErrorKind, ErrorObject, MAX_JAVASCRIPT_LENGTH, MapObject, RegExpMatchObject,
+    RegExpObject, SetObject, canonical_regexp_flags, regexp_source, regexp_string, same_value_zero,
+};
+pub(crate) use url_objects::{
+    UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
+};
+pub(crate) use validation::{PersistedRoots, ensure_value_depth};
 
 use super::{
     CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, Record, RuntimeError,
     Value, add_values, coerce_string, record_with_capacity, resolve_existing_list_assignment_index,
 };
 
-pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 1;
+/// Which byte-charge schedule a persisted heap's `live_logical_bytes` was
+/// computed under. Version 2 charges a measured `VALUE_SLOT_BYTES`; version 1
+/// charged a quarter of it. A heap restored under a foreign schedule is refused
+/// by name rather than failing its own byte-counter cross-check.
+pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 2;
 pub const HEAP_GC_ALLOCATION_INTERVAL: u64 = 1_024;
 pub const DEFAULT_HEAP_LOGICAL_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
-
-const OBJECT_HEADER_BYTES: u64 = 16;
-const VALUE_SLOT_BYTES: u64 = 16;
-const RECORD_FIELD_BYTES: u64 = 8;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct HeapId(u64);
-
-impl HeapId {
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-
-    pub(crate) fn from_counter(counter: u64) -> Self {
-        Self(counter)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HeapObject {
@@ -41,96 +47,14 @@ pub(crate) enum HeapObject {
     List(Vec<Value>),
     Record(Box<Record>),
     Closure { function: u32, captures: Vec<Value> },
-}
-
-impl HeapObject {
-    pub(crate) fn kind_name(&self) -> &'static str {
-        match self {
-            Self::Tuple(_) => "tuple",
-            Self::List(_) => "list",
-            Self::Record(_) => "record",
-            Self::Closure { .. } => "function",
-        }
-    }
-}
-
-impl HeapObject {
-    pub(crate) fn logical_bytes(&self) -> u64 {
-        let payload = match self {
-            Self::Tuple(values) | Self::List(values) => values
-                .iter()
-                .map(value_logical_bytes)
-                .fold(0_u64, u64::saturating_add),
-            Self::Record(record) => record.iter().fold(0_u64, |total, (name, value)| {
-                total
-                    .saturating_add(RECORD_FIELD_BYTES)
-                    .saturating_add(name.len() as u64)
-                    .saturating_add(value_logical_bytes(value))
-            }),
-            Self::Closure { captures, .. } => 4_u64.saturating_add(
-                captures
-                    .iter()
-                    .map(value_logical_bytes)
-                    .fold(0_u64, u64::saturating_add),
-            ),
-        };
-        OBJECT_HEADER_BYTES.saturating_add(payload)
-    }
-
-    /// The single source of truth for child discovery.
-    ///
-    /// Every consumer — allocation bookkeeping, reverse parent edges, mark and
-    /// sweep, wire validation, and root traversal — resolves children through
-    /// this one recursive enumerator, so no caller can accidentally see a
-    /// shallower answer than another. Members are normally scalars or
-    /// references (`Heap::from_wire` rejects anything else, and every in-process
-    /// insertion path imports compounds into their own objects), but the
-    /// enumerator still descends into inline compounds so a future member shape
-    /// cannot silently hide a reference.
-    pub(crate) fn child_refs(&self) -> Vec<HeapId> {
-        let mut refs = Vec::new();
-        for value in self.values() {
-            collect_value_refs(value, &mut refs);
-        }
-        refs
-    }
-
-    fn values(&self) -> Box<dyn Iterator<Item = &Value> + '_> {
-        match self {
-            Self::Tuple(values) | Self::List(values) => Box::new(values.iter()),
-            Self::Record(record) => Box::new(record.values()),
-            Self::Closure { captures, .. } => Box::new(captures.iter()),
-        }
-    }
-}
-
-fn value_logical_bytes(value: &Value) -> u64 {
-    VALUE_SLOT_BYTES.saturating_add(match value {
-        Value::Null | Value::Undefined => 1,
-        Value::Bool(_) => 1,
-        Value::Number(_) => 8,
-        Value::String(value) => value.len() as u64,
-        Value::Image(value) => 24_u64
-            .saturating_add(value.id.len() as u64)
-            .saturating_add(value.label.len() as u64),
-        Value::Resource(value) => 8_u64
-            .saturating_add(value.resource_type.len() as u64)
-            .saturating_add(value.alias.len() as u64),
-        Value::Ref(_) => 8,
-        Value::Tuple(values) | Value::List(values) => values
-            .iter()
-            .map(value_logical_bytes)
-            .fold(OBJECT_HEADER_BYTES, u64::saturating_add),
-        Value::Record(record) => record
-            .iter()
-            .fold(OBJECT_HEADER_BYTES, |total, (key, value)| {
-                total
-                    .saturating_add(RECORD_FIELD_BYTES)
-                    .saturating_add(key.len() as u64)
-                    .saturating_add(value_logical_bytes(value))
-            }),
-        Value::Projected(_) => VALUE_SLOT_BYTES,
-    })
+    RegExp(RegExpObject),
+    RegExpMatch(RegExpMatchObject),
+    Map(MapObject),
+    Set(SetObject),
+    Date(DateObject),
+    Error(ErrorObject),
+    Url(UrlObject),
+    UrlSearchParams(UrlSearchParamsObject),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -158,7 +82,9 @@ pub(crate) struct Heap {
     // removal instead of a scan.
     boundary_refs: FxHashMap<(u8, usize), HeapId>,
     boundary_identities: FxHashMap<HeapId, (u8, usize)>,
-    materialized: FxHashMap<HeapId, Value>,
+    /// Exported form plus its depth: a cache hit must account for the nesting
+    /// an uncached walk would have counted.
+    materialized: FxHashMap<HeapId, (Value, usize)>,
     logical_byte_limit: u64,
 }
 
@@ -363,6 +289,23 @@ impl Heap {
 
     pub(crate) fn live_logical_bytes(&self) -> u64 {
         self.live_logical_bytes
+    }
+
+    pub(crate) fn ensure_list_allocation_len(&self, len: usize) -> Result<(), RuntimeError> {
+        // Array-like constructors must reject against the VM budget before
+        // building their temporary Vec. Each missing element becomes an
+        // explicit `undefined` in the dense representation.
+        let list_bytes = OBJECT_HEADER_BYTES.saturating_add(
+            (VALUE_SLOT_BYTES + 1).saturating_mul(u64::try_from(len).unwrap_or(u64::MAX)),
+        );
+        let attempted = self.live_logical_bytes.saturating_add(list_bytes);
+        if attempted > self.logical_byte_limit {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: self.logical_byte_limit,
+                attempted,
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn schedule_version(&self) -> u32 {
@@ -582,11 +525,12 @@ impl Heap {
     }
 
     pub(crate) fn export(&self, value: &Value) -> Result<Value, RuntimeError> {
-        self.export_inner(value, &mut BTreeSet::new())
+        self.export_inner(value, &mut BTreeSet::new(), 1)
     }
 
     pub(crate) fn export_for_instruction(&mut self, value: &Value) -> Result<Value, RuntimeError> {
-        self.export_instruction_inner(value, &mut BTreeSet::new())
+        self.export_instruction_inner(value, &mut BTreeSet::new(), 1)
+            .map(|(value, _)| value)
     }
 
     pub(crate) fn export_for_mutation(&mut self, value: &Value) -> Result<Value, RuntimeError> {
@@ -610,61 +554,96 @@ impl Heap {
         Ok(())
     }
 
+    /// Exports one value with the depth of the tree it produced, so a cache hit
+    /// charges the nesting the walk it replaced would have charged.
+    ///
+    /// The returned depth counts reference levels — the same unit `depth`
+    /// counts — so a scalar leaf is 0 and a subtree of `n` chained references
+    /// is `n`. That is what makes the cache-hit charge below,
+    /// `depth + cached - 1`, land on exactly the depth the deepest reference in
+    /// the cached subtree would have been walked at.
     fn export_instruction_inner(
         &mut self,
         value: &Value,
         active: &mut BTreeSet<HeapId>,
-    ) -> Result<Value, RuntimeError> {
+        depth: usize,
+    ) -> Result<(Value, usize), RuntimeError> {
         let Value::Ref(id) = value else {
-            return Ok(value.clone());
+            return Ok((value.clone(), 0));
         };
-        if let Some(exported) = self.cached_materialized(*id) {
-            return Ok(exported.clone());
+        ensure_value_depth(depth)?;
+        if let Some((exported, exported_depth)) = self.cached_materialized(*id) {
+            let (exported, exported_depth) = (exported.clone(), *exported_depth);
+            ensure_value_depth(depth.saturating_add(exported_depth).saturating_sub(1))?;
+            return Ok((exported, exported_depth));
         }
         if !active.insert(*id) {
             return Err(RuntimeError::CyclicHostValue { id: id.get() });
         }
         let object = self.get(*id)?.clone();
+        let mut deepest_child = 0;
+        let mut export_child = |heap: &mut Self, value: &Value, active: &mut _| {
+            let (value, child_depth) = heap.export_instruction_inner(value, active, depth + 1)?;
+            deepest_child = deepest_child.max(child_depth);
+            Ok::<_, RuntimeError>(value)
+        };
         let exported = match object {
             HeapObject::Tuple(values) => Value::Tuple(
                 values
                     .iter()
-                    .map(|value| self.export_instruction_inner(value, active))
+                    .map(|value| export_child(self, value, active))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
             HeapObject::List(values) => Value::List(
                 values
                     .iter()
-                    .map(|value| self.export_instruction_inner(value, active))
+                    .map(|value| export_child(self, value, active))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
             HeapObject::Record(record) => {
                 let mut output = record_with_capacity(record.len());
                 for entry in &record.entries {
-                    output.insert_symbolized(
-                        entry.symbol,
-                        entry.name.clone(),
-                        self.export_instruction_inner(&entry.value, active)?,
-                    );
+                    let value = export_child(self, &entry.value, active)?;
+                    output.insert_symbolized(entry.symbol, entry.name.clone(), value);
                 }
                 Value::Record(std::sync::Arc::new(output))
             }
+            HeapObject::RegExpMatch(result) => Value::List(
+                result
+                    .items
+                    .iter()
+                    .map(|value| export_child(self, value, active))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            ),
             HeapObject::Closure { .. } => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
+            object @ (HeapObject::RegExp(_)
+            | HeapObject::Map(_)
+            | HeapObject::Set(_)
+            | HeapObject::Date(_)
+            | HeapObject::Error(_)
+            | HeapObject::Url(_)
+            | HeapObject::UrlSearchParams(_)) => {
+                // Exotic values have no detached `Value` shape: detaching
+                // would destroy identity or expose internal slots.
+                return Err(javascript_exotics::host_boundary_error(&object));
+            }
         };
+        let exported_depth = deepest_child.saturating_add(1);
         active.remove(id);
         if let Some(identity) = compound_identity(&exported) {
             self.cache_boundary(identity, *id);
         }
-        self.cache_materialized(*id, exported.clone());
+        self.cache_materialized(*id, exported.clone(), exported_depth);
         self.debug_assert_boundary_cache_invariant();
-        Ok(exported)
+        Ok((exported, exported_depth))
     }
 
-    fn cached_materialized(&self, id: HeapId) -> Option<&Value> {
+    fn cached_materialized(&self, id: HeapId) -> Option<&(Value, usize)> {
         self.materialized.get(&id)
     }
 
@@ -685,8 +664,14 @@ impl Heap {
         }
     }
 
-    fn cache_materialized(&mut self, id: HeapId, value: Value) {
-        self.materialized.insert(id, value);
+    /// `depth` is the number of reference levels in `value`'s subtree, counted
+    /// the way `export_instruction_inner`'s `depth` argument counts: the object
+    /// itself is one, a scalar leaf is none. Cached in that unit rather than as
+    /// a tree depth so a warm cache refuses at exactly the ceiling a cold walk
+    /// refuses at — the two are live-vs-resumed, because `materialized` is
+    /// rebuilt empty on restore.
+    fn cache_materialized(&mut self, id: HeapId, value: Value, depth: usize) {
+        self.materialized.insert(id, (value, depth));
     }
 
     fn forget(&mut self, id: HeapId) {
@@ -798,10 +783,12 @@ impl Heap {
         &self,
         value: &Value,
         active: &mut BTreeSet<HeapId>,
+        depth: usize,
     ) -> Result<Value, RuntimeError> {
         let Value::Ref(id) = value else {
             return Ok(value.clone());
         };
+        ensure_value_depth(depth)?;
         if !active.insert(*id) {
             return Err(RuntimeError::CyclicHostValue { id: id.get() });
         }
@@ -809,14 +796,14 @@ impl Heap {
             HeapObject::Tuple(values) => Value::Tuple(
                 values
                     .iter()
-                    .map(|value| self.export_inner(value, active))
+                    .map(|value| self.export_inner(value, active, depth + 1))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
             HeapObject::List(values) => Value::List(
                 values
                     .iter()
-                    .map(|value| self.export_inner(value, active))
+                    .map(|value| self.export_inner(value, active, depth + 1))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
@@ -826,13 +813,30 @@ impl Heap {
                     output.insert_symbolized(
                         entry.symbol,
                         entry.name.clone(),
-                        self.export_inner(&entry.value, active)?,
+                        self.export_inner(&entry.value, active, depth + 1)?,
                     );
                 }
                 Value::Record(std::sync::Arc::new(output))
             }
+            HeapObject::RegExpMatch(result) => Value::List(
+                result
+                    .items
+                    .iter()
+                    .map(|value| self.export_inner(value, active, depth + 1))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            ),
             HeapObject::Closure { .. } => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
+            }
+            HeapObject::RegExp(_)
+            | HeapObject::Map(_)
+            | HeapObject::Set(_)
+            | HeapObject::Date(_)
+            | HeapObject::Error(_)
+            | HeapObject::Url(_)
+            | HeapObject::UrlSearchParams(_) => {
+                return Err(javascript_exotics::host_boundary_error(self.get(*id)?));
             }
         };
         active.remove(id);
@@ -952,6 +956,56 @@ impl Heap {
                     .map(|value| self.stage_isolation(value, staging))
                     .collect::<Result<_, _>>()?,
             },
+            HeapObject::RegExp(regexp) => HeapObject::RegExp(regexp.clone()),
+            HeapObject::RegExpMatch(result) => HeapObject::RegExpMatch(RegExpMatchObject {
+                items: result
+                    .items
+                    .iter()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .collect::<Result<_, _>>()?,
+                index: self.stage_isolation(&result.index, staging)?,
+                input: self.stage_isolation(&result.input, staging)?,
+                groups: self.stage_isolation(&result.groups, staging)?,
+            }),
+            HeapObject::Map(map) => HeapObject::Map(MapObject {
+                entries: map
+                    .entries
+                    .iter()
+                    .map(|(key, value)| {
+                        Ok((
+                            self.stage_isolation(key, staging)?,
+                            self.stage_isolation(value, staging)?,
+                        ))
+                    })
+                    .collect::<Result<_, RuntimeError>>()?,
+            }),
+            HeapObject::Set(set) => HeapObject::Set(SetObject {
+                values: set
+                    .values
+                    .iter()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .collect::<Result<_, _>>()?,
+            }),
+            HeapObject::Date(date) => HeapObject::Date(date.clone()),
+            HeapObject::Error(error) => HeapObject::Error(ErrorObject {
+                kind: error.kind,
+                message: error.message.clone(),
+                cause: error
+                    .cause
+                    .as_ref()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .transpose()?,
+                errors: error
+                    .errors
+                    .as_ref()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .transpose()?,
+            }),
+            HeapObject::Url(url) => HeapObject::Url(UrlObject {
+                href: url.href.clone(),
+                search_params: self.stage_isolation(&url.search_params, staging)?,
+            }),
+            HeapObject::UrlSearchParams(params) => HeapObject::UrlSearchParams(params.clone()),
         })
     }
 
@@ -1135,16 +1189,6 @@ impl Heap {
         Ok(Value::Ref(*id))
     }
 
-    /// Whether this value is a list, whether it is held in the heap or still a
-    /// tree.
-    pub(crate) fn is_list(&self, value: &Value) -> bool {
-        match value {
-            Value::List(_) => true,
-            Value::Ref(id) => matches!(self.get(*id), Ok(HeapObject::List(_))),
-            _ => false,
-        }
-    }
-
     pub(crate) fn add_assign_index_number(
         &mut self,
         target: &Value,
@@ -1210,6 +1254,18 @@ impl Heap {
             HeapObject::Closure { .. } => {
                 return Err(RuntimeError::CannotAssignIndex {
                     actual: "function".to_string(),
+                });
+            }
+            object @ (HeapObject::RegExp(_)
+            | HeapObject::RegExpMatch(_)
+            | HeapObject::Map(_)
+            | HeapObject::Set(_)
+            | HeapObject::Date(_)
+            | HeapObject::Error(_)
+            | HeapObject::Url(_)
+            | HeapObject::UrlSearchParams(_)) => {
+                return Err(RuntimeError::CannotAssignIndex {
+                    actual: object.kind_name().to_string(),
                 });
             }
         };
@@ -1336,49 +1392,60 @@ impl Heap {
                 }
                 Ok(true)
             }
+            (HeapObject::RegExp(left), HeapObject::RegExp(right)) => Ok(left == right),
+            (HeapObject::Map(left), HeapObject::Map(right)) => {
+                if left.entries.len() != right.entries.len() {
+                    return Ok(false);
+                }
+                for ((left_key, left_value), (right_key, right_value)) in
+                    left.entries.iter().zip(&right.entries)
+                {
+                    if !self.structural_eq_inner(left_key, right_key, visited)?
+                        || !self.structural_eq_inner(left_value, right_value, visited)?
+                    {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (HeapObject::Set(left), HeapObject::Set(right)) => {
+                if left.values.len() != right.values.len() {
+                    return Ok(false);
+                }
+                for (left, right) in left.values.iter().zip(&right.values) {
+                    if !self.structural_eq_inner(left, right, visited)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (HeapObject::Date(left), HeapObject::Date(right)) => Ok(left == right),
+            (HeapObject::Error(left), HeapObject::Error(right)) => {
+                if left.kind != right.kind || left.message != right.message {
+                    return Ok(false);
+                }
+                match (&left.cause, &right.cause) {
+                    (Some(left), Some(right))
+                        if !self.structural_eq_inner(left, right, visited)? =>
+                    {
+                        return Ok(false);
+                    }
+                    (None, None) | (Some(_), Some(_)) => {}
+                    _ => return Ok(false),
+                }
+                match (&left.errors, &right.errors) {
+                    (Some(left), Some(right)) => self.structural_eq_inner(left, right, visited),
+                    (None, None) => Ok(true),
+                    _ => Ok(false),
+                }
+            }
+            (HeapObject::Url(left), HeapObject::Url(right)) => Ok(left.href == right.href
+                && self.structural_eq_inner(&left.search_params, &right.search_params, visited)?),
+            (HeapObject::UrlSearchParams(left), HeapObject::UrlSearchParams(right)) => {
+                Ok(left == right)
+            }
             _ => Ok(false),
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn replace_object(
-        &mut self,
-        id: HeapId,
-        object: HeapObject,
-    ) -> Result<(), RuntimeError> {
-        let slot = self
-            .id_to_slot
-            .get(&id)
-            .copied()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        let old_bytes = self
-            .slots
-            .get(slot)
-            .and_then(Option::as_ref)
-            .map(|entry| entry.logical_bytes)
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        let new_bytes = object.logical_bytes();
-        let next_live = self
-            .live_logical_bytes
-            .saturating_sub(old_bytes)
-            .saturating_add(new_bytes);
-        if next_live > self.logical_byte_limit {
-            return Err(RuntimeError::MemoryLimitExceeded {
-                limit: self.logical_byte_limit,
-                attempted: next_live,
-            });
-        }
-        let entry = self.slots[slot]
-            .as_mut()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        let old_children = entry.object.child_refs();
-        let new_children = object.child_refs();
-        entry.object = object;
-        entry.logical_bytes = new_bytes;
-        self.live_logical_bytes = next_live;
-        self.retarget_parent_edges(id, &old_children, &new_children);
-        self.invalidate_materialized_reaching(id);
-        Ok(())
     }
 
     pub(crate) fn collect<'a>(&mut self, roots: impl IntoIterator<Item = &'a Value>) {
@@ -1513,34 +1580,6 @@ impl Clone for Heap {
             materialized: FxHashMap::default(),
             logical_byte_limit: self.logical_byte_limit,
         }
-    }
-}
-
-/// Two heaps are equal when they hold the same live objects under the same IDs
-/// and the same meters.
-///
-/// Storage layout — which slot an object occupies, which slots are vacant, and
-/// the free list — is a private allocation detail that a decode/encode round
-/// trip legitimately compacts, so it is deliberately excluded. Including it made
-/// `decode(encode(state)) == state` fail for any program that ever allocated a
-/// temporary.
-impl PartialEq for Heap {
-    fn eq(&self, other: &Self) -> bool {
-        self.next_id == other.next_id
-            && self.allocations == other.allocations
-            && self.live_logical_bytes == other.live_logical_bytes
-            && self.schedule_version == other.schedule_version
-            && self.id_to_slot.len() == other.id_to_slot.len()
-            && self.objects_in_id_order().eq(other.objects_in_id_order())
-    }
-}
-
-fn compound_identity(value: &Value) -> Option<(u8, usize)> {
-    match value {
-        Value::Tuple(values) => Some((0, values.identity())),
-        Value::List(values) => Some((1, values.identity())),
-        Value::Record(record) => Some((2, std::sync::Arc::as_ptr(record) as usize)),
-        _ => None,
     }
 }
 

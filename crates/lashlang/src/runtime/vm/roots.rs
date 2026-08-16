@@ -36,7 +36,7 @@ trait FrameRootView {
     fn slots(&self) -> &[Option<Value>];
     fn globals(&self) -> &Record;
     fn iterators(&self) -> &[Self::Iterator];
-    fn map_roots(&self) -> Option<(&Value, &[Value], &[Value])>;
+    fn callback_roots(&self) -> Option<(&Value, &[Value], &[Value])>;
 }
 
 trait FinallyRootView {
@@ -80,11 +80,11 @@ impl FrameRootView for CallFrame {
         &self.iter_stack
     }
 
-    fn map_roots(&self) -> Option<(&Value, &[Value], &[Value])> {
+    fn callback_roots(&self) -> Option<(&Value, &[Value], &[Value])> {
         match &self.return_target {
             ReturnTarget::Direct => None,
-            ReturnTarget::Map(callback) => {
-                Some((&callback.function, &callback.items, &callback.results))
+            ReturnTarget::Callback(callback) => {
+                Some((&callback.function, &callback.calls, &callback.results))
             }
         }
     }
@@ -109,15 +109,15 @@ impl FrameRootView for VmFrameContinuation {
         &self.iterator_stack
     }
 
-    fn map_roots(&self) -> Option<(&Value, &[Value], &[Value])> {
+    fn callback_roots(&self) -> Option<(&Value, &[Value], &[Value])> {
         match &self.return_target {
             VmFrameReturnContinuation::Direct => None,
-            VmFrameReturnContinuation::Map {
+            VmFrameReturnContinuation::Callback {
                 function,
-                items,
+                calls,
                 results,
                 ..
-            } => Some((function, items, results)),
+            } => Some((function, calls, results)),
         }
     }
 }
@@ -313,9 +313,9 @@ fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl VmRootVisit
                 }
             }
         }
-        if let Some((function, items, results)) = frame.map_roots() {
+        if let Some((function, calls, results)) = frame.callback_roots() {
             visitor.transient(function);
-            for value in items {
+            for value in calls {
                 visitor.transient(value);
             }
             for value in results {

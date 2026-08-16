@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::{LashlangExecutionCallSite, LashlangExecutionChild};
 
+use super::super::access::prototype_chain_data_key_error;
 use super::super::host::{
     AbilityOp, AbilityResult, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart,
     ResourceOperation, ResourceOperationBatch, ResourceOperationResult, Sleep, SleepKind,
@@ -72,7 +73,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     }))
                     .await
                 {
-                    Ok(AbilityResult::Value(value)) => success(value),
+                    Ok(AbilityResult::Value(value)) => host_success(value),
                     Ok(AbilityResult::ResourceOperationBatch(_)) => error_value(
                         "module operation returned a resource operation batch result".to_string(),
                     ),
@@ -308,6 +309,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 return Err(runtime_error);
             }
         };
+        // The value-entry guard, on the one ability whose values arrive in
+        // bulk. Like the malformed shapes below, a batch carrying a
+        // prototype-chain data key fails the whole batch closed rather than
+        // handing one leaf a value nothing can read.
+        if let Some(rejection) = result.results.iter().find_map(|result| match result {
+            ResourceOperationResult::Value(value) => prototype_chain_data_key_error(value),
+            ResourceOperationResult::Error(_) => None,
+        }) {
+            for active in active_nodes.iter().flatten() {
+                self.fail_lashlang_execution(active, rejection.to_string());
+            }
+            return Err(rejection);
+        }
         if result.results.len() != batch.leaves.len() {
             let error = RuntimeError::ResourceBatchResultCount {
                 actual: result.results.len(),
@@ -424,7 +438,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .perform(AbilityOp::Await(Value::Record(handles)))
                         .await
                     {
-                        Ok(AbilityResult::Value(value)) => success(value),
+                        Ok(AbilityResult::Value(value)) => host_success(value),
                         Ok(AbilityResult::ResourceOperationBatch(_)) => error_value(
                             "await returned a resource operation batch result".to_string(),
                         ),
@@ -446,7 +460,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     Value::Record(Arc::new(record))
                 }
                 handle => match self.host.perform(AbilityOp::Await(handle)).await {
-                    Ok(AbilityResult::Value(value)) => success(value),
+                    Ok(AbilityResult::Value(value)) => host_success(value),
                     Ok(AbilityResult::ResourceOperationBatch(_)) => {
                         error_value("await returned a resource operation batch result".to_string())
                     }
@@ -543,4 +557,14 @@ fn process_handle_id_from_value(value: &Value) -> Option<String> {
         return None;
     };
     Some(id.to_string())
+}
+
+/// A host value that clears the value-entry guard becomes a success result; one
+/// that does not becomes the same error result a failed ability produces, so
+/// the refusal reaches the guest by the route it already handles.
+fn host_success(value: Value) -> Value {
+    match prototype_chain_data_key_error(&value) {
+        Some(error) => error_value(error.to_string()),
+        None => success(value),
+    }
 }

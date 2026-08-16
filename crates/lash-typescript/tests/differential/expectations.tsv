@@ -146,18 +146,18 @@ opus	144	accept	"({a:1}).a"	"1"	-
 opus	145	accept	"({a:1}).b"	"undefined"	-
 opus	146	accept	"({a:1})['a']"	"1"	-
 opus	147	accept	"void 0"	"undefined"	-
-opus	148	reject	"2 ** 3"	"8"	TS_EXPONENTIATION_UNSUPPORTED
-opus	149	reject	"1 & 3"	"1"	TS_BITWISE_UNSUPPORTED
-opus	150	reject	"1 | 2"	"3"	TS_BITWISE_UNSUPPORTED
-opus	151	reject	"1 ^ 3"	"2"	TS_BITWISE_UNSUPPORTED
-opus	152	reject	"~1"	"-2"	TS_BITWISE_UNSUPPORTED
-opus	153	reject	"1 << 2"	"4"	TS_BITWISE_UNSUPPORTED
-opus	154	reject	"8 >> 2"	"2"	TS_BITWISE_UNSUPPORTED
-opus	155	reject	"-8 >>> 2"	"1073741822"	TS_BITWISE_UNSUPPORTED
+opus	148	accept	"2 ** 3"	"8"	-
+opus	149	accept	"1 & 3"	"1"	-
+opus	150	accept	"1 | 2"	"3"	-
+opus	151	accept	"1 ^ 3"	"2"	-
+opus	152	accept	"~1"	"-2"	-
+opus	153	accept	"1 << 2"	"4"	-
+opus	154	accept	"8 >> 2"	"2"	-
+opus	155	accept	"-8 >>> 2"	"1073741822"	-
 opus	156	reject	"(1, 2)"	"2"	TS_SEQUENCE_UNSUPPORTED
-opus	157	reject	"'a' in ({a:1})"	"true"	TS_IN_OPERATOR_UNSUPPORTED
-opus	158	reject	"1 instanceof Object"	"false"	TS_INSTANCEOF_UNSUPPORTED
-opus	159	reject	"delete ({a:1}).a"	"true"	TS_DELETE_UNSUPPORTED
+opus	157	accept	"'a' in ({a:1})"	"true"	-
+opus	158	accept	"1 instanceof Object"	"false"	-
+opus	159	accept	"delete ({a:1}).a"	"true"	-
 opus	160	accept	"true ? 1 : 2"	"1"	-
 opus	161	accept	"(() => 1)()"	"1"	-
 opus	162	accept	"((x: number) => x + 1)(1)"	"2"	-
@@ -344,3 +344,204 @@ findings	55	accept	"'abc'.replace('', '-')"	"-abc"	-
 findings	56	accept	"'café'.replaceAll('', '.')"	".c.a.f.é."	-
 findings	57	accept	"'ab'.replaceAll('', '[$`|$\\']')"	"[|ab]a[a|b]b[ab|]"	-
 findings	58	reject	"'ab'.map((x) => x)"	"ERR<TypeError>"	TS_METHOD_UNSUPPORTED
+findings	59	accept	"(() => { const {a, n:[b=4], ...r}={a:1,n:[undefined],z:3}; return `${a}|${b}|${r.z}`; })()"	"1|4|3"	-
+findings	60	accept	"(() => { const [a,,...r]=[1,2,3,4]; return `${a}|${r.join(',')}`; })()"	"1|3,4"	-
+findings	61	accept	"(() => { let a=0,b=0; [a,b]=[3,4]; return `${a}|${b}`; })()"	"3|4"	-
+findings	62	accept	"(() => { let n=0; const a=null; const v=a?.b[n++].c; return `${v}|${n}`; })()"	"undefined|0"	-
+findings	63	accept	"(() => { const f=undefined; return f?.(); })()"	"undefined"	-
+findings	64	accept	"(() => { let i=0; const a=[2]; const old=a[i++]++; a[0] **= 3; return `${old}|${a[0]}|${i}`; })()"	"2|27|1"	-
+findings	65	accept	"(() => { let n=0; n ||= 4; n &&= 6; n ??= 8; return n; })()"	"6"	-
+findings	66	accept	"(() => { let n=2; return `${n++}|${++n}|${n--}|${--n}`; })()"	"2|4|4|2"	-
+findings	67	accept	"(() => [...'ab','c'].join(''))()"	"abc"	-
+findings	68	accept	"(() => { function f(a,b,c){return `${a}${b}${c}`;} return f(...['a','b'],'c'); })()"	"abc"	-
+findings	69	accept	"(() => Object.keys({x:1,...{2:'n',y:2},['z']:3}).join(','))()"	"2,x,y,z"	-
+findings	70	accept	"(() => { function f(a=1,b=a+1,...r){return `${a}|${b}|${r.join(',')}`;} return f(undefined,undefined,3,4); })()"	"1|2|3,4"	-
+findings	71	accept	"(() => { try { throw {x:3}; } catch ({x}) { return x; } })()"	"3"	-
+findings	72	accept	"(() => { try { throw 3; } catch { return 4; } })()"	"4"	-
+findings	73	accept	"(() => { const e=new TypeError('bad',{cause:7}); return `${e.name}|${e.message}|${e.cause}`; })()"	"TypeError|bad|7"	-
+findings	74	accept	"(() => { const e=new RangeError(); return `${e instanceof RangeError}|${e instanceof Error}|${[] instanceof Array}`; })()"	"true|true|true"	-
+findings	75	accept	"(() => { let out=''; switch(2){case 1:out+='a';break;default:out+='d';case 2:out+='b';case 3:out+='c';} return out; })()"	"bc"	-
+findings	76	accept	"(() => { let out=''; for(const k in {b:1,1:2,a:3}) out+=k; return out; })()"	"1ba"	-
+findings	77	accept	"(() => `${'0' in [1]}|${'a' in {a:1}}` )()"	"true|true"	-
+findings	78	accept	"(() => { let i=0; do { i++; } while(i<2); return i; })()"	"2"	-
+findings	79	accept	"(() => `${-1 >>> 1}|${2147483647 << 1}|${~0}|${5 & 3}|${5 | 2}|${5 ^ 1}`)()"	"2147483647|-2|-1|1|7|4"	-
+findings	80	accept	"(() => [...[4,5].entries()].map(x=>x.join(':')).join(','))()"	"0:4,1:5"	-
+findings	81	accept	"(() => { function f(){ const before=x; if(true){var x=3;} return `${before}|${x}`; } return f(); })()"	"undefined|3"	-
+findings	82	accept	"(() => { const k='x'; const n=2; const o={n,[k]:1,f(){return this;}}; return `${o.n}|${o.x}`; })()"	"2|1"	-
+findings	83	accept	"(() => 0xff + 0o10 + 0b10 + 1_000)()"	"1265"	-
+findings	84	accept	"(() => { 'use strict'; return 3; })()"	"3"	-
+findings	85	accept	"(() => { function f(){ return this; } return f(); })()"	"undefined"	-
+findings	86	accept	"(() => { const o={a:1,b:2}; const p=o; const ok=delete o.a; return `${ok}|${'a' in p}|${p.b}`; })()"	"true|false|2"	-
+findings	87	accept	"(() => [0,1,2].filter(Boolean).join(','))()"	"1,2"	-
+findings	88	accept	"(() => { const [a,b]=Array.from([7,8].values()); return `${a}|${b}`; })()"	"7|8"	-
+findings	89	accept	"(() => { const m=new Map([['a',1]]); return Object.fromEntries(m.entries()).a; })()"	"1"	-
+findings	90	accept	"(() => { function f(){ return globalThis.__fig1413=7; } const value=f(); delete globalThis.__fig1413; return value; })()"	"7"	-
+findings	91	accept	"(() => { const f=[]; for(let i=0;i<2;i++){ f[f.length]=()=>i; } return `${f[0]()}|${f[1]()}`; })()"	"0|1"	-
+findings	92	accept	"encodeURIComponent('a b/é😀')"	"a%20b%2F%C3%A9%F0%9F%98%80"	-
+findings	93	accept	"decodeURIComponent('a%20b%2F%C3%A9%F0%9F%98%80')"	"a b/é😀"	-
+findings	94	accept	"encodeURI('https://x.test/a b?x=é#z')"	"https://x.test/a%20b?x=%C3%A9#z"	-
+findings	95	accept	"decodeURI('https://x.test/a%20b?x=%3F%23%2F')"	"https://x.test/a b?x=%3F%23%2F"	-
+findings	96	accept	"(() => { try { decodeURIComponent('%E0%A4%A'); } catch (e) { return `${e.name}|${e.message}|${e instanceof URIError}`; } })()"	"URIError|URI malformed|true"	-
+findings	97	accept	"(() => { try { encodeURIComponent('\\uD800'); } catch (e) { return `${e.name}|${e.message}|${e instanceof URIError}`; } })()"	"URIError|URI malformed|true"	-
+findings	98	accept	"(() => [1,2,3,4].filter((v,i,a)=>v%2===0&&i<a.length).join(','))()"	"2,4"	-
+findings	99	accept	"(() => [1,2,3].reduce((a,v,i,x)=>a+v+i+x.length,0))()"	"18"	-
+findings	100	accept	"(() => [1,2,3].reduce((a,v)=>a+v))()"	"6"	-
+findings	101	accept	"(() => [1,2,3].reduceRight((a,v)=>a-v))()"	"0"	-
+findings	102	accept	"(() => [1,3,4].find((v,i,a)=>v+i>a.length))()"	"3"	-
+findings	103	accept	"(() => [1,3,4].findIndex((v,i,a)=>v+i>a.length))()"	"1"	-
+findings	104	accept	"(() => [1,3,4].findLast(v=>v<4))()"	"3"	-
+findings	105	accept	"(() => [1,3,4].findLastIndex(v=>v<4))()"	"1"	-
+findings	106	accept	"(() => [1,2,3].some((v,i,a)=>v+i===a.length))()"	"true"	-
+findings	107	accept	"(() => [1,2,3].every((v,i,a)=>v+i<=a.length+1))()"	"false"	-
+findings	108	accept	"(() => { const a=[]; [1,2,3].forEach((v,i,x)=>a[a.length]=v+i+x.length); return a.join(','); })()"	"4,6,8"	-
+findings	109	accept	"(() => [1,2].flatMap((v,i,a)=>[v+i,a.length]).join(','))()"	"1,2,3,2"	-
+findings	110	accept	"(() => `${[].find(()=>true)}|${[].findIndex(()=>true)}|${[].some(()=>true)}|${[].every(()=>false)}`)()"	"undefined|-1|false|true"	-
+findings	111	accept	"(() => { const a=[3,1,2]; const b=a.sort((x,y)=>x-y); return `${a.join(',')}|${a===b}`; })()"	"1,2,3|true"	-
+findings	112	accept	"(() => ['a','c','b'].sort(()=>NaN).join(','))()"	"a,c,b"	-
+findings	113	accept	"(() => [10,2,1].sort().join(','))()"	"1,10,2"	-
+findings	114	accept	"(() => [3,1,2].sort((x,y)=>String(x-y)).join(','))()"	"1,2,3"	-
+findings	115	accept	"(() => { const a=[3,1,2]; const b=a.toSorted((x,y)=>y-x); return `${a.join(',')}|${b.join(',')}`; })()"	"3,1,2|3,2,1"	-
+findings	116	accept	"(() => [1,2,3].indexOf(2,-2))()"	"1"	-
+findings	117	accept	"(() => [1,2,1].lastIndexOf(1,-2))()"	"0"	-
+findings	118	accept	"(() => [1,[2,[3]]].flat(Infinity).join(','))()"	"1,2,3"	-
+findings	119	accept	"(() => { const a=[1,2,3]; const b=a.fill('x',-2); return `${a.join(',')}|${a===b}`; })()"	"1,x,x|true"	-
+findings	120	accept	"(() => [1].concat([2],3,[4,5]).join(','))()"	"1,2,3,4,5"	-
+findings	121	accept	"(() => { const a=[1,2,3]; const b=a.reverse(); return `${a.join(',')}|${a===b}`; })()"	"3,2,1|true"	-
+findings	122	accept	"(() => { const a=[1,2,3,4]; const r=a.splice(-3,2,'x'); return `${a.join(',')}|${r.join(',')}`; })()"	"1,x,4|2,3"	-
+findings	123	accept	"(() => { const a=[1,2,3]; return `${a.toReversed().join(',')}|${a.join(',')}`; })()"	"3,2,1|1,2,3"	-
+findings	124	accept	"(() => { const a=[1,2,3]; return `${a.toSpliced(1,1,9).join(',')}|${a.join(',')}`; })()"	"1,9,3|1,2,3"	-
+findings	125	accept	"(() => 'abcdef'.slice(1,4))()"	"bcd"	-
+findings	126	accept	"(() => 'abc'.split('b',1).join('|'))()"	"a"	-
+findings	127	accept	"(() => '5'.padStart(4,'ab'))()"	"aba5"	-
+findings	128	accept	"(() => '5'.padEnd(4,'ab'))()"	"5aba"	-
+findings	129	accept	"(() => 'aba'.replaceAll('a','[$&]'))()"	"[a]b[a]"	-
+findings	130	accept	"(() => '\\uFEFF  x \\u00A0'.trimStart().trimEnd())()"	"x"	-
+findings	131	accept	"(() => '😀'.codePointAt(0))()"	"128512"	-
+findings	132	accept	"(() => 'abcdef'.substring(4,1))()"	"bcd"	-
+findings	133	accept	"(() => Array.from({0:'a',2:'c',length:3},(v,i)=>String(v)+i).join(','))()"	"a0,undefined1,c2"	-
+findings	134	accept	"(() => Array.of(1,'x',true).join(','))()"	"1,x,true"	-
+findings	135	accept	"(() => `${Array.isArray([])}|${Array.isArray({})}`)()"	"true|false"	-
+findings	136	accept	"(() => String.fromCharCode(65,66)+String.fromCodePoint(0x1f600))()"	"AB😀"	-
+findings	137	accept	"(() => Object.entries({b:2,a:1}).map(x=>x.join(':')).join(','))()"	"b:2,a:1"	-
+findings	138	accept	"(() => Object.fromEntries([['a',1],['b',2]]).b)()"	"2"	-
+findings	139	accept	"(() => { const a={x:1}; const b=Object.assign(a,{y:2},{x:3}); return `${a.x}|${a.y}|${a===b}`; })()"	"3|2|true"	-
+findings	140	accept	"(() => `${Object.hasOwn({x:1},'x')}|${({x:1}).hasOwnProperty('x')}`)()"	"true|true"	-
+findings	141	accept	"(() => `${Object.is(NaN,NaN)}|${Object.is(-0,0)}`)()"	"true|false"	-
+findings	142	accept	"(() => JSON.stringify(Object.groupBy([1,2,3,4],v=>v%2)))()"	"{\"0\":[2,4],\"1\":[1,3]}"	-
+findings	143	accept	"(() => Array.from(Map.groupBy([1,2,3],v=>v%2)).map(([k,v])=>k+':'+v.join(',')).join('|'))()"	"1:1,3|0:2"	-
+findings	144	accept	"(() => { const a=new Set([1,2]); const b=new Set([2,3]); return [...a.union(b)].join(',')+'|'+[...a.intersection(b)].join(',')+'|'+[...a.difference(b)].join(',')+'|'+[...a.symmetricDifference(b)].join(','); })()"	"1,2,3|2|1|1,3"	-
+findings	145	accept	"(() => { const a=new Set([1,2]); return `${a.isSubsetOf(new Set([1,2,3]))}|${a.isSupersetOf(new Set([1]))}|${a.isDisjointFrom(new Set([9]))}`; })()"	"true|true|true"	-
+findings	146	accept	"(() => `${Number.parseInt('0x10')}|${Number.parseInt('10',2)}|${Number.parseFloat('  -1.25x')}`)()"	"16|2|-1.25"	-
+findings	147	accept	"(() => `${Number.EPSILON}|${Number.MIN_SAFE_INTEGER}|${Number.MAX_SAFE_INTEGER}|${Number.MAX_VALUE}`)()"	"2.220446049250313e-16|-9007199254740991|9007199254740991|1.7976931348623157e+308"	-
+findings	148	accept	"(() => `${Math.PI}|${Math.E}|${Math.LN2}|${Math.LN10}|${Math.LOG2E}|${Math.LOG10E}|${Math.SQRT2}|${Math.SQRT1_2}`)()"	"3.141592653589793|2.718281828459045|0.6931471805599453|2.302585092994046|1.4426950408889634|0.4342944819032518|1.4142135623730951|0.7071067811865476"	-
+findings	149	accept	"(() => [Math.trunc(-1.9),Math.sign(-0),Math.cbrt(27),Math.hypot(3,4),Math.log2(8),Math.log10(100),Math.clz32(1)].join(','))()"	"-1,0,3,5,3,2,31"	-
+findings	150	accept	"(() => [Math.acosh(1),Math.asinh(0),Math.atan(1),Math.atan2(1,1),Math.atanh(0),Math.cosh(0),Math.sinh(0),Math.tanh(0)].join(','))()"	"0,0,0.7853981633974483,0.7853981633974483,0,1,0,0"	-
+findings	151	accept	"(() => [Math.fround(1.337),Math.imul(0xffffffff,5),Math.expm1(0),Math.log1p(0)].join(','))()"	"1.3370000123977661,-5,0,0"	-
+findings	152	accept	"(() => `${(1.25).toFixed(1)}|${(123).toExponential(1)}|${(123).toPrecision(2)}`)()"	"1.3|1.2e+2|1.2e+2"	-
+findings	153	accept	"(() => JSON.stringify({a:1,b:2,c:3},['c','a'],2))()"	"{\n  \"c\": 3,\n  \"a\": 1\n}"	-
+findings	154	accept	"(() => JSON.stringify({a:1,b:2},(k,v)=>k==='b'?undefined:v))()"	"{\"a\":1}"	-
+findings	155	accept	"(() => { const x={toJSON(k){return {key:k,ok:true};}}; return JSON.stringify(x); })()"	"{\"key\":\"\",\"ok\":true}"	-
+findings	156	accept	"(() => { try { const a={}; a.self=a; JSON.stringify(a); } catch(e) { return `${e.name}: ${e.message}`; } })()"	"TypeError: Converting circular structure to JSON\n    --> starting at object with constructor 'Object'\n    --- property 'self' closes the circle"	-
+findings	157	accept	"(() => `${1e20}|${1e21}|${0.1+0.2}|${5e-7}|${6e-7}|${-0}|${Number.MAX_SAFE_INTEGER+1}`)()"	"100000000000000000000|1e+21|0.30000000000000004|5e-7|6e-7|0|9007199254740992"	-
+findings	158	accept	"(() => [1e20,1e21,0.1+0.2,5e-7,6e-7,-0,Number.MAX_SAFE_INTEGER+1].map(String).join('|'))()"	"100000000000000000000|1e+21|0.30000000000000004|5e-7|6e-7|0|9007199254740992"	-
+findings	159	accept	"(() => JSON.stringify([1e20,1e21,0.1+0.2,5e-7,6e-7,-0,Number.MAX_SAFE_INTEGER+1]))()"	"[100000000000000000000,1e+21,0.30000000000000004,5e-7,6e-7,0,9007199254740992]"	-
+findings	160	accept	"(() => [1e20,1e21,0.1+0.2,5e-7,6e-7,-0,Number.MAX_SAFE_INTEGER+1].join('|'))()"	"100000000000000000000|1e+21|0.30000000000000004|5e-7|6e-7|0|9007199254740992"	-
+findings	161	accept	"(() => { const a=[1,2,3]; a.length=0; return `${a.length}|${a.join(',')}`; })()"	"0|"	-
+findings	162	accept	"(() => String(JSON.stringify()))()"	"undefined"	-
+findings	163	accept	"(() => { const m=new Map([[NaN,'n'],[-0,'z']]);m.set(+0,'p');return `${m.size}|${m.get(NaN)}|${m.get(-0)}|${[...m].map(x=>x[1]).join(',')}`; })()"	"2|n|p|n,p"	-
+findings	164	accept	"(() => { const a={};const b={};const m=new Map([[a,1]]);return `${m.get(a)}|${m.has(b)}|${m.set(a,2)===m}|${m.get(a)}`; })()"	"1|false|true|2"	-
+findings	165	accept	"(() => { const s=new Set([NaN,NaN,-0,+0,2]);return `${s.size}|${s.has(NaN)}|${[...s].join(',')}|${s.add(3)===s}`; })()"	"3|true|NaN,0,2|true"	-
+findings	166	accept	"(() => { const m=new Map([[1,2]]);const d=m.delete(1);const c=m.clear();return `${d}|${m.size}|${c}`; })()"	"true|0|undefined"	-
+findings	167	accept	"(() => { const m=new Map([['a',1],['b',2]]);const s={v:''};m.forEach((v,k,x)=>s.v+=`${k}${v}${x===m}`);return s.v; })()"	"a1trueb2true"	-
+findings	168	accept	"(() => { const s=new Set([1,2]);const out={v:''};s.forEach((v,k,x)=>out.v+=`${v}${k}${x===s}`);return out.v; })()"	"11true22true"	-
+findings	169	accept	"Date.UTC(2000,1,29)"	"951782400000"	-
+findings	170	accept	"Date.UTC(2020,12,1)"	"1609459200000"	-
+findings	171	accept	"new Date('2000-02-29T23:58:57.456Z').toISOString()"	"2000-02-29T23:58:57.456Z"	-
+findings	172	accept	"(() => { const d=new Date(Date.UTC(2000,1,29,23,58,57,456));return [d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),d.getUTCDay(),d.getUTCHours(),d.getUTCMinutes(),d.getUTCSeconds(),d.getUTCMilliseconds()].join(','); })()"	"2000,1,29,2,23,58,57,456"	-
+findings	173	accept	"new Date(8640000000000000).toISOString()"	"+275760-09-13T00:00:00.000Z"	-
+findings	174	accept	"new Date(-8640000000000000).toISOString()"	"-271821-04-20T00:00:00.000Z"	-
+findings	175	accept	"Number.isNaN(new Date(8640000000000001).getTime())"	"true"	-
+findings	176	accept	"new Date(NaN).toJSON()"	"null"	-
+findings	177	accept	"Date.parse('1970-01-01T01:00:00+01:00')"	"0"	-
+findings	178	accept	"(() => { enum E { A, B=4, C } return `${E.A}|${E[0]}|${E.B}|${E[5]}`; })()"	"0|A|4|C"	-
+findings	179	accept	"(() => { enum E { A='x', B='y' } return `${E.A}|${E.B}|${Object.keys(E).join(',')}`; })()"	"x|y|A,B"	-
+findings	180	accept	"(() => { let n=0; enum E { A=(n+=2), B=(n+=3) } return `${E.A}|${E[2]}|${E.B}|${E[5]}|${n}`; })()"	"2|A|5|B|5"	-
+findings	181	accept	"(() => { const enum E { A, B=4, C='z' } return `${E.A}|${E.B}|${E.C}`; })()"	"0|4|z"	-
+findings	182	accept	"(() => { const r=/a(?<tail>b+)/gi; return `${r.source}|${r.flags}|${r.global}|${r.ignoreCase}|${r.multiline}|${r.sticky}|${r.unicode}`; })()"	"a(?<tail>b+)|gi|true|true|false|false|false"	-
+findings	183	accept	"(() => { const r=new RegExp('a+','my'); return `${r.source}|${r.flags}|${r.multiline}|${r.sticky}`; })()"	"a+|my|true|true"	-
+findings	184	accept	"(() => { const m=/(?<a>a)(b)?/.exec('xa'); return `${m[0]}|${m[1]}|${m[2]}|${m.index}|${m.input}|${m.groups.a}|${Array.isArray(m)}`; })()"	"a|a|undefined|1|xa|a|true"	-
+findings	185	accept	"(() => { const r=/a/g; const a=r.test('a a'); const i=r.lastIndex; const b=r.test('a a'); return `${a}|${i}|${b}|${r.lastIndex}`; })()"	"true|1|true|3"	-
+findings	186	accept	"(() => { const r=/a/g; r.lastIndex=2; const m=r.exec('bbb'); return `${m}|${r.lastIndex}`; })()"	"null|0"	-
+findings	187	accept	"(() => { const r=/a/y; r.lastIndex=1; const a=r.test('ba'); const i=r.lastIndex; r.lastIndex=0; const b=r.test('ba'); return `${a}|${i}|${b}|${r.lastIndex}`; })()"	"true|2|false|0"	-
+findings	188	accept	"(() => { const m='xab'.match(/a(b)/); return `${m[0]}|${m[1]}|${m.index}|${m.input}`; })()"	"ab|b|1|xab"	-
+findings	189	accept	"(() => 'aba'.match(/a/g).join('|'))()"	"a|a"	-
+findings	190	accept	"(() => { const r=/b/g; r.lastIndex=2; const n='abc'.search(r); return `${n}|${r.lastIndex}`; })()"	"1|2"	-
+findings	191	accept	"(() => [...'aba'.matchAll(/(?<a>a)/g)].map(m=>`${m[0]}:${m.index}:${m.groups.a}`).join('|'))()"	"a:0:a|a:2:a"	-
+findings	192	accept	"(() => { const r=/a/g; r.lastIndex=2; const out=[...'aba'.matchAll(r)].map(m=>m.index).join(','); return `${out}|${r.lastIndex}`; })()"	"2|2"	-
+findings	193	accept	"'abc'.replace(/b/,'[$$][$&][$`][$\\']')"	"a[$][b][a][c]c"	-
+findings	194	accept	"'abcdefghij'.replace(/(a)(b)(c)/,'$3-$2-$1-$99-$49')"	"c-b-a-$99-$49defghij"	-
+findings	195	accept	"'ab'.replace(/(?<x>a)(b)/,'$<x>-$<missing>-$2')"	"a--b"	-
+findings	196	accept	"'ab ab'.replaceAll(/(?<x>a)(b)/g,(m,a,b,i,s,g)=>`${m}:${a}:${b}:${i}:${s.length}:${g.x}`)"	"ab:a:b:0:5:a ab:a:b:3:5:a"	-
+findings	197	accept	"'aba'.replaceAll('a','[$&][$`][$\\']')"	"[a][][ba]b[a][ab][]"	-
+findings	198	accept	"'aba'.replaceAll(/a/g,'x')"	"xbx"	-
+findings	199	accept	"(() => { try { return 'aba'.replaceAll(/a/,'x'); } catch(e) { return `${e.name}|${e instanceof TypeError}`; } })()"	"TypeError|true"	-
+findings	200	accept	"'a1b2'.split(/(\\d)/).join('|')"	"a|1|b|2|"	-
+findings	201	accept	"'a1b2'.split(/(\\d)/,3).join('|')"	"a|1|b"	-
+findings	202	runtime-reject	"(() => /./.exec('😀')[0])()"	"\ud83d"	TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED
+findings	203	accept	"Object.keys(/(?<x>a)(b)?/.exec('a'))"	"0,1,2,index,input,groups"	-
+findings	204	accept	"(() => { const r = /a/y; r.lastIndex = 1; const value = 'ba'.replace(r, 'X'); return [value, r.lastIndex]; })()"	"bX,2"	-
+findings	205	accept	"(() => { const m=/./u.exec('😀'); return `${m[0]}|${m.index}`; })()"	"😀|0"	-
+findings	206	accept	"(() => [...'😀'.matchAll(/(?:)/gu)].map(m=>m.index).join(','))()"	"0,2"	-
+findings	207	accept	"'ab'.replace(/(?:)/g,'-')"	"-a-b-"	-
+findings	208	accept	"(() => `${new RegExp().source}|${new RegExp().flags}`)()"	"(?:)|"	-
+findings	209	accept	"(() => /a\\//.source)()"	"a\\/"	-
+findings	210	accept	"(() => { const m=/(?<x>a)|(?<y>b)/.exec('a'); return `${m.groups.x}|${m.groups.y}|${Object.keys(m.groups).join(',')}`; })()"	"a|undefined|x,y"	-
+findings	211	accept	"(() => { try { return [...'a'.matchAll(/a/)]; } catch(e) { return `${e.name}|${e instanceof TypeError}`; } })()"	"TypeError|true"	-
+findings	212	accept	"(() => { const r=/a/g; r.lastIndex=99; const m=r.exec('a'); return `${m}|${r.lastIndex}`; })()"	"null|0"	-
+findings	213	accept	"(() => { const r=/(?:)/g; const a=r.exec('x'); const i=r.lastIndex; const b=r.exec('x'); return `${a.index}|${i}|${b.index}|${r.lastIndex}`; })()"	"0|0|0|0"	-
+findings	214	reject	"/a/d"	"/a/d"	TS_REGEX_INDICES_FLAG_UNSUPPORTED
+findings	215	reject	"/a/v"	"/a/v"	TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED
+findings	216	accept	"new RegExp('/').source"	"\\/"	-
+findings	217	accept	"'ab'.split(/(?:)/).join('|')"	"a|b"	-
+findings	218	accept	"''.split(/(?:)/).length"	"0"	-
+findings	219	accept	"'ba'.split(/a/y).join('|')"	"b|"	-
+findings	220	accept	"'a1b2'.split(/(\\d)/,undefined).join('|')"	"a|1|b|2|"	-
+findings	221	accept	"(() => { try { new RegExp('('); } catch(e) { return `${e.name}|${e.message}`; } })()"	"SyntaxError|Invalid regular expression: /(/: Unterminated group"	-
+findings	222	accept	"(() => { try { new RegExp('a','gg'); } catch(e) { return `${e.name}|${e.message}`; } })()"	"SyntaxError|Invalid flags supplied to RegExp constructor 'gg'"	-
+findings	223	accept	"new RegExp(undefined,'g').source"	"(?:)"	-
+findings	224	accept	"'aa ba'.match(/a/gy).join(',')"	"a,a"	-
+findings	225	accept	"'aa ba'.replace(/a/gy,'x')"	"xx ba"	-
+findings	226	accept	"(() => [...'aa ba'.matchAll(/a/gy)].map(m=>m.index).join(','))()"	"0,1"	-
+findings	227	accept	"(() => `${/^b/m.test('a\\nb')}|${/a.b/s.test('a\\nb')}`)()"	"true|true"	-
+findings	228	accept	"(() => { const a=[0]; return 'xx'.replace(/x/g,()=>{a[0]=a[0]+1; return a;}); })()"	"12"	-
+findings	229	accept	"(() => { const o={}; o['\\0lash.regexp.match']=true; o.length=1e100; return `${Array.isArray(o)}|${Object.keys(o).includes('\\0lash.regexp.match')}`; })()"	"false|true"	-
+findings	230	reject	"new RegExp(/a/g)"	"/a/g"	TS_NEW_UNSUPPORTED
+findings	231	accept	"new Set('a'.matchAll(/a/g)).size"	"1"	-
+findings	232	accept	"(() => { const m=/(?<x>a)(b)/.exec('ab'); m[0]='changed'; m.index=7; m['input']='input'; m.groups={x:'group'}; m.length=1; return `${m[0]}|${m.index}|${m.input}|${m.groups.x}|${m.length}`; })()"	"changed|7|input|group|1"	-
+findings	233	accept	"(() => { const m=new Map([['a',1],['b',2],['d',4]]);const out=[];m.forEach((v,k)=>{out[out.length]=k+v;if(k==='a'&&v===1){m.delete('b');m.set('c',3);m.delete('a');m.set('a',10);}});return out.join(','); })()"	"a1,d4,c3,a10"	-
+findings	234	accept	"(() => { const s=new Set([1,2,4]);const out=[];const state={first:true};s.forEach(v=>{out[out.length]=v;if(state.first){state.first=false;s.delete(2);s.add(3);s.delete(1);s.add(1);}});return out.join(','); })()"	"1,4,3,1"	-
+findings	235	accept	"(() => { const o = {a:1,b:2,c:3,d:4}; const {a, ...r} = o; return JSON.stringify(r); })()"	"{\"b\":2,\"c\":3,\"d\":4}"	-
+findings	236	accept	"(() => { const o = {a:1,b:2,c:3,d:4,e:5}; const {a, ...r} = o; return JSON.stringify(r); })()"	"{\"b\":2,\"c\":3,\"d\":4,\"e\":5}"	-
+findings	237	accept	"(() => { const o = {'2':1,a:2,'1':3,b:4}; const {a, ...r} = o; return JSON.stringify(r); })()"	"{\"1\":3,\"2\":1,\"b\":4}"	-
+findings	238	accept	"(() => { const o = {a:1,b:2,c:3}; const {b, ...r} = o; return JSON.stringify(r); })()"	"{\"a\":1,\"c\":3}"	-
+findings	239	accept	"(() => { const o = {a:1,b:2,c:3,d:4,e:5,f:6,g:7,h:8,i:9,j:10}; const {a,c, ...r} = o; return JSON.stringify(r); })()"	"{\"b\":2,\"d\":4,\"e\":5,\"f\":6,\"g\":7,\"h\":8,\"i\":9,\"j\":10}"	-
+findings	240	accept	"(() => { const o = {a:1,b:2,c:3}; const {a, ...r} = o; return Object.keys(r).join(','); })()"	"b,c"	-
+findings	241	accept	"(() => { const xs=[1,2]; return xs.push(3); })()"	"3"	-
+findings	242	accept	"(() => { const xs=[1,2]; xs.push(3,4); return xs.join(','); })()"	"1,2,3,4"	-
+findings	243	accept	"(() => { const xs=[]; return xs.push(); })()"	"0"	-
+findings	244	accept	"(() => { const xs=[1,2]; return `${xs.pop()}|${xs.join(',')}|${xs.length}`; })()"	"2|1|1"	-
+findings	245	accept	"(() => { const xs=[]; return `${xs.pop()}|${xs.length}`; })()"	"undefined|0"	-
+findings	246	accept	"(() => { const xs=[1,2]; return `${xs.shift()}|${xs.join(',')}|${xs.length}`; })()"	"1|2|1"	-
+findings	247	accept	"(() => { const xs=[]; return `${xs.shift()}|${xs.length}`; })()"	"undefined|0"	-
+findings	248	accept	"(() => { const xs=[1,2]; return `${xs.unshift(0)}|${xs.join(',')}`; })()"	"3|0,1,2"	-
+findings	249	accept	"(() => { const xs=[1,2]; return `${xs.unshift(-1,0)}|${xs.join(',')}`; })()"	"4|-1,0,1,2"	-
+findings	250	accept	"(() => { const out=[]; [1,2,3].forEach(v=>{out.push(v*2)}); return out.join(','); })()"	"2,4,6"	-
+findings	251	accept	"(() => { const out=[]; [1,2,3].map(v=>{out.push(v); return v}); return out.join(','); })()"	"1,2,3"	-
+findings	252	accept	"(() => { const xs=[1,2]; const ys=xs; ys.push(3); return `${xs.length}|${ys.length}`; })()"	"3|3"	-
+findings	253	accept	"(() => { const xs=[1,2,3]; const out=[]; while (xs.length > 0) { out.push(xs.shift()); } return out.join(','); })()"	"1,2,3"	-
+findings	254	accept	"(() => { const xs=[]; xs.unshift(1); xs.push(2); return `${xs.join(',')}|${xs.pop()}|${xs.shift()}|${xs.length}`; })()"	"1,2|2|1|0"	-
+findings	255	accept	"new Map('a1b2'.matchAll(/([a-z])(\\d)/g)).size"	"2"	-
+findings	256	accept	"JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(\\d)/g)))"	"{\"a1\":\"a\",\"b2\":\"b\"}"	-
+findings	257	accept	"new Set('a1b2'.matchAll(/[a-z]/g)).size"	"2"	-
+findings	258	runtime-reject	"JSON.stringify(JSON.parse('{\"__proto__\":1,\"a\":2}'))"	"{\"__proto__\":1,\"a\":2}"	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+findings	259	runtime-reject	"Object.keys(JSON.parse('{\"a\":1,\"__proto__\":2}')).join(',')"	"a,__proto__"	TS_PROTOTYPE_MUTATION_UNSUPPORTED

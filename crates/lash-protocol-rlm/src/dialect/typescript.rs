@@ -383,7 +383,13 @@ Write one script inside standalone `<typescript>` and `</typescript>` lines. Top
 ```typescript
 interface ProcessDefinition<Input, Output> { readonly name: string }
 interface ProcessHandle<Output> extends PromiseLike<Output> {}
-declare const console: { log(...values: unknown[]): void };
+declare const console: {
+  log(...values: unknown[]): void;
+  warn(...values: unknown[]): void;
+  error(...values: unknown[]): void;
+  info(...values: unknown[]): void;
+  debug(...values: unknown[]): void;
+};
 declare function print(value: unknown): void;
 declare function finish(value: unknown): never;
 declare function sleep(milliseconds: number): Promise<void>;
@@ -399,8 +405,13 @@ Declare durable work only as a top-level `const p = defineProcess({ name: "liter
 
 ### v1 guardrails
 
-Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), and async functions other than `defineProcess.run` (`TS_ASYNC_UNSUPPORTED`) reject. Capturing a `let` in a function rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; capture an immutable value or mutate through a captured object. `for...of` snapshots arrays/strings, so a body that mutates, aliases, or passes the iterable itself rejects as `TS_FOR_OF_UNSUPPORTED`; calls that do not touch the iterable are fine. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. These common shapes also reject, so write them out longhand: destructuring (`TS_DESTRUCTURING_UNSUPPORTED`), spread in arrays or objects (`TS_SPREAD_UNSUPPORTED`), optional chaining (`TS_OPTIONAL_CHAINING_UNSUPPORTED`), `switch` (`TS_SWITCH_UNSUPPORTED`), and regex literals (`TS_REGEXP_UNSUPPORTED`). Static methods: `Object.keys/values/entries/fromEntries/hasOwn/is`, `Array.isArray/of`, `String.fromCodePoint`, `Number.isFinite/isInteger/isNaN/isSafeInteger/parseFloat/parseInt`, `JSON.parse/stringify`, and `Math.abs/acos/asin/cbrt/ceil/cos/exp/floor/log/log10/log2/round/sin/tan/trunc/max/min/pow/sqrt/sign`. Instance methods: `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, `valueOf`. `Date.now()` and `Math.random()` are journaled; `new Date()` rejects as `TS_NEW_UNSUPPORTED`."#;
-        Ok(format!("{host_api}{tools}{host_surface}"))
+Use ordinary modern TypeScript control flow and expression syntax: destructuring (including defaults/rest), optional chaining, spread, compound/update operators, `switch`, `do...while`, `for...in`, `for...of`, parameter defaults/rest, `var`, runtime enums, and const enums are supported. Async functions and arrows are supported wherever every awaited value is a tool call, `sleep`, or a process handle; fan out with `await Promise.all(items.map(async (item) => ...))` or its `Promise.allSettled` form, which runs the callbacks sequentially and durably. Error-family constructors, `new Map`/`Set`/`Date`/`RegExp`, and `new URL(input, base?)` / `new URLSearchParams(init?)` are supported; `instanceof` accepts exactly those built-ins plus `Array` and `Object`. A `URL`'s `searchParams` is one live object, so mutating it updates `href`. RegExp literals and `new RegExp(pattern?, flags?)` accept `gimsuy`; use `exec`/`test` or string `match`/`search`/`replace`/`replaceAll`/`split`, and consume `matchAll` directly with `for...of`, spread, or `Array.from`. Date math is UTC-only; use `getUTC*` and `toISOString()`. Bare conversions and number parsers are available; other iterators must be consumed directly by `for...of`, spread, `Array.from`, `new Map|Set`, or `Object.fromEntries`. `globalThis.name` and top-level bindings address the durable session state.
+
+Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), namespaces (`TS_NAMESPACE_UNSUPPORTED`), decorators (`TS_DECORATOR_UNSUPPORTED`), `for await` (`TS_FOR_OF_UNSUPPORTED`), labels (`TS_LABEL_UNSUPPORTED`), arbitrary `new` (`TS_NEW_UNSUPPORTED`), and arbitrary `instanceof` (`TS_INSTANCEOF_UNSUPPORTED`) reject with a replacement in the diagnostic. RegExp flags `d`/`v` reject as `TS_REGEX_INDICES_FLAG_UNSUPPORTED`/`TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED`; remove `d` and use `match.index` plus capture lengths, or replace `v` with `u` and ordinary Unicode classes. A retained `matchAll` iterator rejects as `TS_REGEX_ITERATOR_POSITION`; spread it immediately. Assigning to a captured `let` rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; mutate a captured object's field instead. `for...of` snapshots its input, so a body that aliases or mutates that input rejects as `TS_FOR_OF_UNSUPPORTED`. Promise chaining and `Promise.resolve`/`reject` reject: use direct `await` and `try/catch`. `Promise.race`/`any` reject pending FIG-1416; use `Promise.all`, `Promise.allSettled`, or durable `sleep`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. `localeCompare` and locale formatting reject; use `(a < b ? -1 : a > b ? 1 : 0)` and `toFixed(digits)`. `Date.now()` and argless `new Date()` use the same journaled clock effect; non-ISO parsing, local-time Date methods, and implicit Date string coercion reject with UTC/ISO repairs. `Math.random()` is journaled.
+
+### Deterministic standard library"#;
+        let stdlib = lash_typescript::render_stdlib_contract();
+        Ok(format!("{host_api}\n\n{stdlib}{tools}{host_surface}"))
     }
 
     fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> &'static str {
@@ -773,6 +784,10 @@ mod tests {
             "{section}"
         );
         assert!(section.contains("TS_FOR_OF_UNSUPPORTED"), "{section}");
+        assert!(
+            section.contains(&lash_typescript::render_stdlib_contract()),
+            "the prompt stdlib inventory must come from the lowering signature table"
+        );
         insta::assert_snapshot!("typescript_execution_section", section);
     }
 

@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::lexer::Span;
 
-use super::super::{ExecutionHost, Instruction, RuntimeError, Value, record_with_capacity};
+use super::super::{
+    ErrorKind, ExecutionHost, Instruction, RuntimeError, Value, record_with_capacity,
+};
 use super::Vm;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -285,10 +287,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     fn runtime_error_value(
-        &self,
+        &mut self,
         error: &RuntimeError,
         instruction_ip: usize,
     ) -> Result<Value, RuntimeError> {
+        if let RuntimeError::UncaughtException { value } = error {
+            return Ok(value.clone());
+        }
+        if matches!(
+            error,
+            RuntimeError::CannotAssignField { actual, .. }
+                | RuntimeError::CannotAssignIndex { actual }
+                if matches!(actual.as_str(), "RegExp" | "Map" | "Set" | "Date")
+                    || ErrorKind::from_name(actual).is_some()
+        ) {
+            return self
+                .heap
+                .allocate_error(ErrorKind::TypeError, error.to_string(), None, None);
+        }
         let mut details = record_with_capacity(3);
         details.insert(
             "kind".to_string(),

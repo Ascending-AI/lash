@@ -7,6 +7,7 @@
 //! unit, so it lives together, away from the per-method dispatch that merely
 //! calls into it.
 
+use super::super::access::prototype_chain_data_key_error;
 use super::super::{javascript_to_string, to_json_direct};
 use super::javascript::{ecma_record_entries, js_stdlib_error};
 use super::*;
@@ -130,6 +131,17 @@ impl<'de> serde::Deserialize<'de> for OrderedJsonValue {
 }
 
 pub(super) fn parse_javascript_json(source: &str) -> Result<Value, RuntimeError> {
+    let value = parse_javascript_json_value(source)?;
+    // Untrusted JSON is one of the two ways a prototype-chain name can arrive
+    // as a data key. It is refused here rather than at the first read, so no
+    // value ever exists that `Object.keys` lists and nothing can read back.
+    if let Some(error) = prototype_chain_data_key_error(&value) {
+        return Err(error);
+    }
+    Ok(value)
+}
+
+fn parse_javascript_json_value(source: &str) -> Result<Value, RuntimeError> {
     match serde_json::from_str::<OrderedJsonValue>(source) {
         Ok(value) => Ok(ordered_json_to_value(value)),
         Err(error) => {

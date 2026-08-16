@@ -17,11 +17,6 @@ rejection_test!(
     "function* f() {}",
     Code::GeneratorUnsupported
 );
-rejection_test!(
-    rejects_async_functions,
-    "async function f() {}",
-    Code::AsyncUnsupported
-);
 rejection_test!(rejects_with, "with ({}) {}", Code::WithUnsupported);
 rejection_test!(rejects_eval, "eval('1');", Code::EvalUnsupported);
 rejection_test!(
@@ -35,9 +30,54 @@ rejection_test!(
     Code::LabelUnsupported
 );
 rejection_test!(
-    rejects_regular_expressions,
-    "const r = /x/;",
-    Code::RegExpUnsupported
+    rejects_regexp_indices_flag,
+    "const r = /x/d;",
+    Code::RegexIndicesFlagUnsupported
+);
+rejection_test!(
+    rejects_regexp_unicode_sets_flag,
+    "const r = /x/v;",
+    Code::RegexUnicodeSetsFlagUnsupported
+);
+
+#[test]
+fn retained_match_all_iterator_has_a_sink_repair() {
+    let error = lash_typescript::validate("const matches = 'a'.matchAll(/a/g);")
+        .expect_err("matchAll must be consumed directly");
+    assert_eq!(error.code, Code::RegexIteratorPosition);
+    assert!(
+        error.message.contains("[...text.matchAll(regexp)]"),
+        "{error}"
+    );
+}
+
+#[test]
+fn match_all_rejects_non_contract_iterable_sinks() {
+    // `new Map`/`Set` and `Object.fromEntries` are contract sinks — the same
+    // five the collection iterators take. What is still refused is a position
+    // that lets the iterator outlive its materialization.
+    for source in [
+        "const it = 'a'.matchAll(/a/g);",
+        "const wrap = { it: 'a'.matchAll(/a/g) };",
+        "function take(x: unknown) { } take('a'.matchAll(/a/g));",
+        "finish('a'.matchAll(/a/g));",
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::RegexIteratorPosition, "{error}");
+    }
+    for source in [
+        "new Set('a'.matchAll(/a/g));",
+        "new Map('a1'.matchAll(/([a-z])(\\d)/g));",
+        "Object.fromEntries('a1'.matchAll(/([a-z])(\\d)/g));",
+    ] {
+        lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
+
+rejection_test!(
+    rejects_non_string_regexp_constructor_literal,
+    "new RegExp(/a/g);",
+    Code::NewUnsupported
 );
 rejection_test!(
     rejects_getters,
@@ -55,7 +95,6 @@ rejection_test!(
     Code::PrototypeMutationUnsupported
 );
 rejection_test!(rejects_this, "const x = this;", Code::ThisUnsupported);
-rejection_test!(rejects_enums, "enum E { A }", Code::EnumUnsupported);
 rejection_test!(
     rejects_namespaces,
     "namespace N {}",
@@ -82,30 +121,12 @@ rejection_test!(
     Code::ImportExportUnsupported
 );
 rejection_test!(rejects_jsx, "const x = <div />;", Code::JsxUnsupported);
-rejection_test!(rejects_var, "var x = 1;", Code::VarUnsupported);
 rejection_test!(rejects_using, "using x = resource;", Code::UsingUnsupported);
 rejection_test!(
-    rejects_array_destructuring,
-    "const [x] = value;",
-    Code::DestructuringUnsupported
+    rejects_arbitrary_new,
+    "new WeakMap();",
+    Code::NewUnsupported
 );
-rejection_test!(
-    rejects_object_destructuring,
-    "const {x} = value;",
-    Code::DestructuringUnsupported
-);
-rejection_test!(
-    rejects_object_spread,
-    "const x = { ...value };",
-    Code::SpreadUnsupported
-);
-rejection_test!(rejects_call_spread, "f(...value);", Code::SpreadUnsupported);
-rejection_test!(
-    rejects_optional_chaining,
-    "const x = value?.field;",
-    Code::OptionalChainingUnsupported
-);
-rejection_test!(rejects_new, "new Date();", Code::NewUnsupported);
 rejection_test!(
     rejects_unsupported_await,
     "await 1;",
@@ -143,39 +164,9 @@ rejection_test!(
     Code::MethodUnsupported
 );
 rejection_test!(
-    rejects_array_from_mapping_callback,
-    "Array.from('ab', value => value.toUpperCase());",
-    Code::MethodUnsupported
-);
-rejection_test!(
-    rejects_missing_runtime_property,
-    "finish(Math.PI);",
-    Code::MethodUnsupported
-);
-rejection_test!(
     rejects_dynamic_process_config,
     "const config = {}; const worker = defineProcess(config);",
     Code::ProcessConfigLiteralRequired
-);
-rejection_test!(
-    rejects_switch,
-    "switch (x) { case 1: break; }",
-    Code::SwitchUnsupported
-);
-rejection_test!(
-    rejects_do_while,
-    "do {} while (false);",
-    Code::DoWhileUnsupported
-);
-rejection_test!(
-    rejects_for_in,
-    "for (const key in value) {}",
-    Code::ForInUnsupported
-);
-rejection_test!(
-    rejects_delete,
-    "delete value.field;",
-    Code::DeleteUnsupported
 );
 rejection_test!(
     rejects_yield,
@@ -187,16 +178,6 @@ rejection_test!(
     "tag`value`;",
     Code::TaggedTemplateUnsupported
 );
-rejection_test!(
-    rejects_computed_properties,
-    "const x = { [key]: 1 };",
-    Code::ComputedPropertyUnsupported
-);
-rejection_test!(
-    rejects_object_methods,
-    "const x = { method() {} };",
-    Code::ObjectMethodUnsupported
-);
 rejection_test!(rejects_super, "super();", Code::SuperUnsupported);
 rejection_test!(
     rejects_meta_properties,
@@ -205,29 +186,9 @@ rejection_test!(
 );
 rejection_test!(rejects_bigint, "const x = 1n;", Code::BigIntUnsupported);
 rejection_test!(
-    rejects_compound_assignment,
-    "x += 1;",
-    Code::AssignmentOperatorUnsupported
-);
-rejection_test!(
     rejects_sequence,
     "const x = (1, 2);",
     Code::SequenceUnsupported
-);
-rejection_test!(
-    rejects_bitwise,
-    "const x = 1 | 2;",
-    Code::BitwiseUnsupported
-);
-rejection_test!(
-    rejects_exponentiation,
-    "const x = 2 ** 3;",
-    Code::ExponentiationUnsupported
-);
-rejection_test!(
-    rejects_in_operator,
-    "const x = 'a' in value;",
-    Code::InOperatorUnsupported
 );
 rejection_test!(
     rejects_instanceof,
@@ -235,17 +196,6 @@ rejection_test!(
     Code::InstanceOfUnsupported
 );
 rejection_test!(rejects_debugger, "debugger;", Code::DebuggerUnsupported);
-rejection_test!(
-    rejects_empty_catch_binding,
-    "try {} catch {}",
-    Code::EmptyCatchBindingUnsupported
-);
-
-rejection_test!(
-    rejects_compound_index_assignment,
-    "const a = [1]; a[0] += 5;",
-    Code::AssignmentOperatorUnsupported
-);
 rejection_test!(
     rejects_reserved_generated_identifier,
     "const __typescript_0_a = 1;",
@@ -256,6 +206,10 @@ rejection_test!(
 fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
     for source in [
         "let x = 0; x++; finish(x);",
+        "let x = 1; const old = x++; finish(old);",
+        "var x = 1; const {a} = {a:2}; finish([x,a]);",
+        "const x = { ...{a:1}, ['b']:2, f(){return 3;} }; finish(x?.a);",
+        "switch(1){case 1: break;} do {} while(false);",
         "for (let i = 0; i < 1; i++) {}",
         "const values = [1]; for (const value of values) { print(value); }",
         "await web.fetch({ url: 'https://example.com' });",
@@ -268,12 +222,6 @@ fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
     }
 }
 
-rejection_test!(
-    rejects_update_in_value_position,
-    "let x = 1; const old = x++;",
-    Code::UpdateUnsupported
-);
-
 /// The register must name exactly what the lowerer accepts.
 ///
 /// The documented inventory was hand-maintained and fell nine methods behind
@@ -285,7 +233,7 @@ fn instance_method_inventory_matches_the_lowerer() {
     let register = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
         .expect("the register is readable");
     let documented = register
-        .split("The shipped instance methods are ")
+        .split("The shipped instance names are ")
         .nth(1)
         .expect("the register names its instance methods")
         .split('.')
@@ -316,23 +264,144 @@ fn instance_method_inventory_matches_the_lowerer() {
         unaccepted.is_empty(),
         "the register documents {unaccepted:?}, which the lowerer does not accept"
     );
-    let claimed = register
-        .split("37 static methods and\n")
-        .nth(1)
-        .and_then(|rest| rest.split(' ').next())
-        .and_then(|count| count.parse::<usize>().ok())
-        .expect("the register states an instance-method count");
-    assert_eq!(
-        claimed,
-        documented.len(),
-        "the stated instance-method count must match the documented list"
-    );
-    for candidate in [
-        "sort", "pop", "push", "shift", "unshift", "reduce", "filter", "flat", "substr",
-    ] {
+    assert_eq!(documented.len(), 89);
+    assert_eq!(lash_typescript::stdlib_name_count(), 149);
+    for candidate in ["substr", "localeCompare", "toLocaleString", "normalize"] {
         assert!(
             !lash_typescript::accepts_instance_method(candidate),
             "`{candidate}` is not documented, so it must not be accepted"
         );
     }
+}
+
+#[test]
+fn base64_globals_keep_the_dom_exception_repair_diagnostic() {
+    for source in ["finish(btoa('x'));", "finish(atob('eA=='));"] {
+        let error = lash_typescript::compile(source)
+            .expect_err("base64 globals remain outside the exact runtime surface");
+        assert_eq!(
+            error.code,
+            lash_typescript::DiagnosticCode::MethodUnsupported
+        );
+        assert!(error.message.contains("DOMException"), "{error}");
+        assert!(error.message.contains("host tool"), "{error}");
+    }
+}
+
+#[test]
+fn retained_stdlib_rejections_carry_exact_repairs() {
+    for (source, repair) in [
+        (
+            "finish('a'.localeCompare('b'));",
+            "a < b ? -1 : a > b ? 1 : 0",
+        ),
+        ("finish((1).toLocaleString());", "toFixed(digits)"),
+        (
+            "finish('e'.normalize());",
+            "Normalize text in a deterministic host tool",
+        ),
+        (
+            "finish(JSON.parse('{}',(k,v)=>v));",
+            "Parse first, then walk the returned value explicitly",
+        ),
+    ] {
+        let error = lash_typescript::validate(source).expect_err("call remains rejected");
+        assert_eq!(error.code.as_str(), "TS_METHOD_UNSUPPORTED", "{source}");
+        assert!(error.to_string().contains(repair), "{source}: {error}");
+    }
+}
+
+#[test]
+fn date_rejections_name_the_deterministic_repair() {
+    for (source, repair) in [
+        ("new Date(0).getFullYear();", "d.getUTCFullYear()"),
+        ("new Date(0).getHours();", "d.getUTCHours()"),
+        ("new Date(0).setUTCSeconds(1);", "new Date(d.getTime() + n)"),
+        ("new Date(0).toDateString();", "toISOString()"),
+        ("new Date(0).toLocaleString();", "d.toISOString()"),
+    ] {
+        let error = lash_typescript::validate(source).expect_err("Date call remains rejected");
+        assert_eq!(error.code, Code::MethodUnsupported, "{source}: {error}");
+        assert!(error.to_string().contains(repair), "{source}: {error}");
+    }
+}
+
+// The prototype chain. The census has claimed
+// `TS_PROTOTYPE_MUTATION_UNSUPPORTED` for `__proto__` and the accessor family
+// since it was written, while the guard matched only the literal name
+// `prototype` — so `o.__proto__ = base` compiled and ran, landing as an
+// ordinary data key that nothing ever reads through. These are the four static
+// shapes; the computed one is only knowable at the access and is covered in
+// `ecma_regressions.rs`.
+rejection_test!(
+    rejects_proto_member_write,
+    "const o: any = {}; o.__proto__ = { x: 1 };",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_proto_member_read,
+    "const o: any = { a: 1 }; finish(o.__proto__);",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_proto_string_property,
+    "const o: any = {}; o['__proto__'] = { x: 1 };",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_proto_object_literal_key,
+    "const o: any = { __proto__: { x: 1 } };",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_proto_quoted_object_literal_key,
+    "const o: any = { '__proto__': { x: 1 } };",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_define_getter,
+    "const o: any = {}; o.__defineGetter__('x', () => 1);",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_define_setter,
+    "const o: any = {}; o.__defineSetter__('x', (v: number) => v);",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_lookup_getter,
+    "const o: any = {}; finish(o.__lookupGetter__('x'));",
+    Code::PrototypeMutationUnsupported
+);
+
+// An unknown static on an ECMA global is a missing method, not a tool call.
+// These reported `TS_AWAIT_REQUIRED` — an instruction to add `await` to a
+// method that does not exist — because the receiver was not on the list of
+// names that can never be a tool module. The diagnostic now names the owner
+// too, so `isError` and `fromBase64` are attributed to `Error` and
+// `Uint8Array` rather than floating free.
+rejection_test!(
+    rejects_unknown_error_static,
+    "finish(Error.isError(new Error('x')));",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_typed_array_static,
+    "finish(Uint8Array.fromBase64('AAA='));",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_reflect_static,
+    "finish(Reflect.ownKeys({}));",
+    Code::MethodUnsupported
+);
+
+#[test]
+fn an_unknown_ecma_static_names_its_owner() {
+    let error = lash_typescript::validate("finish(Error.isError(new Error('x')));")
+        .expect_err("an unknown static must reject");
+    assert!(
+        error.to_string().contains("`Error.isError`"),
+        "the diagnostic must name the owner: {error}"
+    );
 }

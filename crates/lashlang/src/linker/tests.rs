@@ -101,6 +101,101 @@ mod tests {
             .with_language_features(LashlangLanguageFeatures::default().with_label_annotations())
     }
 
+    #[test]
+    fn typescript_lowering_intrinsics_link_through_the_production_registry_path() {
+        let builtin = |name: &str, args: Vec<Expr>| Expr::BuiltinCall {
+            name: name.into(),
+            args,
+        };
+        let function = || {
+            Expr::Function(Box::new(crate::FunctionExpr {
+                name: None,
+                params: vec!["value".into()],
+                captures: Vec::new(),
+                body: Box::new(Expr::Return(Box::new(Expr::Variable("value".into())))),
+            }))
+        };
+        let cases = [
+            (
+                "instanceof",
+                Program::block(vec![Expr::Finish(Box::new(builtin(
+                    "__typescript_heap_instanceof",
+                    vec![
+                        builtin(
+                            "__typescript_heap_new",
+                            vec![Expr::String("TypeError".into())],
+                        ),
+                        Expr::String("TypeError".into()),
+                    ],
+                )))]),
+            ),
+            (
+                "global delete",
+                Program::block(vec![Expr::Finish(Box::new(builtin(
+                    "__typescript_global_delete",
+                    vec![Expr::String("state".into())],
+                )))]),
+            ),
+            (
+                "global presence",
+                Program::block(vec![Expr::Finish(Box::new(builtin(
+                    "__typescript_global_has",
+                    vec![Expr::String("state".into())],
+                )))]),
+            ),
+            (
+                "spread dynamic call",
+                Program::block(vec![Expr::Finish(Box::new(builtin(
+                    "__typescript_call_dynamic",
+                    vec![function(), Expr::List(vec![Expr::Number(1.0)])],
+                )))]),
+            ),
+            (
+                "async map",
+                Program::block(vec![Expr::Finish(Box::new(builtin(
+                    "__typescript_async_map",
+                    vec![Expr::List(vec![Expr::Number(1.0)]), function()],
+                )))]),
+            ),
+            (
+                "default and rest closure metadata",
+                Program::block(vec![Expr::Finish(Box::new(builtin(
+                    "__typescript_closure",
+                    vec![function(), Expr::Number(1.0), Expr::Bool(false)],
+                )))]),
+            ),
+            (
+                "nested global set",
+                Program::block(vec![Expr::Finish(Box::new(builtin(
+                    "__typescript_global_set",
+                    vec![Expr::String("state".into()), Expr::Number(1.0)],
+                )))]),
+            ),
+            (
+                "URI codec globals",
+                Program::block(vec![Expr::Finish(Box::new(Expr::List(
+                    [
+                        "__typescript_encode_uri_component",
+                        "__typescript_decode_uri_component",
+                        "__typescript_encode_uri",
+                        "__typescript_decode_uri",
+                    ]
+                    .into_iter()
+                    .map(|name| builtin(name, vec![Expr::String("value".into())]))
+                    .collect(),
+                )))]),
+            ),
+        ];
+        for (shape, program) in cases {
+            LinkedModule::link_with_dialect(
+                program,
+                full_host_environment(),
+                crate::CompilationDialect::Typescript,
+            )
+            .unwrap_or_else(|error| panic!("{shape} must link: {error}"));
+        }
+    }
+
     fn timer_tick_type_with_field(field: &'static str) -> NamedDataType {
         NamedDataType::object(
             "timer.Tick",
