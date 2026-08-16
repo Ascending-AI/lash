@@ -12,6 +12,7 @@ cleanup() {
   if [ "$created_volume" -eq 1 ]; then
     docker volume rm -f "$trace_volume" >/dev/null 2>&1 || true
   fi
+  lash_gate_cleanup
 }
 trap cleanup EXIT
 

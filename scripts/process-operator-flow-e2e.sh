@@ -44,6 +44,7 @@ container="${LASH_PROCESS_OPERATOR_POSTGRES_CONTAINER:-lash-fig897-${runbook_nam
 cleanup() {
   status=$?
   docker rm -f "$container" >/dev/null 2>&1 || true
+  lash_gate_cleanup
   if [ "$status" -ne 0 ]; then
     echo "${runbook_name} E2E failed with status $status; artifacts: $artifact_dir" >&2
   fi

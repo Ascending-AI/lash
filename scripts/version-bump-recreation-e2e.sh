@@ -27,6 +27,7 @@ test_output="$artifact_dir/version-bump-recreation-e2e.log"
 cleanup() {
   status=$?
   "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  lash_gate_cleanup
   if [ "$status" -ne 0 ]; then
     echo "version-bump recreation E2E failed with status $status; artifacts: $artifact_dir" >&2
   fi
