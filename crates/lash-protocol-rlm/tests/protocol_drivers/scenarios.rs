@@ -192,6 +192,7 @@ fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() 
     let code = "print \"hi\"";
     let cell_text = lashlang_block_with_prose(prose, code);
     let cell_payload = serde_json::json!({
+        "turn_id": "test-turn",
         "decision": "execute_lashlang",
         "termination": "natural",
         "counts": {
@@ -224,6 +225,7 @@ fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() 
         "response cell classification: split text parts",
         vec![text_part(split_open), text_part(split_close)],
         serde_json::json!({
+            "turn_id": "test-turn",
             "decision": "execute_lashlang",
             "termination": "natural",
             "counts": {
@@ -376,6 +378,7 @@ fn rlm_protocol_scenario_finish_required_prose_only_diagnostic_has_clean_counts(
         .expect(RlmProtocolExpectations {
             checkpoints: vec![CheckpointKind::AfterWork],
             llm_extraction_payload: Some(serde_json::json!({
+                "turn_id": "test-turn",
                 "decision": "request_finish",
                 "termination": "finish_required",
                 "counts": {
@@ -402,6 +405,7 @@ fn rlm_protocol_scenario_natural_prose_only_diagnostic_has_clean_counts() {
         .expect(RlmProtocolExpectations {
             checkpoints: vec![CheckpointKind::BeforeCompletion],
             llm_extraction_payload: Some(serde_json::json!({
+                "turn_id": "test-turn",
                 "decision": "finish_prose",
                 "termination": "natural",
                 "counts": {
@@ -433,6 +437,7 @@ fn rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts()
         .expect(RlmProtocolExpectations {
             exec_codes: vec![code],
             llm_extraction_payload: Some(serde_json::json!({
+                "turn_id": "test-turn",
                 "decision": "execute_lashlang",
                 "termination": "natural",
                 "counts": {
@@ -460,6 +465,7 @@ fn rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_
         .expect(RlmProtocolExpectations {
             exec_codes: vec![code],
             llm_extraction_payload: Some(serde_json::json!({
+                "turn_id": "test-turn",
                 "decision": "execute_lashlang",
                 "termination": "natural",
                 "counts": {

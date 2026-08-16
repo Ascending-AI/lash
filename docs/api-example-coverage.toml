@@ -365,7 +365,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:334#let parent: lash::CancellationToken = lash::CancellationToken::new();"
+usage = "examples/docs-snippets/src/embedding_turns.rs:340#let parent: lash::CancellationToken = lash::CancellationToken::new();"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -374,8 +374,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:337#lash::CancellationToken::cancel(&parent);"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:340#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+usage = "examples/docs-snippets/src/embedding_turns.rs:343#lash::CancellationToken::cancel(&parent);"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:346#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
 
 [[api]]
 symbol = "lash::CancellationToken::cancelled"
@@ -383,8 +383,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:347#lash::CancellationToken::cancelled(&child),"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:344#assert!(lash::CancellationToken::is_cancelled(&child));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:353#lash::CancellationToken::cancelled(&child),"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:350#assert!(lash::CancellationToken::is_cancelled(&child));"
 
 [[api]]
 symbol = "lash::CancellationToken::cancelled_owned"
@@ -392,7 +392,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:353#let owned_waiter = tokio::spawn(lash::CancellationToken::cancelled_owned(owned.clone()));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:359#let owned_waiter = tokio::spawn(lash::CancellationToken::cancelled_owned(owned.clone()));"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -401,7 +401,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:335#let child = lash::CancellationToken::child_token(&parent);"
+usage = "examples/docs-snippets/src/embedding_turns.rs:341#let child = lash::CancellationToken::child_token(&parent);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -410,8 +410,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:374#drop(lash::CancellationToken::drop_guard(guarded));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:376#lash::CancellationToken::is_cancelled(&observed_guarded),"
+usage = "examples/docs-snippets/src/embedding_turns.rs:380#drop(lash::CancellationToken::drop_guard(guarded));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:382#lash::CancellationToken::is_cancelled(&observed_guarded),"
 
 [[api]]
 symbol = "lash::CancellationToken::drop_guard_ref"
@@ -419,8 +419,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:381#drop(lash::CancellationToken::drop_guard_ref(&borrowed_guarded));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:383#lash::CancellationToken::is_cancelled(&borrowed_guarded),"
+usage = "examples/docs-snippets/src/embedding_turns.rs:387#drop(lash::CancellationToken::drop_guard_ref(&borrowed_guarded));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:389#lash::CancellationToken::is_cancelled(&borrowed_guarded),"
 
 [[api]]
 symbol = "lash::CancellationToken::is_cancelled"
@@ -428,8 +428,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:344#assert!(lash::CancellationToken::is_cancelled(&child));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:344#assert!(lash::CancellationToken::is_cancelled(&child));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:350#assert!(lash::CancellationToken::is_cancelled(&child));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:350#assert!(lash::CancellationToken::is_cancelled(&child));"
 
 [[api]]
 symbol = "lash::CancellationToken::new"
@@ -437,7 +437,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:334#let parent: lash::CancellationToken = lash::CancellationToken::new();"
+usage = "examples/docs-snippets/src/embedding_turns.rs:340#let parent: lash::CancellationToken = lash::CancellationToken::new();"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -446,8 +446,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:340#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:340#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+usage = "examples/docs-snippets/src/embedding_turns.rs:346#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:346#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -456,8 +456,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:364#tokio::time::timeout(Duration::from_secs(1), owned_work)"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:364#tokio::time::timeout(Duration::from_secs(1), owned_work)"
+usage = "examples/docs-snippets/src/embedding_turns.rs:370#tokio::time::timeout(Duration::from_secs(1), owned_work)"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:370#tokio::time::timeout(Duration::from_secs(1), owned_work)"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -5533,7 +5533,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ChildUsage", "lash_core::TurnEvent::ChildUsage"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:152#TurnEvent::ChildUsage {"
+usage = "examples/docs-snippets/src/embedding_turns.rs:158#TurnEvent::ChildUsage {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5543,7 +5543,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ChildUsage::cumulative", "lash_core::TurnEvent::ChildUsage::cumulative"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:155#cumulative,"
+usage = "examples/docs-snippets/src/embedding_turns.rs:154#cumulative,"
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage::model"
@@ -5579,7 +5579,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ChildUsage::source", "lash_core::TurnEvent::ChildUsage::source"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:153#source,"
+usage = "examples/docs-snippets/src/embedding_turns.rs:159#source,"
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage::usage"
@@ -5725,7 +5725,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::FinalValue", "lash_core::TurnEvent::FinalValue"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:140#TurnEvent::FinalValue { value } => {"
+usage = "examples/docs-snippets/src/embedding_turns.rs:146#TurnEvent::FinalValue { value } => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6115,7 +6115,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolValue", "lash_core::TurnEvent::ToolValue"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:143#TurnEvent::ToolValue { tool_name, value } => {"
+usage = "examples/docs-snippets/src/embedding_turns.rs:149#TurnEvent::ToolValue { tool_name, value } => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6125,7 +6125,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolValue::tool_name", "lash_core::TurnEvent::ToolValue::tool_name"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:143#TurnEvent::ToolValue { tool_name, value } => {"
+usage = "examples/docs-snippets/src/embedding_turns.rs:149#TurnEvent::ToolValue { tool_name, value } => {"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolValue::value"
@@ -70244,7 +70244,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:87#use lash::sync::MutexExt;"
+usage = "examples/docs-snippets/src/embedding_turns.rs:93#use lash::sync::MutexExt;"
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -70253,7 +70253,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:111#let row = self.turn_state.lock_recover().reasoning.clone();"
+usage = "examples/docs-snippets/src/embedding_turns.rs:117#let row = self.turn_state.lock_recover().reasoning.clone();"
 reason = "The published embedding-turn snippet uses poison-recovering host synchronization; its calls are plumbing for the documented projection."
 
 [[api]]

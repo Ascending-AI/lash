@@ -200,8 +200,15 @@ pub(crate) fn assert_no_legacy_llm_extraction_keys(payload: &serde_json::Value) 
     let object = payload.as_object().expect("diagnostic payload object");
     assert_eq!(
         object.len(),
-        3,
-        "llm_extraction payload should only contain decision, termination, and counts"
+        4,
+        "llm_extraction payload should only contain turn_id, decision, termination, and counts"
+    );
+    // The turn id is what scopes the no-progress count across a session whose
+    // active path carries every earlier turn's diagnostics.
+    assert_eq!(
+        object.get("turn_id").and_then(serde_json::Value::as_str),
+        Some("test-turn"),
+        "every extraction diagnostic must name its own turn"
     );
     for key in [
         "assistant_text_chars",

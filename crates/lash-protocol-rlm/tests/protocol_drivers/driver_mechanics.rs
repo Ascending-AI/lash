@@ -1314,3 +1314,121 @@ fn an_unbounded_no_progress_budget_keeps_re_asking() {
         "an explicit opt-out is honored"
     );
 }
+
+/// The count is scoped to one turn, and the driver's history is not.
+///
+/// `DriverContextView::events` is the whole active session path, so a forward
+/// scan that resets only on an error-free execution reads every earlier turn's
+/// extraction diagnostics as this turn's stalls. A turn that stopped on the
+/// no-progress budget leaves exactly that trail, so the session would be
+/// bricked: every later turn gets one provider call and stops.
+#[test]
+fn a_no_progress_stop_does_not_spend_the_next_turns_budget() {
+    let mut first = TurnMachine::new(
+        config_with_no_progress_budget(3),
+        vec![user_message("do the thing")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let stalled = drive_stalling_turn(&mut first, "<lashlang>\nfinish \"ok\"", None, 32);
+    assert_eq!(stalled.llm_calls, 3, "the first turn spends its own budget");
+    let carried = first.events().to_vec();
+    assert!(
+        !carried.is_empty(),
+        "the stopped turn leaves its diagnostics on the session path"
+    );
+
+    // A second turn, on the same session path, with its own turn id.
+    let mut config = config_with_no_progress_budget(3);
+    config.turn_id = "second-turn".to_string();
+    let mut second = TurnMachine::new(
+        config,
+        vec![user_message("try again")],
+        Arc::new(carried),
+        0,
+    );
+    let stalled = drive_stalling_turn(&mut second, "<lashlang>\nfinish \"ok\"", None, 32);
+
+    assert_eq!(
+        stalled.llm_calls, 3,
+        "the second turn gets its whole budget, not the leftovers of the first"
+    );
+}
+
+/// Prose-only turns are the other leak: each commits one extraction diagnostic
+/// and no execution at all, so a chat session accumulates a trail that would
+/// exhaust the next turn's budget on its first stalled attempt.
+#[test]
+fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
+    let prose_turns = 12;
+    let mut carried: Vec<lash_core::SessionHistoryRecord> = Vec::new();
+    for index in 0..prose_turns {
+        let mut config = config_with_no_progress_budget(3);
+        config.turn_id = format!("prose-turn-{index}");
+        let mut machine = TurnMachine::new(
+            config,
+            vec![user_message("just talk to me")],
+            Arc::new(carried.clone()),
+            0,
+        );
+        let mut effects = drain_effects(&mut machine);
+        let llm_id = *find_llm_call(&effects).expect("llm call");
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(rlm_response(vec![text_part(
+                "No code needed; here is the answer.",
+            )])),
+        });
+        effects = drain_effects(&mut machine);
+        let (checkpoint_id, _) = find_checkpoint(&effects).expect("completion checkpoint");
+        machine.handle_response(Response::Checkpoint {
+            id: checkpoint_id,
+            delivery: sansio::CheckpointDelivery::default(),
+        });
+        drain_effects(&mut machine);
+        carried = machine.events().to_vec();
+    }
+    let prose_diagnostics = carried
+        .iter()
+        .filter(|record| match record {
+            lash_core::SessionHistoryRecord::Protocol(event) => matches!(
+                lash_protocol_rlm::decode_rlm_protocol_event(event),
+                Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                    if diagnostic.phase == "llm_extraction"
+            ),
+            _ => false,
+        })
+        .count();
+    assert_eq!(
+        prose_diagnostics, prose_turns,
+        "each prose-only turn leaves one extraction diagnostic behind"
+    );
+
+    let mut config = config_with_no_progress_budget(3);
+    config.turn_id = "code-turn".to_string();
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("now run something")],
+        Arc::new(carried),
+        0,
+    );
+    let mut effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part("<lashlang>\nfinish \"ok\"")])),
+    });
+    effects = drain_effects(&mut machine);
+
+    assert!(
+        find_done(&effects).is_none(),
+        "one stalled attempt after {prose_turns} prose turns is the first, not the {}th",
+        prose_turns + 1
+    );
+    assert!(
+        find_checkpoint(&effects).is_some(),
+        "the turn asks the model again instead of stopping"
+    );
+}

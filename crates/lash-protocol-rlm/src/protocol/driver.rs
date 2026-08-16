@@ -196,6 +196,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
+                        ctx.turn_id(),
                         decision,
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -244,6 +245,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
+                        ctx.turn_id(),
                         "retry_foreign_dialect_cell",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -286,6 +288,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
+                        ctx.turn_id(),
                         "retry_output_limit_prose",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -330,6 +333,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
+                        ctx.turn_id(),
                         "finish_prose",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -364,6 +368,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                 LLM_EXTRACTION_PHASE,
                 llm_extraction_payload(
+                    ctx.turn_id(),
                     "request_finish",
                     &termination,
                     LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -408,6 +413,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
             LLM_EXTRACTION_PHASE,
             llm_extraction_payload(
+                ctx.turn_id(),
                 self.dialect.execution_diagnostic_name(),
                 &termination,
                 LlmExtractionCounts::cell(&assistant_text, &reasoning, &cell),
@@ -744,6 +750,14 @@ pub fn project_conformance_messages_through_rlm_history(
 /// raised commits a trajectory entry carrying that error, and a model that
 /// raises the same error forever has made exactly as much progress as one
 /// whose cell never parsed.
+///
+/// Two consequences of that law are intended, not oversights. A loop that
+/// raises while genuinely converging is bounded the same as one that is not —
+/// the bound is set far above ordinary repair traffic precisely so that
+/// convergence has room, and a repair that needs more attempts than the bound
+/// is indistinguishable from a stall from outside the model. And an attempt
+/// whose cell executed but only printed observations resets nothing here; that
+/// is real work, and bounding *it* is the turn budget's job, not this one's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AttemptProgress {
     /// A cell executed and reported no error.
@@ -752,29 +766,79 @@ enum AttemptProgress {
     Stalled,
 }
 
-/// Consecutive provider attempts, ending at the turn's latest record, that
-/// committed no error-free execution.
+/// Consecutive provider attempts *in this turn*, ending at its latest record,
+/// that committed no error-free execution.
 ///
-/// Derived from the turn's own durable records rather than carried in driver
-/// state: driver state is rebuilt per protocol iteration, and a counter that
-/// survives park, replay, and continuation has to be readable from what the
-/// turn committed. Every attempt appends exactly one `llm_extraction`
-/// diagnostic, so counting those since the last error-free trajectory entry
-/// counts attempts.
+/// Derived from committed records rather than carried in driver state: driver
+/// state is rebuilt per protocol iteration, and a counter that survives park,
+/// replay, and continuation has to be readable from what the turn committed.
+/// Every attempt appends exactly one `llm_extraction` diagnostic, so counting
+/// those since the last error-free trajectory entry counts attempts.
 ///
-/// The pending actions are counted too. Whether this attempt's own diagnostic
-/// is already committed depends on which handler is deciding — the extraction
+/// The scan runs backwards and stops at the first record that is not this
+/// turn's, because the driver's history is the whole active session path. A
+/// forward scan over that path leaks earlier turns into the count: only an
+/// error-free execution resets, and a prose-only chat turn, a finish request, a
+/// turn-limit stop, and a no-progress stop all end their turn leaving a
+/// trailing diagnostic with no execution behind it. Counting those would spend
+/// a fresh turn's whole budget on its first attempt.
+///
+/// Pending actions are counted too. Whether this attempt's own diagnostic is
+/// already committed depends on which handler is deciding — the extraction
 /// paths decide in the same action batch that appends it, the execution path
 /// decides an effect later — and a count that reads only committed history
 /// would be one short on exactly one of them.
 fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAction]) -> usize {
-    fn count(records: &[SessionHistoryRecord], attempts: &mut usize) {
+    let turn_id = ctx.turn_id();
+    let trajectory_prefix = trajectory_entry_turn_prefix(turn_id);
+    let mut attempts = 0;
+    for record in ctx.events().iter().rev() {
+        let SessionHistoryRecord::Protocol(event) = record else {
+            continue;
+        };
+        match crate::projection::decode_rlm_protocol_event(event) {
+            Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                if diagnostic.phase == LLM_EXTRACTION_PHASE =>
+            {
+                if diagnostic.payload.get("turn_id").and_then(Value::as_str) != Some(turn_id) {
+                    break;
+                }
+                attempts += 1;
+            }
+            // A closed turn's own stop record. Nothing before it is this turn's.
+            Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                if diagnostic.phase == NO_PROGRESS_BUDGET_PHASE =>
+            {
+                break;
+            }
+            // An earlier turn's execution, or this turn's last progress point.
+            Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
+                if !entry.id.starts_with(&trajectory_prefix) || entry.error.is_none() =>
+            {
+                break;
+            }
+            _ => {}
+        }
+    }
+    count_pending_attempts(actions, &trajectory_prefix, &mut attempts);
+    attempts
+}
+
+/// Apply the not-yet-committed action batch to `attempts`, forwards, since the
+/// batch is this turn's and is ordered.
+fn count_pending_attempts(actions: &[DriverAction], trajectory_prefix: &str, attempts: &mut usize) {
+    for action in actions {
+        let DriverAction::AppendEvents(records) = action else {
+            continue;
+        };
         for record in records {
             let SessionHistoryRecord::Protocol(event) = record else {
                 continue;
             };
             match crate::projection::decode_rlm_protocol_event(event) {
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) if entry.error.is_none() => {
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
+                    if entry.error.is_none() && entry.id.starts_with(trajectory_prefix) =>
+                {
                     *attempts = 0;
                 }
                 Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
@@ -786,15 +850,10 @@ fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAction]) -> us
             }
         }
     }
+}
 
-    let mut attempts = 0;
-    count(ctx.events(), &mut attempts);
-    for action in actions {
-        if let DriverAction::AppendEvents(records) = action {
-            count(records, &mut attempts);
-        }
-    }
-    attempts
+fn trajectory_entry_turn_prefix(turn_id: &str) -> String {
+    format!("lashlang_step_{turn_id}_")
 }
 
 fn continue_or_stop_after_nonterminal(
@@ -825,6 +884,7 @@ fn continue_or_stop_after_nonterminal(
                 diagnostic_event(
                     NO_PROGRESS_BUDGET_PHASE,
                     serde_json::json!({
+                        "turn_id": ctx.turn_id(),
                         "decision": "stop_no_progress",
                         "consecutive_attempts": attempts,
                         "max_attempts": budget.max_attempts(),
@@ -1184,12 +1244,23 @@ fn reasoning_diagnostic_chars(reasoning: &[RlmReasoningPart]) -> usize {
         .sum()
 }
 
+/// The per-attempt extraction diagnostic.
+///
+/// `turn_id` is what scopes the no-progress count. The driver's view of history
+/// is the whole active session path, not one turn, so a diagnostic that cannot
+/// name its own turn cannot be told apart from a previous turn's tail — and
+/// several terminal shapes (a prose-only chat turn, a finish request, a
+/// turn-limit stop) leave a trailing diagnostic with no execution after it.
+/// Diagnostics written before this field existed name no turn and are read as
+/// belonging to an earlier one, which under-counts rather than mis-stops.
 fn llm_extraction_payload(
+    turn_id: &str,
     decision: &str,
     termination: &RlmTermination,
     counts: LlmExtractionCounts,
 ) -> Value {
     serde_json::json!({
+        "turn_id": turn_id,
         "decision": decision,
         "termination": termination_diagnostic_name(termination),
         "counts": {
