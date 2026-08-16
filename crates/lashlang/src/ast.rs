@@ -213,6 +213,19 @@ pub enum Expr {
         name: AstString,
         args: Vec<Expr>,
     },
+    /// A user-defined function value. This node is AST-only; the parser never
+    /// produces it. Captures are copied when the closure is created.
+    Function(Box<FunctionExpr>),
+    /// Calls a user-defined function value.
+    Call {
+        function: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    /// AST-only map intrinsic used to exercise builtin-to-VM callbacks.
+    Map {
+        items: Box<Expr>,
+        function: Box<Expr>,
+    },
     Field {
         target: Box<Expr>,
         field: AstString,
@@ -231,6 +244,17 @@ pub enum Expr {
         right: Box<Expr>,
     },
     TypeLiteral(Box<TypeExpr>),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FunctionExpr {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<AstString>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<AstString>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captures: Vec<AstString>,
+    pub body: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -328,6 +352,15 @@ impl Expr {
             | Expr::Unary { expr, .. } => buffer.push(expr),
             Expr::Finish(expr) => buffer.push(expr),
             Expr::BuiltinCall { args, .. } => buffer.extend(args.iter()),
+            Expr::Function(function) => buffer.push(&function.body),
+            Expr::Call { function, args } => {
+                buffer.push(function);
+                buffer.extend(args.iter());
+            }
+            Expr::Map { items, function } => {
+                buffer.push(items);
+                buffer.push(function);
+            }
             Expr::Field { target, .. } => buffer.push(target),
             Expr::Index { target, index } => {
                 buffer.push(target);
@@ -505,6 +538,23 @@ where
                 .into_iter()
                 .map(|expr| folder.fold_expr(expr))
                 .collect(),
+        },
+        Expr::Function(function) => Expr::Function(Box::new(FunctionExpr {
+            name: function.name,
+            params: function.params,
+            captures: function.captures,
+            body: Box::new(folder.fold_expr(*function.body)),
+        })),
+        Expr::Call { function, args } => Expr::Call {
+            function: Box::new(folder.fold_expr(*function)),
+            args: args
+                .into_iter()
+                .map(|expr| folder.fold_expr(expr))
+                .collect(),
+        },
+        Expr::Map { items, function } => Expr::Map {
+            items: Box::new(folder.fold_expr(*items)),
+            function: Box::new(folder.fold_expr(*function)),
         },
         Expr::Field { target, field } => Expr::Field {
             target: Box::new(folder.fold_expr(*target)),

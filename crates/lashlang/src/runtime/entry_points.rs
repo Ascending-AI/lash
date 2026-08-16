@@ -31,6 +31,14 @@ pub fn compile(source: &str) -> Result<CompiledProgram, crate::parser::ParseErro
     crate::parse(source).map(|program| compile_program_internal(&program))
 }
 
+/// Compiles a program assembled through the AST API.
+///
+/// This is the entry point for AST-only nodes such as user functions, calls,
+/// and callback-driven maps, which intentionally have no source syntax.
+pub fn compile_ast(program: &Program) -> CompiledProgram {
+    compile_program_internal(program)
+}
+
 pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
     let (chunk, compile_stats) = Compiler::compile_program(program);
     CompiledProgram {
@@ -192,6 +200,7 @@ pub(crate) async fn execute_compiled_internal<H: ExecutionHost>(
     state: &mut State,
     host: &H,
 ) -> Result<ExecutionOutcome, RuntimeError> {
+    state.validate_program(program)?;
     let projected = host.projected_bindings();
     if let Some(mut scratch) = host.take_scratch() {
         let result =

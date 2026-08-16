@@ -43,6 +43,11 @@ pub fn workflow_graph_from_source_with_facets(
     src: &str,
     environment: Option<&LashlangHostEnvironment>,
 ) -> Result<WorkflowGraph, WorkflowGraphBuildError> {
+    // The workflow graph remains a source-language projection. AST-only
+    // Function/Call/Map nodes cannot enter this projector: both input paths
+    // parse source, and canonicalization rejects those nodes with
+    // NonSourceableExpression. The projector's generic expression arms are
+    // therefore intentionally not widened for FIG-1302's private AST dialect.
     let parsed = parse(src)?;
     let canonical = canonical_program_source(&parsed)?;
     let canonical_program = parse(&canonical)?;

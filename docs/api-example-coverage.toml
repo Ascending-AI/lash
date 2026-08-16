@@ -11,6 +11,51 @@
 # rustc-mir evidence resolves fluent method owners before recording the source line.
 schema_version = 1
 
+# AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
+# their explicit dispositions here so that "not host-facing" never becomes
+# "not inventoried".
+[[low_level_api]]
+symbol = "lashlang::FunctionExpr"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:33#Expr::Function(Box::new(FunctionExpr {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:67#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
+
+[[low_level_api]]
+symbol = "lashlang::Expr::Function"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:33#Expr::Function(Box::new(FunctionExpr {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:67#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
+
+[[low_level_api]]
+symbol = "lashlang::Expr::Call"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:75#Expr::Finish(Box::new(Expr::Call {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:86#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
+
+[[low_level_api]]
+symbol = "lashlang::Expr::Map"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:56#Expr::Finish(Box::new(Expr::Map {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:67#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
+
+[[low_level_api]]
+symbol = "lashlang::DEFAULT_MAX_VM_FRAME_DEPTH"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:87#lashlang::DEFAULT_MAX_VM_FRAME_DEPTH.get()"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:87#assert_eq!(lashlang::DEFAULT_MAX_VM_FRAME_DEPTH.get(), 1_024);"
+
+[[low_level_api]]
+symbol = "lashlang::compile_ast"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:61#let compiled = compile_ast(&program);"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:67#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
+
+[[low_level_api]]
+symbol = "lashlang::VmContinuation::frame_depth"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:86#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:86#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
+
 [[api]]
 symbol = "lash::AdvancedToolAdmin"
 kind = "struct"

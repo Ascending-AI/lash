@@ -1,3 +1,4 @@
+use super::vm::{VM_CONTINUATION_FORMAT_VERSION, VmFrameReturnContinuation};
 use super::*;
 use crate::ast::{Expr, Program};
 use lash_sansio::sync::{LockResultExt, MutexExt};
@@ -936,6 +937,12 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::WrapHostDescriptor(type_name) => {
             format!("wrap_host_descriptor {}", name_text(chunk, type_name))
         }
+        Instruction::MakeClosure { function, captures } => {
+            format!("make_closure {function} captures={captures}")
+        }
+        Instruction::Call { argc } => format!("call argc={argc}"),
+        Instruction::Map => "map_callback".to_string(),
+        Instruction::Return => "return".to_string(),
     }
 }
 
@@ -996,7 +1003,7 @@ fn format_template_snapshot(chunk: &Chunk, index: usize) -> String {
 }
 
 fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
-    let argc = op.argc();
+    let argc = op.fixed_argc().unwrap_or(0);
     match op {
         IntrinsicOp::Len => format!("intrinsic len argc={argc}"),
         IntrinsicOp::Empty => format!("intrinsic empty argc={argc}"),
@@ -1240,3 +1247,4 @@ include!("tests/projection_cases.rs");
 include!("tests/async_and_cache_cases.rs");
 include!("tests/continuation_cases.rs");
 include!("tests/continuation_wire_cases.rs");
+include!("tests/function_cases.rs");

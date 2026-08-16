@@ -11,15 +11,11 @@
 
 use super::Instruction;
 use crate::ast::BinaryOp;
-use crate::runtime::{Chunk, IntrinsicOp};
+use crate::runtime::{Chunk, IntrinsicOp, RuntimeError};
 
 /// How much of the operand stack an instruction needs exported to tree values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum StackExport {
-    /// Export every operand. The conservative default for opcodes that are not
-    /// declared below, and for opcodes that read the stack by a length the plan
-    /// cannot see.
-    All,
     /// Export the top `n` operands and leave anything deeper alone.
     ///
     /// Leaving a reference deeper on the stack is what keeps an accumulator
@@ -39,13 +35,6 @@ pub(super) enum SlotExport {
     None,
     Read(usize),
     Mutate(usize),
-    /// Export every slot read-only. The conservative default, for the same
-    /// reason `StackExport::All` is: an opcode nobody declared may read any
-    /// slot, and a heap reference reaching a boundary that expects a tree is
-    /// how `format("{0}", xs)` came to take the process down. Being
-    /// conservative on one axis and permissive on the other would have let the
-    /// next undeclared slot reader reproduce it quietly.
-    All,
 }
 
 /// Everything one instruction needs from heap-backed state before it runs.
@@ -90,11 +79,14 @@ impl InstructionHeapPlan {
 pub(super) fn instruction_heap_plan(
     instruction: Instruction,
     chunk: &Chunk,
-) -> InstructionHeapPlan {
+) -> Result<InstructionHeapPlan, RuntimeError> {
     use Instruction as I;
-    use StackExport::{All, Top};
+    use StackExport::Top;
 
-    match instruction {
+    // Keep this match exhaustive. Compile-time failure is the guard that makes
+    // every new opcode author declare its heap boundary explicitly; a catch-all
+    // would silently restore the old conservative default and hide omissions.
+    let plan = match instruction {
         // Isolation and in-place container mutation consume heap references as
         // they are: exporting them would be the copy these opcodes exist to
         // avoid.
@@ -102,7 +94,15 @@ pub(super) fn instruction_heap_plan(
         | I::DeepCopyLoopBinding(_)
         | I::AppendAssign(_)
         | I::ListAppend
-        | I::Intrinsic(IntrinsicOp::PushAssign(_)) => InstructionHeapPlan::heap_native(),
+        | I::Intrinsic(IntrinsicOp::PushAssign(_))
+        | I::MakeClosure { .. }
+        | I::Call { .. }
+        | I::Map
+        | I::Return
+        | I::BuildTuple(_)
+        | I::BuildList(_)
+        | I::BuildRecord(_) => InstructionHeapPlan::heap_native(),
+        I::StoreName(_) => InstructionHeapPlan::heap_native(),
         // These export the operands they need through the heap themselves.
         I::AddAssignIndexNumber { .. } | I::AddAssignIndexSlotNumber { .. } => {
             InstructionHeapPlan::heap_native()
@@ -130,7 +130,6 @@ pub(super) fn instruction_heap_plan(
         | I::JumpIfTrue(_)
         | I::Unary(_)
         | I::Pop
-        | I::StoreName(_)
         | I::BeginIter(_) => InstructionHeapPlan::stack(Top(1)),
 
         // Two-operand opcodes.
@@ -140,9 +139,31 @@ pub(super) fn instruction_heap_plan(
 
         // Opcodes whose operand count is carried in the instruction, or in the
         // table the instruction points at.
-        I::BuildTuple(len) | I::BuildList(len) => InstructionHeapPlan::stack(Top(len)),
-        I::BuildRecord(keys) => InstructionHeapPlan::stack(Top(chunk.key_lists[keys].len())),
         I::BeginRangeIter { argc, .. } => InstructionHeapPlan::stack(Top(argc)),
+        I::ResourceCall { argc, .. } | I::ResourceCallUnwrap { argc, .. } => {
+            InstructionHeapPlan::stack(Top(argc + 1))
+        }
+        I::ResourceOperationBatch(batch) => InstructionHeapPlan::stack(Top(chunk
+            .resource_operation_batches[batch]
+            .stack_value_count)),
+        I::StartProcess { keys, .. } => {
+            InstructionHeapPlan::stack(Top(chunk.key_lists[keys].len()))
+        }
+
+        I::Print
+        | I::Finish
+        | I::SleepFor
+        | I::SleepUntil
+        | I::AwaitHandle
+        | I::AwaitHandleUnwrap
+        | I::CancelHandle
+        | I::WrapTypeLiteral
+        | I::WrapHostDescriptor(_)
+        | I::ProcessYield
+        | I::ProcessWake
+        | I::ProcessFail => InstructionHeapPlan::stack(Top(1)),
+        I::ProcessWaitSignal { .. } => InstructionHeapPlan::stack(Top(0)),
+        I::ProcessSignalRun { .. } => InstructionHeapPlan::stack(Top(2)),
 
         // Slot readers. The fused format opcodes belong here: they read a slot
         // and stringify it, so a heap reference in that slot has to be exported
@@ -179,56 +200,46 @@ pub(super) fn instruction_heap_plan(
         }
         I::AddAssignSlot { .. } => InstructionHeapPlan::heap_native(),
 
+        I::Intrinsic(IntrinsicOp::FormatCompiled(template)) => {
+            InstructionHeapPlan::stack(Top(chunk.format_templates[template].argc))
+        }
+
         // Every remaining intrinsic reads exactly its argument count from the
         // stack — that same count is what dispatch uses to find them — and
         // touches no slot. The three that do carry a slot are declared above.
-        I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op.argc())),
-
-        // Everything else exports the whole stack and every slot: effects hand
-        // values to the host, and an opcode added later lands here until
-        // someone declares it.
-        _ => InstructionHeapPlan {
-            stack: All,
-            slots: SlotExport::All,
-        },
-    }
+        I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op.fixed_argc().ok_or(
+            RuntimeError::ContextDependentIntrinsicMisdispatch {
+                context: "heap planning",
+            },
+        )?)),
+    };
+    Ok(plan)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Which opcodes fall to the conservative default.
-    ///
-    /// The default exports the whole stack and every slot, which is correct but
-    /// costs more than a declaration. This test names the set so growing it is a
-    /// deliberate act: an opcode that lands here because nobody declared it will
-    /// show up as a change to this list, and an opcode that is expensive to
-    /// leave here can be seen before it is measured.
     #[test]
-    fn only_effect_shaped_opcodes_use_the_conservative_default() {
+    fn function_opcodes_keep_closure_references_inside_the_vm() {
         use crate::runtime::Instruction as I;
         let program = crate::compile("finish 0").expect("a trivial program compiles");
         let chunk = &program.chunk;
-        let undeclared = [
-            I::Print,
-            I::Finish,
-            I::SleepFor,
-            I::SleepUntil,
-            I::AwaitHandle,
-            I::AwaitHandleUnwrap,
-            I::CancelHandle,
-            I::WrapTypeLiteral,
-            I::ProcessYield,
-            I::ProcessWake,
-            I::ProcessFail,
+        let function_opcodes = [
+            I::MakeClosure {
+                function: 0,
+                captures: 1,
+            },
+            I::Call { argc: 1 },
+            I::Map,
+            I::Return,
         ];
-        for (index, instruction) in undeclared.into_iter().enumerate() {
-            let plan = instruction_heap_plan(instruction, chunk);
+        for (index, instruction) in function_opcodes.into_iter().enumerate() {
+            let plan = instruction_heap_plan(instruction, chunk).expect("function heap plan");
             assert_eq!(
                 (plan.stack, plan.slots),
-                (StackExport::All, SlotExport::All),
-                "undeclared opcode {index} should use the conservative default"
+                (StackExport::Top(0), SlotExport::None),
+                "function opcode {index} must not export a closure"
             );
         }
     }

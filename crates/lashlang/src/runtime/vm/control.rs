@@ -227,7 +227,22 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             self.heap_initialized = true;
         }
-        while let Some(instruction) = self.chunk.code.get(self.ip).copied() {
+        while self.active_function.is_some() || self.ip < self.chunk.root_code_len {
+            if let Some(function) = self.active_function
+                && self.ip == self.chunk.functions[function].end_ip
+            {
+                if let Err(error) = self.return_from_function() {
+                    return Err(VmTrap {
+                        error,
+                        instruction_ip: self.ip.saturating_sub(1),
+                        span: None,
+                    });
+                }
+                continue;
+            }
+            let Some(instruction) = self.chunk.code.get(self.ip).copied() else {
+                break;
+            };
             let instruction_ip = self.ip;
             if let Err(error) = self.materialize_instruction_operands(instruction) {
                 return Err(VmTrap {
@@ -261,6 +276,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let result = match step {
                 Ok(VmStep::Continue) => Ok(None),
                 Ok(VmStep::Effect(effect)) => {
+                    if self
+                        .frames
+                        .iter()
+                        .any(|frame| matches!(frame.return_target, super::ReturnTarget::Map(_)))
+                    {
+                        return Err(VmTrap {
+                            error: RuntimeError::EffectInBuiltinCallback,
+                            instruction_ip,
+                            span: None,
+                        });
+                    }
                     self.active_execution_elapsed += active_started.elapsed();
                     if let Err(error) = self.enforce_execution_bounds() {
                         return Err(VmTrap {
@@ -402,7 +428,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         instruction: super::Instruction,
     ) -> Result<(), RuntimeError> {
-        let plan = instruction_heap_plan(instruction, self.chunk);
+        let plan = instruction_heap_plan(instruction, self.chunk)?;
         match plan.stack {
             StackExport::Top(window) => {
                 let start = self.stack.len().saturating_sub(window);
@@ -411,21 +437,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     self.stack[index] = exported;
                 }
             }
-            StackExport::All => {
-                for value in &mut self.stack {
-                    *value = self.heap.export_for_instruction(value)?;
-                }
-            }
         }
         match plan.slots {
             SlotExport::None => {}
             SlotExport::Read(slot) => self.materialize_slot(slot)?,
             SlotExport::Mutate(slot) => self.materialize_mutable_slot(slot)?,
-            SlotExport::All => {
-                for slot in 0..self.slots.values.len() {
-                    self.materialize_slot(slot)?;
-                }
-            }
         }
         Ok(())
     }
@@ -441,36 +457,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) {
             *value = self.heap.export_for_mutation(value)?;
         }
-        Ok(())
-    }
-
-    pub(super) fn materialize_vm_state(&mut self) -> Result<(), RuntimeError> {
-        for value in &mut self.stack {
-            *value = self.heap.export_for_instruction(value)?;
-        }
-        if let Some(value) = &mut self.last_value {
-            *value = self.heap.export_for_instruction(value)?;
-        }
-        for value in self.slots.values.iter_mut().flatten() {
-            *value = self.heap.export_for_instruction(value)?;
-        }
-        for entry in &mut self.slots.extras.entries {
-            entry.value = self.heap.export_for_instruction(&entry.value)?;
-        }
-        for iterator in &mut self.iter_stack {
-            if let super::IterCursor::List { values, .. } = &mut iterator.cursor {
-                let materialized = values
-                    .iter()
-                    .map(|value| self.heap.export_for_instruction(value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                *values = materialized.into();
-            }
-            if let Some(value) = &mut iterator.restore.previous {
-                *value = self.heap.export_for_instruction(value)?;
-            }
-            iterator.heapified = false;
-        }
-        self.extras_heapified = false;
         Ok(())
     }
 
@@ -603,16 +589,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn heap_roots(&self) -> Vec<Value> {
-        let mut roots = self.stack.clone();
-        roots.extend(self.last_value.iter().cloned());
-        roots.extend(self.slots.values.iter().flatten().cloned());
-        roots.extend(self.slots.extras.values().cloned());
-        for iterator in &self.iter_stack {
-            if let super::IterCursor::List { values, .. } = &iterator.cursor {
-                roots.push(Value::List(values.clone()));
-            }
-            roots.extend(iterator.restore.previous.iter().cloned());
-        }
+        let mut roots = Vec::new();
+        super::visit_vm_roots(self, &mut roots);
         roots
     }
 }

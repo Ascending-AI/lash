@@ -257,6 +257,41 @@ impl Compiler {
             Expr::BuiltinCall { name, args } => {
                 self.emit_builtin_call(name, args);
             }
+            Expr::Function(function) => {
+                let function_index = self.pending_functions.len();
+                let cloned = (**function).clone();
+                self.copy_expression_metadata(&function.body, &cloned.body);
+                self.pending_functions.push(Some(cloned));
+                for capture in &function.captures {
+                    let slot = self.push_slot(capture);
+                    self.code.push(Instruction::LoadName(slot));
+                    // The lashlang AST lowering chooses by-value capture. The
+                    // VM opcode itself merely stores the values it receives,
+                    // so a later dialect may intentionally pass references.
+                    self.code.push(Instruction::DeepCopy);
+                }
+                self.code.push(Instruction::MakeClosure {
+                    function: function_index,
+                    captures: function.captures.len(),
+                });
+            }
+            Expr::Call { function, args } => {
+                self.compile_expr(function);
+                for arg in args {
+                    self.compile_expr(arg);
+                    self.code.push(Instruction::DeepCopy);
+                }
+                let instruction = self.code.len();
+                self.code.push(Instruction::Call { argc: args.len() });
+                if let Some(site) = self.lashlang_execution_site(expr, "call", "function call") {
+                    self.mark_lashlang_execution_site(instruction, site);
+                }
+            }
+            Expr::Map { items, function } => {
+                self.compile_expr(items);
+                self.compile_expr(function);
+                self.code.push(Instruction::Map);
+            }
             Expr::Field { target, field } => {
                 if let Expr::Variable(name) = target.as_ref() {
                     let slot = self.push_slot(name);

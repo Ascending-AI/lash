@@ -485,6 +485,15 @@ impl<'a> SourceFormatter<'a> {
                     args.join(", ")
                 ))
             }
+            Expr::Function(_) => Err(CanonicalSourceError::NonSourceableExpression {
+                kind: "AST-only function",
+            }),
+            Expr::Call { .. } => Err(CanonicalSourceError::NonSourceableExpression {
+                kind: "AST-only function call",
+            }),
+            Expr::Map { .. } => Err(CanonicalSourceError::NonSourceableExpression {
+                kind: "AST-only function map",
+            }),
             Expr::Field { target, field } => Ok(format!(
                 "{}.{}",
                 self.postfix_target_source(target)?,

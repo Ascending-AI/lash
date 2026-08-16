@@ -1,10 +1,10 @@
 use compact_str::ToCompactString;
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, HostDescriptor, ImageValue,
-    LASH_PROCESS_NAME_KEY, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
-    LinkedModule, ListValue, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
-    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr,
-    TypeField, Value, from_json,
+    AbilityOp, AbilityResult, AssignTarget, BinaryOp, ExecutionHost, ExecutionHostError, Expr,
+    FunctionExpr, HostDescriptor, ImageValue, LASH_PROCESS_NAME_KEY, LashlangAbilities,
+    LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue, Program,
+    ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
+    ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr, TypeField, Value, from_json,
 };
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -150,6 +150,210 @@ impl fmt::Display for Scenario {
             Self::HeapShallowChainMutation => "heap_shallow_chain_mutation",
             Self::HeapDeepChainMutation24 => "heap_deep_chain_mutation_24",
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
+pub enum FunctionScenario {
+    NonCapturingCall,
+    CapturedCall,
+    DeepRecursion,
+    Map64,
+    Map256,
+    Map1024,
+    FrameHeavy,
+}
+
+#[allow(dead_code)]
+impl FunctionScenario {
+    pub const ALL: &'static [Self] = &[
+        Self::NonCapturingCall,
+        Self::CapturedCall,
+        Self::DeepRecursion,
+        Self::Map64,
+        Self::Map256,
+        Self::Map1024,
+        Self::FrameHeavy,
+    ];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "function_call_noncapturing" => Self::NonCapturingCall,
+            "function_call_captured" => Self::CapturedCall,
+            "function_deep_recursion" => Self::DeepRecursion,
+            "function_map_64" => Self::Map64,
+            "function_map_256" => Self::Map256,
+            "function_map_1024" => Self::Map1024,
+            "function_frame_heavy" => Self::FrameHeavy,
+            _ => return None,
+        })
+    }
+}
+
+impl fmt::Display for FunctionScenario {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NonCapturingCall => "function_call_noncapturing",
+            Self::CapturedCall => "function_call_captured",
+            Self::DeepRecursion => "function_deep_recursion",
+            Self::Map64 => "function_map_64",
+            Self::Map256 => "function_map_256",
+            Self::Map1024 => "function_map_1024",
+            Self::FrameHeavy => "function_frame_heavy",
+        })
+    }
+}
+
+#[allow(dead_code)]
+fn ast_variable(name: &str) -> Expr {
+    Expr::Variable(name.into())
+}
+
+#[allow(dead_code)]
+fn ast_assign(name: &str, expr: Expr) -> Expr {
+    Expr::Assign {
+        target: AssignTarget::variable(name.into()),
+        expr: Box::new(expr),
+    }
+}
+
+#[allow(dead_code)]
+fn ast_call(function: Expr, args: Vec<Expr>) -> Expr {
+    Expr::Call {
+        function: Box::new(function),
+        args,
+    }
+}
+
+#[allow(dead_code)]
+fn ast_function(name: Option<&str>, params: &[&str], captures: &[&str], body: Expr) -> Expr {
+    Expr::Function(Box::new(FunctionExpr {
+        name: name.map(Into::into),
+        params: params.iter().map(|name| (*name).into()).collect(),
+        captures: captures.iter().map(|name| (*name).into()).collect(),
+        body: Box::new(body),
+    }))
+}
+
+/// Builds the AST-only programs that guard function, frame, and map costs.
+#[allow(dead_code)]
+pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
+    match scenario {
+        FunctionScenario::NonCapturingCall => Program::block(vec![
+            ast_assign(
+                "increment",
+                ast_function(
+                    None,
+                    &["value"],
+                    &[],
+                    Expr::Binary {
+                        left: Box::new(ast_variable("value")),
+                        op: BinaryOp::Add,
+                        right: Box::new(Expr::Number(1.0)),
+                    },
+                ),
+            ),
+            Expr::Finish(Box::new(ast_call(
+                ast_variable("increment"),
+                vec![Expr::Number(41.0)],
+            ))),
+        ]),
+        FunctionScenario::CapturedCall => Program::block(vec![
+            ast_assign("offset", Expr::List(vec![Expr::Number(1.0)])),
+            ast_assign(
+                "increment",
+                ast_function(
+                    None,
+                    &["value"],
+                    &["offset"],
+                    Expr::Binary {
+                        left: Box::new(ast_variable("value")),
+                        op: BinaryOp::Add,
+                        right: Box::new(Expr::Index {
+                            target: Box::new(ast_variable("offset")),
+                            index: Box::new(Expr::Number(0.0)),
+                        }),
+                    },
+                ),
+            ),
+            Expr::Finish(Box::new(ast_call(
+                ast_variable("increment"),
+                vec![Expr::Number(41.0)],
+            ))),
+        ]),
+        FunctionScenario::DeepRecursion | FunctionScenario::FrameHeavy => {
+            let terminal = if matches!(scenario, FunctionScenario::FrameHeavy) {
+                Expr::Yield(Box::new(Expr::List(vec![Expr::Number(0.0); 8])))
+            } else {
+                Expr::Number(0.0)
+            };
+            let recurse = ast_call(
+                ast_variable("countdown"),
+                vec![Expr::Binary {
+                    left: Box::new(ast_variable("n")),
+                    op: BinaryOp::Subtract,
+                    right: Box::new(Expr::Number(1.0)),
+                }],
+            );
+            let depth = if matches!(scenario, FunctionScenario::FrameHeavy) {
+                512.0
+            } else {
+                768.0
+            };
+            Program::block(vec![
+                ast_assign(
+                    "countdown",
+                    ast_function(
+                        Some("countdown"),
+                        &["n"],
+                        &[],
+                        Expr::If {
+                            condition: Box::new(Expr::Binary {
+                                left: Box::new(ast_variable("n")),
+                                op: BinaryOp::LessEqual,
+                                right: Box::new(Expr::Number(0.0)),
+                            }),
+                            then_block: Box::new(terminal),
+                            else_block: Box::new(recurse),
+                        },
+                    ),
+                ),
+                Expr::Finish(Box::new(ast_call(
+                    ast_variable("countdown"),
+                    vec![Expr::Number(depth)],
+                ))),
+            ])
+        }
+        FunctionScenario::Map64 | FunctionScenario::Map256 | FunctionScenario::Map1024 => {
+            let size = match scenario {
+                FunctionScenario::Map64 => 64,
+                FunctionScenario::Map256 => 256,
+                FunctionScenario::Map1024 => 1_024,
+                _ => unreachable!("map arm only receives map scenarios"),
+            };
+            Program::block(vec![
+                ast_assign(
+                    "increment",
+                    ast_function(
+                        None,
+                        &["value"],
+                        &[],
+                        Expr::Binary {
+                            left: Box::new(ast_variable("value")),
+                            op: BinaryOp::Add,
+                            right: Box::new(Expr::Number(1.0)),
+                        },
+                    ),
+                ),
+                Expr::Finish(Box::new(Expr::Map {
+                    items: Box::new(Expr::List(
+                        (0..size).map(|value| Expr::Number(value as f64)).collect(),
+                    )),
+                    function: Box::new(ast_variable("increment")),
+                })),
+            ])
+        }
     }
 }
 

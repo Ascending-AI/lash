@@ -3,8 +3,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+#[path = "artifact_hash_writer.rs"]
+mod hash_writer;
+use hash_writer::HashWriter;
 
 use crate::ast::{
     AssignPathStep, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause,
@@ -19,7 +22,7 @@ use crate::trigger_manifest::{
 
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v2";
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v1";
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v2";
 
 /// Durability tier of an execution path's wired store or effect host.
 ///
@@ -917,6 +920,35 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
                 write_expr(writer, arg, normalizer);
             }
         }
+        Expr::Function(function) => {
+            writer.atom("function");
+            match &function.name {
+                Some(name) => writer.atom(&normalizer.name_token(name.as_str())),
+                None => writer.atom("anonymous"),
+            }
+            writer.usize(function.params.len());
+            for param in &function.params {
+                writer.atom(&normalizer.name_token(param.as_str()));
+            }
+            writer.usize(function.captures.len());
+            for capture in &function.captures {
+                writer.atom(&normalizer.name_token(capture.as_str()));
+            }
+            write_expr(writer, &function.body, normalizer);
+        }
+        Expr::Call { function, args } => {
+            writer.atom("function-call");
+            write_expr(writer, function, normalizer);
+            writer.usize(args.len());
+            for arg in args {
+                write_expr(writer, arg, normalizer);
+            }
+        }
+        Expr::Map { items, function } => {
+            writer.atom("function-map");
+            write_expr(writer, items, normalizer);
+            write_expr(writer, function, normalizer);
+        }
         Expr::Field { target, field } => {
             writer.atom("field-access");
             write_expr(writer, target, normalizer);
@@ -1079,55 +1111,6 @@ impl NameNormalizer {
             }
         }
     }
-}
-
-#[derive(Default)]
-struct HashWriter {
-    bytes: Vec<u8>,
-}
-
-impl HashWriter {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn atom(&mut self, value: &str) {
-        self.bytes
-            .extend_from_slice(value.len().to_string().as_bytes());
-        self.bytes.push(b':');
-        self.bytes.extend_from_slice(value.as_bytes());
-        self.bytes.push(b';');
-    }
-
-    fn bool(&mut self, value: bool) {
-        self.atom(if value { "true" } else { "false" });
-    }
-
-    fn usize(&mut self, value: usize) {
-        self.atom(&value.to_string());
-    }
-
-    fn u32(&mut self, value: u32) {
-        self.atom(&value.to_string());
-    }
-
-    fn u64(&mut self, value: u64) {
-        self.atom(&value.to_string());
-    }
-
-    fn finish(self) -> ContentHash {
-        ContentHash::new(hex_digest(&Sha256::digest(self.bytes)))
-    }
-}
-
-fn hex_digest(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
 }
 
 #[derive(Clone, Debug)]
@@ -1492,6 +1475,37 @@ impl<'program> RequirementsCollector<'program> {
                 for arg in args {
                     self.collect_expr(arg, scope);
                 }
+                Some(RequirementBinding::Value)
+            }
+            Expr::Function(function) => {
+                for capture in &function.captures {
+                    if !scope.contains_key(capture.as_str()) {
+                        self.requirements.globals.insert(capture.to_string());
+                    }
+                }
+                let mut function_scope = BTreeMap::new();
+                for capture in &function.captures {
+                    function_scope.insert(capture.to_string(), RequirementBinding::Value);
+                }
+                for param in &function.params {
+                    function_scope.insert(param.to_string(), RequirementBinding::Value);
+                }
+                if let Some(name) = &function.name {
+                    function_scope.insert(name.to_string(), RequirementBinding::Value);
+                }
+                self.collect_expr(&function.body, &mut function_scope);
+                Some(RequirementBinding::Value)
+            }
+            Expr::Call { function, args } => {
+                self.collect_expr(function, scope);
+                for arg in args {
+                    self.collect_expr(arg, scope);
+                }
+                Some(RequirementBinding::Value)
+            }
+            Expr::Map { items, function } => {
+                self.collect_expr(items, scope);
+                self.collect_expr(function, scope);
                 Some(RequirementBinding::Value)
             }
             Expr::Field { target, .. } => {

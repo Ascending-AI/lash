@@ -219,7 +219,19 @@ def resolve_profile_scenarios(values: list[str], known: list[str]) -> list[str]:
 def maybe_build(root: Path, debug: bool, build: bool) -> None:
     if not build:
         return
-    cmd = ["cargo", "build", "-q", "-p", "lashlang", "--example", "perf", "--example", "profile"]
+    cmd = [
+        "cargo",
+        "build",
+        "-q",
+        "-p",
+        "lashlang",
+        "--example",
+        "perf",
+        "--example",
+        "profile",
+        "--example",
+        "function_perf",
+    ]
     if not debug:
         cmd.append("--release")
     print(f"Building Lashlang profiling examples: {' '.join(cmd)}", file=sys.stderr)
@@ -469,12 +481,18 @@ def evaluate_lashlang_budgets(report: dict[str, Any], budgets: dict[str, Any]) -
     for row in perf_results:
         scenario = str(row.get("scenario_arg", "unknown"))
         mode = str(row.get("mode_arg", "unknown"))
-        for metric in ("allocated_bytes_per_iter", "allocations_per_iter", "ns_per_iter"):
+        for metric in (
+            "allocated_bytes_per_iter",
+            "allocations_per_iter",
+            "ns_per_iter",
+            "heap_allocations",
+            "live_logical_bytes",
+        ):
             budget = budget_value(budgets, "perf", scenario, f"{metric}_max", mode)
             # Wall-clock budgets are opt-in per scenario: a scenario without one
             # is not time-guarded, and a missing time measurement is only a
             # failure where a budget asks for it.
-            if metric == "ns_per_iter" and budget is None:
+            if metric in {"ns_per_iter", "heap_allocations", "live_logical_bytes"} and budget is None:
                 continue
             value = row.get(metric)
             actual = float(value) if isinstance(value, int | float) else None
@@ -546,6 +564,7 @@ def main() -> int:
     apply_stack_budget(stack_budget_bytes)
     perf_bin = example_path(root, args.debug, "perf")
     profile_bin = example_path(root, args.debug, "profile")
+    function_perf_bin = example_path(root, args.debug, "function_perf")
 
     scenario_binary = perf_bin if perf_bin.exists() else profile_bin
     if not scenario_binary.exists():
@@ -569,6 +588,20 @@ def main() -> int:
                 parsed["scenario_arg"] = scenario
                 parsed["stack_profile"] = dict(stack_profile)
                 perf_results.append(parsed)
+        if not function_perf_bin.exists():
+            raise SystemExit(f"error: function perf example not found: {function_perf_bin}")
+        function_scenarios = load_scenarios(root, function_perf_bin)
+        for scenario in function_scenarios:
+            parsed = parse_perf_output(
+                run_command(
+                    root,
+                    [str(function_perf_bin), scenario, str(max(args.iterations, 1))],
+                )
+            )
+            parsed["mode_arg"] = "compiled_ast_execute"
+            parsed["scenario_arg"] = scenario
+            parsed["stack_profile"] = dict(stack_profile)
+            perf_results.append(parsed)
 
     profile_results = []
     if not args.skip_profile:

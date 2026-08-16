@@ -28,9 +28,9 @@ pub use artifact::{
 };
 pub use ast::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, ExprFolder, ExprVisitor,
-    LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam, ProcessSignalDecl,
-    ProcessStartExpr, Program, ResourceRefExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
-    fold_expr_children, format_type_expr, walk_expr,
+    FunctionExpr, LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam,
+    ProcessSignalDecl, ProcessStartExpr, Program, ResourceRefExpr, TypeDecl, TypeExpr, TypeField,
+    UnaryOp, fold_expr_children, format_type_expr, walk_expr,
 };
 
 /// Names of every builtin accepted by the linker and runtime, in registry order.
@@ -59,6 +59,7 @@ pub use linker::{
     ValueConstructorBinding,
 };
 pub use parser::{ParseError, parse, parse_expression, parse_type_expression};
+pub use runtime::DEFAULT_MAX_VM_FRAME_DEPTH;
 pub use runtime::{
     AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector, CompileStats,
     CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
@@ -76,8 +77,9 @@ pub use runtime::{
     ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
     SnapshotDecodeError, State, Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation,
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmProfileContinuation,
-    VmRunOutcome, compile, compile_linked, compile_linked_process, compile_module_artifact_process,
-    compile_process, execute, from_json, prewarm, unwrap_type_value,
+    VmRunOutcome, compile, compile_ast, compile_linked, compile_linked_process,
+    compile_module_artifact_process, compile_process, execute, from_json, prewarm,
+    unwrap_type_value,
 };
 #[doc(hidden)]
 pub use runtime::{
@@ -90,7 +92,7 @@ pub use runtime::{
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 3;
+pub const BYTECODE_FORMAT_VERSION: u32 = 4;
 pub use source::{
     CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
     canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,

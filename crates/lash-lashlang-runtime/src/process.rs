@@ -414,7 +414,17 @@ async fn execute_lashlang(
             }
         }
     } else {
-        lashlang::Vm::from_state(compiled.as_ref(), state, env)
+        match lashlang::Vm::from_state(compiled.as_ref(), state, env) {
+            Ok(vm) => vm,
+            Err(err) => {
+                return process_lashlang_failure(
+                    LashlangProcessFailureCode::ProcessSegmentResumeFailed,
+                    format!("failed to install lashlang snapshot: {err}"),
+                    None,
+                )
+                .into();
+            }
+        }
     };
     let mut progress = lash_core::SegmentProgress::default();
     loop {

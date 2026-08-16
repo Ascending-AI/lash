@@ -832,6 +832,40 @@ impl<'module> Linker<'module> {
                 self.validate_shaping_builtin(name.as_str(), &arg_types, scope.span)?;
                 shaping_builtin_return_type(name.as_str(), &arg_types)
             }
+            Expr::Function(function) => {
+                for capture in &function.captures {
+                    if scope.get(capture).is_none() {
+                        return Err(LinkError::UnknownName {
+                            name: capture.to_string(),
+                            span: scope.span,
+                        });
+                    }
+                }
+                let mut function_scope = Scope::new(scope.process_body, scope.span);
+                for capture in &function.captures {
+                    function_scope.bind(capture, any_binding());
+                }
+                for param in &function.params {
+                    function_scope.bind(param, any_binding());
+                }
+                if let Some(name) = &function.name {
+                    function_scope.bind(name, any_binding());
+                }
+                self.infer_expr_type(&function.body, &mut function_scope)?;
+                TypeExpr::Any
+            }
+            Expr::Call { function, args } => {
+                self.infer_expr_type(function, scope)?;
+                for arg in args {
+                    self.infer_expr_type(arg, scope)?;
+                }
+                TypeExpr::Any
+            }
+            Expr::Map { items, function } => {
+                self.infer_expr_type(items, scope)?;
+                self.infer_expr_type(function, scope)?;
+                TypeExpr::List(Box::new(TypeExpr::Any))
+            }
             Expr::Field { target, field } => {
                 self.field_type(&self.infer_expr_type(target, scope)?, field, scope.span)?
             }

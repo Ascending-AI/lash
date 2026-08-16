@@ -5,7 +5,8 @@
 impl<H: ExecutionHost> Vm<'_, H> {
     fn append_assign(&mut self, slot: usize) -> Result<(), RuntimeError> {
         let item = self.pop_stack()?;
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+        self.slots
+            .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
         // `xs = xs + [item]` appends into the accumulator's own object.
         // Every other holder of the old value already owns a separate
         // copy, so the append is unobservable outside this binding.
@@ -22,7 +23,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Ok(());
         }
         self.materialize_mutable_slot(slot)?;
-        let slot_name = &self.chunk.slot_names[slot];
+        let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
         let current = self
             .slots
             .get_mut(slot)
@@ -46,7 +47,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     #[inline(always)]
     fn add_assign_value(&mut self, slot: usize, right: Value) -> Result<(), RuntimeError> {
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+        self.slots
+            .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
         // A list accumulator grows in place. Every other holder of its old
         // value already owns a separate copy, so extending the object it names
         // is unobservable — and it costs what is being appended rather than
@@ -68,7 +70,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         self.materialize_mutable_slot(slot)?;
         let right = self.heap.export_for_instruction(&right)?;
-        let slot_name = &self.chunk.slot_names[slot];
+        let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
         let value = {
             let left = self
                 .slots
@@ -107,8 +109,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     #[inline(always)]
     fn add_assign_number(&mut self, slot: usize, right: f64) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+        let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
+        self.slots
+            .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
         let value = {
             let left = self
                 .slots
@@ -155,8 +158,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         index: &Value,
         right: f64,
     ) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+        let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
+        self.slots
+            .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
         let root = self
             .slots
             .get_mut(slot)

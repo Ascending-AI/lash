@@ -304,13 +304,16 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
     let program = compile_source("value = null\nfinish value").expect("program should compile");
     let slot_count = program.chunk.slot_names.len();
     let base = VmContinuation {
+        format_version: VM_CONTINUATION_FORMAT_VERSION,
         instruction_pointer: 0,
+        active_function: None,
         operand_stack: Vec::new(),
         last_value: None,
         slots: vec![None; slot_count],
         projected_slots: vec![false; slot_count],
         globals: Record::new(),
         iterator_stack: Vec::new(),
+        frame_stack: Vec::new(),
         occurrence_counters: Default::default(),
         mode: ExecutionMode::Process,
         profile: None,
@@ -422,7 +425,7 @@ async fn run_with_segment_budget(
 ) -> (ExecutionOutcome, Vec<Value>, usize) {
     let host = SegmentRecordingHost::default();
     let mut state = State::new();
-    let mut vm = Vm::from_state(program, &mut state, &host);
+    let mut vm = Vm::from_state(program, &mut state, &host).expect("state should install");
     let mut effects_in_segment = 0;
     let mut boundaries = 0;
     loop {
@@ -534,7 +537,7 @@ async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters()
         .expect("program should compile");
     let host = Host;
     let mut state = State::new();
-    let mut vm = Vm::from_state(&program, &mut state, &host);
+    let mut vm = Vm::from_state(&program, &mut state, &host).expect("state should install");
     vm.suspend_after_instructions(1204);
     assert_eq!(
         vm.run_process_until_effect().await.expect("suspend run"),
@@ -881,7 +884,7 @@ async fn determinism_process_probe() {
     .expect("probe program should compile");
     let host = Host;
     let mut state = State::new();
-    let mut vm = Vm::from_state(&program, &mut state, &host);
+    let mut vm = Vm::from_state(&program, &mut state, &host).expect("state should install");
     let outcome = vm.run_for_mode().await.expect("probe should execute");
     assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
     let mut continuation = vm.suspend().expect("probe should suspend");

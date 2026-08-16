@@ -32,6 +32,20 @@ pub(crate) struct Chunk {
     pub(crate) compiled_schemas: Vec<ValidationPlan>,
     pub(crate) assign_paths: Vec<CompiledAssignPath>,
     pub(crate) resource_operation_batches: Vec<CompiledResourceOperationBatch>,
+    pub(crate) functions: Vec<CompiledFunction>,
+    pub(crate) root_code_len: usize,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledFunction {
+    pub(crate) entry_ip: usize,
+    pub(crate) end_ip: usize,
+    pub(crate) parameter_count: usize,
+    pub(crate) capture_count: usize,
+    pub(crate) self_slot: Option<usize>,
+    pub(crate) parameter_slots: Box<[usize]>,
+    pub(crate) capture_slots: Box<[usize]>,
+    pub(crate) slot_names: Box<[Name]>,
 }
 
 #[derive(Clone)]
@@ -227,6 +241,15 @@ pub(crate) enum Instruction {
     AwaitHandleUnwrap,
     CancelHandle,
     Intrinsic(IntrinsicOp),
+    MakeClosure {
+        function: usize,
+        captures: usize,
+    },
+    Call {
+        argc: usize,
+    },
+    Map,
+    Return,
     AddAssign(usize),
     // Retained after measurement: indexed_assignment/large_data regress when
     // numeric add-assign paths route through generic stack/path assignment.
@@ -379,6 +402,10 @@ impl Instruction {
             Instruction::ProcessSignalRun { .. } => InstructionProfileTag::SessionProcessAdmin,
             Instruction::CancelHandle => InstructionProfileTag::CancelHandle,
             Instruction::Intrinsic(_) => InstructionProfileTag::Intrinsic,
+            Instruction::MakeClosure { .. } => InstructionProfileTag::MakeClosure,
+            Instruction::Call { .. } => InstructionProfileTag::Call,
+            Instruction::Map => InstructionProfileTag::Callback,
+            Instruction::Return => InstructionProfileTag::Return,
             Instruction::AddAssign(_)
             | Instruction::AddAssignNumber { .. }
             | Instruction::AddAssignSlot { .. }
@@ -406,8 +433,8 @@ impl Instruction {
 }
 
 impl IntrinsicOp {
-    pub(crate) fn argc(self) -> usize {
-        match self {
+    pub(crate) fn fixed_argc(self) -> Option<usize> {
+        Some(match self {
             IntrinsicOp::Len
             | IntrinsicOp::Empty
             | IntrinsicOp::Keys
@@ -443,11 +470,11 @@ impl IntrinsicOp {
             | IntrinsicOp::Format(argc)
             | IntrinsicOp::Range(argc)
             | IntrinsicOp::InvalidArity { argc, .. }
-            | IntrinsicOp::Unknown { argc, .. }
-            | IntrinsicOp::FormatCompiled(argc) => argc,
-            IntrinsicOp::FormatCompiledSlotNumber { .. }
-            | IntrinsicOp::FormatCompiledSlotNumberBinary { .. } => 0,
-        }
+            | IntrinsicOp::Unknown { argc, .. } => argc,
+            IntrinsicOp::FormatCompiled(_)
+            | IntrinsicOp::FormatCompiledSlotNumber { .. }
+            | IntrinsicOp::FormatCompiledSlotNumberBinary { .. } => return None,
+        })
     }
 
     pub(crate) fn profile_tag(self) -> BuiltinProfileTag {
@@ -531,9 +558,13 @@ pub(crate) enum InstructionProfileTag {
     EndIter,
     ResolveTypeRef,
     WrapTypeLiteral,
+    MakeClosure,
+    Call,
+    Callback,
+    Return,
 }
 
-const INSTRUCTION_PROFILE_COUNT: usize = InstructionProfileTag::WrapTypeLiteral as usize + 1;
+const INSTRUCTION_PROFILE_COUNT: usize = InstructionProfileTag::Return as usize + 1;
 
 #[derive(Clone, Copy)]
 #[repr(usize)]
@@ -646,6 +677,10 @@ const INSTRUCTION_PROFILE_NAMES: [&str; INSTRUCTION_PROFILE_COUNT] = [
     "end_iter",
     "resolve_type_ref",
     "wrap_type_literal",
+    "make_closure",
+    "call",
+    "callback",
+    "return",
 ];
 
 const BUILTIN_PROFILE_NAMES: [&str; BUILTIN_PROFILE_COUNT] = [

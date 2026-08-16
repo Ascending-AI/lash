@@ -168,6 +168,19 @@ _DEPENDENCY_DOCUMENTS: dict[tuple[str, bool], dict[str, Any]] = {}
 #: Type-bearing rustdoc kinds a reachability edge can land on.
 REACHABLE_KINDS = {"enum", "struct", "trait", "type_alias", "union"}
 
+# AST-only Lashlang contracts are deliberately outside the host-facade walk,
+# but additions made for FIG-1302 still require an explicit, checked
+# disposition in the same registry.
+REQUIRED_LOW_LEVEL_API = {
+    "lashlang::DEFAULT_MAX_VM_FRAME_DEPTH",
+    "lashlang::Expr::Call",
+    "lashlang::Expr::Function",
+    "lashlang::Expr::Map",
+    "lashlang::FunctionExpr",
+    "lashlang::VmContinuation::frame_depth",
+    "lashlang::compile_ast",
+}
+
 
 def item_kind(item: dict[str, Any]) -> str:
     return next(iter(item["inner"]))
@@ -1233,6 +1246,34 @@ def check() -> int:
     by_api: dict[tuple[str, str], dict[str, Any]] = {}
     errors: list[str] = []
     facade_dirs = facade_dependency_dirs()
+    low_level_entries = document.get("low_level_api", [])
+    low_level_symbols = {entry.get("symbol", "") for entry in low_level_entries}
+    missing_low_level = sorted(REQUIRED_LOW_LEVEL_API - low_level_symbols)
+    unexpected_low_level = sorted(low_level_symbols - REQUIRED_LOW_LEVEL_API)
+    if missing_low_level:
+        errors.append(
+            "undispositioned low-level Lashlang API: " + ", ".join(missing_low_level)
+        )
+    if unexpected_low_level:
+        errors.append(
+            "unknown low-level Lashlang API disposition: "
+            + ", ".join(unexpected_low_level)
+        )
+    for entry in low_level_entries:
+        symbol = entry.get("symbol", "")
+        disposition = entry.get("disposition")
+        if disposition not in DISPOSITIONS:
+            errors.append(f"{symbol}: unknown low-level disposition {disposition!r}")
+        usage = entry.get("usage", "")
+        assertion = entry.get("assertion", "")
+        if disposition in {"used-asserted", "used-unasserted"} and not reference_exists(usage):
+            errors.append(f"{symbol}: stale or invalid low-level usage reference {usage!r}")
+        if disposition == "used-asserted" and not reference_exists(assertion):
+            errors.append(
+                f"{symbol}: stale or invalid low-level assertion reference {assertion!r}"
+            )
+        if disposition.startswith("unused-") and not entry.get("reason", "").strip():
+            errors.append(f"{symbol}: unused low-level disposition requires a concrete reason")
     for entry in entries:
         symbol = entry.get("symbol", "")
         kind = entry.get("kind", "")

@@ -23,6 +23,7 @@ mod architecture_execution;
 mod architecture_providers;
 mod embedding;
 mod embedding_advanced;
+mod embedding_lashlang_functions;
 mod embedding_prompts;
 mod embedding_turns;
 mod example_agent_service;

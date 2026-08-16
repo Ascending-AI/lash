@@ -39,7 +39,7 @@ pub use cache::{
 #[allow(unused_imports)]
 pub(crate) use compiler::*;
 pub use entry_points::{
-    ExecutableProgram, compile, compile_linked, compile_linked_process,
+    ExecutableProgram, compile, compile_ast, compile_linked, compile_linked_process,
     compile_module_artifact_process, compile_process, execute, prewarm,
 };
 pub use heap::{
@@ -48,10 +48,10 @@ pub use heap::{
 };
 pub(crate) use heap::{Heap, HeapObject, HeapRestoreWire, PersistedRoots};
 pub use host::{
-    AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
-    ExecutionHostError, ExecutionMode, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart,
-    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
-    ResourceOperationResult, Sleep, SleepKind,
+    AbilityOp, AbilityResult, DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds,
+    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ProcessEvent,
+    ProcessEventKind, ProcessSignal, ProcessStart, ResourceOperation, ResourceOperationBatch,
+    ResourceOperationBatchResult, ResourceOperationResult, Sleep, SleepKind,
 };
 #[allow(unused_imports)]
 pub(crate) use instruction::*;

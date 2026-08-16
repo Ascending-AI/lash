@@ -4,6 +4,8 @@ use thiserror::Error;
 use super::super::{ExecutionBound, HeapObject, HeapRestoreWire, PersistedRoots};
 use super::*;
 
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 2;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
     EffectCompleted,
@@ -40,7 +42,9 @@ impl TestSuspension {
 /// plans are rebuilt lazily after restore.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct VmContinuation {
+    pub format_version: u32,
     pub instruction_pointer: usize,
+    pub active_function: Option<u32>,
     #[serde(
         serialize_with = "continuation_serde::serialize_values",
         deserialize_with = "continuation_serde::deserialize_values"
@@ -63,6 +67,7 @@ pub struct VmContinuation {
     )]
     pub globals: Record,
     pub iterator_stack: Vec<VmIteratorContinuation>,
+    pub(crate) frame_stack: Vec<VmFrameContinuation>,
     pub occurrence_counters: std::collections::BTreeMap<String, u64>,
     pub mode: ExecutionMode,
     pub profile: Option<VmProfileContinuation>,
@@ -76,6 +81,50 @@ pub struct VmContinuation {
     pub heap: VmHeapContinuation,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct VmFrameContinuation {
+    pub return_instruction_pointer: usize,
+    pub function: Option<u32>,
+    pub operand_stack_base: usize,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_slots",
+        deserialize_with = "continuation_serde::deserialize_slots"
+    )]
+    pub slots: Vec<Option<Value>>,
+    pub projected_slots: Vec<bool>,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_record",
+        deserialize_with = "continuation_serde::deserialize_record"
+    )]
+    pub globals: Record,
+    pub iterator_stack: Vec<VmIteratorContinuation>,
+    pub return_target: VmFrameReturnContinuation,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum VmFrameReturnContinuation {
+    Direct,
+    Map {
+        #[serde(
+            serialize_with = "continuation_serde::serialize_value",
+            deserialize_with = "continuation_serde::deserialize_value"
+        )]
+        function: Value,
+        #[serde(
+            serialize_with = "continuation_serde::serialize_values",
+            deserialize_with = "continuation_serde::deserialize_values"
+        )]
+        items: Vec<Value>,
+        next_index: usize,
+        #[serde(
+            serialize_with = "continuation_serde::serialize_values",
+            deserialize_with = "continuation_serde::deserialize_values"
+        )]
+        results: Vec<Value>,
+    },
+}
+
 impl<'de> Deserialize<'de> for VmContinuation {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -83,7 +132,9 @@ impl<'de> Deserialize<'de> for VmContinuation {
     {
         #[derive(Deserialize)]
         struct Wire {
+            format_version: u32,
             instruction_pointer: usize,
+            active_function: Option<u32>,
             #[serde(deserialize_with = "continuation_serde::deserialize_values")]
             operand_stack: Vec<Value>,
             #[serde(deserialize_with = "continuation_serde::deserialize_optional_value")]
@@ -94,6 +145,7 @@ impl<'de> Deserialize<'de> for VmContinuation {
             #[serde(deserialize_with = "continuation_serde::deserialize_record")]
             globals: Record,
             iterator_stack: Vec<VmIteratorContinuation>,
+            frame_stack: Vec<VmFrameContinuation>,
             occurrence_counters: std::collections::BTreeMap<String, u64>,
             mode: ExecutionMode,
             profile: Option<VmProfileContinuation>,
@@ -105,14 +157,23 @@ impl<'de> Deserialize<'de> for VmContinuation {
         }
 
         let wire = Wire::deserialize(deserializer)?;
+        if wire.format_version != VM_CONTINUATION_FORMAT_VERSION {
+            return Err(serde::de::Error::custom(format!(
+                "continuation format version {} is incompatible with version {}",
+                wire.format_version, VM_CONTINUATION_FORMAT_VERSION
+            )));
+        }
         let continuation = Self {
+            format_version: wire.format_version,
             instruction_pointer: wire.instruction_pointer,
+            active_function: wire.active_function,
             operand_stack: wire.operand_stack,
             last_value: wire.last_value,
             slots: wire.slots,
             projected_slots: wire.projected_slots,
             globals: wire.globals,
             iterator_stack: wire.iterator_stack,
+            frame_stack: wire.frame_stack,
             occurrence_counters: wire.occurrence_counters,
             mode: wire.mode,
             profile: wire.profile,
@@ -172,6 +233,13 @@ impl VmHeapContinuation {
     }
 }
 
+impl VmContinuation {
+    /// Number of parked caller frames in this suspended VM.
+    pub fn frame_depth(&self) -> usize {
+        self.frame_stack.len()
+    }
+}
+
 impl Default for VmHeapContinuation {
     fn default() -> Self {
         Self::new(Heap::default())
@@ -216,18 +284,42 @@ pub struct VmProfileContinuation {
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ContinuationError {
+    #[error("continuation format version {found} is incompatible with version {expected}")]
+    FormatVersionMismatch { expected: u32, found: u32 },
+    #[error("continuation function index exceeds the durable u32 index space")]
+    FunctionIndexOverflow,
+    #[error("continuation closure function index {index} is not present in the compiled program")]
+    UnknownFunction { index: u32 },
+    #[error("continuation closure function {index} requires {expected} capture(s), found {actual}")]
+    ClosureCaptureCountMismatch {
+        index: u32,
+        expected: usize,
+        actual: usize,
+    },
     #[error("cannot capture VM continuation: `{variant}` value at {location} is not serializable")]
     UnserializableValue {
         location: String,
         variant: &'static str,
     },
     #[error(
-        "continuation instruction pointer {instruction_pointer} exceeds program length {program_length}"
+        "continuation {location} instruction pointer {instruction_pointer} is outside {owner} code range {range_start}..{range_end}"
     )]
-    InvalidInstructionPointer {
+    InstructionPointerOutsideCodeRange {
+        location: String,
         instruction_pointer: usize,
-        program_length: usize,
+        owner: String,
+        range_start: usize,
+        range_end: usize,
     },
+    #[error(
+        "continuation frame {frame} return instruction pointer {instruction_pointer} is not immediately after a call site"
+    )]
+    InvalidReturnSite {
+        frame: usize,
+        instruction_pointer: usize,
+    },
+    #[error("continuation with an active function must have a root-owned bottom frame")]
+    MissingRootFrame,
     #[error("continuation has {actual} slots but program requires {expected}")]
     SlotCountMismatch { expected: usize, actual: usize },
     #[error(
@@ -238,12 +330,25 @@ pub enum ContinuationError {
         binding_slot: usize,
         slot_count: usize,
     },
+    #[error(
+        "continuation frame {frame} iterator {iterator} binds slot {binding_slot}, but only {slot_count} slots exist"
+    )]
+    FrameIteratorBindingOutOfBounds {
+        frame: usize,
+        iterator: usize,
+        binding_slot: usize,
+        slot_count: usize,
+    },
     #[error("continuation iterator {iterator} has a zero range step")]
     ZeroRangeStep { iterator: usize },
+    #[error("continuation frame {frame} iterator {iterator} has a zero range step")]
+    FrameZeroRangeStep { frame: usize, iterator: usize },
     #[error("continuation profile shape is incompatible with this VM")]
     ProfileShapeMismatch,
     #[error("lashlang instruction budget of {limit} instructions was already exceeded")]
     InstructionBudgetExceeded { limit: u64 },
+    #[error("lashlang frame depth limit of {limit} frames was already exceeded")]
+    FrameDepthExceeded { limit: u64 },
     #[error("lashlang active-execution deadline of {limit_ms}ms was already exceeded")]
     ExecutionDeadlineExceeded { limit_ms: u128 },
     #[error(
@@ -257,6 +362,7 @@ impl ContinuationError {
         matches!(
             self,
             Self::InstructionBudgetExceeded { .. }
+                | Self::FrameDepthExceeded { .. }
                 | Self::ExecutionDeadlineExceeded { .. }
                 | Self::MemoryLimitExceeded { .. }
         )
@@ -316,9 +422,19 @@ mod continuation_serde {
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "kind", rename_all = "snake_case")]
     enum HeapObjectWire {
-        Tuple { items: Vec<ValueWire> },
-        List { items: Vec<ValueWire> },
-        Record { fields: Vec<(String, ValueWire)> },
+        Tuple {
+            items: Vec<ValueWire>,
+        },
+        List {
+            items: Vec<ValueWire>,
+        },
+        Record {
+            fields: Vec<(String, ValueWire)>,
+        },
+        Closure {
+            function: u32,
+            captures: Vec<ValueWire>,
+        },
     }
 
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
@@ -415,6 +531,13 @@ mod continuation_serde {
             HeapObject::Record(record) => HeapObjectWire::Record {
                 fields: record_to_wire(record)?,
             },
+            HeapObject::Closure { function, captures } => HeapObjectWire::Closure {
+                function: *function,
+                captures: captures
+                    .iter()
+                    .map(value_to_wire)
+                    .collect::<Result<_, _>>()?,
+            },
         })
     }
 
@@ -435,7 +558,31 @@ mod continuation_serde {
             HeapObjectWire::Record { fields } => {
                 HeapObject::Record(Box::new(record_from_wire(fields)?))
             }
+            HeapObjectWire::Closure { function, captures } => HeapObject::Closure {
+                function,
+                captures: captures
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<_, _>>()?,
+            },
         })
+    }
+
+    pub(super) fn serialize_value<S>(value: &Value, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        value_to_wire(value)
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+
+    pub(super) fn deserialize_value<'de, D>(deserializer: D) -> Result<Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        ValueWire::deserialize(deserializer)
+            .and_then(|value| value_from_wire(value).map_err(serde::de::Error::custom))
     }
 
     pub(super) fn serialize_heap<S>(
@@ -613,28 +760,73 @@ mod continuation_serde {
 /// they borrow without owning.
 fn continuation_forest_roots(continuation: &VmContinuation) -> PersistedRoots<'_> {
     let mut roots = PersistedRoots::default();
-    for (index, value) in continuation.slots.iter().enumerate() {
-        if let Some(value) = value {
-            roots.durable(format!("slot {index}"), value);
-        }
-    }
-    for (name, value) in continuation.globals.iter() {
-        roots.durable(format!("global `{name}`"), value);
-    }
-    for (depth, iterator) in continuation.iterator_stack.iter().enumerate() {
-        if let Some(value) = iterator.restore_value.as_ref() {
-            roots.durable(format!("iterator {depth} restore value"), value);
-        }
-        if let VmIteratorCursor::List { values, .. } = &iterator.cursor {
-            roots.transient_all(values.iter());
-        }
-    }
-    roots.transient_all(continuation.operand_stack.iter());
-    roots.transient_all(continuation.last_value.iter());
+    visit_vm_roots(continuation, &mut roots);
     roots
 }
 
+fn validate_iterator_invariants(
+    iterators: &[VmIteratorContinuation],
+    slot_count: usize,
+    frame: Option<usize>,
+) -> Result<(), ContinuationError> {
+    for (iterator_index, iterator) in iterators.iter().enumerate() {
+        if iterator.binding_slot >= slot_count {
+            return match frame {
+                Some(frame) => Err(ContinuationError::FrameIteratorBindingOutOfBounds {
+                    frame,
+                    iterator: iterator_index,
+                    binding_slot: iterator.binding_slot,
+                    slot_count,
+                }),
+                None => Err(ContinuationError::IteratorBindingOutOfBounds {
+                    iterator: iterator_index,
+                    binding_slot: iterator.binding_slot,
+                    slot_count,
+                }),
+            };
+        }
+        if matches!(iterator.cursor, VmIteratorCursor::Range { step: 0, .. }) {
+            return match frame {
+                Some(frame) => Err(ContinuationError::FrameZeroRangeStep {
+                    frame,
+                    iterator: iterator_index,
+                }),
+                None => Err(ContinuationError::ZeroRangeStep {
+                    iterator: iterator_index,
+                }),
+            };
+        }
+    }
+    Ok(())
+}
+
 fn validate_continuation(continuation: &VmContinuation) -> Result<(), ContinuationError> {
+    if continuation.format_version != VM_CONTINUATION_FORMAT_VERSION {
+        return Err(ContinuationError::FormatVersionMismatch {
+            expected: VM_CONTINUATION_FORMAT_VERSION,
+            found: continuation.format_version,
+        });
+    }
+    if continuation.slots.len() != continuation.projected_slots.len() {
+        return Err(ContinuationError::SlotCountMismatch {
+            expected: continuation.slots.len(),
+            actual: continuation.projected_slots.len(),
+        });
+    }
+    if continuation.active_function.is_none() && !continuation.frame_stack.is_empty() {
+        return Err(ContinuationError::UnserializableValue {
+            location: "frame stack".to_string(),
+            variant: "frames without an active function",
+        });
+    }
+    if continuation.active_function.is_some()
+        && continuation
+            .frame_stack
+            .first()
+            .is_none_or(|frame| frame.function.is_some())
+    {
+        return Err(ContinuationError::MissingRootFrame);
+    }
     validate_values(&continuation.operand_stack, "operand stack")?;
     validate_heap_references(&continuation.heap.heap, &continuation.operand_stack)?;
     validate_optional_value(continuation.last_value.as_ref(), "last value")?;
@@ -675,6 +867,7 @@ fn validate_continuation(continuation: &VmContinuation) -> Result<(), Continuati
             validate_heap_references(&continuation.heap.heap, values)?;
         }
     }
+    validate_iterator_invariants(&continuation.iterator_stack, continuation.slots.len(), None)?;
     for (id, object) in continuation.heap.heap.objects_in_id_order() {
         match object {
             HeapObject::Tuple(values) | HeapObject::List(values) => {
@@ -687,6 +880,57 @@ fn validate_continuation(continuation: &VmContinuation) -> Result<(), Continuati
                     validate_heap_reference(&continuation.heap.heap, value)?;
                 }
             }
+            HeapObject::Closure { captures, .. } => {
+                validate_values(captures, &format!("heap closure {}", id.get()))?;
+                validate_heap_references(&continuation.heap.heap, captures)?;
+            }
+        }
+    }
+    for (depth, frame) in continuation.frame_stack.iter().enumerate() {
+        if frame.slots.len() != frame.projected_slots.len() {
+            return Err(ContinuationError::SlotCountMismatch {
+                expected: frame.slots.len(),
+                actual: frame.projected_slots.len(),
+            });
+        }
+        if frame.operand_stack_base > continuation.operand_stack.len() {
+            return Err(ContinuationError::UnserializableValue {
+                location: format!("frame {depth} operand stack base"),
+                variant: "out-of-bounds stack base",
+            });
+        }
+        validate_values(
+            &frame.slots.iter().flatten().cloned().collect::<Vec<_>>(),
+            &format!("frame {depth} slots"),
+        )?;
+        validate_heap_references(
+            &continuation.heap.heap,
+            &frame.slots.iter().flatten().cloned().collect::<Vec<_>>(),
+        )?;
+        for value in frame.globals.values() {
+            validate_value(value, &format!("frame {depth} globals"))?;
+            validate_heap_reference(&continuation.heap.heap, value)?;
+        }
+        validate_iterator_invariants(&frame.iterator_stack, frame.slots.len(), Some(depth))?;
+        if let VmFrameReturnContinuation::Map {
+            function,
+            items,
+            next_index,
+            results,
+        } = &frame.return_target
+        {
+            if *next_index > items.len() || results.len().saturating_add(1) != *next_index {
+                return Err(ContinuationError::UnserializableValue {
+                    location: format!("frame {depth} map callback"),
+                    variant: "invalid callback cursor",
+                });
+            }
+            validate_value(function, &format!("frame {depth} map function"))?;
+            validate_heap_reference(&continuation.heap.heap, function)?;
+            validate_values(items, &format!("frame {depth} map items"))?;
+            validate_heap_references(&continuation.heap.heap, items)?;
+            validate_values(results, &format!("frame {depth} map results"))?;
+            validate_heap_references(&continuation.heap.heap, results)?;
         }
     }
     continuation
@@ -757,6 +1001,52 @@ fn validate_value(value: &Value, location: &str) -> Result<(), ContinuationError
     }
 }
 
+fn iterator_to_continuation(
+    iterator: &IterState,
+    location: &str,
+) -> Result<VmIteratorContinuation, ContinuationError> {
+    validate_optional_value(
+        iterator.restore.previous.as_ref(),
+        &format!("{location} restore value"),
+    )?;
+    let cursor = match &iterator.cursor {
+        IterCursor::List { values, index } => {
+            validate_values(values, &format!("{location} values"))?;
+            VmIteratorCursor::List {
+                values: values.iter().cloned().collect(),
+                next_index: *index,
+            }
+        }
+        IterCursor::Range { next, end, step } => VmIteratorCursor::Range {
+            next: *next,
+            end: *end,
+            step: *step,
+        },
+    };
+    Ok(VmIteratorContinuation {
+        cursor,
+        binding_slot: iterator.binding,
+        restore_value: iterator.restore.previous.clone(),
+    })
+}
+
+fn iterator_from_continuation(iterator: VmIteratorContinuation) -> IterState {
+    IterState {
+        cursor: match iterator.cursor {
+            VmIteratorCursor::List { values, next_index } => IterCursor::List {
+                values: values.into(),
+                index: next_index,
+            },
+            VmIteratorCursor::Range { next, end, step } => IterCursor::Range { next, end, step },
+        },
+        binding: iterator.binding_slot,
+        restore: LoopRestore {
+            previous: iterator.restore_value,
+        },
+        heapified: false,
+    }
+}
+
 fn profile_from_continuation(
     profile: VmProfileContinuation,
 ) -> Result<ProfileAccumulator, ContinuationError> {
@@ -779,6 +1069,9 @@ fn profile_from_continuation(
             .map_err(|_| ContinuationError::ProfileShapeMismatch)?,
     })
 }
+
+mod program_validation;
+use program_validation::validate_program_continuation;
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
     #[cfg(test)]
@@ -826,6 +1119,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             host,
             mode: VmMode::from(mode),
             iter_stack: Vec::new(),
+            active_function: None,
+            frames: Vec::new(),
             lashlang_execution_occurrences: FxHashMap::default(),
             profile: None,
             validation_plans: FxHashMap::default(),
@@ -857,6 +1152,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             host,
             mode: VmMode::from(mode),
             iter_stack: std::mem::take(&mut scratch.iter_stack),
+            active_function: None,
+            frames: Vec::new(),
             lashlang_execution_occurrences: FxHashMap::default(),
             profile: None,
             validation_plans: FxHashMap::default(),
@@ -888,41 +1185,64 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             validate_value(value, &format!("global `{key}`"))?;
         }
 
-        let mut iterator_stack = Vec::with_capacity(self.iter_stack.len());
-        for (depth, iterator) in self.iter_stack.iter().enumerate() {
-            validate_optional_value(
-                iterator.restore.previous.as_ref(),
-                &format!("iterator {depth} restore value"),
-            )?;
-            let cursor = match &iterator.cursor {
-                IterCursor::List { values, index } => {
-                    validate_values(values, &format!("iterator {depth} values"))?;
-                    VmIteratorCursor::List {
-                        values: values.iter().cloned().collect(),
-                        next_index: *index,
-                    }
-                }
-                IterCursor::Range { next, end, step } => VmIteratorCursor::Range {
-                    next: *next,
-                    end: *end,
-                    step: *step,
+        let iterator_stack = self
+            .iter_stack
+            .iter()
+            .enumerate()
+            .map(|(depth, iterator)| {
+                iterator_to_continuation(iterator, &format!("iterator {depth}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut frame_stack = Vec::with_capacity(self.frames.len());
+        for frame in &self.frames {
+            let iterator_stack = frame
+                .iter_stack
+                .iter()
+                .enumerate()
+                .map(|(depth, iterator)| {
+                    iterator_to_continuation(iterator, &format!("frame iterator {depth}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let return_target = match &frame.return_target {
+                ReturnTarget::Direct => VmFrameReturnContinuation::Direct,
+                ReturnTarget::Map(callback) => VmFrameReturnContinuation::Map {
+                    function: callback.function.clone(),
+                    items: callback.items.clone(),
+                    next_index: callback.next_index,
+                    results: callback.results.clone(),
                 },
             };
-            iterator_stack.push(VmIteratorContinuation {
-                cursor,
-                binding_slot: iterator.binding,
-                restore_value: iterator.restore.previous.clone(),
+            frame_stack.push(VmFrameContinuation {
+                return_instruction_pointer: frame.return_ip,
+                function: frame
+                    .function
+                    .map(u32::try_from)
+                    .transpose()
+                    .map_err(|_| ContinuationError::FunctionIndexOverflow)?,
+                operand_stack_base: frame.operand_stack_base,
+                slots: frame.slots.values.clone(),
+                projected_slots: frame.slots.projected.clone(),
+                globals: frame.slots.extras.clone(),
+                iterator_stack,
+                return_target,
             });
         }
 
         let continuation = VmContinuation {
+            format_version: VM_CONTINUATION_FORMAT_VERSION,
             instruction_pointer: self.ip,
+            active_function: self
+                .active_function
+                .map(u32::try_from)
+                .transpose()
+                .map_err(|_| ContinuationError::FunctionIndexOverflow)?,
             operand_stack: self.stack.clone(),
             last_value: self.last_value.clone(),
             slots: self.slots.values.clone(),
             projected_slots: self.slots.projected.clone(),
             globals: self.slots.extras.clone(),
             iterator_stack,
+            frame_stack,
             occurrence_counters: self
                 .lashlang_execution_occurrences
                 .iter()
@@ -951,34 +1271,59 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         program: &'a CompiledProgram,
         host: &'a H,
     ) -> Result<Self, ContinuationError> {
-        if continuation.instruction_pointer > program.chunk.code.len() {
-            return Err(ContinuationError::InvalidInstructionPointer {
-                instruction_pointer: continuation.instruction_pointer,
-                program_length: program.chunk.code.len(),
+        if continuation.format_version != VM_CONTINUATION_FORMAT_VERSION {
+            return Err(ContinuationError::FormatVersionMismatch {
+                expected: VM_CONTINUATION_FORMAT_VERSION,
+                found: continuation.format_version,
             });
         }
-        if continuation.slots.len() != program.chunk.slot_names.len()
-            || continuation.projected_slots.len() != program.chunk.slot_names.len()
+        validate_continuation(&continuation)?;
+        validate_program_continuation(&continuation, &program.chunk)?;
+        let active_function = continuation.active_function.map(|index| index as usize);
+        let active_slot_count = match active_function {
+            Some(index) => program
+                .chunk
+                .functions
+                .get(index)
+                .ok_or(ContinuationError::UnknownFunction {
+                    index: index as u32,
+                })?
+                .slot_names
+                .len(),
+            None => program.chunk.slot_names.len(),
+        };
+        if continuation.slots.len() != active_slot_count
+            || continuation.projected_slots.len() != active_slot_count
         {
             return Err(ContinuationError::SlotCountMismatch {
-                expected: program.chunk.slot_names.len(),
+                expected: active_slot_count,
                 actual: continuation.slots.len(),
             });
         }
-        for (index, iterator) in continuation.iterator_stack.iter().enumerate() {
-            if iterator.binding_slot >= continuation.slots.len() {
-                return Err(ContinuationError::IteratorBindingOutOfBounds {
-                    iterator: index,
-                    binding_slot: iterator.binding_slot,
-                    slot_count: continuation.slots.len(),
+        for frame in &continuation.frame_stack {
+            let expected = match frame.function {
+                Some(index) => program
+                    .chunk
+                    .functions
+                    .get(index as usize)
+                    .ok_or(ContinuationError::UnknownFunction { index })?
+                    .slot_names
+                    .len(),
+                None => program.chunk.slot_names.len(),
+            };
+            if frame.slots.len() != expected || frame.projected_slots.len() != expected {
+                return Err(ContinuationError::SlotCountMismatch {
+                    expected,
+                    actual: frame.slots.len(),
                 });
             }
-            if matches!(iterator.cursor, VmIteratorCursor::Range { step: 0, .. }) {
-                return Err(ContinuationError::ZeroRangeStep { iterator: index });
-            }
         }
-        validate_continuation(&continuation)?;
         let bounds = host.execution_bounds();
+        if continuation.frame_stack.len() as u64 > bounds.max_frame_depth.get() {
+            return Err(ContinuationError::FrameDepthExceeded {
+                limit: bounds.max_frame_depth.get(),
+            });
+        }
         if let ExecutionBound::Bounded(limit) = bounds.instruction_budget
             && continuation.instructions_executed > limit.get()
         {
@@ -1006,21 +1351,40 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let iter_stack = continuation
             .iterator_stack
             .into_iter()
-            .map(|iterator| IterState {
-                cursor: match iterator.cursor {
-                    VmIteratorCursor::List { values, next_index } => IterCursor::List {
-                        values: values.into(),
-                        index: next_index,
-                    },
-                    VmIteratorCursor::Range { next, end, step } => {
-                        IterCursor::Range { next, end, step }
-                    }
+            .map(iterator_from_continuation)
+            .collect();
+        let frames = continuation
+            .frame_stack
+            .into_iter()
+            .map(|frame| CallFrame {
+                return_ip: frame.return_instruction_pointer,
+                function: frame.function.map(|index| index as usize),
+                operand_stack_base: frame.operand_stack_base,
+                slots: SlotState {
+                    values: frame.slots,
+                    projected: frame.projected_slots,
+                    extras: frame.globals,
                 },
-                binding: iterator.binding_slot,
-                restore: LoopRestore {
-                    previous: iterator.restore_value,
+                iter_stack: frame
+                    .iterator_stack
+                    .into_iter()
+                    .map(iterator_from_continuation)
+                    .collect(),
+                extras_heapified: false,
+                return_target: match frame.return_target {
+                    VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
+                    VmFrameReturnContinuation::Map {
+                        function,
+                        items,
+                        next_index,
+                        results,
+                    } => ReturnTarget::Map(MapCallback {
+                        function,
+                        items,
+                        next_index,
+                        results,
+                    }),
                 },
-                heapified: false,
             })
             .collect();
         Ok(Self {
@@ -1036,6 +1400,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             host,
             mode: continuation.mode.into(),
             iter_stack,
+            active_function,
+            frames,
             lashlang_execution_occurrences: continuation.occurrence_counters.into_iter().collect(),
             profile,
             validation_plans: FxHashMap::default(),
@@ -1072,13 +1438,16 @@ mod tests {
 
     fn empty_continuation(heap: Heap) -> VmContinuation {
         VmContinuation {
+            format_version: VM_CONTINUATION_FORMAT_VERSION,
             instruction_pointer: 0,
+            active_function: None,
             operand_stack: Vec::new(),
             last_value: None,
             slots: Vec::new(),
             projected_slots: Vec::new(),
             globals: Record::new(),
             iterator_stack: Vec::new(),
+            frame_stack: Vec::new(),
             occurrence_counters: Default::default(),
             mode: ExecutionMode::Process,
             profile: None,
@@ -1088,6 +1457,8 @@ mod tests {
             heap: VmHeapContinuation::new(heap),
         }
     }
+
+    mod program_validation;
 
     #[test]
     fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {

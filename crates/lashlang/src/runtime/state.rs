@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use super::{
-    ContinuationError, Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, PersistedRoots,
-    ProjectedValue, Record, ResourceHandle, RuntimeError, Value, record_with_capacity,
+    CompiledProgram, ContinuationError, Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue,
+    PersistedRoots, ProjectedValue, Record, ResourceHandle, RuntimeError, Value,
+    record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -14,7 +15,7 @@ mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 2;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 3;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the
@@ -190,6 +191,10 @@ impl State {
         }
     }
 
+    pub(crate) fn validate_program(&self, program: &CompiledProgram) -> Result<(), RuntimeError> {
+        self.heap.validate_closures(&program.chunk.functions)
+    }
+
     pub(super) fn take_runtime(&mut self) -> (Record, Heap) {
         let globals = if self.runtime_globals.is_empty()
             && !self.heap.has_runtime_state()
@@ -207,19 +212,31 @@ impl State {
         runtime_globals: Record,
         mut heap: Heap,
     ) -> Result<(), RuntimeError> {
-        let mut globals = record_with_capacity(runtime_globals.len());
-        for entry in runtime_globals.entries.iter() {
-            globals.insert_symbolized(
-                entry.symbol,
-                entry.name.clone(),
-                heap.export_for_instruction(&entry.value)?,
-            );
-        }
+        let globals = materialize_runtime_globals(&runtime_globals, &mut heap)?;
         self.globals = globals;
         self.runtime_globals = runtime_globals;
         self.heap = heap;
         Ok(())
     }
+}
+
+pub(super) fn materialize_runtime_globals(
+    runtime_globals: &Record,
+    heap: &mut Heap,
+) -> Result<Record, RuntimeError> {
+    let mut globals = record_with_capacity(runtime_globals.len());
+    for entry in runtime_globals.entries.iter() {
+        match heap.export_for_instruction(&entry.value) {
+            Ok(value) => {
+                globals.insert_symbolized(entry.symbol, entry.name.clone(), value);
+            }
+            // Function values remain VM-private heap objects. A closure at any
+            // depth omits the whole global rather than leaking a partial tree.
+            Err(RuntimeError::FunctionValueAtHostBoundary) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(globals)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -338,9 +355,19 @@ struct CanonicalHeapEntry {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CanonicalHeapObject {
-    Tuple { items: Vec<CanonicalValue> },
-    List { items: Vec<CanonicalValue> },
-    Record { fields: Vec<CanonicalBinding> },
+    Tuple {
+        items: Vec<CanonicalValue>,
+    },
+    List {
+        items: Vec<CanonicalValue>,
+    },
+    Record {
+        fields: Vec<CanonicalBinding>,
+    },
+    Closure {
+        function: u32,
+        captures: Vec<CanonicalValue>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -517,16 +544,18 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     });
                 }
                 drop(forest_roots);
-                let globals = runtime_globals
-                    .iter()
-                    .map(|(name, value)| {
-                        heap.export(value)
-                            .map(|value| (name.to_string(), value))
-                            .map_err(|error| {
-                                SnapshotDecodeError::InvalidEncoding(error.to_string())
-                            })
-                    })
-                    .collect::<Result<_, _>>()?;
+                let mut globals = Record::new();
+                for (name, value) in runtime_globals.iter() {
+                    match heap.export(value) {
+                        Ok(value) => {
+                            globals.insert(name.to_string(), value);
+                        }
+                        Err(RuntimeError::FunctionValueAtHostBoundary) => {}
+                        Err(error) => {
+                            return Err(SnapshotDecodeError::InvalidEncoding(error.to_string()));
+                        }
+                    }
+                }
                 Ok(Self {
                     globals,
                     runtime_globals,
@@ -637,7 +666,7 @@ const HEAP_FIELDS: &[&str] = &[
 ];
 const BINDING_FIELDS: &[&str] = &["name", "value"];
 const HEAP_ENTRY_FIELDS: &[&str] = &["id", "object"];
-const TAGGED_VALUE_FIELDS: &[&str] = &["kind", "value", "items", "fields"];
+const TAGGED_VALUE_FIELDS: &[&str] = &["kind", "value", "items", "fields", "function", "captures"];
 
 fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
     let globals_result = validate_snapshot_globals(bytes);

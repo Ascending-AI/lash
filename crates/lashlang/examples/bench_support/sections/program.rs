@@ -722,11 +722,10 @@ finish { leaf: tree.next.next.next.next.next.next.leaf }
         Scenario::HeapDeepChainMutation24 => {
             // The deep half: the identical program at twenty-four levels, so
             // the two scenarios differ only in ancestor depth and their ratio
-            // is the scaling guard. Twenty-four rather than the thirty-two a
-            // reviewer probed with, because a thirty-two-level literal
-            // overflows the 2 MiB stack a debug test thread gets; the ratio is
-            // what the guard reads, and four times the depth is four times the
-            // depth either way.
+            // is the scaling guard. Twenty-four is four times the shallow half,
+            // which is all the ratio reads; the depth is not a stack ceiling in
+            // disguise, since linking is now bounded per level well inside the
+            // budget (see `lower_expr_expected_inner`).
             r#"
 tree = { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { leaf: [0] } } } } } } } } } } } } } } } } } } } } } } } } }
 for n in range(0, 150) {

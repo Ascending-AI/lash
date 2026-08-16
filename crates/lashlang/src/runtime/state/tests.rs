@@ -1,5 +1,80 @@
 use super::*;
+use crate::ast::{AssignTarget, Expr, FunctionExpr, Program};
 use crate::runtime::HEAP_SIZE_SCHEDULE_VERSION;
+use crate::runtime::entry_points::compile_program_internal;
+
+#[test]
+fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
+    let program = compile_program_internal(&Program::block(vec![
+        Expr::Assign {
+            target: AssignTarget::variable("captured".into()),
+            expr: Box::new(Expr::Number(1.0)),
+        },
+        Expr::Assign {
+            target: AssignTarget::variable("f".into()),
+            expr: Box::new(Expr::Function(Box::new(FunctionExpr {
+                name: None,
+                params: Vec::new(),
+                captures: vec!["captured".into()],
+                body: Box::new(Expr::Variable("captured".into())),
+            }))),
+        },
+    ]));
+
+    for captures in [Vec::new(), vec![Value::Null, Value::Bool(true)]] {
+        let mut heap = Heap::default();
+        let closure = heap
+            .allocate(HeapObject::Closure {
+                function: 0,
+                captures,
+            })
+            .expect("allocate malformed snapshot closure");
+        let mut runtime_globals = Record::new();
+        runtime_globals.insert("f".to_string(), closure);
+        let snapshot = Snapshot {
+            globals: Record::new(),
+            runtime_globals,
+            heap,
+        };
+        let bytes = snapshot
+            .to_canonical_bytes()
+            .expect("program-independent snapshot encoding accepts closure metadata");
+        let decoded = Snapshot::from_canonical_bytes(&bytes)
+            .expect("program-independent snapshot decoding accepts closure metadata");
+        let state = State::from_snapshot(decoded);
+        assert!(matches!(
+            state.validate_program(&program),
+            Err(RuntimeError::ClosureCaptureCountMismatch {
+                index: 0,
+                expected: 1,
+                ..
+            })
+        ));
+    }
+
+    let mut heap = Heap::default();
+    let closure = heap
+        .allocate(HeapObject::Closure {
+            function: 99,
+            captures: Vec::new(),
+        })
+        .expect("allocate unknown snapshot closure");
+    let mut runtime_globals = Record::new();
+    runtime_globals.insert("f".to_string(), closure);
+    let bytes = Snapshot {
+        globals: Record::new(),
+        runtime_globals,
+        heap,
+    }
+    .to_canonical_bytes()
+    .expect("program-independent snapshot encoding accepts function metadata");
+    let decoded = Snapshot::from_canonical_bytes(&bytes)
+        .expect("program-independent snapshot decoding accepts function metadata");
+    assert!(matches!(
+        State::from_snapshot(decoded).validate_program(&program),
+        Err(RuntimeError::UnknownFunction { index: 99 })
+    ));
+}
 
 #[test]
 fn canonical_encoding_is_deterministic_for_map_order_and_nan_payload() {
@@ -264,9 +339,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x89, 0xb2, 0x49, 0xb1, 0x7e, 0x9b, 0xf7, 0xa6, 0xba, 0x2b, 0xbe, 0xe5, 0xff, 0x32,
-            0xdc, 0x1a, 0xf1, 0xaa, 0x92, 0xeb, 0x7a, 0x51, 0xc6, 0x6d, 0x0d, 0x8b, 0xbc, 0xff,
-            0xd3, 0xba, 0x19, 0xb9,
+            0x1d, 0x82, 0xf8, 0xf0, 0x68, 0x35, 0xa7, 0xd8, 0x27, 0x7f, 0x55, 0x8c, 0x9c, 0x79,
+            0xe3, 0xb9, 0x8f, 0x73, 0xed, 0x66, 0x24, 0x8c, 0xf1, 0x68, 0x92, 0xe5, 0x1c, 0x6d,
+            0x11, 0xb3, 0x4a, 0x84,
         ]
     );
 }
@@ -280,7 +355,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e02a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e03a7676c6f62616c7390");
 }
 
 #[test]

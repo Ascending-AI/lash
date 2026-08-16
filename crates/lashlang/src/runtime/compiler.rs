@@ -18,8 +18,8 @@ use smallvec::SmallVec;
 
 use crate::artifact::CompiledModuleContext;
 use crate::ast::{
-    AssignPathStep, AssignTarget, BinaryOp, Expr, LabelMetadata, ListComprehensionClause,
-    ProcessStartExpr, Program, TypeExpr, UnaryOp,
+    AssignPathStep, AssignTarget, BinaryOp, Expr, FunctionExpr, LabelMetadata,
+    ListComprehensionClause, ProcessStartExpr, Program, TypeExpr, UnaryOp,
 };
 use crate::lexer::Span;
 use crate::tracking::{LashlangAstPath, LashlangExecutionContext, LashlangExecutionSite};
@@ -28,12 +28,13 @@ use super::record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, 
 use super::schema::{ValidationPlan, compile_schema_value};
 use super::{
     Chunk, CompileStats, CompiledAggregateAwaitShape, CompiledAssignPath, CompiledAssignPathStep,
-    CompiledFormatTemplate, CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf,
-    Instruction, IntrinsicOp, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
-    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, Name,
-    Value, as_number, compile_format_template, eval_binary_values, execute_integer_div_builtin,
-    execute_len_direct, execute_range_builtin, is_comparison_binary_op, is_numeric_binary_op,
-    is_truthy, read_field_direct, read_index_direct, transient_name, unwrap_type_value,
+    CompiledFormatTemplate, CompiledFunction, CompiledResourceOperationBatch,
+    CompiledResourceOperationBatchLeaf, Instruction, IntrinsicOp, LASH_HOST_REQUIREMENTS_REF_KEY,
+    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
+    LASH_TYPE_KEY, Name, Value, as_number, compile_format_template, eval_binary_values,
+    execute_integer_div_builtin, execute_len_direct, execute_range_builtin,
+    is_comparison_binary_op, is_numeric_binary_op, is_truthy, read_field_direct, read_index_direct,
+    transient_name, unwrap_type_value,
 };
 
 pub(crate) struct Compiler {
@@ -54,6 +55,8 @@ pub(crate) struct Compiler {
     compile_stats: Rc<RefCell<CompileStats>>,
     const_slots: Vec<Option<Value>>,
     loop_contexts: Vec<LoopContext>,
+    functions: Vec<CompiledFunction>,
+    pending_functions: Vec<Option<FunctionExpr>>,
 }
 
 struct LashlangExecutionCompileContext {
