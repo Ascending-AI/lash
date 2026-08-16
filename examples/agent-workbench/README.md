@@ -281,7 +281,13 @@ on how the turn terminated. A turn that finishes *as* an assistant message —
 bare prose, the shape a queued or wake turn reaches because it runs without
 `require_finish` — already has that reply committed by the runtime as the turn's
 terminal message under a runtime-minted id, and the workbench commits nothing on
-top of it. A turn that finishes with a terminal value — `finish`, which
+top of it. When that answer carries reasoning the copy is committed one layer
+earlier still, by the RLM protocol itself, as a plugin-origin assistant message
+holding the reasoning and the prose; the runtime then adds no terminal message
+because the answer is already the transcript's last one. The projection admits
+that last plugin-authored prose message as the turn's reply — and only that one,
+so the protocol's mid-turn prose stays out of the chat (FIG-1406). A turn that
+finishes with a terminal value — `finish`, which
 `require_finish` forces on the send path — has no runtime-committed assistant
 message, so the workbench commits the reply it renders. Either way a completed
 turn leaves exactly one committed assistant copy.

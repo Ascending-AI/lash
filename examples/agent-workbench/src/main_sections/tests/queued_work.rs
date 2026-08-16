@@ -1056,3 +1056,211 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
         let _ = std::fs::remove_dir_all(data_dir);
     });
 }
+
+/// A wake turn must not retract the answer the turn before it left on screen.
+///
+/// A cause-only turn commits no turn input: its cause lands as an `Event`
+/// message and the reply that follows belongs to the wake, not to the send
+/// before it. A projection that settles a turn's protocol-authored reply only
+/// at the next *turn input* folds the two turns together and drops the first
+/// answer the moment the wake commits its own — an answer disappearing after
+/// the user read it (FIG-1406).
+#[test]
+fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
+    run_async_test_on_stack_budget("workbench-wake-keeps-previous-reply", || async {
+        const REASONED_REPLY: &str = "FIG-1406 reasoned send answer";
+        const WAKE_REPLY: &str = "FIG-1406 wake answer";
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-wake-keeps-previous-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create wake keeps-previous dir");
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
+        );
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let state = recoverable_chat_test_state_with_dependencies_and_context(
+            &data_dir,
+            16,
+            lash::testing::TestProvider::builder()
+                .kind("workbench-wake-keeps-previous-test")
+                .complete(move |_| {
+                    let calls = Arc::clone(&calls);
+                    async move {
+                        let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        if call == 0 {
+                            // The send answers with reasoning attached, so the
+                            // RLM protocol owns the committed copy.
+                            let mut response = text_response(REASONED_REPLY);
+                            response.parts.insert(
+                                0,
+                                lash::direct::LlmOutputPart::Reasoning {
+                                    text: "FIG-1406 send reasoning".to_string(),
+                                    replay: None,
+                                },
+                            );
+                            Ok(response)
+                        } else {
+                            Ok(text_response(WAKE_REPLY))
+                        }
+                    }
+                })
+                .build()
+                .into_handle(),
+            in_memory_trigger_store(),
+            Arc::clone(&store_factory),
+            Some(inert_queued_work_driver()),
+            32_768,
+        )
+        .await;
+        let session_id = state.current_session_id();
+        let session = state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .expect("open wake keeps-previous session");
+
+        let send_turn_id = "workbench-turn-reasoned-send";
+        let send_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+        let send_output = session
+            .turn(lash::TurnInput::text("answer with reasoning"))
+            .turn_id(send_turn_id)
+            .stream_to(&ChannelTurnEvents {
+                turn_state: Arc::clone(&send_turn_state),
+            })
+            .await
+            .expect("run reasoned send turn");
+        crate::restate::record_turn_output(
+            &state,
+            &session,
+            send_turn_id,
+            send_output,
+            send_turn_state,
+            "test.wake_keeps_previous.send",
+        )
+        .await
+        .expect("record reasoned send output");
+        crate::restate::settle_workbench_turn(&state, &session_id, send_turn_id)
+            .await
+            .expect("settle reasoned send turn");
+
+        let target = store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: lash::persistence::SessionRelation::Root,
+                policy: session.policy_snapshot(),
+            })
+            .await
+            .expect("open wake keeps-previous receiver");
+        let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default())
+            as Arc<dyn lash::process::ProcessRegistry>;
+        let process_id = "workbench-wake-keeps-previous-process";
+        registry
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    process_id,
+                    lash::process::ProcessInput::External {
+                        metadata: Value::Null,
+                    },
+                    lash::process::RecoveryDisposition::ExternallyOwned,
+                    lash::process::ProcessProvenance::host(),
+                )
+                .with_extra_event_types([lash::process::ProcessEventType {
+                    name: "producer.wake".to_string(),
+                    payload_schema: lash::triggers::LashSchema::any(),
+                    semantics: lash::process::ProcessEventSemanticsSpec {
+                        wake: Some(lash::process::ProcessWakeSpec {
+                            when: Some(lash::process::ProcessValueSelector::Present(
+                                "/wake_input".to_string(),
+                            )),
+                            input: lash::process::ProcessValueSelector::Pointer(
+                                "/wake_input".to_string(),
+                            ),
+                        }),
+                        ..lash::process::ProcessEventSemanticsSpec::default()
+                    },
+                }])
+                .with_wake_session_id(Some(session_id.clone())),
+            )
+            .await
+            .expect("register wake keeps-previous producer");
+        let wake = registry
+            .append_event(
+                process_id,
+                lash::process::ProcessEventAppendRequest::new(
+                    "producer.wake",
+                    json!({"wake_input": "the producer woke this session"}),
+                ),
+            )
+            .await
+            .expect("append wake keeps-previous event")
+            .wake_delivery
+            .expect("wake keeps-previous delivery");
+        target
+            .enqueue_queued_work(workbench_process_wake_draft(wake))
+            .await
+            .expect("enqueue wake keeps-previous batch");
+
+        let wake_turn_id = "workbench-queued-wake-keeps-previous";
+        state.track_turn(&session_id, wake_turn_id);
+        let wake_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+        let wake_output = restate::WorkbenchQueuedTurnWorkflowRequest {
+            turn_id: wake_turn_id.to_string(),
+            session_id: session_id.clone(),
+            reason: "test_wake_keeps_previous".to_string(),
+            batch_ids: Vec::new(),
+            drain_id: Some(format!("{wake_turn_id}-drain")),
+        }
+        .queued_turn(&session)
+        .stream_to(&ChannelTurnEvents {
+            turn_state: Arc::clone(&wake_turn_state),
+        })
+        .await
+        .expect("run wake keeps-previous turn")
+        .expect("the wake batch produced a turn");
+        crate::restate::record_turn_output(
+            &state,
+            &session,
+            wake_turn_id,
+            wake_output,
+            wake_turn_state,
+            "test.wake_keeps_previous.wake",
+        )
+        .await
+        .expect("record wake keeps-previous output");
+        assert!(
+            session
+                .read_view()
+                .messages()
+                .iter()
+                .any(|message| lash::message_role(message) == "event"),
+            "the wake turn must commit its cause as an event message, which is \
+             the only boundary this projection can read"
+        );
+        crate::restate::settle_workbench_turn(&state, &session_id, wake_turn_id)
+            .await
+            .expect("settle wake keeps-previous turn");
+        session
+            .close()
+            .await
+            .expect("close wake keeps-previous session");
+
+        let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
+            .await
+            .expect("read wake keeps-previous snapshot");
+        let agent_rows = snapshot
+            .state
+            .messages
+            .iter()
+            .filter(|message| message.role == "assistant")
+            .map(|message| message.text.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            agent_rows,
+            vec![REASONED_REPLY.to_string(), WAKE_REPLY.to_string()],
+            "the send's reasoned answer must survive the wake that followed it"
+        );
+        let _ = std::fs::remove_dir_all(data_dir);
+    });
+}

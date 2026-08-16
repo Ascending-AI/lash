@@ -157,8 +157,103 @@ fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
     )
 }
 
-fn project_committed_chat_message(message: &lash::messages::Message) -> Option<ChatMessage> {
-    (!is_durable_internal_rlm_message(message)).then(|| chat_message_from_committed(message))
+/// Whether this plugin-authored RLM message could be a turn's committed reply:
+/// an assistant message carrying visible prose. The protocol's system copies —
+/// finish reminders, retry copy, cell diagnostics — never can be, and its
+/// reasoning-only messages carry nothing for a chat row to say.
+fn is_rlm_assistant_prose_message(message: &lash::messages::Message) -> bool {
+    is_durable_internal_rlm_message(message)
+        && lash::message_role(message) == "assistant"
+        && message.parts.iter().any(|part| {
+            matches!(part.kind, lash_core::PartKind::Prose) && !part.content.trim().is_empty()
+        })
+}
+
+/// The plugin-authored messages that *are* a turn's user-visible reply.
+///
+/// The RLM protocol commits the model's prose as a plugin-origin assistant
+/// message on every protocol iteration. Mid-turn copies are context for the
+/// next request — the transcript keeps only their reasoning — but a turn whose
+/// answer carries reasoning has its **answer** committed the same way, and then
+/// the runtime mints no terminal message of its own: `materialize_terminal_output`
+/// finds that text already last in the transcript and returns. Treating every
+/// plugin-origin message as internal therefore dropped the reply itself and
+/// re-admitted only its reasoning (FIG-1406).
+///
+/// The reply is the last assistant message a turn committed, so this walks the
+/// transcript in commit order and keeps, per turn, the final plugin-authored
+/// assistant prose message — abandoning the candidate as soon as an ordinary
+/// assistant message follows it, because that runtime or workbench copy is then
+/// the reply and the plugin message behind it is superseded context.
+///
+/// What settles a candidate is a *turn change*, and a turn input is neither
+/// necessary nor sufficient to mark one. A cause-only turn — a process wake or
+/// a queued drain — commits no input at all, only its typed cause as an `Event`
+/// message; reading turn inputs alone as boundaries would fold that wake's
+/// prose into the previous turn and retract an answer the user already read.
+/// An input injected into a *running* turn, conversely, commits a turn input
+/// carrying that turn's own id and opens nothing, so it is skipped: settling
+/// there would render the turn's mid-turn prose alongside its answer, one turn
+/// as two agent rows. The open turn is therefore tracked by the typed `turn_id`
+/// the runtime publishes, never by parsing a message id (FIG-972/984). A cause
+/// delivered into a running turn is indistinguishable from one that opens a
+/// turn, and settling the candidate is the safe reading of the two: an extra
+/// durable row is a smaller injury than an answer that disappears.
+///
+/// A running turn's *own* trailing candidate is withheld: while the turn runs
+/// its live workbench-owned row speaks for the answer, and admitting a mid-turn
+/// copy underneath it is the two-namespaces-one-message defect FIG-984 closed.
+/// It renders once that turn settles and its live row retires. The test is
+/// per-turn on purpose — the active-turn registry is persistent and is written
+/// before the next turn's input commits, so a session-wide test would blink the
+/// previous answer out on every send and hide it for good behind an entry whose
+/// process died mid-turn.
+fn durable_rlm_reply_message_ids(
+    messages: &[lash::messages::Message],
+    running_turn_ids: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut replies = BTreeSet::new();
+    let mut candidate: Option<String> = None;
+    // The turn the walk is inside, when the transcript names it. A cause-only
+    // turn never does, and its candidate is judged as an unnamed turn's.
+    let mut open_turn_id: Option<String> = None;
+    for message in messages {
+        match message.origin.as_ref() {
+            Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) => {
+                if open_turn_id.as_deref() == Some(turn_id.as_str()) {
+                    continue;
+                }
+                replies.extend(candidate.take());
+                open_turn_id = Some(turn_id.clone());
+            }
+            _ if lash::message_role(message) == "event" => {
+                replies.extend(candidate.take());
+                open_turn_id = None;
+            }
+            _ if is_rlm_assistant_prose_message(message) => {
+                candidate = Some(message.id.clone());
+            }
+            _ if lash::message_role(message) == "assistant" => {
+                candidate = None;
+            }
+            _ => {}
+        }
+    }
+    let candidate_turn_is_running = open_turn_id
+        .as_ref()
+        .is_some_and(|turn_id| running_turn_ids.contains(turn_id));
+    if !candidate_turn_is_running {
+        replies.extend(candidate);
+    }
+    replies
+}
+
+fn project_committed_chat_message(
+    message: &lash::messages::Message,
+    rlm_reply_ids: &BTreeSet<String>,
+) -> Option<ChatMessage> {
+    (!is_durable_internal_rlm_message(message) || rlm_reply_ids.contains(&message.id))
+        .then(|| chat_message_from_committed(message))
 }
 
 fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> Vec<TranscriptRow> {
@@ -204,6 +299,7 @@ fn transcript_rows_from_committed(
     read_view: &lash::persistence::SessionReadView,
     user_replacements: &BTreeMap<String, ChatMessage>,
     protocol_state_message_ids: &BTreeSet<String>,
+    rlm_reply_ids: &BTreeSet<String>,
 ) -> Vec<TranscriptRow> {
     // The label comes from the dialect the session recorded, not from this
     // process's ambient configuration: the recorded pin is what the executor
@@ -223,7 +319,15 @@ fn transcript_rows_from_committed(
                     return Vec::new();
                 }
                 if is_durable_internal_rlm_message(&message) {
-                    return durable_rlm_reasoning_rows(&message);
+                    // The reply's reasoning still renders as its own collapsed
+                    // row, ahead of the prose it reasoned toward.
+                    let mut rows = durable_rlm_reasoning_rows(&message);
+                    if rlm_reply_ids.contains(&message.id) {
+                        rows.push(TranscriptRow::Message {
+                            message: chat_message_from_committed(&message),
+                        });
+                    }
+                    return rows;
                 }
                 let message = user_replacements
                     .get(&message.id)
@@ -296,6 +400,11 @@ fn project_chat(
         .collect::<BTreeMap<_, _>>();
     let user_replacements = ui_owned_turn_input_replacements(read_view, &ui_user_rows);
     let protocol_state_message_ids = continue_as_protocol_state_message_ids(read_view);
+    let running_turn_ids = active_turns
+        .iter()
+        .map(|address| address.turn_id.clone())
+        .collect::<BTreeSet<_>>();
+    let rlm_reply_ids = durable_rlm_reply_message_ids(read_view.messages(), &running_turn_ids);
     let replaced_committed_ids = user_replacements.keys().cloned().collect::<BTreeSet<_>>();
     let historical_ui_rows = product_messages
         .iter()
@@ -316,7 +425,7 @@ fn project_chat(
         user_replacements
             .get(&message.id)
             .cloned()
-            .or_else(|| project_committed_chat_message(message))
+            .or_else(|| project_committed_chat_message(message, &rlm_reply_ids))
     }));
     let mut transcript = historical_ui_rows
         .into_iter()
@@ -326,6 +435,7 @@ fn project_chat(
         read_view,
         &user_replacements,
         &protocol_state_message_ids,
+        &rlm_reply_ids,
     ));
 
     let mut message_ids = messages
