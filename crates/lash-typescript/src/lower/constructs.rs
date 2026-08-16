@@ -1251,11 +1251,14 @@ impl Lowerer {
             _ => true,
         };
         if !valid_arity {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::NewUnsupported,
                 format!(
                     "new `{constructor}` does not accept {} argument(s) in the TypeScript runtime surface",
                     args.len()
+                ),
+                format!(
+                    "`{constructor}` is constructible — pass the argument count its signature accepts"
                 ),
                 None,
             ));

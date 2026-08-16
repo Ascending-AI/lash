@@ -175,9 +175,11 @@ fn temp_assignment(name: &str, value: LashExpr) -> LashExpr {
 }
 
 fn regex_arity(method: &str, expected: &str) -> Diagnostic {
-    Diagnostic::new(
+    // Arity, not availability. See `callback_arity`.
+    Diagnostic::with_repair(
         DiagnosticCode::MethodUnsupported,
         format!("{method} expects {expected}"),
+        format!("call `{method}` with {expected}"),
         None,
     )
 }

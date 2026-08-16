@@ -1432,3 +1432,102 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
         "the turn asks the model again instead of stopping"
     );
 }
+
+/// Leg 1 of the retry-hygiene triple, driven through the real machine.
+///
+/// Within one iteration a failing cell keeps whatever it printed before it
+/// failed — that output is real and the model should see it. What must not
+/// happen is any of it surviving into the *next* attempt, where it would read
+/// as output of a program that never ran, and where an `error` left in place
+/// would mark a cell that succeeded as failed.
+///
+/// The driver gets this by rebuilding the whole driver state on every protocol
+/// iteration rather than clearing fields, so there is no field to forget. That
+/// is a property of one line in `prepare_protocol_iteration`, which is why this
+/// exercises the iteration rather than asserting that `Default` is empty.
+#[test]
+fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
+    let mut config = test_config_with_termination(RlmTermination::FinishRequired { schema: None });
+    config.turn_budget = lash_core::TurnBudget::bounded(8);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("run it")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let run_cell = |machine: &mut TurnMachine, code: &str, result: lash_sansio::ExecResponse| {
+        let mut effects = drain_effects(machine);
+        // Between iterations the machine parks on a checkpoint; acknowledge
+        // it so the next LLM call is issued.
+        if find_llm_call(&effects).is_none()
+            && let Some((checkpoint_id, _)) = find_checkpoint(&effects)
+        {
+            machine.handle_response(Response::Checkpoint {
+                id: checkpoint_id,
+                delivery: lash_sansio::CheckpointDelivery::default(),
+            });
+            effects = drain_effects(machine);
+        }
+        let llm_id = *find_llm_call(&effects).expect("an llm call opens the iteration");
+        let text = format!("<lashlang>\n{code}\n</lashlang>");
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(LlmResponse {
+                full_text: text.clone(),
+                parts: vec![text_part(&text)],
+                terminal_reason: lash_core::LlmTerminalReason::Stop,
+                ..LlmResponse::default()
+            }),
+        });
+        let effects = drain_effects(machine);
+        let exec_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::ExecCode { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("the cell is executed");
+        machine.handle_response(Response::ExecResult {
+            id: exec_id,
+            result: Ok(result),
+        });
+    };
+
+    // A cell that printed something and then failed.
+    run_cell(
+        &mut machine,
+        "print \"partial\"",
+        exec_response(
+            &["partial output before the failure"],
+            Some("unknown variable `missing_name`"),
+            None,
+        ),
+    );
+    // The repair, which runs clean.
+    run_cell(
+        &mut machine,
+        "print \"repaired\"",
+        exec_response(&["repaired output"], None, None),
+    );
+
+    let trajectory = machine_trajectory(&machine);
+    assert_eq!(trajectory.len(), 2, "one entry per executed cell");
+
+    let failed = &trajectory[0];
+    assert_eq!(failed.output, vec!["partial output before the failure"]);
+    assert!(failed.error.is_some(), "the failure keeps its own error");
+
+    let repaired = &trajectory[1];
+    assert_eq!(
+        repaired.output,
+        vec!["repaired output"],
+        "the repair iteration must not inherit the failed cell's output"
+    );
+    assert_eq!(
+        repaired.error, None,
+        "a clean cell must not inherit the previous iteration's error"
+    );
+    assert_eq!(repaired.code, "print \"repaired\"");
+}

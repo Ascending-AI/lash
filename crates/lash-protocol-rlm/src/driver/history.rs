@@ -298,6 +298,9 @@ pub(super) fn render_history_messages(
 /// message written after it. Dropping only the trajectory entry would leave its
 /// prose to fold into the *next* cell and its repair instruction pointing at
 /// nothing.
+///
+/// Every one of those four is identified by *provenance*, never by role or
+/// position. Only this plugin's own output is the plugin's to delete.
 fn superseded_failure_indices(
     events: &[lash_core::SessionHistoryRecord],
     turn_messages: &lash_core::facade_support::MessageSequence,
@@ -320,9 +323,15 @@ fn superseded_failure_indices(
                 }
                 lash_core::MessageRole::Assistant => prose_entries.push(entry.index),
                 // Protocol feedback is repair instruction for the failure it
-                // follows; it goes when the failure goes.
+                // follows; it goes when the failure goes. Identity, not role:
+                // `System` is a shared channel, and the host puts its own
+                // messages on it — a plugin directive enqueued at a mid-turn
+                // checkpoint lands here too. Scrubbing by role would delete a
+                // policy reminder the host injected between a failed cell and
+                // the next good one, which is not ours to delete and not
+                // recoverable from anywhere.
                 lash_core::MessageRole::System => {
-                    if any_failure_pending {
+                    if any_failure_pending && is_rlm_protocol_message(&message) {
                         pending_failure_entries.push(entry.index);
                     }
                 }
@@ -350,6 +359,23 @@ fn superseded_failure_indices(
     });
 
     superseded
+}
+
+/// Whether this message is the RLM protocol's own durable output.
+///
+/// The one question the scrub is allowed to ask about a `System` message. A host
+/// or another plugin can write on the same channel, and their messages carry
+/// their own provenance.
+fn is_rlm_protocol_message(
+    message: &lash_core::facade_support::BorrowedChronologicalMessage<'_>,
+) -> bool {
+    matches!(
+        message.origin,
+        Some(lash_core::MessageOrigin::Plugin {
+            plugin_id,
+            transient: false,
+        }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
+    )
 }
 
 /// Emit a buffered prose as a standalone assistant message (a prose-only

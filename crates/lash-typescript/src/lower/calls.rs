@@ -291,9 +291,10 @@ impl Lowerer {
                 }
                 if method == "stringify" {
                     if args.len() > 3 {
-                        return Err(Diagnostic::new(
+                        return Err(Diagnostic::with_repair(
                             DiagnosticCode::MethodUnsupported,
                             "JSON.stringify expects value, optional replacer, and optional space",
+                            "call JSON.stringify(value), JSON.stringify(value, replacer), or JSON.stringify(value, replacer, space)",
                             None,
                         ));
                     }
@@ -545,9 +546,10 @@ impl Lowerer {
                 && static_stdlib_owner(object).is_none()
                 && self.iterable_sink_depth == 0
             {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::with_repair(
                     DiagnosticCode::MethodUnsupported,
-                    "Unsupported: iterator methods may only be consumed directly by for-of / spread / Array.from / new Map|Set / Object.fromEntries — wrap: [...expr]",
+                    "Unsupported: iterator methods may only be consumed directly by for-of / spread / Array.from / new Map|Set / Object.fromEntries",
+                    "wrap it at the point of use: `[...expr]`",
                     None,
                 ));
             }
@@ -562,9 +564,10 @@ impl Lowerer {
                         (value, args.get(1..).expect("mapping arguments exist"))
                     }
                     _ => {
-                        return Err(Diagnostic::new(
+                        return Err(Diagnostic::with_repair(
                             DiagnosticCode::MethodUnsupported,
                             "Array.from expects a source and optional mapping callback",
+                            "call Array.from(source) or Array.from(source, (item) => ...)",
                             None,
                         ));
                     }

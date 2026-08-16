@@ -556,7 +556,7 @@ finish result"#,
         root         exec      cell.failed             calls=1 error="[ERROR] `?` unwrapped failed module operation: {"class":"execution","cod…"
         root         provider  model.request           iteration=1
         root         exec      cell.start              lang="lashlang"
-        root         exec      cell.failed             calls=0 error="[POLICY] unknown name `task` --> line 1, column 7 await task.fail({ reas…"
+        root         exec      cell.failed             calls=0 error="[ERROR] unknown name `task` --> line 1, column 7 await task.fail({ reaso…"
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=257B

@@ -220,7 +220,7 @@ impl DiagnosticCode {
             }
             Self::ForOfUnsupported => "iterate a materialized array with plain `for...of`",
             Self::AwaitUnsupported => {
-                "await at the top level of the cell or inside an `async` function"
+                "await tool calls, process handles, `sleep`, `waitSignal`, or `Promise.all`/`allSettled` — nothing else is awaitable"
             }
             Self::AwaitRequired => "add `await` — the call returns a promise",
             Self::YieldUnsupported => "collect the values into an array and return it",
@@ -262,8 +262,54 @@ impl DiagnosticCode {
             Self::UnsupportedStatement | Self::UnsupportedExpression => {
                 "rewrite with the constructs the dialect prompt lists"
             }
+            Self::RegexIteratorPosition => {
+                "consume the iterator where it is produced: `[...expr]`, `for...of`, `Array.from`, `new Map`/`Set`, or `Object.fromEntries`"
+            }
+            Self::RegexPatternTooLong | Self::RegexNestingLimit => {
+                "split the pattern into smaller expressions and match in steps"
+            }
+            Self::SourceNestingLimit => "name intermediate values instead of nesting expressions",
+            Self::SourceTooLarge => "split the work across several cells",
+            Self::ReservedIdentifier => "choose a different name",
+            Self::ProcessDefinitionNotTopLevel => "bind `defineProcess` to one top-level `const`",
+            Self::ProcessConfigLiteralRequired => {
+                "pass `defineProcess` a literal object with static properties"
+            }
+            Self::ProcessNameLiteralRequired => "give `name` a string literal",
+            Self::ProcessSignalsLiteralRequired => {
+                "give `signals` a literal object with static properties"
+            }
+            Self::ProcessRunLiteralRequired => "give `run` a function literal",
+            Self::ProcessTargetStaticRequired => {
+                "name a top-level `defineProcess` binding directly"
+            }
             _ => return None,
         })
+    }
+
+    /// Whether this code refuses something the dialect does not allow, as
+    /// opposed to reporting a defect in the program.
+    ///
+    /// The two need different words to a model. A refusal means no version of
+    /// this approach will be accepted and the fix is to write the *other*
+    /// construct; a defect means the approach was fine and the program was
+    /// wrong. Telling a model its program is broken when the dialect refused
+    /// the construct sends it debugging something it cannot fix, and telling it
+    /// a construct is forbidden when it merely misspelled a name sends it
+    /// rewriting working code.
+    ///
+    /// A misspelled identifier, an unterminated string, a `return` outside a
+    /// function, a use before its declaration: all of those are the program
+    /// being wrong, even though the dialect is what reported them. They are the
+    /// codes this returns `false` for.
+    pub const fn is_dialect_restriction(self) -> bool {
+        // Refusing a construct and being able to name its replacement are the
+        // same fact, so this is the idiom table and nothing else. Keeping them
+        // as one answer is what guarantees the refusal wording stays honest:
+        // the `[POLICY]` feedback tells the model to "rewrite it in the form
+        // named above", and a restriction with no named form would make that a
+        // lie. `a_refusal_always_has_a_form_to_name` holds the pair together.
+        self.accepted_idiom().is_some()
     }
 
     /// The stable machine-readable diagnostic name.
@@ -588,6 +634,59 @@ mod tests {
             silent.is_empty(),
             "these refuse a construct without naming its replacement: {silent:?}"
         );
+    }
+
+    /// `[POLICY]` feedback tells the model to rewrite the cell "in the form
+    /// named above". A restriction with no named form makes that instruction a
+    /// lie, and a lie in the repair loop costs a whole turn. The two answers are
+    /// therefore the same answer.
+    #[test]
+    fn a_refusal_always_has_a_form_to_name() {
+        for code in DiagnosticCode::ALL {
+            assert_eq!(
+                code.is_dialect_restriction(),
+                code.accepted_idiom().is_some(),
+                "{} refuses without naming a replacement",
+                code.as_str()
+            );
+        }
+    }
+
+    /// The distinction is only useful if it actually separates the two families,
+    /// so both directions are checked: every construct refusal is a restriction,
+    /// and the codes that report a wrong program are not.
+    #[test]
+    fn a_wrong_program_is_not_a_dialect_restriction() {
+        for code in DiagnosticCode::ALL
+            .iter()
+            .filter(|code| code.as_str().ends_with("_UNSUPPORTED"))
+        {
+            assert!(
+                code.is_dialect_restriction(),
+                "{} refuses a construct and must read as a refusal",
+                code.as_str()
+            );
+        }
+        for code in [
+            DiagnosticCode::SyntaxError,
+            DiagnosticCode::UnknownBinding,
+            DiagnosticCode::DuplicateBinding,
+            DiagnosticCode::TemporalDeadZone,
+            DiagnosticCode::AssignConst,
+            DiagnosticCode::MissingInitializer,
+            DiagnosticCode::ReturnOutsideFunction,
+            DiagnosticCode::LoopControlOutsideLoop,
+            DiagnosticCode::RegexInvalid,
+            DiagnosticCode::LinkError,
+            DiagnosticCode::InvalidAst,
+            DiagnosticCode::ParseResourcesUnavailable,
+        ] {
+            assert!(
+                !code.is_dialect_restriction(),
+                "{} reports a wrong program, not a forbidden construct",
+                code.as_str()
+            );
+        }
     }
 
     /// The channel exists to *move* repair text, not to copy it. A suggestion

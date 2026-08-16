@@ -378,19 +378,24 @@ async fn execute_code_inner(
     }
     host_environment = host_environment.with_globals(live_global_names);
 
-    let compile_result: Result<_, String> = {
+    // The kind is decided here, while the failure is still a typed diagnostic.
+    // "Compilation failed" is not enough to classify it: a misspelled name and a
+    // forbidden construct both fail here and need opposite advice.
+    let compile_result: Result<_, (crate::feedback::RlmFeedbackKind, String)> = {
         let _phase = ctx.named_phase("rlm_lashlang.compile_link");
         match source_dialect {
             SourceDialect::Lashlang => state
                 .linked_programs
                 .get_or_compile(code, &host_environment)
                 .map_err(|error| match error {
-                    lashlang::LinkedProgramCacheError::Parse(error) => {
-                        format_rlm_parse_diagnostic(code, &error)
-                    }
-                    lashlang::LinkedProgramCacheError::Link(error) => {
-                        format_rlm_link_diagnostic(code, &error)
-                    }
+                    lashlang::LinkedProgramCacheError::Parse(error) => (
+                        lashlang_parse_feedback_kind(&error),
+                        format_rlm_parse_diagnostic(code, &error),
+                    ),
+                    lashlang::LinkedProgramCacheError::Link(error) => (
+                        lashlang_link_feedback_kind(&error),
+                        format_rlm_link_diagnostic(code, &error),
+                    ),
                 }),
             // TypeScript is parsed here rather than by the cache, so the cache
             // is asked first: otherwise every cell would pay a full parse even
@@ -410,7 +415,12 @@ async fn execute_code_inner(
                 // diagnostic carries a span and the model needs the line it
                 // wrote. Lashlang's parse failures have always arrived this way.
                 None => lash_typescript::parse_with_globals(code, &host_environment.globals)
-                    .map_err(|error| lash_typescript::format_diagnostic(code, &error))
+                    .map_err(|error| {
+                        (
+                            typescript_feedback_kind(&error),
+                            lash_typescript::format_diagnostic(code, &error),
+                        )
+                    })
                     .and_then(|program| {
                         state
                             .linked_programs
@@ -420,17 +430,20 @@ async fn execute_code_inner(
                                 &host_environment,
                                 lashlang::CompilationDialect::Typescript,
                             )
-                            .map_err(|error| format_rlm_link_diagnostic(code, &error))
+                            .map_err(|error| {
+                                (
+                                    lashlang_link_feedback_kind(&error),
+                                    format_rlm_link_diagnostic(code, &error),
+                                )
+                            })
                     }),
             },
         }
     };
     let cached_program = match compile_result {
         Ok(program) => program,
-        // A compile or link failure is a refusal, not a bug in what the program
-        // did: the same source will be refused again.
-        Err(error) => {
-            let error = crate::feedback::RlmFeedbackKind::Policy.label(error);
+        Err((kind, error)) => {
+            let error = kind.label(error);
             return ExecResponse {
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
@@ -670,6 +683,56 @@ async fn execute_code_inner(
     }
 }
 
+/// Whether a TypeScript rejection refuses a construct or reports a wrong
+/// program.
+///
+/// The dialect owns this distinction, so it is asked rather than guessed.
+fn typescript_feedback_kind(
+    error: &lash_typescript::Diagnostic,
+) -> crate::feedback::RlmFeedbackKind {
+    if error.code.is_dialect_restriction() {
+        crate::feedback::RlmFeedbackKind::Policy
+    } else {
+        crate::feedback::RlmFeedbackKind::Error
+    }
+}
+
+/// Whether a Lashlang parse failure is a refusal or a wrong program.
+///
+/// Almost all of them are the program: a lex failure, an unexpected token, a
+/// missing `finish` value. The refusals are the retired forms and the rules
+/// about where a construct may appear — no rewrite of the same approach is
+/// accepted, so the model must be told to write a different one.
+fn lashlang_parse_feedback_kind(error: &lashlang::ParseError) -> crate::feedback::RlmFeedbackKind {
+    match error {
+        lashlang::ParseError::SubmitRemoved { .. }
+        | lashlang::ParseError::DeclarativeTriggerRemoved { .. }
+        | lashlang::ParseError::SessionProcessAdminOutsideBlock { .. }
+        | lashlang::ParseError::ForegroundControlInsideProcess { .. }
+        | lashlang::ParseError::NestingTooDeep { .. } => crate::feedback::RlmFeedbackKind::Policy,
+        _ => crate::feedback::RlmFeedbackKind::Error,
+    }
+}
+
+/// Whether a link failure is a refusal or a wrong program.
+///
+/// An unknown name, an unknown operation, an arity or type mismatch: those are
+/// the program. A bare tool call, a disabled feature, an opaque descriptor read,
+/// and the placement rules are the host declining, and no amount of debugging
+/// changes them.
+fn lashlang_link_feedback_kind(error: &lashlang::LinkError) -> crate::feedback::RlmFeedbackKind {
+    match error {
+        lashlang::LinkError::BareToolCall { .. }
+        | lashlang::LinkError::FeatureDisabled { .. }
+        | lashlang::LinkError::OpaqueHostDescriptorAccess { .. }
+        | lashlang::LinkError::ProcessLifecycleOutsideProcess { .. }
+        | lashlang::LinkError::TriggerEventOutsideInputs { .. } => {
+            crate::feedback::RlmFeedbackKind::Policy
+        }
+        _ => crate::feedback::RlmFeedbackKind::Error,
+    }
+}
+
 fn format_rlm_parse_diagnostic(code: &str, error: &lashlang::ParseError) -> String {
     format!(
         "{}\n\nA standalone `</lashlang>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line.",
@@ -880,6 +943,40 @@ mod tests {
 
         assert!(diagnostic.contains("standalone `</lashlang>` line"));
         assert!(diagnostic.contains("inside multiline source text"));
+    }
+
+    /// A typo is not a policy refusal.
+    ///
+    /// Classifying every compile failure as `[POLICY]` produced the one thing
+    /// the split exists to prevent: `unknown name \`task\`` arrived under "the
+    /// runtime refused this cell; sending it again unchanged will be refused
+    /// again. Rewrite it in the form named above" — with no form named above,
+    /// because a misspelled identifier has no accepted alternative form. The
+    /// gate is the diagnostic code, not the fact that compilation failed.
+    #[test]
+    fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
+        let typo = lash_typescript::parse_with_globals("finish(taks);", &BTreeSet::new())
+            .expect_err("an unbound name is rejected");
+        assert_eq!(
+            typescript_feedback_kind(&typo),
+            crate::feedback::RlmFeedbackKind::Error,
+            "a misspelled name is the program being wrong: {typo}"
+        );
+
+        let forbidden = lash_typescript::parse_with_globals("class A {}", &BTreeSet::new())
+            .expect_err("classes are refused");
+        assert_eq!(
+            typescript_feedback_kind(&forbidden),
+            crate::feedback::RlmFeedbackKind::Policy,
+            "a construct outside the dialect is a refusal: {forbidden}"
+        );
+
+        // And the imperative the Policy branch chooses is only honest when the
+        // diagnostic really does name a form.
+        assert!(
+            !forbidden.suggestions.is_empty(),
+            "a Policy classification promises a named form: {forbidden:?}"
+        );
     }
 
     /// The executor is where a TypeScript rejection becomes the text a model

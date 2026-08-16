@@ -27,8 +27,9 @@ pub(crate) enum RlmFeedbackKind {
     /// The runtime refused the cell: a dialect rejection, an execution bound, a
     /// budget. The same program will be refused again.
     Policy,
-    /// The program ran and failed. The same program might succeed on other
-    /// inputs; the defect is in what it did.
+    /// The program is wrong. It may have failed to compile — a misspelled name,
+    /// an unterminated string — or run and thrown. Either way the approach was
+    /// allowed and the code was not correct, so the fix is in the code.
     Error,
 }
 
@@ -77,7 +78,7 @@ impl RlmFeedbackKind {
                 "Next: the runtime refused this {cell_noun}; sending it again unchanged will be refused again. Rewrite it in the form named above."
             ),
             Self::Error => format!(
-                "Next: the program ran and failed. Fix the cause named above, then send the corrected {cell_noun}."
+                "Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected {cell_noun}."
             ),
         }
     }
@@ -116,6 +117,9 @@ mod tests {
         let error = RlmFeedbackKind::Error.imperative("cell");
         assert_ne!(policy, error);
         assert!(policy.contains("refused"), "{policy}");
-        assert!(error.contains("ran and failed"), "{error}");
+        assert!(error.contains("the defect is in the program"), "{error}");
+        // The Error branch also covers compile-time defects, which never ran, so
+        // it must not claim the program did.
+        assert!(!error.contains("ran and failed"), "{error}");
     }
 }

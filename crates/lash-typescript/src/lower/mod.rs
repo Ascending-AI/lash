@@ -1159,9 +1159,10 @@ impl Lowerer {
         if entries.iter().any(|(key, _)| {
             !matches!(*key, "name" | "signals" | "run") || !seen_fields.insert(*key)
         }) {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::ProcessConfigFieldUnsupported,
                 "defineProcess accepts only name, signals, and run",
+                "drop the extra key; anything else the process needs arrives as a `run` parameter",
                 None,
             ));
         }
@@ -1206,9 +1207,10 @@ impl Lowerer {
             ));
         };
         if !run.is_async {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::AsyncUnsupported,
                 "defineProcess.run must be async",
+                "write it as `run: async (...) => { ... }`",
                 None,
             ));
         }

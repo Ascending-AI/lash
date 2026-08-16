@@ -201,11 +201,11 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
     [ERROR]
     read failed at secret.txt; cache failed at .cache/lash/state
 
-    Next: the program ran and failed. Fix the cause named above, then send the corrected block.
+    Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected block.
     "#);
     assert!(observation.contains("Calls:\n- module.ok → ok\n- module.fail → err"));
     assert!(!observation.contains("secret: 1"), "arguments stay elided");
-    assert!(observation.contains("Next: the program ran and failed."));
+    assert!(observation.contains("Next: the defect is in the program"));
     assert!(observation.contains("secret.txt"));
     assert!(observation.contains(".cache/lash/state"));
 }
@@ -394,7 +394,10 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
         refused.contains("sending it again unchanged will be refused again"),
         "{refused}"
     );
-    assert!(!refused.contains("the program ran and failed"), "{refused}");
+    assert!(
+        !refused.contains("the defect is in the program"),
+        "{refused}"
+    );
 
     let threw = rendered_text(&render(&[failed_step_event(
         "lashlang_step_0",
@@ -402,6 +405,93 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
         &crate::feedback::RlmFeedbackKind::Error.label("index out of range"),
     )]));
     assert!(threw.contains("[ERROR]\nindex out of range"), "{threw}");
-    assert!(threw.contains("the program ran and failed"), "{threw}");
+    assert!(threw.contains("the defect is in the program"), "{threw}");
     assert!(!threw.contains("refused"), "{threw}");
+}
+
+/// A host-authored System message is not the RLM protocol's to delete.
+///
+/// `System` is a shared channel: a plugin directive enqueued at a mid-turn
+/// checkpoint lands on it exactly where the protocol's own retry feedback would.
+/// Scrubbing by role therefore reached past the protocol's own output and
+/// deleted a policy reminder the host injected between a failed cell and the
+/// next good one — silently, from every later render, with no other copy.
+#[test]
+fn a_host_system_message_survives_the_scrub() {
+    let transcript = rendered_text(&render(&[
+        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        SessionHistoryRecord::Conversation(ConversationRecord {
+            id: "h1".to_string(),
+            role: MessageRole::System,
+            parts: vec![Part::prose(
+                "h1.p0".to_string(),
+                "Reminder: never write outside the workspace.".to_string(),
+                None,
+            )]
+            .into(),
+            origin: Some(MessageOrigin::Plugin {
+                plugin_id: "some-other-plugin".to_string(),
+                transient: false,
+            }),
+        }),
+        step_event("print 1"),
+    ]));
+
+    assert!(!transcript.contains("undefined_name"), "{transcript}");
+    assert!(
+        transcript.contains("Reminder: never write outside the workspace."),
+        "the host's own message must outlive the failure it happened to follow: {transcript}"
+    );
+}
+
+/// Scrubbing an entry clears the buffered prose, so mis-scrubbing one entry
+/// takes the *next* cell's prose with it. With the host message correctly
+/// excluded there is nothing to clear, and the surviving cell keeps its prose.
+#[test]
+fn a_surviving_cells_prose_is_not_taken_by_the_scrub() {
+    let transcript = rendered_text(&render(&[
+        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        assistant_reasoning_event(&[], "Second attempt, reading the bound value."),
+        SessionHistoryRecord::Conversation(ConversationRecord {
+            id: "h1".to_string(),
+            role: MessageRole::System,
+            parts: vec![Part::prose(
+                "h1.p0".to_string(),
+                "Reminder: stay in the workspace.".to_string(),
+                None,
+            )]
+            .into(),
+            origin: Some(MessageOrigin::Plugin {
+                plugin_id: "some-other-plugin".to_string(),
+                transient: false,
+            }),
+        }),
+        step_event("print 1"),
+    ]));
+
+    assert!(!transcript.contains("undefined_name"), "{transcript}");
+    assert!(
+        transcript.contains("Second attempt, reading the bound value."),
+        "the surviving cell's prose must not be collateral: {transcript}"
+    );
+    assert!(
+        transcript.contains("Reminder: stay in the workspace."),
+        "{transcript}"
+    );
+}
+
+/// Non-vacuity for the identity gate: the protocol's *own* feedback message,
+/// on the same channel, still goes.
+#[test]
+fn the_protocols_own_feedback_is_still_scrubbed() {
+    let transcript = rendered_text(&render(&[
+        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        protocol_feedback("s1", "That step failed; retry with a corrected program."),
+        step_event("print 1"),
+    ]));
+
+    assert!(
+        !transcript.contains("retry with a corrected program"),
+        "{transcript}"
+    );
 }
