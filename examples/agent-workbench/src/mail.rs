@@ -27,8 +27,9 @@ use std::{
 use crate::MAIL_RECEIVED_SOURCE_TYPE;
 use async_trait::async_trait;
 use lash::tools::{
-    LashlangToolBinding, ToolCall, ToolContract, ToolDefinition, ToolDefinitionLashlangExt,
-    ToolManifest, ToolProvider, ToolResult, ToolRetryPolicy,
+    EmitTriggerIntent, LashlangToolBinding, ToolAttemptResult, ToolCall, ToolContract,
+    ToolDefinition, ToolDefinitionLashlangExt, ToolIntent, ToolIntents, ToolManifest, ToolProvider,
+    ToolResult, ToolResultDone, ToolRetryPolicy,
 };
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use serde::{Deserialize, Serialize};
@@ -241,6 +242,43 @@ impl MailWorld {
         Ok(delivered)
     }
 
+    /// Commit one send and declare the `mail.received` emission it owes.
+    ///
+    /// The receipt and the declaration are produced together: there is no
+    /// point between them at which the row is durable and the emission is
+    /// merely hoped for. The caller returns both in one attempt outcome and
+    /// the intent executor emits after that outcome commits.
+    pub(crate) fn send_with_trigger(
+        &self,
+        replay_key: &str,
+        session_id: &str,
+        slug: &str,
+        args: &Value,
+    ) -> Result<(Value, ToolIntent), String> {
+        let delivered = self.op_send_once(replay_key, slug, args)?;
+        let payload = serde_json::to_value(&delivered.delivery).map_err(|err| err.to_string())?;
+        let source_key =
+            empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE).map_err(|err| err.to_string())?;
+        // Both halves of this key are stable under redrive: the tool-call
+        // replay key and the memoized message id. The trigger store therefore
+        // ingests one occurrence however often the declaration is re-executed.
+        let idempotency_key = format!("{replay_key}:mail.received:{}", delivered.message.id);
+        let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {
+            session_id: session_id.to_string(),
+            request: TriggerOccurrenceRequest::new(
+                MAIL_RECEIVED_SOURCE_TYPE,
+                source_key,
+                payload,
+                idempotency_key,
+            )
+            .with_source(json!({})),
+        });
+        Ok((
+            json!({ "account": slug, "id": delivered.message.id }),
+            intent,
+        ))
+    }
+
     fn op_list(&self, slug: &str, _args: &Value) -> Result<Value, String> {
         let accounts = self.inner.read_recover();
         let account = find(&accounts, slug)?;
@@ -440,47 +478,16 @@ impl ToolProvider for MockMailProvider {
         let Some((slug, operation)) = self.route(call.name) else {
             return ToolResult::err_fmt(format_args!("unknown inbox tool `{}`", call.name));
         };
+        if operation == "send" {
+            // Sending commits a durable row and owes a `mail.received`
+            // emission. Only the leaf attempt signature can pair the two, so
+            // this legacy route refuses rather than committing half of it.
+            return ToolResult::err_fmt(format_args!(
+                "inbox tool `{}` requires the leaf AttemptContext signature",
+                call.name
+            ));
+        }
         let result = match operation {
-            "send" => {
-                let Some(replay_key) = call.context.replay_key() else {
-                    return ToolResult::err_fmt("mail send requires a replay key");
-                };
-                match self.world.op_send_once(replay_key, &slug, call.args) {
-                    Ok(delivered) => {
-                        let payload = match serde_json::to_value(&delivered.delivery) {
-                            Ok(payload) => payload,
-                            Err(err) => return ToolResult::err_fmt(err.to_string()),
-                        };
-                        let source_key = match empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE) {
-                            Ok(source_key) => source_key,
-                            Err(err) => return ToolResult::err_fmt(err.to_string()),
-                        };
-                        let idempotency_key =
-                            format!("{replay_key}:mail.received:{}", delivered.message.id);
-                        // A retry must re-attempt trigger emission in case the
-                        // delivery committed before the prior emit failed. The
-                        // memoized message id keeps this occurrence key stable.
-                        if let Err(err) = call
-                            .context
-                            .triggers()
-                            .emit(
-                                TriggerOccurrenceRequest::new(
-                                    MAIL_RECEIVED_SOURCE_TYPE,
-                                    source_key,
-                                    payload,
-                                    idempotency_key,
-                                )
-                                .with_source(json!({})),
-                            )
-                            .await
-                        {
-                            return ToolResult::err_fmt(err.to_string());
-                        }
-                        Ok(json!({ "account": slug, "id": delivered.message.id }))
-                    }
-                    Err(err) => Err(err),
-                }
-            }
             "list" => self.world.op_list(&slug, call.args),
             "delete" => self.world.op_delete(&slug, call.args),
             other => Err(format!("unsupported inbox operation `{other}`")),
@@ -489,6 +496,50 @@ impl ToolProvider for MockMailProvider {
             Ok(value) => ToolResult::ok(value),
             Err(message) => ToolResult::err_fmt(message),
         }
+    }
+
+    fn supports_attempt_context(&self, tool_id: &lash::tools::ToolId) -> bool {
+        self.route(tool_id.as_str().trim_start_matches("tool:"))
+            .is_some_and(|(_, operation)| operation == "send")
+    }
+
+    async fn execute_attempt(&self, call: lash::tools::AttemptToolCall<'_>) -> ToolAttemptResult {
+        let Some((slug, operation)) = self.route(call.name) else {
+            return done(ToolResult::err_fmt(format_args!(
+                "unknown inbox tool `{}`",
+                call.name
+            )));
+        };
+        if operation != "send" {
+            return done(ToolResult::err_fmt(format_args!(
+                "inbox tool `{}` does not use the leaf attempt signature",
+                call.name
+            )));
+        }
+        let Some(replay_key) = call.context.replay_key() else {
+            return done(ToolResult::err_fmt("mail send requires a replay key"));
+        };
+        match self
+            .world
+            .send_with_trigger(replay_key, call.context.session_id(), &slug, call.args)
+        {
+            // One attempt outcome carries the committed row and the declared
+            // emission. The row can no longer become durable without the
+            // `mail.received` occurrence that follows it.
+            Ok((receipt, intent)) => {
+                ToolAttemptResult::done(ToolResultDone::ok(receipt), ToolIntents::v1(vec![intent]))
+            }
+            Err(message) => done(ToolResult::err_fmt(message)),
+        }
+    }
+}
+
+fn done(result: ToolResult) -> ToolAttemptResult {
+    match result {
+        ToolResult::Done(output) => {
+            ToolAttemptResult::done_without_intents(ToolResultDone::from_output(*output))
+        }
+        ToolResult::Pending(pending) => ToolAttemptResult::pending(pending),
     }
 }
 
@@ -539,6 +590,82 @@ mod tests {
             .op_delete("work", &json!({ "id": id }))
             .expect("delete");
         assert_eq!(world.account_summaries()[0].total, 0);
+    }
+
+    /// The shape this tool no longer has. Committing the row and then
+    /// emitting leaves a window in which the delivery is durable and the
+    /// `mail.received` occurrence never happened — the emission has no
+    /// committed cause to point at and the concierge never runs.
+    #[tokio::test]
+    async fn committing_the_row_before_a_separate_emission_leaves_a_partial_effect() {
+        let world = MailWorld::new();
+        world.add_account("Work").expect("add work");
+        let context = lash_core::testing::mock_tool_context();
+
+        let delivered = world
+            .op_send_once(
+                "turn-1:call-1",
+                "work",
+                &json!({ "title": "Contract", "text": "Please review." }),
+            )
+            .expect("the row commits first");
+        let emitted = context
+            .triggers()
+            .emit(TriggerOccurrenceRequest::new(
+                MAIL_RECEIVED_SOURCE_TYPE,
+                empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE).expect("source key"),
+                json!({}),
+                format!("turn-1:call-1:mail.received:{}", delivered.message.id),
+            ))
+            .await;
+
+        assert!(emitted.is_err(), "the separate emission can fail");
+        assert_eq!(
+            world.inbox("work").expect("work inbox").len(),
+            1,
+            "the committed row survives the failed emission: a partial effect"
+        );
+    }
+
+    #[test]
+    fn send_commits_the_row_and_declares_its_emission_in_one_outcome() {
+        let world = MailWorld::new();
+        world.add_account("Work").expect("add work");
+        let args = json!({ "title": "Contract", "text": "Please review." });
+
+        let (receipt, intent) = world
+            .send_with_trigger("turn-1:call-1", "session-1", "work", &args)
+            .expect("send declares its emission");
+
+        assert_eq!(receipt, json!({ "account": "work", "id": "work-1" }));
+        assert_eq!(world.inbox("work").expect("work inbox").len(), 1);
+        assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);
+        let ToolIntent::EmitTrigger(declared) = intent else {
+            panic!("inbox send must declare a trigger emission")
+        };
+        assert_eq!(declared.session_id, "session-1");
+        assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);
+        assert_eq!(
+            declared.request.idempotency_key,
+            "turn-1:call-1:mail.received:work-1"
+        );
+
+        let (replayed_receipt, replayed_intent) = world
+            .send_with_trigger("turn-1:call-1", "session-1", "work", &args)
+            .expect("redriving the same call re-declares the same emission");
+        let ToolIntent::EmitTrigger(replayed) = replayed_intent else {
+            panic!("the redrive must declare a trigger emission")
+        };
+        assert_eq!(replayed_receipt, receipt);
+        assert_eq!(
+            replayed.request.idempotency_key,
+            declared.request.idempotency_key
+        );
+        assert_eq!(
+            world.inbox("work").expect("work inbox").len(),
+            1,
+            "the redrive neither redelivers nor forks the occurrence key"
+        );
     }
 
     #[test]
