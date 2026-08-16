@@ -585,6 +585,10 @@ impl OpenAiCompatibleProvider {
                 .retryable(retryable)
                 .with_raw(raw));
         }
+        // Identity is the monotonic boundary for all other event evidence.
+        // Reject drift before usage or content from the conflicting route can
+        // be merged into the retained partial response.
+        state.capture_identity(event.id, event.model)?;
         if let Some(usage) = event.usage.as_ref()
             && !usage.is_null()
         {
@@ -592,7 +596,6 @@ impl OpenAiCompatibleProvider {
             merge_usage(&mut state.usage, &usage_from_usage_value(usage));
             state.capture_reasoning_tokens(usage);
         }
-        state.capture_identity(event.id, event.model);
         state.final_response_raw = Some(raw.to_string());
         for choice in event.choices {
             if let Some(usage) = choice.usage.as_ref()
@@ -719,11 +722,14 @@ pub(crate) struct ChatStreamState {
 }
 
 impl ChatStreamState {
-    pub(crate) fn capture_response_value(&mut self, value: &Value) {
+    pub(crate) fn capture_response_value(
+        &mut self,
+        value: &Value,
+    ) -> Result<(), LlmTransportError> {
         self.capture_identity(
             value.get("id").and_then(Value::as_str),
             value.get("model").and_then(Value::as_str),
-        );
+        )?;
         if let Some(usage) = value.get("usage") {
             self.capture_reasoning_tokens(usage);
         }
@@ -744,19 +750,33 @@ impl ChatStreamState {
                     })
             })
             .map(str::to_string);
+        Ok(())
     }
 
-    pub(crate) fn capture_identity(&mut self, id: Option<&str>, model: Option<&str>) {
-        if self.provider_response_id.is_none()
-            && let Some(id) = id.filter(|value| !value.is_empty())
-        {
-            self.provider_response_id = Some(id.to_string());
-        }
-        if self.served_model.is_none()
-            && let Some(model) = model.filter(|value| !value.is_empty())
-        {
-            self.served_model = Some(model.to_string());
-        }
+    pub(crate) fn capture_identity(
+        &mut self,
+        id: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<(), LlmTransportError> {
+        let mut accumulated = Some(ExecutionEvidence {
+            served_model: self.served_model.clone(),
+            provider_response_id: self.provider_response_id.clone(),
+            ..ExecutionEvidence::default()
+        });
+        let next = ExecutionEvidence {
+            served_model: model.filter(|value| !value.is_empty()).map(str::to_string),
+            provider_response_id: id.filter(|value| !value.is_empty()).map(str::to_string),
+            ..ExecutionEvidence::default()
+        };
+        ExecutionEvidence::merge_optional(&mut accumulated, Some(next)).map_err(|error| {
+            LlmTransportError::new(format!("Chat Completions stream {error}"))
+                .with_kind(ProviderFailureKind::Stream)
+                .with_code(error.code())
+        })?;
+        let merged = accumulated.unwrap_or_default();
+        self.served_model = merged.served_model;
+        self.provider_response_id = merged.provider_response_id;
+        Ok(())
     }
 
     pub(crate) fn capture_reasoning_tokens(&mut self, usage: &Value) {

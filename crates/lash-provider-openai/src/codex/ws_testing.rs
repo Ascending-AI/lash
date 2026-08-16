@@ -55,6 +55,15 @@ pub fn function_call_item(call_id: &str, tool_name: &str, arguments: &str) -> Va
 /// request it receives. Actions are consumed in order across connections.
 #[derive(Clone, Debug)]
 pub enum ScriptedWsAction {
+    /// Send exact recorded provider frames. This is the fixture-matrix seam:
+    /// the same Responses event payloads drive Codex SSE and WebSocket.
+    RecordedFrames {
+        frames: Vec<String>,
+        close_after_frames: bool,
+    },
+    /// Accept `response.create`, then close before emitting any provider
+    /// event. The outer retry owner must reset attempt-local accumulation.
+    CloseBeforeStart,
     /// Stream a text delta, the completed message item, and
     /// `response.completed`.
     Complete {
@@ -227,6 +236,24 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
                         .pop_front()
                         .expect("scripted ws action");
                     match action {
+                        ScriptedWsAction::RecordedFrames {
+                            frames,
+                            close_after_frames,
+                        } => {
+                            for frame in frames {
+                                ws.send(WsMessage::Text(frame.into()))
+                                    .await
+                                    .expect("send recorded ws frame");
+                            }
+                            if close_after_frames {
+                                let _ = ws.close(None).await;
+                                break;
+                            }
+                        }
+                        ScriptedWsAction::CloseBeforeStart => {
+                            let _ = ws.close(None).await;
+                            break;
+                        }
                         ScriptedWsAction::Complete {
                             response_id,
                             message_id,

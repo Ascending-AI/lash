@@ -359,6 +359,7 @@ fn complete_buffered_responses(
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             LlmTransportError::new(format!("Invalid Responses JSON: {e}")).with_raw(text.clone())
         })?;
+        state.capture_execution_evidence(&value, true)?;
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
         state.parts = OpenAiCompatibleProvider::response_parts_from_value(&value);
@@ -408,6 +409,7 @@ fn complete_buffered_responses(
     if let Some(tx) = &stream_events {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
             provider_usage: state.provider_usage.clone(),
+            execution_evidence: state.execution_evidence.clone(),
             ..Default::default()
         }));
         if state.usage != LlmUsage::default() {
@@ -435,7 +437,7 @@ fn complete_buffered_responses(
         provider_usage: state.provider_usage,
         request_body: None,
         http_summary: Some(CompletionEndpoint::Responses.http_summary(&url, false)),
-        execution_evidence: None,
+        execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
     })
@@ -457,7 +459,7 @@ fn complete_buffered_chat(
             LlmTransportError::new(format!("Invalid Chat Completions JSON: {e}"))
                 .with_raw(text.clone())
         })?;
-        state.capture_response_value(&value);
+        state.capture_response_value(&value)?;
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
         let parts = OpenAiCompatibleProvider::chat_response_parts_from_value(&value);
@@ -598,10 +600,11 @@ async fn drive_streaming_responses(
             let prev_usage = state.usage.clone();
             OpenAiCompatibleProvider::process_sse_event(raw, &mut state, Some(&mut emitted_parts))?;
             if let Some(tx) = &stream_events
-                && state.provider_usage.is_some()
+                && (state.provider_usage.is_some() || state.execution_evidence.is_some())
             {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                     provider_usage: state.provider_usage.clone(),
+                    execution_evidence: state.execution_evidence.clone(),
                     ..Default::default()
                 }));
             }
@@ -694,7 +697,7 @@ async fn drive_streaming_responses(
         provider_usage: state.provider_usage,
         request_body: None,
         http_summary: Some(CompletionEndpoint::Responses.http_summary(&url, true)),
-        execution_evidence: None,
+        execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
     })
@@ -765,12 +768,6 @@ async fn drive_streaming_chat(
         return Err(error.with_partial_response(chat_response_from_state(state.clone(), &url)));
     }
 
-    let parts = state.parts();
-    if !has_response_content(&parts) {
-        return Err(empty_response_error(
-            state.final_response_raw.clone().unwrap_or_default(),
-        ));
-    }
     if stream_termination == StreamTermination::RequireTerminalEvidence
         && state.provider_finish_reason.is_none()
     {
@@ -779,6 +776,12 @@ async fn drive_streaming_chat(
             .with_code("stream_ended_before_finish_reason")
             .retryable(true)
             .with_partial_response(chat_response_from_state(state, &url)));
+    }
+    let parts = state.parts();
+    if !has_response_content(&parts) {
+        return Err(empty_response_error(
+            state.final_response_raw.clone().unwrap_or_default(),
+        ));
     }
     if let Some(tx) = &stream_events {
         for part in state.take_remaining_tool_call_parts() {

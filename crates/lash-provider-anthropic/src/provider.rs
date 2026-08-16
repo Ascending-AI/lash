@@ -124,7 +124,13 @@ impl Provider for AnthropicProvider {
 
         let status = resp.status;
         if !resp.is_success() {
-            let headers = resp.headers;
+            let mut headers = resp.headers;
+            if first_header_value(&headers, "x-request-id").is_none()
+                && let Some(request_id) =
+                    first_header_value(&headers, "request-id").map(str::to_string)
+            {
+                headers.push(("x-request-id".to_string(), request_id));
+            }
             let text = read_http_body_text(
                 resp.body,
                 timeouts.request_timeout,
@@ -140,6 +146,9 @@ impl Provider for AnthropicProvider {
                 request_body.clone(),
             ));
         }
+        let provider_request_id = first_header_value(&resp.headers, "request-id")
+            .or_else(|| first_header_value(&resp.headers, "x-request-id"))
+            .map(str::to_string);
         let mut response_metadata =
             ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         if let Some(tx) = &stream_events {
@@ -149,12 +158,24 @@ impl Provider for AnthropicProvider {
                     "HTTP POST {}/v1/messages (stream)",
                     base_url.trim_end_matches('/')
                 )),
+                execution_evidence: provider_request_id.clone().map(|provider_request_id| {
+                    ExecutionEvidence {
+                        provider_request_id: Some(provider_request_id),
+                        ..Default::default()
+                    }
+                }),
                 generation_disposition,
                 response_metadata: response_metadata.metadata(),
                 ..Default::default()
             }));
         }
-        let mut state = StreamState::default();
+        let mut state = StreamState {
+            execution_evidence: provider_request_id.map(|provider_request_id| ExecutionEvidence {
+                provider_request_id: Some(provider_request_id),
+                ..Default::default()
+            }),
+            ..StreamState::default()
+        };
         let expose_thinking = self.options.expose_thinking;
         let stream_result = drive_sse_response(
             resp.body,
