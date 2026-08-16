@@ -56,6 +56,102 @@ async fn ingress_core_with_effect_host_and_env_store(
     Ok((core, registry))
 }
 
+async fn ingress_core_with_trigger_store() -> Result<(
+    LashCore,
+    Arc<lash_core::facade_support::InMemoryTriggerStore>,
+)> {
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .effect_host(Arc::new(KeyJournalController::default()))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_env_store(Arc::new(
+            lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .process_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
+        .trigger_store(Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>)
+        .build(crate::testing::runtime_lease_owner())?;
+    let _session = core.session(SESSION).open().await?;
+    Ok((core, store))
+}
+
+fn trigger_intent(session_id: &str) -> lash_core::ToolIntent {
+    lash_core::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
+        session_id: session_id.to_string(),
+        request: lash_core::TriggerOccurrenceRequest::new(
+            "intent.ingress.trigger",
+            "intent-ingress-source",
+            serde_json::json!({"law": "host-submitted-emission"}),
+            "intent-ingress-occurrence",
+        ),
+    })
+}
+
+/// The host front door realizes the fifth intent kind through the trigger
+/// router, and re-submitting the same identity cannot emit a second time.
+#[tokio::test]
+async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
+    use lash_core::TriggerStore as _;
+
+    let (core, store) = ingress_core_with_trigger_store().await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("host-trigger-call", 0);
+
+    let first = ingress.submit(key.clone(), trigger_intent(SESSION)).await;
+    let crate::tools::ToolIntentIngressOutcome::Admitted {
+        outcome:
+            lash_core::ToolIntentExecutionOutcome::Executed {
+                kind: lash_core::ToolIntentKind::EmitTrigger,
+                result,
+                parent_end: None,
+                ..
+            },
+        replayed: false,
+    } = first
+    else {
+        panic!("the host front door must realize a recorded trigger emission")
+    };
+    let occurrences = store
+        .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+        .await?;
+    assert_eq!(occurrences.len(), 1);
+    assert_eq!(
+        result["occurrence_id"].as_str(),
+        Some(occurrences[0].occurrence_id.as_str())
+    );
+
+    // The trigger route's dedupe point is the occurrence idempotency key at
+    // the store, not an effect-journal key, so re-submitting the identity
+    // re-ingests the same occurrence rather than creating a second one.
+    let duplicate = ingress.submit(key, trigger_intent(SESSION)).await;
+    let crate::tools::ToolIntentIngressOutcome::Admitted {
+        outcome:
+            lash_core::ToolIntentExecutionOutcome::Executed {
+                kind: lash_core::ToolIntentKind::EmitTrigger,
+                result: duplicate_result,
+                ..
+            },
+        ..
+    } = duplicate
+    else {
+        panic!("a re-submitted trigger declaration stays inside the intent protocol")
+    };
+    assert_eq!(duplicate_result, result);
+    assert_eq!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .len(),
+        1,
+        "a re-submitted identity cannot ingest a second occurrence"
+    );
+    Ok(())
+}
+
 #[derive(Default)]
 struct ProbeProcessEnvStore {
     puts: std::sync::atomic::AtomicUsize,
