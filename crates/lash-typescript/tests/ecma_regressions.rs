@@ -507,3 +507,36 @@ fn empty_search_replace_all_refuses_to_split_a_surrogate_pair() {
         Value::String("-a-b-".into())
     );
 }
+
+/// A billion-element array is refused by the budget, not by the OOM killer.
+///
+/// `Host` above is a plain `ExecutionHost` that never mentions bounds — which
+/// is the shape of every host that has not thought about memory, and the shape
+/// this test exists to protect. The default `execution_bounds()` used to report
+/// memory as `Unbounded`, which set the heap's limit to `u64::MAX` and made the
+/// array pre-charge arithmetically unable to trip: `Array.from({ length: 1e9 })`
+/// then walked the process into tens of gigabytes of resident memory. The
+/// default now carries `DEFAULT_HOST_MEMORY_LIMIT_BYTES`, so the pre-charge
+/// answers before a single element is built.
+#[test]
+fn a_billion_element_array_on_a_default_host_is_a_clean_memory_refusal() {
+    for source in [
+        "finish(Array.from({ length: 1e9 }));",
+        "finish(Array.from({ length: 1e9 }, (_, index: number) => index));",
+    ] {
+        let error = execute(source).expect_err("an over-budget array must refuse");
+        assert!(
+            matches!(error, RuntimeError::MemoryLimitExceeded { .. }),
+            "{source}: {error}"
+        );
+    }
+}
+
+/// The bound is a ceiling, not a ban: ordinary array construction is untouched.
+#[test]
+fn ordinary_array_construction_is_unaffected_by_the_default_memory_ceiling() {
+    assert_eq!(
+        finished("finish(Array.from({ length: 1000 }).length);"),
+        Value::Number(1000.0)
+    );
+}

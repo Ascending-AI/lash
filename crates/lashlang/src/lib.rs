@@ -61,7 +61,6 @@ pub use linker::{
     ValueConstructorBinding,
 };
 pub use parser::{ParseError, parse, parse_expression, parse_type_expression};
-pub use runtime::DEFAULT_MAX_VM_FRAME_DEPTH;
 pub use runtime::{
     AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector,
     CompilationDialect, CompileStats, CompiledLinkedProgram, CompiledProcessCache,
@@ -95,6 +94,7 @@ pub use runtime::{
 pub use runtime::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
 };
+pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
 
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
