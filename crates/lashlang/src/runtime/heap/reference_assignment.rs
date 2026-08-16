@@ -182,9 +182,7 @@ impl Heap {
         }
 
         let leaf_key: Option<Cow<'_, str>> = match *leaf {
-            CompiledAssignPathStep::Field(field) => {
-                Some(Cow::Borrowed(names[field].text.as_ref()))
-            }
+            CompiledAssignPathStep::Field(field) => Some(Cow::Borrowed(names[field].text.as_ref())),
             CompiledAssignPathStep::Index => indexes
                 .get(index_cursor)
                 .map(|index| self.javascript_to_string(index))

@@ -857,9 +857,7 @@ fn match_all_is_accepted_in_every_iterable_sink() {
         Value::Number(2.0)
     );
     assert_eq!(
-        finished(
-            "finish(JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(\\d)/g))));"
-        ),
+        finished("finish(JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(\\d)/g))));"),
         Value::String(r#"{"a1":"a","b2":"b"}"#.into())
     );
 
@@ -882,9 +880,18 @@ fn match_all_is_accepted_in_every_iterable_sink() {
 #[test]
 fn last_index_read_back_is_the_tolength_value_not_the_written_one() {
     for (source, expected) in [
-        ("const r = /a/g; r.lastIndex = -1; finish(r.lastIndex);", 0.0),
-        ("const r = /a/g; r.lastIndex = 2.7; finish(r.lastIndex);", 2.0),
-        ("const r = /a/g; r.lastIndex = NaN; finish(r.lastIndex);", 0.0),
+        (
+            "const r = /a/g; r.lastIndex = -1; finish(r.lastIndex);",
+            0.0,
+        ),
+        (
+            "const r = /a/g; r.lastIndex = 2.7; finish(r.lastIndex);",
+            2.0,
+        ),
+        (
+            "const r = /a/g; r.lastIndex = NaN; finish(r.lastIndex);",
+            0.0,
+        ),
         (
             "const r = /a/g; r.lastIndex = Infinity; finish(r.lastIndex);",
             9_007_199_254_740_991.0,

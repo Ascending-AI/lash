@@ -9,9 +9,13 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod enums;
 mod nesting;
+mod prototype_chain;
 
 use enums::{ConstEnumValue, enum_member_property_name};
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
+use prototype_chain::{
+    check_property_key, is_prototype_chain_property, prototype_access_rejection,
+};
 
 /// Maximum source-level statement or expression nesting accepted by the
 /// TypeScript dialect. This is deliberately below the shared AST and 2 MiB
@@ -927,27 +931,7 @@ impl Adapter {
     }
 
     fn convert_property_key(&self, name: &swc::PropName) -> Result<PropertyKey, Diagnostic> {
-        // A literal `__proto__:` key in an object literal is not a data
-        // property in ECMA — it sets the prototype. A computed `[k]` key with
-        // the same name *is* data, which is why only the literal forms reject.
-        if let swc::PropName::Ident(swc::IdentName { sym: key, .. }) = name
-            && key.as_ref() == "__proto__"
-        {
-            return Err(reject(
-                DiagnosticCode::PrototypeMutationUnsupported,
-                "prototype access",
-                Some(source_span(name.span())),
-            ));
-        }
-        if let swc::PropName::Str(key) = name
-            && key.value.to_string_lossy() == "__proto__"
-        {
-            return Err(reject(
-                DiagnosticCode::PrototypeMutationUnsupported,
-                "prototype access",
-                Some(source_span(name.span())),
-            ));
-        }
+        check_property_key(name)?;
         Ok(match name {
             swc::PropName::Ident(name) => PropertyKey::Static(name.sym.to_string()),
             swc::PropName::Str(name) => {
@@ -1405,11 +1389,7 @@ impl Adapter {
         let property = match &member.prop {
             swc::MemberProp::Ident(name) => {
                 if is_prototype_chain_property(name.sym.as_ref()) {
-                    return Err(reject(
-                        DiagnosticCode::PrototypeMutationUnsupported,
-                        "prototype access",
-                        Some(source_span(member.span)),
-                    ));
+                    return Err(prototype_access_rejection(member.span));
                 }
                 MemberProperty::Field(name.sym.to_string())
             }
@@ -1417,11 +1397,7 @@ impl Adapter {
                 if let swc::Expr::Lit(swc::Lit::Str(name)) = property.expr.as_ref()
                     && is_prototype_chain_property(&name.value.to_string_lossy())
                 {
-                    return Err(reject(
-                        DiagnosticCode::PrototypeMutationUnsupported,
-                        "prototype access",
-                        Some(source_span(member.span)),
-                    ));
+                    return Err(prototype_access_rejection(member.span));
                 }
                 MemberProperty::Index(Box::new(self.convert_expr(&property.expr)?))
             }
@@ -1604,27 +1580,6 @@ fn parser_diagnostic(error: swc_ecma_parser::error::Error, source: &str) -> Diag
         DiagnosticCode::SyntaxError
     };
     Diagnostic::new(code, message, Some(source_span(error.span())))
-}
-
-/// Property names whose ECMA meaning is the prototype chain.
-///
-/// The value model is dense records with no prototypes, so none of these has
-/// anything to read or mutate. Accepting them would not be a small divergence:
-/// `o.__proto__ = base` would land as an ordinary data key, every later read
-/// through the chain would miss, and `__defineGetter__` would install nothing
-/// while reporting success. The census has claimed
-/// `TS_PROTOTYPE_MUTATION_UNSUPPORTED` for this family since it was written;
-/// this is the code that makes the claim true.
-fn is_prototype_chain_property(name: &str) -> bool {
-    matches!(
-        name,
-        "prototype"
-            | "__proto__"
-            | "__defineGetter__"
-            | "__defineSetter__"
-            | "__lookupGetter__"
-            | "__lookupSetter__"
-    )
 }
 
 fn reject(code: DiagnosticCode, construct: &str, span: Option<SourceSpan>) -> Diagnostic {

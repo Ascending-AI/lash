@@ -447,7 +447,10 @@ fn the_two_vocabularies_are_actually_different() {
 const TYPESCRIPT_PROMPT_CONSTRUCT_FAMILIES: &[(&str, &[&str])] = &[
     ("async functions", &["Async functions", "async function"]),
     ("async fan-out", &[".map(async"]),
-    ("promise aggregation", &["Promise.all", "Promise.allSettled"]),
+    (
+        "promise aggregation",
+        &["Promise.all", "Promise.allSettled"],
+    ),
     ("URL construction", &["new URL("]),
     ("URLSearchParams construction", &["new URLSearchParams("]),
     ("instanceof targets", &["instanceof"]),
@@ -472,8 +475,14 @@ const TYPESCRIPT_PROMPT_CONSTRUCT_FAMILIES: &[(&str, &[&str])] = &[
     ("finish", &["finish("]),
     ("journaled clock", &["Date.now()"]),
     ("journaled randomness", &["Math.random"]),
-    ("standard library statics", &["Object.entries", "JSON.parse"]),
-    ("standard library instance methods", &["instance.map", "instance.reduce"]),
+    (
+        "standard library statics",
+        &["Object.entries", "JSON.parse"],
+    ),
+    (
+        "standard library instance methods",
+        &["instance.map", "instance.reduce"],
+    ),
 ];
 
 #[test]

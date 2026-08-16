@@ -1456,12 +1456,9 @@ fn math_random_draws_replay_from_the_journal_in_order() {
             recorded: recorded.clone(),
             served: std::sync::Mutex::new(0),
         };
-        let outcome = futures::executor::block_on(lashlang::execute(
-            &program,
-            &mut State::new(),
-            &host,
-        ))
-        .expect("a journaled random sequence should execute");
+        let outcome =
+            futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+                .expect("a journaled random sequence should execute");
         assert_eq!(
             *host.served.lock().expect("journal cursor"),
             recorded.len(),

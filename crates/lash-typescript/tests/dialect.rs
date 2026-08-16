@@ -710,7 +710,11 @@ fn array_mutators_survive_a_park_in_the_middle_of_the_loop() {
         let decoded = serde_json::from_slice(&encoded).expect("decode the continuation");
         let mut vm = Vm::resume_from(decoded, &program, &Host).expect("resume mid-loop");
         loop {
-            match vm.run_process_until_effect().await.expect("resume to finish") {
+            match vm
+                .run_process_until_effect()
+                .await
+                .expect("resume to finish")
+            {
                 VmRunOutcome::EffectCompleted => continue,
                 other => break other,
             }
@@ -718,7 +722,11 @@ fn array_mutators_survive_a_park_in_the_middle_of_the_loop() {
     });
 
     let expected = ExecutionOutcome::Finished(Value::String("-1,0,1,2".into()));
-    assert_eq!(run(source), expected, "the uninterrupted run is the reference");
+    assert_eq!(
+        run(source),
+        expected,
+        "the uninterrupted run is the reference"
+    );
     assert_eq!(
         resumed,
         VmRunOutcome::Complete(expected),
