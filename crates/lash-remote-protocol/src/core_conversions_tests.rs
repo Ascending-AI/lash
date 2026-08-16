@@ -1434,6 +1434,147 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
 }
 
 #[test]
+fn remote_turn_activity_sink_records_write_error_and_continues_with_later_events() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[derive(Debug, Default)]
+    struct FailFirstWriter {
+        bytes: Vec<u8>,
+        flushes: usize,
+        failed_once: bool,
+    }
+
+    impl std::io::Write for FailFirstWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if !self.failed_once {
+                self.failed_once = true;
+                return Err(std::io::Error::other("simulated write failure"));
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+
+    let activities = [
+        lash_core::TurnActivity {
+            id: lash_core::TurnActivityId::new("activity-1"),
+            correlation_id: lash_core::TurnActivityId::new("correlation-1"),
+            event: lash_core::TurnEvent::AssistantProseDelta {
+                text: "first".into(),
+            },
+        },
+        lash_core::TurnActivity {
+            id: lash_core::TurnActivityId::new("activity-2"),
+            correlation_id: lash_core::TurnActivityId::new("correlation-2"),
+            event: lash_core::TurnEvent::ReasoningDelta {
+                text: "second".into(),
+            },
+        },
+    ];
+
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("test runtime");
+        let sink = RemoteTurnActivitySink::new(FailFirstWriter::default(), 0);
+        runtime.block_on(async {
+            for activity in activities {
+                lash_core::facade_support::TurnActivitySink::emit(&sink, activity).await;
+            }
+        });
+        let errors = sink.take_errors();
+        let writer = sink.into_inner().expect("remote sink writer lock");
+        let _ = result_tx.send((writer, errors));
+    });
+
+    let (writer, errors) = result_rx
+        .recv_timeout(Duration::from_millis(500))
+        .expect("remote activity sink timed out");
+    assert_eq!(errors.len(), 1, "expected one write error");
+    assert!(
+        errors[0].contains("simulated write failure"),
+        "unexpected error message: {}",
+        errors[0]
+    );
+
+    let lines = std::str::from_utf8(&writer.bytes)
+        .expect("NDJSON is UTF-8")
+        .lines()
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "only second activity should be written");
+    let activity: RemoteTurnActivity =
+        serde_json::from_str(lines[0]).expect("valid remote activity");
+    assert_eq!(
+        activity.sequence, 1,
+        "sequence must advance past the failed first activity"
+    );
+    assert_eq!(activity.id, "activity-2");
+}
+
+#[test]
+fn remote_turn_activity_sink_records_flush_error() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[derive(Debug, Default)]
+    struct FailFlushWriter {
+        bytes: Vec<u8>,
+    }
+
+    impl std::io::Write for FailFlushWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("simulated flush failure"))
+        }
+    }
+
+    let activity = lash_core::TurnActivity {
+        id: lash_core::TurnActivityId::new("activity-1"),
+        correlation_id: lash_core::TurnActivityId::new("correlation-1"),
+        event: lash_core::TurnEvent::AssistantProseDelta {
+            text: "flush test".into(),
+        },
+    };
+
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("test runtime");
+        let sink = RemoteTurnActivitySink::new(FailFlushWriter::default(), 0);
+        runtime.block_on(async {
+            lash_core::facade_support::TurnActivitySink::emit(&sink, activity).await;
+        });
+        let errors = sink.take_errors();
+        let writer = sink.into_inner().expect("remote sink writer lock");
+        let _ = result_tx.send((writer, errors));
+    });
+
+    let (_writer, errors) = result_rx
+        .recv_timeout(Duration::from_millis(500))
+        .expect("remote activity sink timed out");
+    assert_eq!(errors.len(), 1, "expected one flush error");
+    assert!(
+        errors[0].contains("simulated flush failure"),
+        "unexpected error message: {}",
+        errors[0]
+    );
+}
+
+#[test]
 fn remote_session_observation_from_core_maps_snapshot_metadata() {
     let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
     let event = lash_core::LiveReplayStore::append(

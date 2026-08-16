@@ -1225,8 +1225,12 @@ async fn forward_session_observations(
     while let Some(item) = stream.next().await {
         match item {
             Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {
-                let Ok(event) = RemoteSessionObservationEvent::from_core(sequence, event) else {
-                    break;
+                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
+                    Ok(event) => event,
+                    Err(err) => {
+                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
+                        break;
+                    }
                 };
                 sequence = sequence.saturating_add(1);
                 if tx
@@ -1244,8 +1248,12 @@ async fn forward_session_observations(
                 snapshot,
                 ..
             }) => {
-                let Ok(event) = RemoteSessionObservationEvent::from_core(sequence, event) else {
-                    break;
+                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
+                    Ok(event) => event,
+                    Err(err) => {
+                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
+                        break;
+                    }
                 };
                 sequence = sequence.saturating_add(1);
                 if tx

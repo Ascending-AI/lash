@@ -1094,12 +1094,12 @@ impl Stream for RemoteSessionObservationEventStream {
         match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(Ok(event))) => {
-                let remote =
-                    match RemoteSessionObservationEvent::from_core(self.next_sequence, event) {
-                        Ok(remote) => remote,
-                        Err(err) => return Poll::Ready(Some(Err(err.into()))),
-                    };
+                let sequence = self.next_sequence;
                 self.next_sequence = self.next_sequence.saturating_add(1);
+                let remote = match RemoteSessionObservationEvent::from_core(sequence, event) {
+                    Ok(remote) => remote,
+                    Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                };
                 Poll::Ready(Some(Ok(remote)))
             }
             Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(live_replay_error(err)))),
@@ -1127,12 +1127,12 @@ impl Stream for RemoteSessionObservationStream {
         match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(Ok(SessionObservationStreamItem::Event(event)))) => {
-                let remote =
-                    match RemoteSessionObservationEvent::from_core(self.next_sequence, event) {
-                        Ok(remote) => remote,
-                        Err(err) => return Poll::Ready(Some(Err(err.into()))),
-                    };
+                let sequence = self.next_sequence;
                 self.next_sequence = self.next_sequence.saturating_add(1);
+                let remote = match RemoteSessionObservationEvent::from_core(sequence, event) {
+                    Ok(remote) => remote,
+                    Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                };
                 Poll::Ready(Some(Ok(RemoteSessionObservationStreamItem::Event(remote))))
             }
             Poll::Ready(Some(Ok(SessionObservationStreamItem::Gap { observation, gap }))) => {
@@ -1320,5 +1320,71 @@ mod reconcile_tests {
         assert_eq!(state.policy.model.id, "host-model");
         assert_eq!(state.policy.generation, host.generation);
         assert_eq!(state.policy.prompt, host.prompt);
+    }
+
+    #[tokio::test]
+    async fn remote_observation_event_stream_advances_sequence_past_events() {
+        use lash_core::LiveReplayStore;
+
+        let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
+        let cursor = store.current_cursor("session-seq-test", lash_core::SessionRevision::new(0));
+        let activity1 = lash_core::TurnActivity {
+            id: lash_core::TurnActivityId::new("act-1"),
+            correlation_id: lash_core::TurnActivityId::new("corr-1"),
+            event: lash_core::TurnEvent::AssistantProseDelta {
+                text: "hello".into(),
+            },
+        };
+        let activity2 = lash_core::TurnActivity {
+            id: lash_core::TurnActivityId::new("act-2"),
+            correlation_id: lash_core::TurnActivityId::new("corr-2"),
+            event: lash_core::TurnEvent::AssistantProseDelta {
+                text: "world".into(),
+            },
+        };
+        let _ = store
+            .append(
+                "session-seq-test",
+                lash_core::SessionRevision::new(1),
+                Some("turn-1"),
+                lash_core::SessionObservationEventPayload::TurnActivity(activity1),
+            )
+            .expect("append 1");
+        let _ = store
+            .append(
+                "session-seq-test",
+                lash_core::SessionRevision::new(2),
+                Some("turn-1"),
+                lash_core::SessionObservationEventPayload::TurnActivity(activity2),
+            )
+            .expect("append 2");
+
+        let subscription = store.subscribe_after_cursor(&cursor).expect("subscribe");
+        let lash_core::LiveReplaySubscribeResult::Subscribed(sub) = subscription else {
+            panic!("expected subscribed");
+        };
+
+        let mut stream = RemoteSessionObservationEventStream::new(sub);
+        assert_eq!(stream.next_sequence, 0);
+
+        let event1 = stream.next_event().await.expect("first event");
+        let lash_remote_protocol::RemoteSessionObservationEventPayload::TurnActivity {
+            activity: act1,
+        } = event1.event
+        else {
+            panic!("expected turn activity");
+        };
+        assert_eq!(act1.sequence, 0);
+        assert_eq!(stream.next_sequence, 1);
+
+        let event2 = stream.next_event().await.expect("second event");
+        let lash_remote_protocol::RemoteSessionObservationEventPayload::TurnActivity {
+            activity: act2,
+        } = event2.event
+        else {
+            panic!("expected turn activity");
+        };
+        assert_eq!(act2.sequence, 1);
+        assert_eq!(stream.next_sequence, 2);
     }
 }
