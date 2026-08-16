@@ -8,6 +8,38 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{Heap, HeapId, HeapObject, Value, canonical_regexp_flags, same_value_zero, value_refs};
+use crate::runtime::RuntimeError;
+use crate::runtime::state::MAX_SNAPSHOT_VALUE_DEPTH;
+
+/// The deepest value nesting any runtime value walk will follow.
+///
+/// It is the durable boundary's ceiling (`MAX_SNAPSHOT_VALUE_DEPTH`), reused
+/// rather than restated: a value nested deeper than a snapshot will accept has
+/// no future anyway, and the walks that materialize a value — export at the
+/// instruction boundary, at the terminal-exit boundary, and JavaScript's
+/// object-to-primitive coercion — are recursive. Bounding them at the same
+/// number turns an over-deep value into a deterministic typed refusal at the
+/// first walk that touches it, instead of a stack overflow that aborts the
+/// whole host process.
+///
+/// Enforced on the walks rather than on heap mutation because depth is not an
+/// incrementally maintainable property of this heap: reference semantics let a
+/// member assignment close a cycle or re-parent a whole subtree, so a per-object
+/// depth would have to be recomputed upward through the parent edges on every
+/// mutation, and is undefined for a cyclic graph. The walk knows its own depth
+/// for free.
+pub(crate) const MAX_RUNTIME_VALUE_DEPTH: usize = MAX_SNAPSHOT_VALUE_DEPTH;
+
+/// Rejects one level deeper than the ceiling, so callers can descend by
+/// checking before they recurse.
+pub(crate) fn ensure_value_depth(depth: usize) -> Result<(), RuntimeError> {
+    if depth > MAX_RUNTIME_VALUE_DEPTH {
+        return Err(RuntimeError::ValueDepthLimitExceeded {
+            limit: MAX_RUNTIME_VALUE_DEPTH,
+        });
+    }
+    Ok(())
+}
 
 /// The roots a persisted heap is validated against.
 ///

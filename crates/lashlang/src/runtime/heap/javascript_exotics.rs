@@ -629,7 +629,7 @@ impl Heap {
         &self,
         value: &Value,
     ) -> Result<Value, RuntimeError> {
-        self.javascript_to_primitive_inner(value, &mut BTreeSet::new())
+        self.javascript_to_primitive_inner(value, &mut BTreeSet::new(), 1)
     }
 
     pub(crate) fn javascript_to_number(&self, value: &Value) -> Result<f64, RuntimeError> {
@@ -648,11 +648,19 @@ impl Heap {
         Ok(javascript_to_string(&primitive))
     }
 
+    /// `depth` is the nesting level of `value` itself. The `active` set beside
+    /// it only closes cycles; a finite but deeply nested container is not
+    /// cyclic, and without a depth bound this walk and
+    /// `javascript_sequence_string` recurse once per level until the thread
+    /// stack is gone. The bound is the durable boundary's, so a value this
+    /// refuses could never have been persisted either.
     fn javascript_to_primitive_inner(
         &self,
         value: &Value,
         active: &mut BTreeSet<HeapId>,
+        depth: usize,
     ) -> Result<Value, RuntimeError> {
+        super::ensure_value_depth(depth)?;
         let object = match value {
             Value::Ref(id) => {
                 if !active.insert(*id) {
@@ -666,11 +674,12 @@ impl Heap {
             _ => None,
         };
         let primitive = match object.map(|(_, object)| object) {
-            Some(HeapObject::Tuple(values) | HeapObject::List(values)) => {
-                Value::String(self.javascript_sequence_string(values, active)?.into())
-            }
+            Some(HeapObject::Tuple(values) | HeapObject::List(values)) => Value::String(
+                self.javascript_sequence_string(values, active, depth)?
+                    .into(),
+            ),
             Some(HeapObject::RegExpMatch(result)) => Value::String(
-                self.javascript_sequence_string(&result.items, active)?
+                self.javascript_sequence_string(&result.items, active, depth)?
                     .into(),
             ),
             Some(HeapObject::Record(_)) => Value::String("[object Object]".into()),
@@ -694,9 +703,10 @@ impl Heap {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
             None => match value {
-                Value::Tuple(values) | Value::List(values) => {
-                    Value::String(self.javascript_sequence_string(values, active)?.into())
-                }
+                Value::Tuple(values) | Value::List(values) => Value::String(
+                    self.javascript_sequence_string(values, active, depth)?
+                        .into(),
+                ),
                 Value::Record(_) | Value::Image(_) | Value::Resource(_) => {
                     Value::String("[object Object]".into())
                 }
@@ -709,10 +719,13 @@ impl Heap {
         Ok(primitive)
     }
 
+    /// `depth` is the nesting level of the container these values belong to;
+    /// each element sits one level below it.
     fn javascript_sequence_string(
         &self,
         values: &[Value],
         active: &mut BTreeSet<HeapId>,
+        depth: usize,
     ) -> Result<String, RuntimeError> {
         values
             .iter()
@@ -725,7 +738,7 @@ impl Heap {
                     })
                 }
                 other => self
-                    .javascript_to_primitive_inner(other, active)
+                    .javascript_to_primitive_inner(other, active, depth + 1)
                     .map(|primitive| javascript_to_string(&primitive)),
             })
             .collect::<Result<Vec<_>, _>>()

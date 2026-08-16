@@ -103,6 +103,15 @@ pub enum RuntimeError {
     /// A host boundary cannot represent cyclic heap values.
     #[error("lashlang heap value contains a cycle through object {id}")]
     CyclicHostValue { id: u64 },
+    /// A value tree is nested deeper than a durable boundary will ever accept.
+    ///
+    /// The ceiling is the persisted-graph one (`MAX_SNAPSHOT_VALUE_DEPTH`), so
+    /// a value that cannot be snapshotted also cannot be exported or coerced.
+    /// Enforcing it on the runtime walks is what keeps those walks — which are
+    /// recursive — inside the product stack budget instead of aborting the
+    /// host process on a value the durable boundary would have refused anyway.
+    #[error("lashlang value nesting depth limit of {limit} levels exceeded")]
+    ValueDepthLimitExceeded { limit: usize },
     /// Execution referenced a binding that is not defined.
     #[error("unknown name `{name}`")]
     UndefinedVariable { name: String },
@@ -467,6 +476,10 @@ impl RuntimeError {
             Self::HeapIdExhausted => ErrorTaxonomy::Catchable,
             Self::UnexportedHeapReference { .. } => ErrorTaxonomy::Catchable,
             Self::CyclicHostValue { .. } => ErrorTaxonomy::Catchable,
+            // Classified like the snapshot boundary classifies it: a refusal of
+            // the whole value, not a failure a guest handler can absorb and
+            // continue past with the same over-deep value still in hand.
+            Self::ValueDepthLimitExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::UndefinedVariable { .. } => ErrorTaxonomy::Catchable,
             Self::NonListIteration => ErrorTaxonomy::Catchable,
             Self::SessionProcessAdminOutsideProcess { .. } => ErrorTaxonomy::Catchable,
@@ -592,6 +605,7 @@ impl RuntimeError {
             Self::HeapIdExhausted => "HeapIdExhausted",
             Self::UnexportedHeapReference { .. } => "UnexportedHeapReference",
             Self::CyclicHostValue { .. } => "CyclicHostValue",
+            Self::ValueDepthLimitExceeded { .. } => "ValueDepthLimitExceeded",
             Self::UndefinedVariable { .. } => "UndefinedVariable",
             Self::NonListIteration => "NonListIteration",
             Self::SessionProcessAdminOutsideProcess { .. } => "SessionProcessAdminOutsideProcess",
@@ -1005,6 +1019,7 @@ mod tests {
                 context: "string formatting".into(),
             },
             RuntimeError::CyclicHostValue { id: 7 },
+            RuntimeError::ValueDepthLimitExceeded { limit: 64 },
             RuntimeError::UncaughtException {
                 value: crate::Value::Null,
             },
@@ -1082,6 +1097,9 @@ mod tests {
                 }
                 RuntimeError::CyclicHostValue { .. } => {
                     "lashlang heap value contains a cycle through object 7"
+                }
+                RuntimeError::ValueDepthLimitExceeded { .. } => {
+                    "lashlang value nesting depth limit of 64 levels exceeded"
                 }
                 RuntimeError::UndefinedVariable { .. } => "unknown name `name`",
                 RuntimeError::NonListIteration => "`for` expects a list or tuple",
@@ -1312,7 +1330,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 114] = [
+    const RUNTIME_ERROR_CODES: [&str; 115] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1331,6 +1349,7 @@ mod tests {
         "HeapIdExhausted",
         "UnexportedHeapReference",
         "CyclicHostValue",
+        "ValueDepthLimitExceeded",
         "UndefinedVariable",
         "NonListIteration",
         "SessionProcessAdminOutsideProcess",
@@ -1455,6 +1474,7 @@ mod tests {
             RuntimeError::HeapIdExhausted => "HeapIdExhausted",
             RuntimeError::UnexportedHeapReference { .. } => "UnexportedHeapReference",
             RuntimeError::CyclicHostValue { .. } => "CyclicHostValue",
+            RuntimeError::ValueDepthLimitExceeded { .. } => "ValueDepthLimitExceeded",
             RuntimeError::UndefinedVariable { .. } => "UndefinedVariable",
             RuntimeError::NonListIteration => "NonListIteration",
             RuntimeError::SessionProcessAdminOutsideProcess { .. } => {

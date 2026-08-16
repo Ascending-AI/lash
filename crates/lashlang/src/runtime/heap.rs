@@ -21,7 +21,7 @@ pub(crate) use javascript_exotics::{
 pub(crate) use url_objects::{
     UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
 };
-pub(crate) use validation::PersistedRoots;
+pub(crate) use validation::{PersistedRoots, ensure_value_depth};
 
 use super::{
     CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, Record, RuntimeError,
@@ -107,7 +107,9 @@ pub(crate) struct Heap {
     // removal instead of a scan.
     boundary_refs: FxHashMap<(u8, usize), HeapId>,
     boundary_identities: FxHashMap<HeapId, (u8, usize)>,
-    materialized: FxHashMap<HeapId, Value>,
+    /// Exported form plus its depth: a cache hit must account for the nesting
+    /// an uncached walk would have counted.
+    materialized: FxHashMap<HeapId, (Value, usize)>,
     logical_byte_limit: u64,
 }
 
@@ -548,11 +550,12 @@ impl Heap {
     }
 
     pub(crate) fn export(&self, value: &Value) -> Result<Value, RuntimeError> {
-        self.export_inner(value, &mut BTreeSet::new())
+        self.export_inner(value, &mut BTreeSet::new(), 1)
     }
 
     pub(crate) fn export_for_instruction(&mut self, value: &Value) -> Result<Value, RuntimeError> {
-        self.export_instruction_inner(value, &mut BTreeSet::new())
+        self.export_instruction_inner(value, &mut BTreeSet::new(), 1)
+            .map(|(value, _)| value)
     }
 
     pub(crate) fn export_for_mutation(&mut self, value: &Value) -> Result<Value, RuntimeError> {
@@ -576,44 +579,53 @@ impl Heap {
         Ok(())
     }
 
+    /// Exports one value with the depth of the tree it produced, so a cache hit
+    /// charges the nesting the walk it replaced would have charged.
     fn export_instruction_inner(
         &mut self,
         value: &Value,
         active: &mut BTreeSet<HeapId>,
-    ) -> Result<Value, RuntimeError> {
+        depth: usize,
+    ) -> Result<(Value, usize), RuntimeError> {
         let Value::Ref(id) = value else {
-            return Ok(value.clone());
+            return Ok((value.clone(), 1));
         };
-        if let Some(exported) = self.cached_materialized(*id) {
-            return Ok(exported.clone());
+        ensure_value_depth(depth)?;
+        if let Some((exported, exported_depth)) = self.cached_materialized(*id) {
+            let (exported, exported_depth) = (exported.clone(), *exported_depth);
+            ensure_value_depth(depth.saturating_add(exported_depth).saturating_sub(1))?;
+            return Ok((exported, exported_depth));
         }
         if !active.insert(*id) {
             return Err(RuntimeError::CyclicHostValue { id: id.get() });
         }
         let object = self.get(*id)?.clone();
+        let mut deepest_child = 0;
+        let mut export_child = |heap: &mut Self, value: &Value, active: &mut _| {
+            let (value, child_depth) = heap.export_instruction_inner(value, active, depth + 1)?;
+            deepest_child = deepest_child.max(child_depth);
+            Ok::<_, RuntimeError>(value)
+        };
         let exported = match object {
             HeapObject::Tuple(values) => Value::Tuple(
                 values
                     .iter()
-                    .map(|value| self.export_instruction_inner(value, active))
+                    .map(|value| export_child(self, value, active))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
             HeapObject::List(values) => Value::List(
                 values
                     .iter()
-                    .map(|value| self.export_instruction_inner(value, active))
+                    .map(|value| export_child(self, value, active))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
             HeapObject::Record(record) => {
                 let mut output = record_with_capacity(record.len());
                 for entry in &record.entries {
-                    output.insert_symbolized(
-                        entry.symbol,
-                        entry.name.clone(),
-                        self.export_instruction_inner(&entry.value, active)?,
-                    );
+                    let value = export_child(self, &entry.value, active)?;
+                    output.insert_symbolized(entry.symbol, entry.name.clone(), value);
                 }
                 Value::Record(std::sync::Arc::new(output))
             }
@@ -621,7 +633,7 @@ impl Heap {
                 result
                     .items
                     .iter()
-                    .map(|value| self.export_instruction_inner(value, active))
+                    .map(|value| export_child(self, value, active))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
@@ -635,21 +647,22 @@ impl Heap {
             | HeapObject::Error(_)
             | HeapObject::Url(_)
             | HeapObject::UrlSearchParams(_)) => {
-                // Exotic values intentionally have no detached `Value` shape:
-                // detaching would destroy identity or expose internal slots.
+                // Exotic values have no detached `Value` shape: detaching
+                // would destroy identity or expose internal slots.
                 return Err(javascript_exotics::host_boundary_error(&object));
             }
         };
+        let exported_depth = deepest_child.saturating_add(1);
         active.remove(id);
         if let Some(identity) = compound_identity(&exported) {
             self.cache_boundary(identity, *id);
         }
-        self.cache_materialized(*id, exported.clone());
+        self.cache_materialized(*id, exported.clone(), exported_depth);
         self.debug_assert_boundary_cache_invariant();
-        Ok(exported)
+        Ok((exported, exported_depth))
     }
 
-    fn cached_materialized(&self, id: HeapId) -> Option<&Value> {
+    fn cached_materialized(&self, id: HeapId) -> Option<&(Value, usize)> {
         self.materialized.get(&id)
     }
 
@@ -670,8 +683,8 @@ impl Heap {
         }
     }
 
-    fn cache_materialized(&mut self, id: HeapId, value: Value) {
-        self.materialized.insert(id, value);
+    fn cache_materialized(&mut self, id: HeapId, value: Value, depth: usize) {
+        self.materialized.insert(id, (value, depth));
     }
 
     fn forget(&mut self, id: HeapId) {
@@ -783,10 +796,12 @@ impl Heap {
         &self,
         value: &Value,
         active: &mut BTreeSet<HeapId>,
+        depth: usize,
     ) -> Result<Value, RuntimeError> {
         let Value::Ref(id) = value else {
             return Ok(value.clone());
         };
+        ensure_value_depth(depth)?;
         if !active.insert(*id) {
             return Err(RuntimeError::CyclicHostValue { id: id.get() });
         }
@@ -794,14 +809,14 @@ impl Heap {
             HeapObject::Tuple(values) => Value::Tuple(
                 values
                     .iter()
-                    .map(|value| self.export_inner(value, active))
+                    .map(|value| self.export_inner(value, active, depth + 1))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
             HeapObject::List(values) => Value::List(
                 values
                     .iter()
-                    .map(|value| self.export_inner(value, active))
+                    .map(|value| self.export_inner(value, active, depth + 1))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
@@ -811,7 +826,7 @@ impl Heap {
                     output.insert_symbolized(
                         entry.symbol,
                         entry.name.clone(),
-                        self.export_inner(&entry.value, active)?,
+                        self.export_inner(&entry.value, active, depth + 1)?,
                     );
                 }
                 Value::Record(std::sync::Arc::new(output))
@@ -820,7 +835,7 @@ impl Heap {
                 result
                     .items
                     .iter()
-                    .map(|value| self.export_inner(value, active))
+                    .map(|value| self.export_inner(value, active, depth + 1))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
