@@ -165,7 +165,24 @@ impl Record {
         // from the end. `{ a, ...rest }` lowers to copy-then-delete, and a
         // swap_remove there rotated the last key to the front of `rest`.
         let removed = self.entries.remove(index);
-        self.rebuild_index();
+        // The shift moves every entry above `index` down one slot, so the index
+        // is repaired in place rather than rebuilt: a fresh map per delete
+        // allocated and rehashed the whole record to learn what the shift
+        // already said.
+        if let Some(map) = &mut self.index {
+            if self.entries.len() > RECORD_INDEX_THRESHOLD {
+                map.remove(&removed.symbol);
+                for slot in map.values_mut() {
+                    if *slot > index {
+                        *slot -= 1;
+                    }
+                }
+            } else {
+                // Below the threshold the scan is the cheaper lookup, which is
+                // the same shape `rebuild_index` produces at this length.
+                self.index = None;
+            }
+        }
         Some(removed.value)
     }
 
@@ -259,4 +276,72 @@ impl<'de> Deserialize<'de> for Record {
 
 pub(crate) fn record_with_capacity(capacity: usize) -> Record {
     Record::with_capacity(capacity)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record_of(len: usize) -> Record {
+        let mut record = Record::new();
+        for key in 0..len {
+            record.insert(format!("k{key}"), Value::Number(key as f64));
+        }
+        record
+    }
+
+    fn keys_of(record: &Record) -> Vec<String> {
+        record.keys().map(str::to_string).collect()
+    }
+
+    /// Removal shifts, so every entry above the vacated slot moves down one.
+    /// The symbol index has to learn that; the edge is that it is repaired in
+    /// place now rather than rebuilt from scratch, so a stale slot would read
+    /// back the wrong value rather than simply being slower.
+    #[test]
+    fn removing_a_key_keeps_order_and_lookups_above_the_vacated_slot() {
+        // Indexed: ten keys is past `RECORD_INDEX_THRESHOLD`.
+        let mut record = record_of(10);
+        assert_eq!(record.remove("k3"), Some(Value::Number(3.0)));
+        assert_eq!(
+            keys_of(&record),
+            ["k0", "k1", "k2", "k4", "k5", "k6", "k7", "k8", "k9"]
+        );
+        assert!(record.index.is_some(), "nine keys still index");
+        for key in [0, 1, 2, 4, 5, 6, 7, 8, 9] {
+            assert_eq!(
+                record.get(&format!("k{key}")),
+                Some(&Value::Number(key as f64)),
+                "k{key} after removing a key below it"
+            );
+        }
+
+        // The last key: nothing shifts, and nothing may be left pointing past
+        // the end.
+        assert_eq!(record.remove("k9"), Some(Value::Number(9.0)));
+        assert_eq!(record.get("k8"), Some(&Value::Number(8.0)));
+        assert_eq!(record.get("k9"), None);
+
+        // Crossing back under the threshold drops the index, which is what
+        // `rebuild_index` produced at this length before.
+        assert_eq!(record.len(), 8);
+        assert!(record.index.is_none(), "eight keys stop indexing");
+        assert_eq!(record.get("k7"), Some(&Value::Number(7.0)));
+        record.insert("k10".to_string(), Value::Number(10.0));
+        assert!(record.index.is_some(), "nine keys index again");
+        assert_eq!(record.get("k10"), Some(&Value::Number(10.0)));
+        assert_eq!(record.get("k0"), Some(&Value::Number(0.0)));
+    }
+
+    /// The un-indexed path takes the same shift, and a record that never
+    /// reaches the threshold must not grow an index on the way out.
+    #[test]
+    fn removing_a_key_from_a_small_record_keeps_order() {
+        let mut record = record_of(4);
+        assert_eq!(record.remove("k1"), Some(Value::Number(1.0)));
+        assert_eq!(keys_of(&record), ["k0", "k2", "k3"]);
+        assert!(record.index.is_none());
+        assert_eq!(record.remove("missing"), None);
+        assert_eq!(record.get("k3"), Some(&Value::Number(3.0)));
+    }
 }
