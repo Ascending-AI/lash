@@ -554,7 +554,7 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 521 rows, of which 448 are distinct
+The Node differential table carries 527 rows, of which 454 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
 that of the 448 unique rows rather than of 521 distinct behaviours. Both counts

@@ -160,8 +160,12 @@ impl Record {
 
     pub(super) fn remove_symbol(&mut self, symbol: Symbol) -> Option<Value> {
         let index = self.position_for(symbol)?;
-        let removed = self.entries.swap_remove(index);
-        self.reindex_after_remove(symbol, index);
+        // Property order is observable — `Object.keys`, `JSON.stringify`, and
+        // object rest all read it — so the vacated slot cannot be backfilled
+        // from the end. `{ a, ...rest }` lowers to copy-then-delete, and a
+        // swap_remove there rotated the last key to the front of `rest`.
+        let removed = self.entries.remove(index);
+        self.rebuild_index();
         Some(removed.value)
     }
 
@@ -190,22 +194,6 @@ impl Record {
         }
         if self.entries.len() > RECORD_INDEX_THRESHOLD {
             self.rebuild_index();
-        }
-    }
-
-    fn reindex_after_remove(&mut self, removed: Symbol, index: usize) {
-        if self.entries.len() <= RECORD_INDEX_THRESHOLD {
-            self.index = None;
-            return;
-        }
-
-        let Some(map) = &mut self.index else {
-            self.rebuild_index();
-            return;
-        };
-        map.remove(&removed);
-        if let Some(moved) = self.entries.get(index) {
-            map.insert(moved.symbol, index);
         }
     }
 }

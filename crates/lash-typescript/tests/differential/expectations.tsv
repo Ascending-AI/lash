@@ -520,3 +520,9 @@ findings	231	reject	"new Set('a'.matchAll(/a/g)).size"	"1"	TS_REGEX_ITERATOR_POS
 findings	232	accept	"(() => { const m=/(?<x>a)(b)/.exec('ab'); m[0]='changed'; m.index=7; m['input']='input'; m.groups={x:'group'}; m.length=1; return `${m[0]}|${m.index}|${m.input}|${m.groups.x}|${m.length}`; })()"	"changed|7|input|group|1"	-
 findings	233	accept	"(() => { const m=new Map([['a',1],['b',2],['d',4]]);const out=[];m.forEach((v,k)=>{out[out.length]=k+v;if(k==='a'&&v===1){m.delete('b');m.set('c',3);m.delete('a');m.set('a',10);}});return out.join(','); })()"	"a1,d4,c3,a10"	-
 findings	234	accept	"(() => { const s=new Set([1,2,4]);const out=[];const state={first:true};s.forEach(v=>{out[out.length]=v;if(state.first){state.first=false;s.delete(2);s.add(3);s.delete(1);s.add(1);}});return out.join(','); })()"	"1,4,3,1"	-
+findings	235	accept	"(() => { const o = {a:1,b:2,c:3,d:4}; const {a, ...r} = o; return JSON.stringify(r); })()"	"{\"b\":2,\"c\":3,\"d\":4}"	-
+findings	236	accept	"(() => { const o = {a:1,b:2,c:3,d:4,e:5}; const {a, ...r} = o; return JSON.stringify(r); })()"	"{\"b\":2,\"c\":3,\"d\":4,\"e\":5}"	-
+findings	237	accept	"(() => { const o = {'2':1,a:2,'1':3,b:4}; const {a, ...r} = o; return JSON.stringify(r); })()"	"{\"1\":3,\"2\":1,\"b\":4}"	-
+findings	238	accept	"(() => { const o = {a:1,b:2,c:3}; const {b, ...r} = o; return JSON.stringify(r); })()"	"{\"a\":1,\"c\":3}"	-
+findings	239	accept	"(() => { const o = {a:1,b:2,c:3,d:4,e:5,f:6,g:7,h:8,i:9,j:10}; const {a,c, ...r} = o; return JSON.stringify(r); })()"	"{\"b\":2,\"d\":4,\"e\":5,\"f\":6,\"g\":7,\"h\":8,\"i\":9,\"j\":10}"	-
+findings	240	accept	"(() => { const o = {a:1,b:2,c:3}; const {a, ...r} = o; return Object.keys(r).join(','); })()"	"b,c"	-

@@ -627,3 +627,54 @@ fn array_like_lengths_under_the_limit_are_node_exact() {
         Value::Bool(true)
     );
 }
+
+/// Deleting a property keeps the survivors in their order.
+///
+/// Records stored their properties in a vector and removed with `swap_remove`,
+/// which backfills the vacated slot from the end. Property order is observable
+/// in ECMA — `Object.keys`, `JSON.stringify`, spread — so that rotated the last
+/// key to the front. `{ a, ...rest }` lowers to copy-then-delete, which made
+/// every object rest over three or more surviving keys come out scrambled.
+#[test]
+fn property_removal_preserves_the_surviving_order() {
+    for (source, expected) in [
+        (
+            "const o = { a: 1, b: 2, c: 3, d: 4 }; const { a, ...rest } = o; finish(JSON.stringify(rest));",
+            r#"{"b":2,"c":3,"d":4}"#,
+        ),
+        (
+            "const o = { a: 1, b: 2, c: 3, d: 4, e: 5 }; const { a, ...rest } = o; finish(JSON.stringify(rest));",
+            r#"{"b":2,"c":3,"d":4,"e":5}"#,
+        ),
+        (
+            "const o = { '2': 1, a: 2, '1': 3, b: 4 }; const { a, ...rest } = o; finish(JSON.stringify(rest));",
+            r#"{"1":3,"2":1,"b":4}"#,
+        ),
+        (
+            "const o = { a: 1, b: 2, c: 3 }; const { b, ...rest } = o; finish(JSON.stringify(rest));",
+            r#"{"a":1,"c":3}"#,
+        ),
+        // Past the record's index threshold, where removal must also keep the
+        // symbol index in step with the shifted slots.
+        (
+            "const o = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9, j: 10 }; const { a, c, ...rest } = o; finish(JSON.stringify(rest));",
+            r#"{"b":2,"d":4,"e":5,"f":6,"g":7,"h":8,"i":9,"j":10}"#,
+        ),
+    ] {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+
+    // `delete` reaches the same removal directly.
+    assert_eq!(
+        finished(
+            "const o: any = { a: 1, b: 2, c: 3 }; delete o.a; finish(Object.keys(o).join(','));"
+        ),
+        Value::String("b,c".into())
+    );
+    assert_eq!(
+        finished(
+            "const o: any = { a: 1, b: 2, c: 3, d: 4 }; delete o.b; finish(JSON.stringify(o));"
+        ),
+        Value::String(r#"{"a":1,"c":3,"d":4}"#.into())
+    );
+}
