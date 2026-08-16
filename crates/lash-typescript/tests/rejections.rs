@@ -50,7 +50,6 @@ rejection_test!(
     Code::PrototypeMutationUnsupported
 );
 rejection_test!(rejects_this, "const x = this;", Code::ThisUnsupported);
-rejection_test!(rejects_enums, "enum E { A }", Code::EnumUnsupported);
 rejection_test!(
     rejects_namespaces,
     "namespace N {}",
@@ -220,8 +219,8 @@ fn instance_method_inventory_matches_the_lowerer() {
         unaccepted.is_empty(),
         "the register documents {unaccepted:?}, which the lowerer does not accept"
     );
-    assert_eq!(documented.len(), 68);
-    assert_eq!(lash_typescript::stdlib_name_count(), 125);
+    assert_eq!(documented.len(), 80);
+    assert_eq!(lash_typescript::stdlib_name_count(), 139);
     for candidate in ["pop", "push", "shift", "unshift", "substr"] {
         assert!(
             !lash_typescript::accepts_instance_method(candidate),
@@ -263,6 +262,21 @@ fn retained_stdlib_rejections_carry_exact_repairs() {
     ] {
         let error = lash_typescript::validate(source).expect_err("call remains rejected");
         assert_eq!(error.code.as_str(), "TS_METHOD_UNSUPPORTED", "{source}");
+        assert!(error.to_string().contains(repair), "{source}: {error}");
+    }
+}
+
+#[test]
+fn date_rejections_name_the_deterministic_repair() {
+    for (source, repair) in [
+        ("new Date(0).getFullYear();", "d.getUTCFullYear()"),
+        ("new Date(0).getHours();", "d.getUTCHours()"),
+        ("new Date(0).setUTCSeconds(1);", "new Date(d.getTime() + n)"),
+        ("new Date(0).toDateString();", "toISOString()"),
+        ("new Date(0).toLocaleString();", "d.toISOString()"),
+    ] {
+        let error = lash_typescript::validate(source).expect_err("Date call remains rejected");
+        assert_eq!(error.code, Code::MethodUnsupported, "{source}: {error}");
         assert!(error.to_string().contains(repair), "{source}: {error}");
     }
 }

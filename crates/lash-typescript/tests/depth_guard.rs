@@ -781,4 +781,17 @@ fn newly_accepted_constructs_share_the_source_nesting_budget() {
     let spread = format!("const x = {}[1]{};", "[...".repeat(100), "]".repeat(100));
     let error = lash_typescript::parse(&spread).expect_err("spread depth is charged");
     assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+
+    let date = format!("finish({}0{});", "new Date(".repeat(100), ")".repeat(100));
+    let error = lash_typescript::parse(&date).expect_err("Date constructor depth is charged");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+
+    let enumeration = format!(
+        "enum E {{ A = {}1{} }} finish(E.A);",
+        "(".repeat(100),
+        ")".repeat(100)
+    );
+    let error =
+        lash_typescript::parse(&enumeration).expect_err("enum initializer depth is charged");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
 }

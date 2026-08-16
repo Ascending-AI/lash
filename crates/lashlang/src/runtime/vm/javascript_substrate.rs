@@ -105,10 +105,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             };
             let message = match args.get(message_index) {
                 None | Some(Value::Undefined) => String::new(),
-                Some(value) => {
-                    let primitive = self.heap.javascript_to_primitive_string_or_number(value)?;
-                    javascript_to_string(&primitive)
-                }
+                Some(value) => self.heap.javascript_to_string(value)?,
             };
             let cause = args
                 .get(message_index + 1)
@@ -165,10 +162,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             ("Set", []) | ("Set", [Value::Undefined]) => self.heap.allocate_set(Vec::new())?,
             ("Set", [values]) => self.heap.allocate_set(heap_sequence(&self.heap, values)?)?,
-            ("Date", [milliseconds]) => {
-                let milliseconds = self.heap.javascript_to_number(milliseconds)?;
-                self.heap.allocate_date(milliseconds)?
-            }
+            ("Date", values) => self.construct_javascript_date(values)?,
             _ => {
                 return Err(js_stdlib_error(format!(
                     "TS_CONSTRUCTOR_UNSUPPORTED: {kind} with {} argument(s)",

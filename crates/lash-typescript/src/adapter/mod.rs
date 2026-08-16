@@ -1,4 +1,5 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, BTreeSet};
 
 use swc_common::{BytePos, Span, Spanned};
 use swc_ecma_ast as swc;
@@ -6,8 +7,10 @@ use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
+mod enums;
 mod nesting;
 
+use enums::{ConstEnumValue, enum_member_property_name};
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
 
 /// Maximum source-level statement or expression nesting accepted by the
@@ -28,6 +31,10 @@ pub(crate) enum Stmt {
     Var {
         kind: VarKind,
         declarations: Vec<Var>,
+    },
+    Enum {
+        name: String,
+        members: Vec<EnumMember>,
     },
     Function {
         name: String,
@@ -77,6 +84,13 @@ pub(crate) enum Stmt {
         catch: Option<Catch>,
         finally: Option<Vec<Stmt>>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct EnumMember {
+    pub(crate) name: String,
+    pub(crate) value: Expr,
+    pub(crate) reverse: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -481,6 +495,9 @@ fn parse_source(source: &str) -> Result<Program, Diagnostic> {
 #[derive(Default)]
 struct Adapter {
     nesting_depth: Cell<usize>,
+    enum_constants: RefCell<Vec<BTreeMap<String, BTreeMap<String, ConstEnumValue>>>>,
+    inline_enums: RefCell<Vec<BTreeSet<String>>>,
+    enum_context: RefCell<Option<(String, BTreeSet<String>)>>,
 }
 
 impl Adapter {
@@ -516,24 +533,28 @@ impl Adapter {
     }
 
     fn convert_module_items(&self, items: &[swc::ModuleItem]) -> Result<Vec<Stmt>, Diagnostic> {
-        items
-            .iter()
-            .map(|item| match item {
-                swc::ModuleItem::Stmt(stmt) => self.convert_stmt(stmt),
-                swc::ModuleItem::ModuleDecl(decl) => Err(reject(
-                    DiagnosticCode::ImportExportUnsupported,
-                    "static import/export declarations",
-                    Some(source_span(decl.span())),
-                )),
-            })
-            .collect()
+        self.with_enum_scope(|| {
+            items
+                .iter()
+                .map(|item| match item {
+                    swc::ModuleItem::Stmt(stmt) => self.convert_stmt(stmt),
+                    swc::ModuleItem::ModuleDecl(decl) => Err(reject(
+                        DiagnosticCode::ImportExportUnsupported,
+                        "static import/export declarations",
+                        Some(source_span(decl.span())),
+                    )),
+                })
+                .collect()
+        })
     }
 
     fn convert_statements(&self, statements: &[swc::Stmt]) -> Result<Vec<Stmt>, Diagnostic> {
-        statements
-            .iter()
-            .map(|stmt| self.convert_stmt(stmt))
-            .collect()
+        self.with_enum_scope(|| {
+            statements
+                .iter()
+                .map(|stmt| self.convert_stmt(stmt))
+                .collect()
+        })
     }
 
     fn convert_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
@@ -715,11 +736,7 @@ impl Adapter {
                 "Unsupported: classes. Use functions and plain objects; for coded errors use Object.assign(new Error(message), {code}).",
                 span,
             )),
-            swc::Decl::TsEnum(_) => Err(reject(
-                DiagnosticCode::EnumUnsupported,
-                "TypeScript enums",
-                span,
-            )),
+            swc::Decl::TsEnum(declaration) => self.convert_enum(declaration),
             swc::Decl::TsModule(_) => Err(reject(
                 DiagnosticCode::NamespaceUnsupported,
                 "TypeScript namespaces/modules",
@@ -977,7 +994,19 @@ impl Adapter {
     fn convert_expr_inner(&self, expr: &swc::Expr) -> Result<Expr, Diagnostic> {
         let span = Some(source_span(expr.span()));
         Ok(match expr {
-            swc::Expr::Ident(ident) => Expr::Ident(ident.sym.to_string()),
+            swc::Expr::Ident(ident) => {
+                let name = ident.sym.to_string();
+                if let Some((enum_name, members)) = self.enum_context.borrow().as_ref()
+                    && members.contains(&name)
+                {
+                    Expr::Member {
+                        object: Box::new(Expr::Ident(enum_name.clone())),
+                        property: MemberProperty::Field(name),
+                    }
+                } else {
+                    Expr::Ident(name)
+                }
+            }
             swc::Expr::Lit(lit) => match lit {
                 swc::Lit::Null(_) => Expr::Null,
                 swc::Lit::Bool(value) => Expr::Bool(value.value),
@@ -1334,6 +1363,13 @@ impl Adapter {
     }
 
     fn convert_member(&self, member: &swc::MemberExpr) -> Result<Expr, Diagnostic> {
+        if let swc::Expr::Ident(owner) = member.obj.as_ref()
+            && self.enum_is_inline(owner.sym.as_ref())
+            && let Some(name) = enum_member_property_name(&member.prop)
+            && let Some(value) = self.enum_constant(owner.sym.as_ref(), &name)
+        {
+            return Ok(value.expression());
+        }
         let object = self.convert_expr(&member.obj)?;
         if matches!(&object, Expr::Ident(name) if name == "prototype") {
             return Err(reject(

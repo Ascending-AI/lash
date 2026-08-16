@@ -320,6 +320,60 @@ impl Lowerer {
                     );
                 }
             }
+            if let Some(replacement) = match method.as_str() {
+                "getFullYear" => Some("getUTCFullYear"),
+                "getMonth" => Some("getUTCMonth"),
+                "getDate" => Some("getUTCDate"),
+                "getDay" => Some("getUTCDay"),
+                "getHours" => Some("getUTCHours"),
+                "getMinutes" => Some("getUTCMinutes"),
+                "getSeconds" => Some("getUTCSeconds"),
+                "getMilliseconds" => Some("getUTCMilliseconds"),
+                _ => None,
+            } {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    format!(
+                        "Unsupported: Date.{method} is host-timezone dependent. Use d.{replacement}()."
+                    ),
+                    None,
+                ));
+            }
+            if matches!(
+                method.as_str(),
+                "setUTCFullYear"
+                    | "setUTCMonth"
+                    | "setUTCDate"
+                    | "setUTCHours"
+                    | "setUTCMinutes"
+                    | "setUTCSeconds"
+                    | "setUTCMilliseconds"
+            ) {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    format!(
+                        "Unsupported: Date.{method}; durable Date values are immutable. Use new Date(d.getTime() + n)."
+                    ),
+                    None,
+                ));
+            }
+            if matches!(
+                method.as_str(),
+                "toDateString"
+                    | "toTimeString"
+                    | "toUTCString"
+                    | "toGMTString"
+                    | "toLocaleDateString"
+                    | "toLocaleTimeString"
+            ) {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    format!(
+                        "Unsupported: Date.{method} is timezone/locale dependent. Use Date.toISOString()."
+                    ),
+                    None,
+                ));
+            }
             if method == "localeCompare" {
                 return Err(Diagnostic::new(
                     DiagnosticCode::MethodUnsupported,
@@ -337,11 +391,12 @@ impl Lowerer {
             if method == "toLocaleString" {
                 return Err(Diagnostic::new(
                     DiagnosticCode::MethodUnsupported,
-                    "Unsupported: toLocaleString/Intl formatting is locale-dependent. For numbers use toFixed(digits); otherwise build the deterministic string explicitly.",
+                    "Unsupported: toLocaleString/Intl formatting is locale-dependent. For Date use d.toISOString(); for numbers use toFixed(digits); otherwise build the deterministic string explicitly.",
                     None,
                 ));
             }
-            if matches!(object.as_ref(), Expr::Ident(name) if name == "console") && method == "log"
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "console")
+                && matches!(method.as_str(), "log" | "warn" | "error" | "info" | "debug")
             {
                 if !self.has_binding("console") {
                     let mut lowered = args

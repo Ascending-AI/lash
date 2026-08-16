@@ -42,6 +42,7 @@ pub(super) fn single_pattern_name(pattern: &Pattern) -> Option<&str> {
 pub(super) fn function_var_names(statements: &[Stmt]) -> Vec<String> {
     fn visit(statement: &Stmt, names: &mut Vec<String>) {
         match statement {
+            Stmt::Enum { name, .. } => names.push(name.clone()),
             Stmt::Var {
                 kind: VarKind::Var,
                 declarations,
@@ -1249,6 +1250,15 @@ impl Lowerer {
                 ),
                 None,
             ));
+        }
+        if constructor == "Date" && args.is_empty() {
+            return Ok(LashExpr::BuiltinCall {
+                name: "__typescript_heap_new".into(),
+                args: vec![
+                    LashExpr::String("Date".into()),
+                    LashExpr::ResultUnwrap(Box::new(journaled_runtime_call("now"))),
+                ],
+            });
         }
         let mut values = vec![LashExpr::String(constructor.into())];
         values.extend(

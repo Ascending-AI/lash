@@ -33,6 +33,12 @@ pub(crate) const STATIC_STDLIB_SIGNATURES: &[StdlibSignature] = signatures![
     ("String", "fromCharCode", "...codeUnits"),
     ("String", "fromCodePoint", "...codePoints"),
     ("Map", "groupBy", "iterable, callback"),
+    ("Date", "parse", "value"),
+    (
+        "Date",
+        "UTC",
+        "year[, month[, date[, hours[, minutes[, seconds[, milliseconds]]]]]]"
+    ),
     ("Number", "isFinite", "value"),
     ("Number", "isInteger", "value"),
     ("Number", "isNaN", "value"),
@@ -85,6 +91,8 @@ pub(crate) const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = signatures![
     ("instance", "charCodeAt", "[index]"),
     ("instance", "codePointAt", "[index]"),
     ("instance", "append", "name, value"),
+    ("instance", "add", "value"),
+    ("instance", "clear", ""),
     ("instance", "delete", "key[, value]"),
     ("instance", "entries", ""),
     ("instance", "endsWith", "search[, endPosition]"),
@@ -159,6 +167,16 @@ pub(crate) const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = signatures![
     ("instance", "isSupersetOf", "set"),
     ("instance", "isDisjointFrom", "set"),
     ("instance", "toJSON", "[key]"),
+    ("instance", "getTime", ""),
+    ("instance", "getUTCFullYear", ""),
+    ("instance", "getUTCMonth", ""),
+    ("instance", "getUTCDate", ""),
+    ("instance", "getUTCDay", ""),
+    ("instance", "getUTCHours", ""),
+    ("instance", "getUTCMinutes", ""),
+    ("instance", "getUTCSeconds", ""),
+    ("instance", "getUTCMilliseconds", ""),
+    ("instance", "toISOString", ""),
 ];
 
 /// Renders the standard-library inventory used by the model prompt.

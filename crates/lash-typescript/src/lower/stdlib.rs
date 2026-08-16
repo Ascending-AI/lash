@@ -21,7 +21,7 @@ pub(super) fn static_stdlib_owner(expr: &Expr) -> Option<&str> {
     };
     matches!(
         name.as_str(),
-        "Object" | "Array" | "String" | "Number" | "JSON" | "Math" | "Map" | "URL"
+        "Object" | "Array" | "String" | "Number" | "JSON" | "Math" | "Map" | "Date" | "URL"
     )
     .then_some(name)
 }
@@ -62,6 +62,8 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "charCodeAt",
     "codePointAt",
     "append",
+    "add",
+    "clear",
     "delete",
     "entries",
     "endsWith",
@@ -124,6 +126,16 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "isSupersetOf",
     "isDisjointFrom",
     "toJSON",
+    "getTime",
+    "getUTCFullYear",
+    "getUTCMonth",
+    "getUTCDate",
+    "getUTCDay",
+    "getUTCHours",
+    "getUTCMinutes",
+    "getUTCSeconds",
+    "getUTCMilliseconds",
+    "toISOString",
 ];
 
 pub(super) fn is_instance_stdlib_method(method: &str) -> bool {

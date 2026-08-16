@@ -17,16 +17,19 @@ Arithmetic includes exponentiation and ECMA `ToInt32`/`ToUint32` bitwise and shi
 operators. `in` is an own-property query because dialect objects have no prototypes;
 `instanceof` accepts the Error family, Map, Set, Date, RegExp, URL,
 URLSearchParams, Array, and Object.
-`console.log`
-accepts any arity and prints its arguments after ECMA `ToString` conversion,
-joined by one space; lexical bindings named `console` take precedence.
+`console.log`, `console.warn`, `console.error`, `console.info`, and
+`console.debug` accept any arity and emit through the existing print-observation
+channel after ECMA `ToString` conversion, joined by one space; lexical bindings
+named `console` take precedence.
 Accepted operations follow ECMA-262 coercion, truthiness, operand-return, and
 reference rules. Type-level TypeScript syntax is erased: annotations,
 interfaces, type aliases, generics and type arguments, `as`/angle-bracket
 assertions, `satisfies`, and postfix non-null `!` do not exist at runtime.
-Enums, decorators, and namespaces/modules emit or alter runtime behavior, so
-they remain named rejections: `TS_ENUM_UNSUPPORTED`,
-`TS_DECORATOR_UNSUPPORTED`, and `TS_NAMESPACE_UNSUPPORTED`.
+Non-const enums create the same runtime object shape as `tsc`: numeric members
+have forward and reverse mappings, string members have forward mappings, and
+computed initializers run in declaration order. Const-enum member reads inline
+their constant number or string. Decorators and namespaces/modules remain
+named rejections: `TS_DECORATOR_UNSUPPORTED` and `TS_NAMESPACE_UNSUPPORTED`.
 
 Cells are scripts and may use top-level `await` for tools, process handles,
 `sleep`, `Promise.all`, and `Promise.allSettled`; `waitSignal` is
@@ -66,10 +69,16 @@ no fail-fast cancellation of an in-flight batch leaf, so the aggregate settles
 at the pace of its slowest leaf while rejecting with its first-settled reason.
 This is a runtime-system constraint, not an alternate semantics.
 
-`Date.now()` and `Math.random()` are host effects, so their result is recorded
+`Date.now()`, argless `new Date()`, and `Math.random()` are host effects, so their result is recorded
 at the same journal boundary as other effects and replay never samples the VM's
 clock or RNG. The Error family plus Map, Set, Date, and RegExp are the explicit
 exceptions to the general `new` rejection.
+
+`new Date(milliseconds)`, UTC-pinned multi-argument construction,
+`Date.UTC`, ISO-only `Date.parse`, all `getUTC*` getters, `getTime`, `valueOf`,
+`toISOString`, and `toJSON` are accepted. Date values are immutable. The
+Map/Set surface includes `size`, `get`/`set`/`add`, `has`, `delete`, `clear`,
+`forEach`, and the iterator-sink forms of `keys`/`values`/`entries`.
 
 `encodeURIComponent`, `decodeURIComponent`, `encodeURI`, and `decodeURI` lower
 to deterministic pure VM codecs. Malformed percent encodings and lone-surrogate
@@ -123,7 +132,7 @@ shape-dependent runtime rejection. The executable inventories in
 `tests/rejections.rs`, `tests/structural_contract.rs`, and the checked-in Node
 differential suite under `tests/differential/` are the source of truth. In
 particular, v1 excludes classes, generators, non-canonical classic `for` forms,
-modules/imports, JSX, enums, namespaces, decorators, `eval`/`Function`, prototype
+modules/imports, JSX, namespaces, decorators, `eval`/`Function`, prototype
 access, accessors, regex literals, BigInt, sequence expressions, labels, `for await`,
 and arbitrary constructors or `instanceof` right-hand sides. Identifiers beginning
 with `__typescript_` are reserved for the
@@ -230,9 +239,28 @@ language semantics:
   a function, plus nested-path mutation, membership, and deletion share the
   same durable session slots as top-level bindings. Nested-function replacement
   uses the root-global set intrinsic and returns the assigned value.
-- `console.log` is host-defined rather than ECMA-262, and prints ECMA
+- The five accepted `console` methods are host-defined rather than ECMA-262,
+  share one print-observation channel, and print ECMA
   `ToString` of each argument. Node's inspector formatting is not reproduced:
   `console.log({a: 1})` prints `[object Object]` where Node prints `{ a: 1 }`.
+- Multi-argument Date construction and ISO date-times without an explicit
+  offset are interpreted as UTC, never the host timezone. `Date.parse` and
+  string construction accept only ECMA date-time syntax; a structurally valid
+  but invalid date produces `NaN`, while non-ISO fallback syntax rejects as
+  `TS_DATE_PARSE_NON_ISO` with an ISO rewrite.
+- Durable Date values are immutable. `setUTC*` methods reject as
+  `TS_DATE_IMMUTABLE` and direct the author to
+  `new Date(d.getTime() + n)`. Local-time getters reject with the corresponding
+  `getUTC*` replacement; locale and local string methods direct the author to
+  `toISOString()`.
+- Date numeric coercion is supported, including subtraction and relational
+  comparison. String coercion—directly or through an array/Error-message join—
+  rejects as `TS_DATE_STRING_COERCION_PENDING` and directs the author to
+  `.toISOString()`; the VM never substitutes a host-local date string.
+- Map/Set `forEach` currently snapshots the callback sequence before the first
+  callback. Node's live cursor observes additions and skips entries deleted
+  before their turn; mutation during a Map/Set callback therefore remains an
+  assembly STOP rather than a silently claimed exact behavior.
 - A block-scoped binding whose name shadows one already in scope is lowered to
   a generated slot, so that the inner binding cannot overwrite the outer one.
   At root that slot is a runtime global, which makes it the one place a
@@ -263,9 +291,9 @@ surface below.
 SWC parses modern TypeScript syntax, including ASI, comments, trailing commas,
 Unicode escapes, numeric separators, and hexadecimal/octal/binary literals.
 Annotations, interfaces, type aliases, generics, `as`, `satisfies`, and non-null
-assertions are erased. Enums, decorators, and namespaces are parsed but reject
-as `TS_ENUM_UNSUPPORTED`, `TS_DECORATOR_UNSUPPORTED`, and
-`TS_NAMESPACE_UNSUPPORTED`. `"use strict"` is an accepted no-op; functions see
+assertions are erased. Enums lower to their `tsc` runtime object or const-enum
+literals; decorators and namespaces are parsed but reject as
+`TS_DECORATOR_UNSUPPORTED` and `TS_NAMESPACE_UNSUPPORTED`. `"use strict"` is an accepted no-op; functions see
 `this` as `undefined`, top-level `this` rejects, and `arguments` rejects with a
 rest-parameter replacement.
 
@@ -288,8 +316,8 @@ with `Math.pow`, `Math.min()` is `Infinity`, and `Math.round(-0.5)` is `-0`.
 
 ## Standard-library inventory
 
-The v1 inventory contains 125 owner-qualified method names: 57 static methods
-and 68 instance method names. The signature table is also the source of the
+The v1 inventory contains 139 owner-qualified method names: 59 static methods
+and 80 instance method names. The signature table is also the source of the
 model prompt; optional arguments are explicit rather than hidden behind an
 "ECMA optional arguments" qualifier.
 
@@ -305,6 +333,8 @@ The shipped static families are:
 - Array: `from(source[, mapFn[, thisArg]])`, `isArray(value)`, `of(...values)`.
 - String: `fromCharCode(...codeUnits)`, `fromCodePoint(...codePoints)`.
 - Map: `groupBy(iterable, callback)`.
+- Date: `parse(value)`,
+  `UTC(year[, month[, date[, hours[, minutes[, seconds[, milliseconds]]]]]])`.
 - Number: `isFinite(value)`, `isInteger(value)`, `isNaN(value)`,
   `isSafeInteger(value)`, `parseFloat(value)`, `parseInt(value[, radix])`.
 - JSON: `parse(text)`, `stringify(value[, replacer[, space]])`.
@@ -317,7 +347,7 @@ The shipped static families are:
 - URL: `canParse(input[, base])`.
 
 The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
-`codePointAt`, `append`, `delete`, `entries`, `endsWith`, `filter`, `fill`,
+`codePointAt`, `append`, `add`, `clear`, `delete`, `entries`, `endsWith`, `filter`, `fill`,
 `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `forEach`,
 `get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`,
 `every`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `reduce`,
@@ -326,8 +356,11 @@ The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
 `toReversed`, `toSorted`, `toSpliced`, `set`, `keys`, `toLowerCase`,
 `toUpperCase`, `toString`, `trim`, `trimEnd`, `trimStart`, `valueOf`, `values`,
 `with`, `hasOwnProperty`, `union`, `intersection`, `difference`,
-`symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`, and
-`toJSON`. The signature table in `src/signatures.rs` gives every optional form.
+`symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`,
+`toJSON`, `getTime`, `getUTCFullYear`, `getUTCMonth`, `getUTCDate`,
+`getUTCDay`, `getUTCHours`, `getUTCMinutes`, `getUTCSeconds`,
+`getUTCMilliseconds`, and `toISOString`. The signature table in
+`src/signatures.rs` gives every optional form.
 
 `Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, and `MAX_VALUE` are
 accepted constants. Array callbacks run synchronously and sequentially inside
@@ -449,10 +482,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 449 rows, of which 376 are distinct
+The Node differential table carries 468 rows, of which 395 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of the 376 unique rows rather than of 449 distinct behaviours. Both counts
+that of the 395 unique rows rather than of 468 distinct behaviours. Both counts
 are pinned against the table by `committed_row_counts_match_the_register`, and
 the generator pins each lane's own row count, so neither this paragraph nor a
 lane can drift from the corpus in silence.

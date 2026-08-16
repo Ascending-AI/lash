@@ -185,6 +185,7 @@ pub(super) fn continue_under_finally(
         }),
         Stmt::Empty
         | Stmt::Expr(_)
+        | Stmt::Enum { .. }
         | Stmt::Var { .. }
         | Stmt::Function { .. }
         | Stmt::Return(_)
@@ -513,6 +514,7 @@ fn statement_expressions(stmt: &Stmt) -> Box<dyn Iterator<Item = &Expr> + '_> {
         Stmt::Var { declarations, .. } => {
             Box::new(declarations.iter().filter_map(|d| d.init.as_ref()))
         }
+        Stmt::Enum { members, .. } => Box::new(members.iter().map(|member| &member.value)),
         Stmt::If {
             test,
             consequent,

@@ -115,6 +115,89 @@ fn error_constructors_and_instanceof_use_heap_kinds() {
 }
 
 #[test]
+fn date_utc_surface_is_complete_and_iso_only() {
+    assert_eq!(
+        finished(
+            "const d=new Date(Date.UTC(2000,1,29,23,58,57,456)); finish(`${d.getUTCFullYear()}|${d.getUTCMonth()}|${d.getUTCDate()}|${d.getUTCDay()}|${d.getUTCHours()}|${d.getUTCMinutes()}|${d.getUTCSeconds()}|${d.getUTCMilliseconds()}|${d.getTime()}|${d.valueOf()}|${d.toISOString()}|${d.toJSON()}`);"
+        ),
+        Value::String(
+            "2000|1|29|2|23|58|57|456|951868737456|951868737456|2000-02-29T23:58:57.456Z|2000-02-29T23:58:57.456Z".into()
+        )
+    );
+    assert_eq!(
+        finished(
+            "finish(`${new Date(8640000000000000).toISOString()}|${new Date(-8640000000000000).toISOString()}|${new Date(NaN).toJSON()}|${Number.isNaN(Date.parse('2020-13-01'))}`);"
+        ),
+        Value::String("+275760-09-13T00:00:00.000Z|-271821-04-20T00:00:00.000Z|null|true".into())
+    );
+    let error = execute("finish(Date.parse('March 1, 2020'));")
+        .expect_err("implementation-defined parse fallback must reject");
+    assert!(
+        error.to_string().contains("TS_DATE_PARSE_NON_ISO"),
+        "{error}"
+    );
+}
+
+#[test]
+fn date_string_coercion_rejects_inside_containers_and_error_messages() {
+    for source in [
+        "finish('' + [new Date(0)]);",
+        "finish(new Error(new Date(0)).message);",
+        "finish(new Error([new Date(0)]).message);",
+    ] {
+        let error = execute(source).expect_err("Date string coercion remains a loud deviation");
+        assert!(
+            error
+                .to_string()
+                .contains("TS_DATE_STRING_COERCION_PENDING")
+                && error.to_string().contains("toISOString"),
+            "{source}: {error}"
+        );
+    }
+
+    assert_eq!(
+        finished("const a=new Date(1); const b=new Date(4); finish(`${b-a}|${a<b}`);"),
+        Value::String("3|true".into())
+    );
+    for source in [
+        "finish(new Date(0) + '');",
+        "finish(`${new Date(0)}`);",
+        "finish(String(new Date(0)));",
+    ] {
+        let error = execute(source).expect_err("Date string coercion remains a loud deviation");
+        assert!(
+            error
+                .to_string()
+                .contains("TS_DATE_STRING_COERCION_PENDING")
+                && error.to_string().contains("toISOString"),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn enums_match_tsc_runtime_objects_and_const_members_inline() {
+    assert_eq!(
+        finished(
+            "let n=0; enum Numeric { A, B=4, C, D=(n+=2) } enum Text { A='x', B='x'+'y' } enum Referenced { A=Text.A } const enum Inline { A, B=4, C='z', D=Referenced.A, E=4294967296|0 } function scoped(){const enum Inline { A=9 } return Inline.A;} finish(`${Numeric.A}|${Numeric[0]}|${Numeric.B}|${Numeric[5]}|${Numeric.D}|${Numeric[2]}|${Text.A}|${Text.B}|${Object.keys(Text).join(',')}|${Object.keys(Referenced).join(',')}|${Inline.A}|${Inline.C}|${Inline.D}|${Inline.E}|${scoped()}|${n}`);"
+        ),
+        Value::String("0|A|4|C|2|D|x|xy|A,B|A|0|z|x|0|9|2".into())
+    );
+}
+
+#[test]
+fn map_and_set_surface_preserves_same_value_zero_identity_and_order() {
+    assert_eq!(
+        finished(
+            "const key={}; const other={}; const m=new Map([[NaN,'nan'],[-0,'zero'],[key,'id']]); m.set(+0,'updated'); const calls={text:''}; m.forEach((v,k)=>{calls.text=calls.text+(calls.text?',':'')+`${v}:${k===key}`;}); const removed=m.delete(other); const has=m.has(key); const size=m.size; const order=[...m].map(([k,v])=>v).join(','); m.clear(); const s=new Set([NaN,NaN,-0,+0,2]); const setOrder=[...s].join(','); const deleted=s.delete(NaN); const setSize=s.size; s.clear(); finish(`${m.get(key)}|${has}|${removed}|${size}|${order}|${calls.text}|${m.size}|${setOrder}|${deleted}|${setSize}|${s.size}`);"
+        ),
+        Value::String(
+            "undefined|true|false|3|nan,updated,id|nan:false,updated:false,id:true|0|NaN,0,2|true|2|0".into()
+        )
+    );
+}
+
+#[test]
 fn delete_preserves_alias_identity_and_rejects_array_holes() {
     assert_eq!(
         finished(

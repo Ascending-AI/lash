@@ -339,6 +339,16 @@ fn newly_accepted_constructs_survive_without_the_preflight() {
             "do { switch(1) { case 1: ".repeat(depth),
             "break; } } while(false);".repeat(depth)
         ),
+        format!(
+            "finish({}0{});",
+            "new Date(".repeat(depth),
+            ")".repeat(depth)
+        ),
+        format!(
+            "enum E {{ A = {}1{} }} finish(E.A);",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        ),
     ];
     for source in sources {
         assert!(source.len() <= lash_typescript::MAX_SOURCE_BYTES);

@@ -142,7 +142,7 @@ fn return_runs_and_can_be_replaced_by_finally() {
 }
 
 #[test]
-fn type_level_typescript_syntax_is_erased_but_runtime_declarations_stay_rejected() {
+fn type_level_typescript_syntax_is_erased_while_namespaces_and_decorators_reject() {
     assert_eq!(
         finished(
             r#"
@@ -156,10 +156,6 @@ fn type_level_typescript_syntax_is_erased_but_runtime_declarations_stay_rejected
         Value::Number(2.0)
     );
     for (source, code) in [
-        (
-            "enum E { A }",
-            lash_typescript::DiagnosticCode::EnumUnsupported,
-        ),
         (
             "namespace N {}",
             lash_typescript::DiagnosticCode::NamespaceUnsupported,
@@ -205,7 +201,6 @@ fn unsupported_constructs_have_stable_named_diagnostics() {
     let cases = [
         ("class A {}", Code::ClassUnsupported),
         ("function* f() {}", Code::GeneratorUnsupported),
-        ("enum E { A }", Code::EnumUnsupported),
         ("namespace N {}", Code::NamespaceUnsupported),
         ("const r = /x/;", Code::RegExpUnsupported),
         ("eval('1')", Code::EvalUnsupported),
@@ -479,6 +474,10 @@ mod durability {
         "if (1) { const branch = 2; } print('x'); finish('done');",
         "try { const attempted = 1; } finally { const cleaned = 2; } print('x'); finish('done');",
         "const g = function self(n: number): number { if (n <= 0) { return 0; } return self(n - 1); }; print('x'); finish(`${g(3)}`);",
+        "const key = { id: 1 }; const map = new Map([[key, 'value']]); const alias = map; print('x'); finish(`${alias.get(key)}|${alias === map}`);",
+        "const set = new Set([NaN, -0, 2]); const alias = set; print('x'); finish(`${alias.has(NaN)}|${alias === set}`);",
+        "const date = new Date('2000-02-29T12:34:56.789Z'); const alias = date; print('x'); finish(`${alias.toISOString()}|${alias === date}`);",
+        "enum Status { Ready, Done = 4 } const alias = Status; print('x'); finish(`${alias.Ready}|${alias[4]}`);",
     ];
 
     fn suspended_continuation_json(source: &str) -> String {
@@ -539,6 +538,38 @@ mod durability {
         for source in DURABLE_CORPUS {
             suspend_and_snapshot(source);
         }
+    }
+
+    #[test]
+    fn map_set_and_date_aliases_survive_a_continuation_restart() {
+        futures::executor::block_on(async {
+            let source = "const key={id:1}; const map=new Map([[key,'value']]); const mapAlias=map; const set=new Set([key,NaN]); const setAlias=set; const date=new Date('2000-02-29T12:34:56.789Z'); const dateAlias=date; print('park'); finish(`${mapAlias===map}|${mapAlias.get(key)}|${setAlias===set}|${setAlias.has(key)}|${setAlias.has(NaN)}|${dateAlias===date}|${dateAlias.toISOString()}`);";
+            let program = lash_typescript::compile(source).expect("durable exotics compile");
+            let mut state = State::new();
+            let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
+            assert_eq!(
+                vm.run_process_until_effect().await.expect("run to park"),
+                VmRunOutcome::EffectCompleted
+            );
+            let encoded = serde_json::to_vec(&vm.suspend().expect("suspend exotics"))
+                .expect("encode continuation");
+            let continuation = serde_json::from_slice(&encoded).expect("decode continuation");
+            let mut resumed =
+                Vm::resume_from(continuation, &program, &Host).expect("resume exotics");
+            let VmRunOutcome::Complete(outcome) = resumed
+                .run_process_until_effect()
+                .await
+                .expect("finish after restart")
+            else {
+                panic!("the resumed program should have no second effect");
+            };
+            assert_eq!(
+                outcome,
+                ExecutionOutcome::Finished(Value::String(
+                    "true|value|true|true|true|true|2000-02-29T12:34:56.789Z".into()
+                ))
+            );
+        });
     }
 
     /// The globals an RLM session carries between turns, which is also what the

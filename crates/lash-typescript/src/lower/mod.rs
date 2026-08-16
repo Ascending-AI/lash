@@ -619,6 +619,45 @@ impl Lowerer {
                 }
                 output
             }
+            Stmt::Enum { name, members } => {
+                let internal = self.binding(name)?.internal.clone();
+                let variable = || LashExpr::Variable(internal.as_str().into());
+                let mut output = vec![LashExpr::If {
+                    condition: Box::new(variable()),
+                    then_block: Box::new(variable()),
+                    else_block: Box::new(LashExpr::Block(vec![
+                        LashExpr::Assign {
+                            target: AssignTarget::variable(internal.as_str().into()),
+                            expr: Box::new(LashExpr::Record(Vec::new())),
+                        },
+                        variable(),
+                    ])),
+                }];
+                for member in members {
+                    output.push(LashExpr::Assign {
+                        target: AssignTarget {
+                            root: internal.as_str().into(),
+                            steps: vec![AssignPathStep::Index(LashExpr::String(
+                                member.name.as_str().into(),
+                            ))],
+                        },
+                        expr: Box::new(self.lower_expr(&member.value)?),
+                    });
+                    if member.reverse {
+                        output.push(LashExpr::Assign {
+                            target: AssignTarget {
+                                root: internal.as_str().into(),
+                                steps: vec![AssignPathStep::Index(LashExpr::Index {
+                                    target: Box::new(variable()),
+                                    index: Box::new(LashExpr::String(member.name.as_str().into())),
+                                })],
+                            },
+                            expr: Box::new(LashExpr::String(member.name.as_str().into())),
+                        });
+                    }
+                }
+                output
+            }
             Stmt::Function { .. } => unreachable!("function declarations are hoisted"),
             Stmt::Return(value) => {
                 if self.functions.is_empty() {

@@ -1,8 +1,11 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const NODE_VERSION = 'v25.2.1';
+const TYPESCRIPT_VERSION = '7.0.2';
 if (process.version !== NODE_VERSION) {
   throw new Error(`oracle requires Node ${NODE_VERSION}, got ${process.version}`);
 }
@@ -11,7 +14,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 162],
+  ['findings', 'findings-expressions.txt', 181],
 ];
 
 const rejected = new Map([
@@ -55,9 +58,45 @@ function eraseTypesForNode(expression) {
 
 function nodeString(expression) {
   try {
+    if (/\b(?:const\s+)?enum\b/u.test(expression)) {
+      return typescriptNodeString(expression);
+    }
     return String(eval(`(${eraseTypesForNode(expression)})`));
   } catch (error) {
     return `ERR<${error.constructor.name}>`;
+  }
+}
+
+function typescriptNodeString(expression) {
+  const work = mkdtempSync(join(tmpdir(), 'lash-typescript-oracle-'));
+  try {
+    const input = join(work, 'oracle.ts');
+    writeFileSync(input, `const __result = String(${expression});\n__result;\n`);
+    const compile = spawnSync(
+      'npx',
+      [
+        '--yes',
+        '--package',
+        `typescript@${TYPESCRIPT_VERSION}`,
+        'tsc',
+        '--target',
+        'esnext',
+        '--outDir',
+        work,
+        input,
+        '--pretty',
+        'false',
+      ],
+      { encoding: 'utf8' },
+    );
+    if (compile.status !== 0) {
+      throw new Error(
+        `TypeScript ${TYPESCRIPT_VERSION} oracle compile failed:\n${compile.stdout}${compile.stderr}`,
+      );
+    }
+    return String(eval(readFileSync(join(work, 'oracle.js'), 'utf8')));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
 }
 

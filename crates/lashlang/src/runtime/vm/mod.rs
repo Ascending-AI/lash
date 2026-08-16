@@ -19,6 +19,7 @@ mod heap_plan;
 mod javascript;
 mod javascript_array;
 mod javascript_codec;
+mod javascript_date;
 mod javascript_json;
 mod javascript_stdlib;
 mod javascript_substrate;

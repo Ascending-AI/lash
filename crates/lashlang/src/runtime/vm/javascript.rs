@@ -150,7 +150,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             )
         {
             return Err(js_stdlib_error(
-                "TS_DATE_STRING_COERCION_PENDING: Date addition requires Date string semantics",
+                "TS_DATE_STRING_COERCION_PENDING: Date addition requires unavailable host-local string semantics; use .toISOString()",
             ));
         }
         if !strict {
@@ -465,6 +465,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(self.execute_url_can_parse(args)?);
             return Ok(());
         }
+        if let [Value::String(method), args @ ..] = values.as_slice()
+            && let Some(result) = self.execute_javascript_date_static(method, args)?
+        {
+            self.stack.push(result);
+            return Ok(());
+        }
         if let [Value::String(method), source] = values.as_slice()
             && matches!(method.as_str(), "Array.from" | "Lash.ArrayFromIterable")
         {
@@ -524,6 +530,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             return Ok(());
         }
+        if kind == "Date" {
+            if let Some(result) = self.execute_javascript_date_method(method, receiver)? {
+                self.stack.push(result);
+            }
+            return Ok(());
+        }
         let result = match (kind, method, args) {
             ("RegExp", "valueOf", []) | ("Map", "valueOf", []) | ("Set", "valueOf", []) => {
                 Some(Value::Ref(receiver))
@@ -536,16 +548,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             ("Map", "toString", []) => Some(Value::String("[object Map]".into())),
             ("Set", "toString", []) => Some(Value::String("[object Set]".into())),
-            ("Date", "valueOf" | "getTime", []) => Some(Value::Number(
-                self.heap
-                    .date_milliseconds(receiver)?
-                    .expect("Date receiver was checked"),
-            )),
-            ("Date", "toString", []) => {
-                return Err(js_stdlib_error(
-                    "TS_DATE_STRING_COERCION_PENDING: Date string coercion is not implemented",
-                ));
-            }
             (kind, "toString", []) if ErrorKind::from_name(kind).is_some() => {
                 let HeapObject::Error(error) = self.heap.get(receiver)? else {
                     unreachable!("Error receiver kind was checked")

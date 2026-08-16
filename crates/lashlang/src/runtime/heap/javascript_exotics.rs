@@ -538,7 +538,7 @@ impl Heap {
     pub(crate) fn javascript_to_string(&self, value: &Value) -> Result<String, RuntimeError> {
         if matches!(value, Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_))) {
             return Err(RuntimeError::ValidationFailed {
-                reason: "TS_DATE_STRING_COERCION_PENDING: Date string coercion is not implemented"
+                reason: "TS_DATE_STRING_COERCION_PENDING: Date string coercion is unavailable; use .toISOString()"
                     .to_string(),
             });
         }
@@ -612,6 +612,12 @@ impl Heap {
             .iter()
             .map(|value| match value {
                 Value::Null | Value::Undefined => Ok(String::new()),
+                Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_)) => {
+                    Err(RuntimeError::ValidationFailed {
+                        reason: "TS_DATE_STRING_COERCION_PENDING: Date string coercion inside a container is unavailable; use .toISOString()"
+                            .to_string(),
+                    })
+                }
                 other => self
                     .javascript_to_primitive_inner(other, active)
                     .map(|primitive| javascript_to_string(&primitive)),

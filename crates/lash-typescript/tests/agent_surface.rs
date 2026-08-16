@@ -544,6 +544,26 @@ fn time_and_randomness_are_host_effects_instead_of_vm_nondeterminism() {
 }
 
 #[test]
+fn argless_date_uses_the_same_journaled_clock_effect_as_date_now() {
+    let program = lash_typescript::compile(
+        "const d=new Date(); finish(`${d.getTime()}|${Date.now()}|${d.toISOString()}`);",
+    )
+    .expect("argless Date should compile through the runtime clock");
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &program,
+        &mut State::new(),
+        &RuntimeValueHost,
+    ))
+    .expect("argless Date should execute through the host");
+    assert_eq!(
+        outcome,
+        ExecutionOutcome::Finished(Value::String(
+            "1723456|1723456|1970-01-01T00:28:43.456Z".into()
+        ))
+    );
+}
+
+#[test]
 fn common_for_forms_and_standard_library_execute() {
     assert_eq!(
         finished(

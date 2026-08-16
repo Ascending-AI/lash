@@ -383,7 +383,13 @@ Write one script inside standalone `<typescript>` and `</typescript>` lines. Top
 ```typescript
 interface ProcessDefinition<Input, Output> { readonly name: string }
 interface ProcessHandle<Output> extends PromiseLike<Output> {}
-declare const console: { log(...values: unknown[]): void };
+declare const console: {
+  log(...values: unknown[]): void;
+  warn(...values: unknown[]): void;
+  error(...values: unknown[]): void;
+  info(...values: unknown[]): void;
+  debug(...values: unknown[]): void;
+};
 declare function print(value: unknown): void;
 declare function finish(value: unknown): never;
 declare function sleep(milliseconds: number): Promise<void>;
@@ -399,9 +405,9 @@ Declare durable work only as a top-level `const p = defineProcess({ name: "liter
 
 ### v1 guardrails
 
-Use ordinary modern TypeScript control flow and expression syntax: destructuring (including defaults/rest), optional chaining, spread, compound/update operators, `switch`, `do...while`, `for...in`, `for...of`, parameter defaults/rest, and `var` are supported. Error-family constructors, Map/Set/Date/RegExp, and their restricted built-in `instanceof` checks are supported. Bare conversions and number parsers are available; array iterator methods must be consumed directly by `for...of`, spread, `Array.from`, `new Map|Set`, or `Object.fromEntries`. `globalThis.name` and top-level bindings address the durable session state.
+Use ordinary modern TypeScript control flow and expression syntax: destructuring (including defaults/rest), optional chaining, spread, compound/update operators, `switch`, `do...while`, `for...in`, `for...of`, parameter defaults/rest, `var`, runtime enums, and const enums are supported. Error-family constructors, Map/Set/Date/RegExp, and their restricted built-in `instanceof` checks are supported. Date math is UTC-only; use `getUTC*` and `toISOString()`. Bare conversions and number parsers are available; array iterator methods must be consumed directly by `for...of`, spread, `Array.from`, `new Map|Set`, or `Object.fromEntries`. `globalThis.name` and top-level bindings address the durable session state.
 
-Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), regex literals (`TS_REGEXP_UNSUPPORTED`), `for await` (`TS_FOR_OF_UNSUPPORTED`), labels (`TS_LABEL_UNSUPPORTED`), arbitrary `new` (`TS_NEW_UNSUPPORTED`), and arbitrary `instanceof` (`TS_INSTANCEOF_UNSUPPORTED`) reject with a replacement in the diagnostic. Assigning to a captured `let` rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; mutate a captured object's field instead. `for...of` snapshots its input, so a body that aliases or mutates that input rejects as `TS_FOR_OF_UNSUPPORTED`. Promise chaining and `Promise.resolve`/`reject` reject: use direct `await` and `try/catch`. `Promise.race`/`any` reject pending FIG-1416; use `Promise.all`, `Promise.allSettled`, or durable `sleep`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. `localeCompare` and locale formatting reject; use `(a < b ? -1 : a > b ? 1 : 0)` and `toFixed(digits)`. `Date.now()` and `Math.random()` are journaled.
+Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), regex literals (`TS_REGEXP_UNSUPPORTED`), namespaces (`TS_NAMESPACE_UNSUPPORTED`), decorators (`TS_DECORATOR_UNSUPPORTED`), `for await` (`TS_FOR_OF_UNSUPPORTED`), labels (`TS_LABEL_UNSUPPORTED`), arbitrary `new` (`TS_NEW_UNSUPPORTED`), and arbitrary `instanceof` (`TS_INSTANCEOF_UNSUPPORTED`) reject with a replacement in the diagnostic. Assigning to a captured `let` rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; mutate a captured object's field instead. `for...of` snapshots its input, so a body that aliases or mutates that input rejects as `TS_FOR_OF_UNSUPPORTED`. Promise chaining and `Promise.resolve`/`reject` reject: use direct `await` and `try/catch`. `Promise.race`/`any` reject pending FIG-1416; use `Promise.all`, `Promise.allSettled`, or durable `sleep`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. `localeCompare` and locale formatting reject; use `(a < b ? -1 : a > b ? 1 : 0)` and `toFixed(digits)`. `Date.now()` and argless `new Date()` use the same journaled clock effect; non-ISO parsing, local-time Date methods, and implicit Date string coercion reject with UTC/ISO repairs. `Math.random()` is journaled.
 
 ### Deterministic standard library"#;
         let stdlib = lash_typescript::render_stdlib_contract();
