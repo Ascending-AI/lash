@@ -57,6 +57,7 @@ pub enum ToolIntent {
     SignalProcess(SignalProcessIntent),
     CancelProcess(CancelProcessIntent),
     EmitProcessEvent(EmitProcessEventIntent),
+    EmitTrigger(EmitTriggerIntent),
 }
 
 impl ToolIntent {
@@ -67,6 +68,7 @@ impl ToolIntent {
             Self::SignalProcess(_) => ToolIntentKind::SignalProcess,
             Self::CancelProcess(_) => ToolIntentKind::CancelProcess,
             Self::EmitProcessEvent(_) => ToolIntentKind::EmitProcessEvent,
+            Self::EmitTrigger(_) => ToolIntentKind::EmitTrigger,
         }
     }
 
@@ -77,6 +79,7 @@ impl ToolIntent {
             Self::SignalProcess(intent) => &intent.session_id,
             Self::CancelProcess(intent) => &intent.session_id,
             Self::EmitProcessEvent(intent) => &intent.session_id,
+            Self::EmitTrigger(intent) => &intent.session_id,
         }
     }
 }
@@ -184,6 +187,21 @@ pub struct EmitProcessEventIntent {
     pub event_type: String,
     /// Event payload validated by the process registry.
     pub payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Trigger declaration consumed by protocol and process-engine implementors.
+///
+/// A leaf attempt cannot emit a trigger synchronously on ordinal-addressed
+/// journal tiers: an emission that outlives a failed attempt would advertise a
+/// cause that never committed. Declaring this intent instead moves the emission
+/// behind the attempt's own commit, where the recorded occurrence's
+/// `idempotency_key` is the exactly-once backstop for redrive.
+pub struct EmitTriggerIntent {
+    /// Session whose authority owns the emission.
+    pub session_id: String,
+    /// Complete durable trigger-occurrence request handed to the router.
+    pub request: crate::TriggerOccurrenceRequest,
 }
 
 /// The single identity seam for the v1 protocol.

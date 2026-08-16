@@ -396,6 +396,27 @@ async fn execute_one(
                 None,
             ))
         }
+        crate::ToolIntent::EmitTrigger(intent) => {
+            // Unlike the process commands above, the router owns the whole
+            // emission: the occurrence's idempotency key is the store-side
+            // dedupe point and each reserved delivery starts under its own
+            // deterministic journal key, so a redrive of this declaration
+            // re-ingests the same occurrence and re-plays the same starts.
+            let router = context.trigger_router.as_ref().ok_or_else(|| {
+                crate::PluginError::Session(
+                    "trigger store is unavailable in this runtime".to_string(),
+                )
+            })?;
+            let report = Box::pin(router.emit(
+                intent.request.clone(),
+                context.effect_controller.controller(),
+            ))
+            .await?;
+            Ok((
+                serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+                None,
+            ))
+        }
     }
 }
 

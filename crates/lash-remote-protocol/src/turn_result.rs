@@ -286,6 +286,7 @@ pub enum RemoteToolIntentKind {
     SignalProcess,
     CancelProcess,
     EmitProcessEvent,
+    EmitTrigger,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

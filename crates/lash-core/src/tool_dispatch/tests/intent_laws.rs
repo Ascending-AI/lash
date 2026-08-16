@@ -714,3 +714,138 @@ async fn empty_v1_batch_without_a_recorded_call_id_is_a_noop() {
     .await;
     assert!(outcomes.is_empty());
 }
+
+async fn register_trigger_intent_subscription(
+    store: &crate::facade_support::InMemoryTriggerStore,
+) -> crate::TriggerSubscriptionRecord {
+    use crate::TriggerStore as _;
+    let draft = crate::TriggerSubscriptionDraft::for_process(
+        "test/intent-trigger-delivery",
+        crate::ProcessExecutionEnvRef::new("process-env:intent-trigger-delivery"),
+        "intent.trigger.emitted",
+        "intent-law-source",
+        crate::ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: json!({"process": "intent-trigger-delivery"}),
+        },
+        crate::ProcessIdentity::new("test-engine").with_label(Some("intent-trigger-delivery")),
+    )
+    .with_payload_schema(crate::LashSchema::any());
+    let outcome = store
+        .execute_command(
+            "intent-trigger-subscription",
+            crate::TriggerCommand::Register {
+                owner_scope: crate::TriggerOwnerScope::host("intent-law").expect("owner scope"),
+                actor: crate::ProcessOriginator::host_scoped("intent-law"),
+                draft,
+            },
+        )
+        .await
+        .expect("execute the intent-law trigger registration")
+        .expect("register the intent-law trigger subscription");
+    let crate::TriggerCommandOutcome::Mutation { receipt } = outcome else {
+        panic!("registration must return a mutation receipt")
+    };
+    receipt.record_snapshot
+}
+
+fn recorded_trigger_intents() -> crate::ToolIntents {
+    crate::ToolIntents::v1(vec![crate::ToolIntent::EmitTrigger(
+        crate::EmitTriggerIntent {
+            session_id: "session".to_string(),
+            request: crate::TriggerOccurrenceRequest::new(
+                "intent.trigger.emitted",
+                "intent-law-source",
+                json!({"declared": true}),
+                "intent-law-occurrence",
+            ),
+        },
+    )])
+}
+
+/// The atomic-emission law: a recorded `EmitTrigger` declaration reaches the
+/// trigger router only after the attempt result commits, and a crash between
+/// that commit and the drain still ingests exactly one occurrence and reserves
+/// exactly one delivery.
+#[tokio::test]
+async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
+    use crate::TriggerStore as _;
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
+    let subscription = register_trigger_intent_subscription(&store).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(Some(
+        IntentPausePoint::AfterToolAttemptCommit,
+    )));
+    let mut context = fixed_intent_dispatch_context(
+        Arc::clone(&controller),
+        Arc::clone(&registry),
+        recorded_trigger_intents(),
+        Arc::clone(&calls),
+    );
+    context.trigger_router = Some(crate::TriggerRouter::new(
+        Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
+        Some(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>),
+        None,
+    ));
+
+    let crashed_context = context.clone();
+    let crashed =
+        crate::task::spawn(async move { run_fixed_intent_attempt(&crashed_context).await });
+    controller.wait_until_paused().await;
+    crashed.abort();
+    assert!(
+        crashed
+            .await
+            .expect_err("the injected crash aborts the first drain")
+            .is_cancelled(),
+        "the first coordinator task must stop right after the attempt result commits"
+    );
+    assert_eq!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("read occurrences after the crash")
+            .len(),
+        0,
+        "no occurrence may exist before the recorded declaration drains"
+    );
+
+    let redriven = run_fixed_intent_attempt(&context).await;
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the attempt result replays instead of re-running the provider"
+    );
+    let [crate::ToolIntentExecutionOutcome::Executed {
+        kind: crate::ToolIntentKind::EmitTrigger,
+        result,
+        ..
+    }] = redriven.intent_outcomes.as_slice()
+    else {
+        panic!(
+            "the redrive must execute the recorded trigger declaration: {:?}",
+            redriven.intent_outcomes
+        )
+    };
+    let occurrence_id = result["occurrence_id"]
+        .as_str()
+        .expect("the executed outcome reports its occurrence")
+        .to_string();
+
+    let occurrences = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("read occurrences after the redrive");
+    assert_eq!(occurrences.len(), 1, "redrive must not duplicate the emission");
+    assert_eq!(occurrences[0].occurrence_id, occurrence_id);
+    let deliveries = store
+        .list_deliveries_by_occurrence_id(&occurrence_id)
+        .await
+        .expect("read the reserved deliveries");
+    assert_eq!(deliveries.len(), 1, "exactly one delivery is reserved");
+    assert_eq!(
+        deliveries[0].subscription.subscription_id,
+        subscription.subscription_id
+    );
+}

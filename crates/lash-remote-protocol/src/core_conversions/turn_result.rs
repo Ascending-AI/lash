@@ -210,6 +210,7 @@ impl From<lash_core::ToolIntentKind> for RemoteToolIntentKind {
             lash_core::ToolIntentKind::SignalProcess => Self::SignalProcess,
             lash_core::ToolIntentKind::CancelProcess => Self::CancelProcess,
             lash_core::ToolIntentKind::EmitProcessEvent => Self::EmitProcessEvent,
+            lash_core::ToolIntentKind::EmitTrigger => Self::EmitTrigger,
         }
     }
 }
