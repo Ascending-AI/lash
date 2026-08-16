@@ -54247,8 +54247,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:743#.executable_for(&manifest.name)"
-assertion = "examples/agent-workbench/src/mail.rs:745#assert_eq!(surface.call_path(), \"inbox.work.send\");"
+usage = "examples/agent-workbench/src/mail.rs:757#.executable_for(&manifest.name)"
+assertion = "examples/agent-workbench/src/mail.rs:759#assert_eq!(surface.call_path(), \"inbox.work.send\");"
 
 [[api]]
 symbol = "lash::tools::LashlangToolBinding::module_path"
@@ -57052,8 +57052,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Never"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:709#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
-assertion = "examples/agent-workbench/src/mail.rs:709#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
+usage = "examples/agent-workbench/src/mail.rs:723#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
+assertion = "examples/agent-workbench/src/mail.rs:723#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57063,7 +57063,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Safe"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:716#ToolRetryPolicy::Safe {"
+usage = "examples/agent-workbench/src/mail.rs:730#ToolRetryPolicy::Safe {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57074,7 +57074,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::base_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:394#base_delay_ms: 25,"
-assertion = "examples/agent-workbench/src/mail.rs:703#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::Safe::max_attempts"
@@ -57084,7 +57084,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::max_attempts"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:393#max_attempts: 3,"
-assertion = "examples/agent-workbench/src/mail.rs:703#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::Safe::max_delay_ms"
@@ -57094,7 +57094,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::max_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:395#max_delay_ms: 250,"
-assertion = "examples/agent-workbench/src/mail.rs:703#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::safe"
@@ -57104,7 +57104,7 @@ aliases = ["lash_core::ToolRetryPolicy::safe"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:391#\"list\" => ToolRetryPolicy::safe(3, 25, 250),"
-assertion = "examples/agent-workbench/src/mail.rs:703#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolSourceHandle"
@@ -70592,7 +70592,7 @@ aliases = ["lash_core::ToolDefinition::contract"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:473#definition_for(&slug, &summary.display_name, operation).contract(),"
-assertion = "examples/agent-workbench/src/mail.rs:734#assert!(provider.resolve_contract(\"inbox__work__delete\").is_some());"
+assertion = "examples/agent-workbench/src/mail.rs:748#assert!(provider.resolve_contract(\"inbox__work__delete\").is_some());"
 
 [[api]]
 symbol = "lash::tools::ToolDefinition::manifest"
@@ -72638,8 +72638,8 @@ aliases = ["lash_core::EmitTriggerIntent"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:647#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
-assertion = "examples/agent-workbench/src/mail.rs:659#assert_eq!(replayed_receipt, receipt);"
+usage = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+assertion = "examples/agent-workbench/src/mail.rs:660#assert_eq!(declared.session_id, \"session-1\");"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -72650,7 +72650,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:268#request: TriggerOccurrenceRequest::new("
-assertion = "examples/agent-workbench/src/mail.rs:659#assert_eq!(replayed_receipt, receipt);"
+assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -72661,7 +72661,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:267#session_id: session_id.to_string(),"
-assertion = "examples/agent-workbench/src/mail.rs:659#assert_eq!(replayed_receipt, receipt);"
+assertion = "examples/agent-workbench/src/mail.rs:660#assert_eq!(declared.session_id, \"session-1\");"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -72980,8 +72980,8 @@ aliases = ["lash_core::ToolIntent::EmitTrigger"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:642#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
-assertion = "examples/agent-workbench/src/mail.rs:659#assert_eq!(replayed_receipt, receipt);"
+usage = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -72992,7 +72992,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:266#let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {"
-assertion = "examples/agent-workbench/src/mail.rs:659#assert_eq!(replayed_receipt, receipt);"
+assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -73409,8 +73409,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:642#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
-assertion = "examples/agent-workbench/src/mail.rs:659#assert_eq!(replayed_receipt, receipt);"
+usage = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
