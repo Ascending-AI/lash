@@ -25,6 +25,8 @@ fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
         "ends_with" => IntrinsicOp::EndsWith,
         "split" => IntrinsicOp::Split,
         "join" => IntrinsicOp::Join,
+        "__typescript_split" => IntrinsicOp::JavaScriptSplit,
+        "__typescript_join" => IntrinsicOp::JavaScriptJoin,
         "trim" => IntrinsicOp::Trim,
         "slice" => IntrinsicOp::Slice,
         "to_string" => IntrinsicOp::ToString,
@@ -125,6 +127,7 @@ fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::If { .. } => true,
         Expr::Block(_)
         | Expr::Null
+        | Expr::Undefined
         | Expr::Bool(_)
         | Expr::Number(_)
         | Expr::String(_)
@@ -148,10 +151,14 @@ fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::Map { .. }
         | Expr::Try(_)
         | Expr::Throw(_)
+        | Expr::Return(_)
         | Expr::Field { .. }
         | Expr::Index { .. }
         | Expr::Unary { .. }
         | Expr::Binary { .. }
+        | Expr::JavaScriptUnary { .. }
+        | Expr::JavaScriptBinary { .. }
+        | Expr::JavaScriptLogical { .. }
         | Expr::TypeLiteral(_) => false,
     }
 }
@@ -193,6 +200,7 @@ pub(crate) fn is_pure_expr(expr: &Expr) -> bool {
     match expr {
         Expr::LabelAnnotated { expr, .. } => is_pure_expr(expr),
         Expr::Null
+        | Expr::Undefined
         | Expr::Bool(_)
         | Expr::Number(_)
         | Expr::String(_)
@@ -206,16 +214,21 @@ pub(crate) fn is_pure_expr(expr: &Expr) -> bool {
         Expr::HostDescriptorConstructor { input, .. } => is_pure_expr(input),
         Expr::BuiltinCall { args, .. } => args.iter().all(is_pure_expr),
         Expr::Function(function) => function.captures.is_empty(),
-        Expr::Call { .. } | Expr::Map { .. } | Expr::Try(_) | Expr::Throw(_) => false,
+        Expr::Call { .. } | Expr::Map { .. } | Expr::Try(_) | Expr::Throw(_) | Expr::Return(_) => {
+            false
+        }
         Expr::Field { target, .. } => is_pure_expr(target),
         Expr::Index { target, index } => is_pure_expr(target) && is_pure_expr(index),
         Expr::Unary { expr, .. } => is_pure_expr(expr),
+        Expr::JavaScriptUnary { expr, .. } => is_pure_expr(expr),
         Expr::If {
             condition,
             then_block,
             else_block,
         } => is_pure_expr(condition) && is_pure_expr(then_block) && is_pure_expr(else_block),
         Expr::Binary { left, right, .. } => is_pure_expr(left) && is_pure_expr(right),
+        Expr::JavaScriptBinary { left, right, .. }
+        | Expr::JavaScriptLogical { left, right, .. } => is_pure_expr(left) && is_pure_expr(right),
         Expr::TypeLiteral(ty) => fold_type(ty).is_some(),
         Expr::Block(_)
         | Expr::Assign { .. }

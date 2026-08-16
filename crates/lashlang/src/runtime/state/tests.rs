@@ -35,6 +35,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             globals: Record::new(),
             runtime_globals,
             heap,
+            reference_semantics: false,
         };
         let bytes = snapshot
             .to_canonical_bytes()
@@ -65,6 +66,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
         globals: Record::new(),
         runtime_globals,
         heap,
+        reference_semantics: false,
     }
     .to_canonical_bytes()
     .expect("program-independent snapshot encoding accepts function metadata");
@@ -339,9 +341,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x1d, 0x82, 0xf8, 0xf0, 0x68, 0x35, 0xa7, 0xd8, 0x27, 0x7f, 0x55, 0x8c, 0x9c, 0x79,
-            0xe3, 0xb9, 0x8f, 0x73, 0xed, 0x66, 0x24, 0x8c, 0xf1, 0x68, 0x92, 0xe5, 0x1c, 0x6d,
-            0x11, 0xb3, 0x4a, 0x84,
+            0x46, 0xf4, 0xf9, 0x31, 0x8e, 0x6e, 0x73, 0x76, 0x19, 0xe1, 0xe1, 0xa6, 0x8f, 0x8f,
+            0xf2, 0x15, 0xa3, 0xb0, 0x25, 0x78, 0x44, 0xf4, 0x97, 0xc4, 0x28, 0x24, 0xba, 0xbd,
+            0x96, 0x6e, 0xe3, 0x38,
         ]
     );
 }
@@ -355,7 +357,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e03a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e04a7676c6f62616c7390");
 }
 
 #[test]
@@ -417,6 +419,7 @@ fn canonical_heap_with(
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: None,
         heap: Some(CanonicalHeap {
+            reference_semantics: false,
             next_id,
             allocation_counter,
             live_logical_bytes,

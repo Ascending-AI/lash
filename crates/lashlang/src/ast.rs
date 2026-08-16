@@ -68,6 +68,9 @@ pub enum InvalidAst {
     /// to be told.
     #[error("`{keyword}` is used outside a loop")]
     LoopControlOutsideLoop { keyword: &'static str },
+    /// A JavaScript-style `return` appears outside a function body.
+    #[error("`return` is used outside a function")]
+    ReturnOutsideFunction,
 }
 
 /// Rejects an AST the compiler cannot lower as written.
@@ -93,8 +96,8 @@ pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
 /// its loop contexts across one, so an enclosing loop outside the function does
 /// not reach in.
 fn check_loop_control(root: &Expr) -> Result<(), InvalidAst> {
-    let mut pending: Vec<(&Expr, bool)> = vec![(root, false)];
-    while let Some((expr, in_loop)) = pending.pop() {
+    let mut pending: Vec<(&Expr, bool, bool)> = vec![(root, false, false)];
+    while let Some((expr, in_loop, in_function)) = pending.pop() {
         match expr {
             Expr::Break if !in_loop => {
                 return Err(InvalidAst::LoopControlOutsideLoop { keyword: "break" });
@@ -104,24 +107,25 @@ fn check_loop_control(root: &Expr) -> Result<(), InvalidAst> {
                     keyword: "continue",
                 });
             }
+            Expr::Return(_) if !in_function => return Err(InvalidAst::ReturnOutsideFunction),
             Expr::For { iterable, body, .. } => {
-                pending.push((iterable, in_loop));
-                pending.push((body, true));
+                pending.push((iterable, in_loop, in_function));
+                pending.push((body, true, in_function));
                 continue;
             }
             Expr::While { condition, body } => {
-                pending.push((condition, in_loop));
-                pending.push((body, true));
+                pending.push((condition, in_loop, in_function));
+                pending.push((body, true, in_function));
                 continue;
             }
             Expr::Function(function) => {
-                pending.push((&function.body, false));
+                pending.push((&function.body, false, true));
                 continue;
             }
             _ => {}
         }
         for child in expr.children() {
-            pending.push((child, in_loop));
+            pending.push((child, in_loop, in_function));
         }
     }
     Ok(())
@@ -281,6 +285,8 @@ pub enum Expr {
         expr: Box<Expr>,
     },
     Null,
+    /// The JavaScript `undefined` value. This node is AST-only.
+    Undefined,
     Bool(bool),
     Number(f64),
     String(AstString),
@@ -366,6 +372,9 @@ pub enum Expr {
     Try(Box<TryExpr>),
     /// AST-only explicit throw. The thrown value is transferred unchanged.
     Throw(Box<Expr>),
+    /// AST-only JavaScript function return. The compiler runs every enclosing
+    /// `finally` before returning from the current function.
+    Return(Box<Expr>),
     Field {
         target: Box<Expr>,
         field: AstString,
@@ -381,6 +390,23 @@ pub enum Expr {
     Binary {
         left: Box<Expr>,
         op: BinaryOp,
+        right: Box<Expr>,
+    },
+    /// An ECMA-262 unary operation whose coercion differs from Lashlang.
+    JavaScriptUnary {
+        op: JavaScriptUnaryOp,
+        expr: Box<Expr>,
+    },
+    /// An eager ECMA-262 binary operation whose coercion differs from Lashlang.
+    JavaScriptBinary {
+        left: Box<Expr>,
+        op: JavaScriptBinaryOp,
+        right: Box<Expr>,
+    },
+    /// A short-circuiting ECMA-262 logical operation that returns an operand.
+    JavaScriptLogical {
+        left: Box<Expr>,
+        op: JavaScriptLogicalOp,
         right: Box<Expr>,
     },
     TypeLiteral(Box<TypeExpr>),
@@ -436,6 +462,7 @@ impl Expr {
         let mut buffer = SmallExprVec::new();
         match self {
             Expr::Null
+            | Expr::Undefined
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)
@@ -504,7 +531,9 @@ impl Expr {
             | Expr::Yield(expr)
             | Expr::Wake(expr)
             | Expr::Fail(expr)
-            | Expr::Unary { expr, .. } => buffer.push(expr),
+            | Expr::Unary { expr, .. }
+            | Expr::JavaScriptUnary { expr, .. }
+            | Expr::Return(expr) => buffer.push(expr),
             Expr::Finish(expr) => buffer.push(expr),
             Expr::BuiltinCall { args, .. } => buffer.extend(args.iter()),
             Expr::Function(function) => buffer.push(&function.body),
@@ -531,7 +560,9 @@ impl Expr {
                 buffer.push(target);
                 buffer.push(index);
             }
-            Expr::Binary { left, right, .. } => {
+            Expr::Binary { left, right, .. }
+            | Expr::JavaScriptBinary { left, right, .. }
+            | Expr::JavaScriptLogical { left, right, .. } => {
                 buffer.push(left);
                 buffer.push(right);
             }
@@ -732,6 +763,7 @@ where
                 .map(|finally| Box::new(folder.fold_expr(*finally))),
         })),
         Expr::Throw(value) => Expr::Throw(Box::new(folder.fold_expr(*value))),
+        Expr::Return(value) => Expr::Return(Box::new(folder.fold_expr(*value))),
         Expr::Field { target, field } => Expr::Field {
             target: Box::new(folder.fold_expr(*target)),
             field,
@@ -749,7 +781,22 @@ where
             op,
             right: Box::new(folder.fold_expr(*right)),
         },
+        Expr::JavaScriptUnary { op, expr } => Expr::JavaScriptUnary {
+            op,
+            expr: Box::new(folder.fold_expr(*expr)),
+        },
+        Expr::JavaScriptBinary { left, op, right } => Expr::JavaScriptBinary {
+            left: Box::new(folder.fold_expr(*left)),
+            op,
+            right: Box::new(folder.fold_expr(*right)),
+        },
+        Expr::JavaScriptLogical { left, op, right } => Expr::JavaScriptLogical {
+            left: Box::new(folder.fold_expr(*left)),
+            op,
+            right: Box::new(folder.fold_expr(*right)),
+        },
         leaf @ (Expr::Null
+        | Expr::Undefined
         | Expr::Bool(_)
         | Expr::Number(_)
         | Expr::String(_)
@@ -942,6 +989,38 @@ impl ResourceRefExpr {
 pub enum UnaryOp {
     Negate,
     Not,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JavaScriptUnaryOp {
+    Plus,
+    Negate,
+    Not,
+    TypeOf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JavaScriptBinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    StrictEqual,
+    StrictNotEqual,
+    LooseEqual,
+    LooseNotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JavaScriptLogicalOp {
+    And,
+    Or,
+    NullishCoalesce,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -528,6 +528,7 @@ impl<'module> Linker<'module> {
                 last
             }
             Expr::Null
+            | Expr::Undefined
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)
@@ -871,6 +872,10 @@ impl<'module> Linker<'module> {
                 self.infer_expr_type(value, scope)?;
                 TypeExpr::Any
             }
+            Expr::Return(value) => {
+                self.infer_expr_type(value, scope)?;
+                TypeExpr::Any
+            }
             Expr::Field { target, field } => {
                 self.field_type(&self.infer_expr_type(target, scope)?, field, scope.span)?
             }
@@ -886,6 +891,36 @@ impl<'module> Linker<'module> {
                 let right = self.infer_expr_type(right, scope)?;
                 self.validate_binary_operands(*op, &left, &right, scope.span)?;
                 binary_return_type(*op)
+            }
+            Expr::JavaScriptUnary { op, expr } => {
+                self.infer_expr_type(expr, scope)?;
+                match op {
+                    crate::ast::JavaScriptUnaryOp::Not => TypeExpr::Bool,
+                    crate::ast::JavaScriptUnaryOp::TypeOf => TypeExpr::Str,
+                    crate::ast::JavaScriptUnaryOp::Plus | crate::ast::JavaScriptUnaryOp::Negate => {
+                        TypeExpr::Float
+                    }
+                }
+            }
+            Expr::JavaScriptBinary { left, op, right } => {
+                self.infer_expr_type(left, scope)?;
+                self.infer_expr_type(right, scope)?;
+                match op {
+                    crate::ast::JavaScriptBinaryOp::StrictEqual
+                    | crate::ast::JavaScriptBinaryOp::StrictNotEqual
+                    | crate::ast::JavaScriptBinaryOp::LooseEqual
+                    | crate::ast::JavaScriptBinaryOp::LooseNotEqual
+                    | crate::ast::JavaScriptBinaryOp::Less
+                    | crate::ast::JavaScriptBinaryOp::LessEqual
+                    | crate::ast::JavaScriptBinaryOp::Greater
+                    | crate::ast::JavaScriptBinaryOp::GreaterEqual => TypeExpr::Bool,
+                    _ => TypeExpr::Any,
+                }
+            }
+            Expr::JavaScriptLogical { left, right, .. } => {
+                self.infer_expr_type(left, scope)?;
+                self.infer_expr_type(right, scope)?;
+                TypeExpr::Any
             }
         })
     }

@@ -145,6 +145,11 @@ pub(crate) async fn execute_intrinsic(
                     .into(),
             ))
         }
+        IntrinsicOp::JavaScriptSplit | IntrinsicOp::JavaScriptJoin => {
+            Err(RuntimeError::ContextDependentIntrinsicMisdispatch {
+                context: "TypeScript container intrinsic".into(),
+            })
+        }
         IntrinsicOp::Join => {
             expect_arg_count("join", values, 2)?;
             execute_join_builtin_async(&values[0], &values[1]).await
@@ -1186,6 +1191,7 @@ pub(crate) fn coerce_string(value: &Value) -> Result<Cow<'_, str>, RuntimeError>
     match value {
         Value::String(value) => Ok(Cow::Borrowed(value)),
         Value::Null => Ok(Cow::Borrowed("null")),
+        Value::Undefined => Ok(Cow::Borrowed("undefined")),
         Value::Bool(value) => Ok(Cow::Owned(value.to_string())),
         Value::Number(value) => Ok(Cow::Owned(value.to_string())),
         Value::Image(_)
@@ -1298,7 +1304,7 @@ pub(crate) fn add_values(left: Value, right: Value) -> Result<Value, RuntimeErro
 
 pub(crate) fn is_truthy(value: &Value) -> bool {
     match value {
-        Value::Null => false,
+        Value::Null | Value::Undefined => false,
         Value::Bool(value) => *value,
         Value::Number(value) => *value != 0.0 && !value.is_nan(),
         Value::String(value) => !value.is_empty(),
@@ -1372,6 +1378,7 @@ pub(crate) fn debug_assert_exported_value(context: &str) {
 pub(crate) fn value_type_name(value: &Value) -> &str {
     match value {
         Value::Null => "null",
+        Value::Undefined => "undefined",
         Value::Bool(_) => "bool",
         Value::Number(_) => "number",
         Value::String(_) => "string",
@@ -1392,6 +1399,7 @@ pub(crate) fn value_contains_projected(value: &Value) -> bool {
         Value::List(values) => values.iter().any(value_contains_projected),
         Value::Record(record) => record.values().any(value_contains_projected),
         Value::Null
+        | Value::Undefined
         | Value::Bool(_)
         | Value::Number(_)
         | Value::String(_)

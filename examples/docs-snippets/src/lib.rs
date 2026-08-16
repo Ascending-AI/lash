@@ -26,6 +26,7 @@ mod embedding_advanced;
 mod embedding_lashlang_functions;
 mod embedding_prompts;
 mod embedding_turns;
+mod embedding_typescript;
 mod example_agent_service;
 mod example_agent_workbench;
 mod execution_modes;

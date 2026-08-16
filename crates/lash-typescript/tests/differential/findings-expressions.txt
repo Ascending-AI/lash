@@ -1,0 +1,23 @@
+typeof neverDeclared
+null == false
+`${1e21}`
++'+0x10'
++'0xFFFFFFFFFFFFFFFFF'
+'abc'.split('')
+[1,null,undefined,[2,3]].join(',')
+'😀'.length
+NaN
+Infinity
+'\u{10000}' < '\uff61'
+((function f(this: number, a: number){ return a; })(7))
+({a:1}).missing
+[1][9]
+(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()
+(() => { const a = [1,2]; a[-1] = 9; return a[-1]; })()
+'\uD800'
++'\uFEFF5'
++'\u00855'
++'\uFEFF 5\u00A0'
++'\u2028\u20295'
+'\uD83D\uDE00'.split('')
+'\uD83D\uDE00'[0]

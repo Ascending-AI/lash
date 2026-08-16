@@ -1,0 +1,34 @@
+[package]
+name = "lash-typescript"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The ECMA-exact TypeScript dialect front-end for the Lash heap VM."
+keywords = ["lash", "typescript", "codeact", "agent"]
+categories = ["compilers", "parser-implementations"]
+
+[features]
+testing = []
+
+[lints]
+workspace = true
+
+[dependencies]
+lashlang = { workspace = true }
+serde_json = { workspace = true }
+swc_common = { workspace = true }
+swc_ecma_ast = { workspace = true }
+swc_ecma_parser = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+futures = "0.3"
+lash-typescript = { path = ".", features = ["testing"] }
+swc_common = { workspace = true }
+swc_ecma_ast = { workspace = true }

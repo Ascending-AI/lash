@@ -317,6 +317,7 @@ fn normalize_descriptor_type(type_name: &str) -> String {
 fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
     match value {
         FlowValue::Null => "null",
+        FlowValue::Undefined => "undefined",
         FlowValue::Bool(_) => "boolean",
         FlowValue::Number(_) => "number",
         FlowValue::String(_) => "string",

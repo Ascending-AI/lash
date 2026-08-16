@@ -26,6 +26,7 @@ lash-provider-openai = { workspace = true }
 lash-s3-store = { workspace = true }
 lash-sqlite-store = { workspace = true }
 lash-subagents = { workspace = true }
+lash-typescript = { workspace = true }
 lashlang = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }

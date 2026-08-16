@@ -775,9 +775,11 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             )
         }
         Instruction::PushNull => "push_null".to_string(),
+        Instruction::PushUndefined => "push_undefined".to_string(),
         Instruction::PushBool(value) => format!("push_bool {value}"),
         Instruction::PushNumber(value) => format!("push_number {value}"),
         Instruction::LoadName(slot) => format!("load_name {slot}:{}", slot_name(chunk, slot)),
+        Instruction::Duplicate => "duplicate".to_string(),
         Instruction::DeepCopy => "deep_copy".to_string(),
         Instruction::StoreName(slot) => format!("store_name {slot}:{}", slot_name(chunk, slot)),
         Instruction::StoreConst { slot, constant } => format!(
@@ -787,8 +789,12 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         ),
         Instruction::BuildTuple(count) => format!("build_tuple {count}"),
         Instruction::BuildList(count) => format!("build_list {count}"),
+        Instruction::BuildHeapList(count) => format!("build_heap_list {count}"),
         Instruction::ListAppend => "list_append".to_string(),
         Instruction::BuildRecord(keys) => format!("build_record {}", keys_snapshot(chunk, keys)),
+        Instruction::BuildHeapRecord(keys) => {
+            format!("build_heap_record {}", keys_snapshot(chunk, keys))
+        }
         Instruction::LoadField { slot, field } => format!(
             "load_field {slot}:{} .{}",
             slot_name(chunk, slot),
@@ -806,9 +812,17 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             slot_name(chunk, slot),
             assign_path_snapshot(chunk, path)
         ),
+        Instruction::HeapPathAssign { slot, path } => format!(
+            "heap_path_assign {slot}:{} {}",
+            slot_name(chunk, slot),
+            assign_path_snapshot(chunk, path)
+        ),
         Instruction::ResultUnwrap => "result_unwrap".to_string(),
         Instruction::Unary(op) => format!("unary {op:?}"),
         Instruction::Binary(op) => format!("binary {op:?}"),
+        Instruction::JavaScriptUnary(op) => format!("javascript_unary {op:?}"),
+        Instruction::JavaScriptBinary(op) => format!("javascript_binary {op:?}"),
+        Instruction::IsNullish => "is_nullish".to_string(),
         Instruction::SlotNumberBinary { slot, op, right } => format!(
             "slot_number_binary {slot}:{} {op:?} {right}",
             slot_name(chunk, slot)
@@ -948,6 +962,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::EnterFinally { .. } => "enter_finally".to_string(),
         Instruction::EndFinally => "end_finally".to_string(),
         Instruction::AbandonFinally => "abandon_finally".to_string(),
+        Instruction::AbandonFinallyKeepValue => "abandon_finally_keep_value".to_string(),
         Instruction::Throw => "throw".to_string(),
     }
 }
@@ -1022,6 +1037,8 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::EndsWith => format!("intrinsic ends_with argc={argc}"),
         IntrinsicOp::Split => format!("intrinsic split argc={argc}"),
         IntrinsicOp::Join => format!("intrinsic join argc={argc}"),
+        IntrinsicOp::JavaScriptSplit => format!("intrinsic typescript_split argc={argc}"),
+        IntrinsicOp::JavaScriptJoin => format!("intrinsic typescript_join argc={argc}"),
         IntrinsicOp::Trim => format!("intrinsic trim argc={argc}"),
         IntrinsicOp::Slice => format!("intrinsic slice argc={argc}"),
         IntrinsicOp::ToString => format!("intrinsic to_string argc={argc}"),

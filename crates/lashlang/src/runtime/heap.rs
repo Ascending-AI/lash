@@ -3,13 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
+mod reference_assignment;
 mod validation;
 
 pub(crate) use validation::PersistedRoots;
 
 use super::{
-    CompiledFunction, Record, RuntimeError, Value, add_values, coerce_string, record_with_capacity,
-    resolve_existing_list_assignment_index,
+    CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, Record, RuntimeError,
+    Value, add_values, coerce_string, record_with_capacity, resolve_existing_list_assignment_index,
 };
 
 pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 1;
@@ -40,6 +41,17 @@ pub(crate) enum HeapObject {
     List(Vec<Value>),
     Record(Box<Record>),
     Closure { function: u32, captures: Vec<Value> },
+}
+
+impl HeapObject {
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Tuple(_) => "tuple",
+            Self::List(_) => "list",
+            Self::Record(_) => "record",
+            Self::Closure { .. } => "function",
+        }
+    }
 }
 
 impl HeapObject {
@@ -94,7 +106,7 @@ impl HeapObject {
 
 fn value_logical_bytes(value: &Value) -> u64 {
     VALUE_SLOT_BYTES.saturating_add(match value {
-        Value::Null => 1,
+        Value::Null | Value::Undefined => 1,
         Value::Bool(_) => 1,
         Value::Number(_) => 8,
         Value::String(value) => value.len() as u64,
@@ -390,6 +402,14 @@ impl Heap {
     ) -> Result<Value, RuntimeError> {
         let function = u32::try_from(function).map_err(|_| RuntimeError::FunctionIndexOverflow)?;
         self.allocate_object(HeapObject::Closure { function, captures })
+    }
+
+    pub(crate) fn allocate_list(&mut self, values: Vec<Value>) -> Result<Value, RuntimeError> {
+        self.allocate_object(HeapObject::List(values))
+    }
+
+    pub(crate) fn allocate_record(&mut self, record: Record) -> Result<Value, RuntimeError> {
+        self.allocate_object(HeapObject::Record(Box::new(record)))
     }
 
     fn allocate_object(&mut self, object: HeapObject) -> Result<Value, RuntimeError> {

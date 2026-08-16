@@ -15,7 +15,7 @@ mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 3;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 4;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the
@@ -57,6 +57,7 @@ pub struct State {
     pub(super) globals: Record,
     pub(super) runtime_globals: Record,
     pub(super) heap: Heap,
+    pub(super) reference_semantics: bool,
 }
 
 impl PartialEq for State {
@@ -64,6 +65,7 @@ impl PartialEq for State {
         self.globals == other.globals
             && self.runtime_globals == other.runtime_globals
             && self.heap == other.heap
+            && self.reference_semantics == other.reference_semantics
     }
 }
 
@@ -180,6 +182,7 @@ impl State {
             globals: self.globals.clone(),
             runtime_globals: self.runtime_globals.clone(),
             heap,
+            reference_semantics: self.reference_semantics,
         }
     }
 
@@ -188,11 +191,31 @@ impl State {
             globals: snapshot.globals,
             runtime_globals: snapshot.runtime_globals,
             heap: snapshot.heap,
+            reference_semantics: snapshot.reference_semantics,
         }
     }
 
     pub(crate) fn validate_program(&self, program: &CompiledProgram) -> Result<(), RuntimeError> {
-        self.heap.validate_closures(&program.chunk.functions)
+        self.heap.validate_closures(&program.chunk.functions)?;
+        if program.dialect == super::CompilationDialect::Lashlang {
+            let mut heap = self.heap.clone();
+            let root_values = self.runtime_globals.values().cloned().collect::<Vec<_>>();
+            heap.collect(root_values.iter());
+            let mut roots = PersistedRoots::default();
+            roots.durable_all(
+                self.runtime_globals
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value)),
+            );
+            heap.validate_persisted_forest(&roots).map_err(|reason| {
+                RuntimeError::ValidationFailed {
+                    reason: format!(
+                        "Lashlang state cannot contain a shared TypeScript heap graph: {reason}"
+                    ),
+                }
+            })?;
+        }
+        Ok(())
     }
 
     pub(super) fn take_runtime(&mut self) -> (Record, Heap) {
@@ -244,6 +267,7 @@ pub struct Snapshot {
     globals: Record,
     runtime_globals: Record,
     heap: Heap,
+    reference_semantics: bool,
 }
 
 impl PartialEq for Snapshot {
@@ -251,6 +275,7 @@ impl PartialEq for Snapshot {
         self.globals == other.globals
             && self.runtime_globals == other.runtime_globals
             && self.heap == other.heap
+            && self.reference_semantics == other.reference_semantics
     }
 }
 
@@ -260,6 +285,7 @@ impl Snapshot {
             globals,
             runtime_globals: Record::new(),
             heap: Heap::default(),
+            reference_semantics: false,
         }
     }
 
@@ -338,6 +364,7 @@ struct CanonicalSnapshot {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CanonicalHeap {
+    reference_semantics: bool,
     next_id: u64,
     allocation_counter: u64,
     live_logical_bytes: u64,
@@ -380,6 +407,7 @@ struct CanonicalBinding {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CanonicalValue {
     Null {},
+    Undefined {},
     Bool { value: bool },
     Number { value: f64 },
     String { value: String },
@@ -445,17 +473,29 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
         let runtime_globals = snapshot.runtime_globals.clone();
         let root_values = runtime_globals.values().cloned().collect::<Vec<_>>();
         heap.collect(root_values.iter());
-        // The writer checks the same forest invariant the reader enforces, in
+        // The writer checks the same ownership invariant the reader enforces, in
         // release builds too. A violation then fails here, at the encode that
         // introduced it, rather than in another process at a later cold
         // restore — and it can never be written to durable storage at all.
         let mut forest_roots = PersistedRoots::default();
         forest_roots.durable_all(runtime_globals.iter());
-        heap.validate_persisted_forest(&forest_roots)
-            .map_err(|reason| ContinuationError::UnserializableValue {
-                location: format!("snapshot heap: {reason}"),
-                variant: "shared heap object",
-            })?;
+        let reference_semantics = match heap.validate_persisted_forest(&forest_roots) {
+            Ok(()) => false,
+            Err(_) if snapshot.reference_semantics => {
+                heap.validate_persisted_graph(&forest_roots)
+                    .map_err(|reason| ContinuationError::UnserializableValue {
+                        location: format!("snapshot heap: {reason}"),
+                        variant: "shared heap object",
+                    })?;
+                true
+            }
+            Err(reason) => {
+                return Err(ContinuationError::UnserializableValue {
+                    location: format!("snapshot heap: {reason}"),
+                    variant: "shared heap object",
+                });
+            }
+        };
         drop(forest_roots);
         let mut roots = runtime_globals.iter().collect::<Vec<_>>();
         roots.sort_unstable_by_key(|(name, _)| *name);
@@ -463,6 +503,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
             version: LASHLANG_SNAPSHOT_VERSION,
             globals: None,
             heap: Some(CanonicalHeap {
+                reference_semantics,
                 next_id: heap.next_id,
                 allocation_counter: heap.allocations(),
                 live_logical_bytes: heap.live_logical_bytes(),
@@ -503,9 +544,11 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                 globals: bindings_into_record(globals, "globals")?,
                 runtime_globals: Record::new(),
                 heap: Heap::default(),
+                reference_semantics: false,
             }),
             (None, Some(heap_wire)) => {
                 let CanonicalHeap {
+                    reference_semantics,
                     next_id,
                     allocation_counter,
                     live_logical_bytes,
@@ -531,8 +574,12 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                 .map_err(SnapshotDecodeError::InvalidEncoding)?;
                 let mut forest_roots = PersistedRoots::default();
                 forest_roots.durable_all(runtime_globals.iter());
-                heap.validate_persisted_forest(&forest_roots)
-                    .map_err(SnapshotDecodeError::InvalidEncoding)?;
+                let validation = if reference_semantics {
+                    heap.validate_persisted_graph(&forest_roots)
+                } else {
+                    heap.validate_persisted_forest(&forest_roots)
+                };
+                validation.map_err(SnapshotDecodeError::InvalidEncoding)?;
                 // The heap form's depth lives in its chain of objects, not in
                 // its MessagePack nesting, so the structural guard cannot see
                 // it. Checking here — before anything materializes a root —
@@ -560,6 +607,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     globals,
                     runtime_globals,
                     heap,
+                    reference_semantics,
                 })
             }
             _ => Err(SnapshotDecodeError::InvalidEncoding(
@@ -657,6 +705,7 @@ fn validate_canonical_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeErro
 
 const SNAPSHOT_FIELDS: &[&str] = &["version", "globals", "heap"];
 const HEAP_FIELDS: &[&str] = &[
+    "reference_semantics",
     "next_id",
     "allocation_counter",
     "live_logical_bytes",

@@ -146,6 +146,7 @@ DEPENDENCY_PACKAGES = {
     "lash_core": ("lash-core", "lash_core", True),
     "lash_http_transport": ("lash-http-transport", "lash_http_transport", True),
     "lash_lashlang_runtime": ("lash-lashlang-runtime", "lash_lashlang_runtime", True),
+    "lash_typescript": ("lash-typescript", "lash_typescript", True),
     "lash_plugin_tool_output_budget": (
         "lash-plugin-tool-output-budget",
         "lash_plugin_tool_output_budget",

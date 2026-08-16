@@ -72,7 +72,7 @@ impl Compiler {
             if !self.compile_expr_with_forced_effect_site(expr, site) {
                 return false;
             }
-            self.code.push(Instruction::DeepCopy);
+            self.emit_isolation();
             self.code.push(Instruction::StoreName(slot));
             self.set_const_slot(slot, None);
             self.push_null_if(leave_value);
@@ -88,7 +88,7 @@ impl Compiler {
         if !self.compile_expr_with_forced_effect_site(expr, site) {
             return false;
         }
-        self.code.push(Instruction::DeepCopy);
+        self.emit_isolation();
         let path = self.push_assign_path(&target.steps);
         self.code.push(Instruction::PathAssign { slot, path });
         self.set_const_slot(slot, None);

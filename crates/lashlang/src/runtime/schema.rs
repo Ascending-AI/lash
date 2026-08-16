@@ -79,6 +79,7 @@ impl PrimitiveMask {
             Value::Tuple(_) | Value::List(_) => Self::ARRAY.0,
             Value::Record(_) | Value::Image(_) | Value::Resource(_) => Self::OBJECT.0,
             Value::Null => Self::NULL.0,
+            Value::Undefined => 0,
             Value::Projected(value) => match value.value_type_name() {
                 "tuple" | "list" => Self::ARRAY.0,
                 _ => Self::OBJECT.0,
@@ -436,6 +437,7 @@ fn format_schema_path(path: &[PathSegment<'_>]) -> String {
 fn schema_value_type_name(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
+        Value::Undefined => "undefined",
         Value::Bool(_) => "boolean",
         Value::Number(_) => "number",
         Value::String(_) => "string",

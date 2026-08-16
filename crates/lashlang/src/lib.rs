@@ -28,10 +28,11 @@ pub use artifact::{
 };
 pub use ast::{
     AssignPathStep, AssignTarget, BinaryOp, CatchClause, Declaration, Expr, ExprFolder,
-    ExprVisitor, FunctionExpr, InvalidAst, LabelMetadata, ListComprehensionClause,
-    MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl, ProcessParam, ProcessSignalDecl,
-    ProcessStartExpr, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
-    check_ast_nesting_depth, fold_expr_children, format_type_expr, validate_ast, walk_expr,
+    ExprVisitor, FunctionExpr, InvalidAst, JavaScriptBinaryOp, JavaScriptLogicalOp,
+    JavaScriptUnaryOp, LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH,
+    NestingTooDeep, ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessStartExpr, Program,
+    ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp, check_ast_nesting_depth,
+    fold_expr_children, format_type_expr, validate_ast, walk_expr,
 };
 
 /// Names of every builtin accepted by the linker and runtime, in registry order.
@@ -62,26 +63,27 @@ pub use linker::{
 pub use parser::{ParseError, parse, parse_expression, parse_type_expression};
 pub use runtime::DEFAULT_MAX_VM_FRAME_DEPTH;
 pub use runtime::{
-    AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector, CompileStats,
-    CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
-    CompiledProgramCache, CompiledProgramCacheStats, ContinuationError, ErrorTaxonomy,
-    ExecutableProgram, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
-    ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError,
-    GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
-    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
-    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
-    LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError, ListValue,
-    ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
-    ProjectedBindingError, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
-    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
-    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
+    AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector,
+    CompilationDialect, CompileStats, CompiledLinkedProgram, CompiledProcessCache,
+    CompiledProcessCacheKey, CompiledProgram, CompiledProgramCache, CompiledProgramCacheStats,
+    ContinuationError, ErrorTaxonomy, ExecutableProgram, ExecutionBound, ExecutionBounds,
+    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
+    ExecutionScratch, FormatError, GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
+    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
+    LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError,
+    ListValue, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport,
+    ProfileStat, ProjectedBindingError, ProjectedBindings, ProjectedFuture,
+    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
+    ResourceHandle, ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
     ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
     SnapshotDecodeError, State, Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmPendingErrorOriginContinuation,
-    VmProfileContinuation, VmRunOutcome, compile, compile_ast, compile_linked,
-    compile_linked_process, compile_module_artifact_process, compile_process, execute, from_json,
-    prewarm, unwrap_type_value,
+    VmProfileContinuation, VmRunOutcome, compile, compile_ast, compile_ast_with_dialect,
+    compile_linked, compile_linked_process, compile_linked_with_dialect,
+    compile_module_artifact_process, compile_process, execute, from_json, prewarm,
+    unwrap_type_value,
 };
 #[doc(hidden)]
 pub use runtime::{
@@ -94,7 +96,7 @@ pub use runtime::{
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 6;
+pub const BYTECODE_FORMAT_VERSION: u32 = 7;
 pub use source::{
     CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
     canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,
@@ -457,6 +459,64 @@ mod tests {
         assert_eq!(stats.misses, 1);
         assert_eq!(stats.evictions, 0);
         assert_eq!(stats.entries, 1);
+    }
+
+    #[test]
+    fn linked_program_cache_hit_does_not_reparse_the_source() {
+        let source = r#"finish (await tools.read_file({ path: "." }))?"#;
+        let environment = LashlangHostEnvironment::new(
+            LashlangHostCatalog::tool_default(["read_file"]),
+            LashlangAbilities::default(),
+        );
+        let mut cache = LinkedProgramCache::with_capacity(2);
+
+        let first = cache
+            .get_or_compile(source, &environment)
+            .expect("compile first linked program");
+        let after_miss = crate::parser::parse_calls();
+
+        let second = cache
+            .get_or_compile(source, &environment)
+            .expect("reuse the cached linked program");
+
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            crate::parser::parse_calls(),
+            after_miss,
+            "a linked-program cache hit must not re-parse its source"
+        );
+        assert_eq!(cache.stats().hits, 1);
+        assert_eq!(cache.stats().misses, 1);
+    }
+
+    #[test]
+    fn linked_program_cache_hit_serves_an_already_parsed_program_without_the_ast() {
+        let source = "finish 1";
+        let environment =
+            LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::default());
+        let mut cache = LinkedProgramCache::with_capacity(2);
+
+        let first = cache
+            .get_or_compile_ast(
+                source,
+                crate::parse(source).expect("source parses"),
+                &environment,
+                CompilationDialect::Typescript,
+            )
+            .expect("link first program");
+
+        let cached = cache
+            .cached_linked_program(source, &environment, CompilationDialect::Typescript)
+            .expect("the linked program is cached");
+
+        assert!(std::sync::Arc::ptr_eq(&first, &cached));
+        assert_eq!(cache.stats().hits, 1);
+        assert!(
+            cache
+                .cached_linked_program(source, &environment, CompilationDialect::Lashlang)
+                .is_none(),
+            "a lookup must not cross dialects"
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ use smallvec::SmallVec;
 
 use crate::artifact::CompiledModuleContext;
 use crate::ast::{
-    AssignPathStep, AssignTarget, BinaryOp, Expr, FunctionExpr, LabelMetadata,
+    AssignPathStep, AssignTarget, BinaryOp, Expr, FunctionExpr, JavaScriptLogicalOp, LabelMetadata,
     ListComprehensionClause, ProcessStartExpr, Program, TypeExpr, UnaryOp,
 };
 use crate::lexer::Span;
@@ -32,12 +32,14 @@ use super::{
     CompiledResourceOperationBatchLeaf, HandlerScopeExtent, Instruction, IntrinsicOp,
     LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
     LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, Name, Value, as_number,
-    compile_format_template, eval_binary_values, execute_integer_div_builtin, execute_len_direct,
-    execute_range_builtin, is_comparison_binary_op, is_numeric_binary_op, is_truthy,
-    read_field_direct, read_index_direct, transient_name, unwrap_type_value,
+    compile_format_template, eval_binary_values, eval_javascript_binary, eval_javascript_unary,
+    execute_integer_div_builtin, execute_len_direct, execute_range_builtin,
+    is_comparison_binary_op, is_numeric_binary_op, is_truthy, read_field_direct, read_index_direct,
+    read_javascript_field_direct, read_javascript_index_direct, transient_name, unwrap_type_value,
 };
 
 pub(crate) struct Compiler {
+    dialect: CompilationDialect,
     module_context: Option<CompiledModuleContext>,
     lashlang_execution: Option<LashlangExecutionCompileContext>,
     expression_source_spans: FxHashMap<usize, Span>,
@@ -60,6 +62,18 @@ pub(crate) struct Compiler {
     pending_finally_sites: Vec<Vec<usize>>,
     functions: Vec<CompiledFunction>,
     pending_functions: Vec<Option<FunctionExpr>>,
+}
+
+/// Source-language choices that affect bytecode while sharing the same AST and
+/// heap VM.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CompilationDialect {
+    /// Lashlang's value-isolating assignment and aggregate semantics.
+    #[default]
+    Lashlang,
+    /// ECMA-262 reference semantics at assignment, argument, capture, and
+    /// aggregate insertion boundaries.
+    Typescript,
 }
 
 struct LashlangExecutionCompileContext {

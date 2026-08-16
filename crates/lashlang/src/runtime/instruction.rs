@@ -10,7 +10,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::artifact::CompiledModuleContext;
-use crate::ast::{BinaryOp, UnaryOp};
+use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
 use crate::lexer::Span;
 use crate::tracking::LashlangExecutionSite;
 
@@ -185,9 +185,11 @@ pub(crate) fn result_wrapper_names() -> &'static ResultWrapperNames {
 pub(crate) enum Instruction {
     PushConst(usize),
     PushNull,
+    PushUndefined,
     PushBool(bool),
     PushNumber(f64),
     LoadName(usize),
+    Duplicate,
     DeepCopy,
     StoreName(usize),
     StoreConst {
@@ -196,8 +198,10 @@ pub(crate) enum Instruction {
     },
     BuildTuple(usize),
     BuildList(usize),
+    BuildHeapList(usize),
     ListAppend,
     BuildRecord(usize),
+    BuildHeapRecord(usize),
     LoadField {
         slot: usize,
         field: usize,
@@ -212,9 +216,16 @@ pub(crate) enum Instruction {
         slot: usize,
         path: usize,
     },
+    HeapPathAssign {
+        slot: usize,
+        path: usize,
+    },
     ResultUnwrap,
     Unary(UnaryOp),
     Binary(BinaryOp),
+    JavaScriptUnary(JavaScriptUnaryOp),
+    JavaScriptBinary(JavaScriptBinaryOp),
+    IsNullish,
     // Retained after measurement: large_data/loop_control/type_system_stress
     // regressed when these numeric slot ops were routed through generic stack
     // dispatch.
@@ -306,6 +317,9 @@ pub(crate) enum Instruction {
     /// abrupt completion (`break` / `continue`), per ECMA-262 completion
     /// replacement.
     AbandonFinally,
+    /// Replaces the pending completion while preserving the return value that
+    /// was evaluated before the `finally` body was left.
+    AbandonFinallyKeepValue,
     Throw,
     AddAssign(usize),
     // Retained after measurement: indexed_assignment/large_data regress when
@@ -363,6 +377,8 @@ pub(crate) enum IntrinsicOp {
     EndsWith,
     Split,
     Join,
+    JavaScriptSplit,
+    JavaScriptJoin,
     Trim,
     Slice,
     ToString,
@@ -415,30 +431,37 @@ impl Instruction {
         match self {
             Instruction::PushConst(_)
             | Instruction::PushNull
+            | Instruction::PushUndefined
             | Instruction::PushBool(_)
             | Instruction::PushNumber(_) => InstructionProfileTag::PushConst,
-            Instruction::LoadName(_) => InstructionProfileTag::LoadName,
+            Instruction::LoadName(_) | Instruction::Duplicate => InstructionProfileTag::LoadName,
             Instruction::DeepCopy | Instruction::DeepCopyLoopBinding(_) => {
                 InstructionProfileTag::StoreName
             }
             Instruction::StoreName(_)
             | Instruction::StoreConst { .. }
-            | Instruction::PathAssign { .. } => InstructionProfileTag::StoreName,
+            | Instruction::PathAssign { .. }
+            | Instruction::HeapPathAssign { .. } => InstructionProfileTag::StoreName,
             Instruction::BuildTuple(_) => InstructionProfileTag::BuildTuple,
-            Instruction::BuildList(_) => InstructionProfileTag::BuildList,
+            Instruction::BuildList(_) | Instruction::BuildHeapList(_) => {
+                InstructionProfileTag::BuildList
+            }
             Instruction::ListAppend => InstructionProfileTag::AppendAssign,
-            Instruction::BuildRecord(_) => InstructionProfileTag::BuildRecord,
+            Instruction::BuildRecord(_) | Instruction::BuildHeapRecord(_) => {
+                InstructionProfileTag::BuildRecord
+            }
             Instruction::LoadField { .. } | Instruction::Field(_) => InstructionProfileTag::Field,
             Instruction::Index => InstructionProfileTag::Index,
             Instruction::ResultUnwrap | Instruction::LoadFieldUnwrap { .. } => {
                 InstructionProfileTag::ResultUnwrap
             }
-            Instruction::Unary(_) => InstructionProfileTag::Unary,
+            Instruction::Unary(_) | Instruction::JavaScriptUnary(_) => InstructionProfileTag::Unary,
             Instruction::Binary(_)
+            | Instruction::JavaScriptBinary(_)
             | Instruction::SlotNumberBinary { .. }
             | Instruction::SlotNumberCompare { .. }
             | Instruction::SlotNumberBinaryCompare { .. } => InstructionProfileTag::Binary,
-            Instruction::ToBool => InstructionProfileTag::ToBool,
+            Instruction::ToBool | Instruction::IsNullish => InstructionProfileTag::ToBool,
             Instruction::Jump(_) => InstructionProfileTag::Jump,
             Instruction::JumpIfFalse(_)
             | Instruction::JumpIfCompareFalse { .. }
@@ -468,6 +491,7 @@ impl Instruction {
             | Instruction::EnterFinally { .. }
             | Instruction::EndFinally
             | Instruction::AbandonFinally
+            | Instruction::AbandonFinallyKeepValue
             | Instruction::Throw => InstructionProfileTag::Exception,
             Instruction::AddAssign(_)
             | Instruction::AddAssignNumber { .. }
@@ -523,6 +547,8 @@ impl IntrinsicOp {
             | IntrinsicOp::EndsWith
             | IntrinsicOp::Split
             | IntrinsicOp::Join
+            | IntrinsicOp::JavaScriptSplit
+            | IntrinsicOp::JavaScriptJoin
             | IntrinsicOp::Validate
             | IntrinsicOp::CeilDiv
             | IntrinsicOp::FloorDiv
@@ -553,6 +579,8 @@ impl IntrinsicOp {
             IntrinsicOp::EndsWith => BuiltinProfileTag::EndsWith,
             IntrinsicOp::Split => BuiltinProfileTag::Split,
             IntrinsicOp::Join => BuiltinProfileTag::Join,
+            IntrinsicOp::JavaScriptSplit => BuiltinProfileTag::Split,
+            IntrinsicOp::JavaScriptJoin => BuiltinProfileTag::Join,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,

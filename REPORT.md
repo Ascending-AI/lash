@@ -1,457 +1,290 @@
-# FIG-1303 implementation report
-
-Status: complete on `samuel-fig-1303`, after two adversarial review rounds and
-their fixes.
-
-## Delivered commits
-
-| Commit | Purpose |
-|---|---|
-| `738b20dce` | Add AST-only exceptions, exception bytecode, durable handler/finally state, VM unwinding, taxonomy enforcement, and conformance tests. |
-| `f858fdd0c` | Add the public AST integration example and register all new public API symbols. |
-| `557243c5c` | Red-side: `break`/`continue` leaking exception scopes. |
-| `8e15036c1` | Unwind exception scopes on `break` and `continue`. |
-| `c064d4b5d` | Red-side: a cleanup-only scope rewriting the error identity. |
-| `19d3c5f6c` | Preserve the original error through a cleanup-only unwind. |
-| `c551107ca` | Red-side: handler and finally stacks validated as bags. |
-| `8d60296d1` | Validate exception stacks as nesting structures. |
-| `61127ec6c` | Red-side: unbounded AST-only nesting. |
-| `0606e076e` | Cap AST nesting depth at the construction entry points. |
-| `0b872cf1d` | Classify runtime errors exhaustively and pin their codes. |
-| `276abc2db` | Fold the review round's covering cases into the suite; wire host cancellation. |
-| `83dbda356` | Red-side: the AST cap refusing parsed programs. |
-| `3cfec80f9` | Make one nesting budget govern the parser and the AST. |
-| `662a51120` | Red-side: handler scope substitution. |
-| `d2f0c9161` | Anchor each durable handler scope to a live code position. |
-| `b7ee34103` | Red-side: uncatchable-state and loop-control holes. |
-| `d29ec2c36` | Make internal exception state terminal; refuse stray loop control. |
-| `86a880c18` | Pin deferred process-terminal behaviour and every error code. |
-| `ab832df7a` | Exercise the layer's remaining public API. |
-
-## Design
-
-### Public AST and bytecode
-
-The public AST exposes `Expr::Try(Box<TryExpr>)`, `TryExpr`, `CatchClause`, and
-`Expr::Throw(Box<Expr>)`. Both nodes participate in traversal, folding, semantic
-hashing, host-requirement collection, linker validation/lowering, and type
-inference. The compiler lowers them to six real VM instructions:
-
-- `PushHandler { handler, finally, catches }`
-- `PopHandler`
-- `EnterFinally { finally, resume }`
-- `EndFinally`
-- `AbandonFinally`
-- `Throw`
-
-`heap_plan` remains the single exhaustive opcode contract table. `Throw` is
-heap-native because the thrown value remains in the VM heap; the five
-control-only instructions declare zero stack values at the host boundary. The
-exception instructions also have an explicit `Exception` profiler tag.
-
-### Loop control flow across exception scopes
-
-`break` and `continue` are abrupt completions, and ECMA-262 requires them to run
-the pending `finally` blocks between the jump and its target loop, innermost
-first, while every handler they cross comes off the handler stack. The compiler
-carries a handler-scope stack alongside its loop contexts; each loop context
-records the scope depth it was entered at, so a jump edge emits exactly the
-instructions the fall-through edge would have executed, and nested loops unwind
-only as far as their own loop.
-
-Leaving a running `finally` body by a jump replaces that body's pending
-completion. `AbandonFinally` performs the replacement: it drops the pending
-resume or rethrow and restores the operand stack. The `finally` that a `break`
-itself enters uses the ordinary `Normal { resume_ip }` completion with a resume
-site inside the jump edge, so the pending jump lives in bytecode and no new
-pending-completion kind reaches the wire.
-
-Before this, `break` and `continue` compiled to a raw patched jump: the pending
-`finally` never ran and the handler stayed installed, where a structurally
-unrelated later throw could be captured by it and transferred into abandoned
-catch code — and the stale handler was written into the durable continuation.
-
-### Error value shape and error identity
-
-Catchable `RuntimeError` values are imported into the normal heap as records.
-They use the following dialect-facing shape:
-
-| Field | Value |
-|---|---|
-| `name` | `"EffectError"` for effect/tool failures, otherwise `"RuntimeError"` |
-| `message` | Existing sanitized `RuntimeError` display text |
-| `code` | Stable guest-visible identity from an explicit table, for example `LenUnsupported` or `UnwrappedModuleOperationFailed` |
-| `details.kind` | `"effect"` or `"runtime"` |
-| `details.instruction` | Bytecode instruction index at which the failure became a throw |
-| `details.operation` | Structured sanitized operation name when the failing instruction is an effect site |
-
-Explicit `throw value` transfers the original value unchanged. Error records use
-the same import, allocation metering, serialization, forest validation, and GC
-rules as every other record. Pending thrown values held by a finally
-continuation are included in VM roots.
-
-A routed runtime failure now travels with the typed `RuntimeError` it came from
-alongside that heap record. When the unwind ends with no catch, `EndFinally`
-re-raises the original error with its original instruction and span
-attribution; `UncaughtException` is reserved for values thrown by an explicit
-`throw`. Wrapping an expression in `try { … } finally { … }` therefore no longer
-changes which error the host sees, which matters because host-side
-classification (effect-vs-runtime, retryability) is variant-based.
-
-That origin is durable rather than VM-local, so a cleanup chain that suspends
-mid-`finally` resumes to the same identity. Carrying a typed error on the wire
-requires `RuntimeError` to round-trip, so its borrowed `&'static str` payloads
-are now `Cow<'static, str>` and `RuntimeError`, `FormatError` and
-`ExecutionHostError` derive serde. Validation refuses an origin holding an
-`UncaughtException`, the one variant carrying a `Value` and therefore the one
-that could smuggle an unrooted heap reference past the forest rule.
-
-### Handler and finally records
-
-An active handler records:
-
-| Field | Purpose |
-|---|---|
-| handler instruction pointer | Catch transfer target |
-| optional finally instruction pointer | Cleanup target |
-| catches flag | Distinguishes catch handlers from cleanup-only handlers |
-| frame depth and function identity | Exact owning call frame |
-| operand-stack depth | Stack restoration boundary |
-| iterator-stack depth | Iterator restoration boundary |
-
-A running finally records its pending completion (`Normal { resume_ip }` or
-`Throw { value, origin }`), handler-stack depth, frame identity, and
-operand-stack depth. Both record families serialize in `VmContinuation`.
-
-### Unwind algorithm
-
-1. Import the thrown value into the current heap and locate the nearest
-   catch-capable handler.
-2. Run cleanup-only handlers above that catch from inner to outer. Each cleanup
-   atomically restores the owning frame, operand stack, and iterator stack, then
-   enters its finally with the pending throw recorded.
-3. On `EndFinally`, either resume the saved normal target or continue throwing
-   the saved value. If nothing catches it and the throw came from a routed
-   runtime failure, the original typed error is raised instead of an
-   `UncaughtException` record.
-4. If code in a finally throws, discard that finally's prior pending completion
-   and unwind the new value. This gives the required replacement semantics; a
-   `break` or `continue` out of the finally body replaces it the same way.
-5. At a catch, restore the handler's frame/stack/iterator boundary, push the
-   thrown value, and transfer to the handler target.
-6. If no handler accepts an explicit throw, return typed
-   `RuntimeError::UncaughtException`. Unwinding itself does not suspend; effects
-   executed by ordinary finally code may suspend and serialize their pending
-   completion.
-
-Frame restoration uses the existing call-frame state and restores temporary
-iterator bindings as iterators are unwound. Occurrence counters are independent
-continuation state, so retry after catch allocates the next occurrence and
-replay key.
-
-### One nesting budget for the parser and the AST
-
-`Try`, `Throw`, `Function` and the other AST-only shapes have no source grammar,
-so nothing bounded them: a dialect that lowered a deeply nested `try` aborted
-the host process rather than returning a typed error. `LinkedModule::link`,
-`compile_ast` and `compile_process` now run `validate_ast` first.
-
-`link` is the shared entry for parsed *and* AST-built programs, so one budget
-governs both — and a syntactic level is not an AST level. Block-bodied
-constructs (`if`, `while`, `for`) build an `Expr::Block` inside them and cost
-two, so the parser's old limit of 40 admitted an 81-level tree. Measured on a
-2 MiB thread, the full link/compile/execute pipeline first aborts at an AST
-depth of 74 for the most expensive per-level variant (nested `try`/`catch`/
-`finally`) and at 77 for the cheapest block-bodied one. The deepest `if` chains
-the parser accepted — syntactic 37 to 39, AST 77 to 81 — therefore already
-aborted in `link` before this layer existed, which the parser's own doc comment
-claimed was impossible.
-
-So the budget is derived from measurement and enforced at the AST level:
-`MAX_AST_NESTING_DEPTH` is 64, ten levels under the tighter cliff, and the
-parser's `MAX_NESTING_DEPTH` drops from 40 to 30 so the worst parsed shape (two
-AST levels per syntactic level plus a statement's constant) lands at 63. That
-narrows the accepted source language, and it turns a host-process abort into the
-typed error the limit already promised.
-
-No constant relation carries this — a comparison between two numbers cannot see
-the per-level cost difference. `tests/nesting_cap.rs` walks a family of parsed
-shapes (`if`/`while`/`for`/record/list/paren/unary/binary/comprehension/call) to
-the parser's refusal point and requires every accepted program to pass the depth
-check *and* link, and reports the deepest tree the family can build.
-`tests/stack_budget.rs` re-pins the 2 MiB budget at the cap using the most
-expensive per-level variant rather than the cheapest.
-
-`validate_ast` also covers loop-control placement: `break` and `continue` have
-no parser to reject them out of place, and a host-built function body carrying a
-stray `break` previously panicked the public `compile_ast`. Both checks are
-iterative walks over `Expr::children`, exhaustive over the variants, and neither
-can overflow on the inputs it exists to refuse. `compile_ast` and
-`LinkedModule::link` now return typed errors (`InvalidAst` / `LinkError`), which
-is the only signature change.
-
-### Lashlang lowering decision
-
-The textual lashlang surface remains unchanged. The parser has no `try`,
-`catch`, `finally`, or `throw` production, and the canonical renderer returns
-`NonSourceableExpression` for both new AST node families —
-`the_renderer_declines_try_and_throw_at_every_nesting` pins that refusal.
-Because the workflow-graph projector only ever reads parsed, canonicalized
-source, those nodes cannot reach it; its source-only note now names them
-explicitly rather than leaving the wildcard arms accidental.
-
-Existing textual `?` still compiles to its existing unwrap instruction. When no
-AST-only handler surrounds it — which is true for every parsed lashlang program
-— its failure leaves the VM with the same typed error and diagnostics as before.
-An embedding or later dialect can place that existing effect site inside an
-AST-only `Try`, in which case the resumed effect failure becomes a throw at that
-site.
-
-No prompt, parser, diagnostic, or benchmark snapshot changed.
-
-## Taxonomy enforcement
-
-| Layer | Catchable | VM route |
-|---|---:|---|
-| Effect/tool failure | Yes | Existing effect error becomes an `EffectError` heap record and enters normal throw unwinding. Its typed variant survives an unwind that nothing catches. |
-| Ordinary guest-reachable runtime error | Yes | Central `route_runtime_error` converts it to a `RuntimeError` heap record when an exception scope is active, carrying the original error alongside it. |
-| Instruction, deadline, memory, or frame-depth exhaustion | No | The taxonomy prevents handler lookup; instruction/deadline checks terminate directly from `enforce_execution_bounds`, while memory/frame terminals are rejected by the same central classification when raised at allocation/call sites. |
-| Host cancellation | No | The cooperative `ExecutionHost::is_cancelled` probe terminates in `enforce_execution_bounds` as `HostCancelled`, before any handler lookup. `LashlangProcessHost` forwards the engine's cancellation token to it, so the row is live in production. |
-
-`InvalidExceptionState` is an uncatchable terminal too. It is raised *by* the
-exception machinery when the bytecode has violated the handler/finally
-discipline, and routing it back through a handler stack that has just been shown
-inconsistent is the one place a catchable classification cannot be defended.
-
-The classification is a single exhaustive `RuntimeError::taxonomy` match rather
-than two hand-maintained `matches!` lists, so a new variant fails to compile
-until it declares its class; `is_uncatchable_terminal` and `is_effect_failure`
-read it and keep their signatures. `RuntimeError::code` is likewise an explicit
-static table, not a string derived from `Debug`, so renaming a Rust variant
-cannot silently change a value guest code branches on. The pinning test covers
-instances rather than only match arms: the exhaustive match forces a new variant
-to declare a code, and a count of distinct observed codes against the declared
-list forces it to be constructed and asserted. That check found eight variants
-that had been classified but never instantiated, three of whose expected display
-strings had drifted from the real ones unnoticed.
-
-`enforce_execution_bounds` documents the direct terminal boundary.
-`route_runtime_error` is the single defensive classification point for errors
-raised elsewhere in instruction execution. Tests wrap every terminal class in a
-catch returning a sentinel and prove the sentinel is never observed.
-
-## Durable format changes
-
-| Contract | Previous | New |
-|---|---:|---:|
-| VM continuation format | 2 | 4 |
-| Compiled bytecode format | 4 | 6 |
-| Lashlang VM ABI | `lashlang-vm-abi-v2` | `lashlang-vm-abi-v3` |
-
-Both numeric contracts moved twice inside this unmerged branch: to 3 and 5 for
-the exception layer itself, and again to 4 and 6 for the fix round's new
-`AbandonFinally` opcode, scope-extent table and pending-error origin. No
-released artifact carries the intermediate stamps.
-
-Continuation v4 requires `handler_stack` and `finally_stack`, and a throw
-completion requires its `origin` field; absence is a decode error rather than a
-default, and there is no migration decoder. Older versions fail closed through
-the existing exact format-version check.
-
-Both exception stacks are validated as nesting structures, not bags of records.
-The compiler emits a scope-extent table into the chunk — one entry per
-`PushHandler`, carrying its install site, handler and finally targets, and the
-end of the region it protects. A durable handler record must name one of those
-scopes exactly, and consecutive records in one frame must form a strictly nested
-chain of them. Requiring an exact scope match also closes the weaker target
-check: a handler target one instruction past its catch entry, or a finally
-target borrowed from another scope, no longer passes as "somewhere inside the
-right function".
-
-Nesting alone still left every handler unanchored: it only had to name *some*
-scope in the right function, so a single-entry stack could be pointed at a
-sibling scope — substituting one cleanup-only scope for its sibling ran the
-wrong cleanup and skipped the mandatory one, the same harm the nesting rule was
-written to prevent, reached by a different one-field edit. The innermost handler
-of each frame is therefore anchored to the code position that frame is sitting
-at: the active frame's instruction pointer, or a parked frame's return site.
-Outer handlers of the same frame stay anchored to the inner one through the
-nesting chain, which makes them a consequence rather than a separate rule. A
-scope is live over `(push_ip, end_ip]` — a handler is never on the stack while
-its own `finally` body runs, and suspension inside a `catch` body is covered by
-the catch-cleanup scope's own extent.
-
-Decode-time validation covers what needs no compiled program — handler frame
-depths never shrink, per-frame operand and iterator depths never shrink, and the
-finally stack's handler and frame depths never shrink. Resume-time validation
-adds the scope-extent chain, the anchor, and the per-record range checks, so
-`Vm::resume_from` refuses these shapes as well as serde does; that matters
-because `VmContinuation`'s stacks are public API a host embedding can build in
-Rust without touching the wire.
-
-### What that validation does and does not make unrepresentable
-
-Stated precisely, because "unrepresentable" is easy to over-claim. Three
-families are now refused rather than defended against inside the VM:
-
-- **Reordering** — a handler stack whose records are permuted, including the
-  same-frame swap where every per-record invariant survives.
-- **Substitution of a live scope** — a handler retargeted at any other scope the
-  compiler emitted, including a sibling cleanup-only scope, because the
-  innermost handler of each frame must be live at that frame's code position.
-- **Structural nesting** — records that do not form a strictly nested chain of
-  real scopes, and targets that are not the entry points of one.
-
-Two families remain **unvalidated**, and both need flow-sensitive information
-the chunk does not carry today — the set of handlers that *must* be installed at
-a given instruction, rather than the set that *may* be:
-
-- **Omission.** Dropping a handler from the stack leaves the remainder
-  structurally valid, so a mandatory cleanup can still be skipped by deleting
-  its record instead of retargeting it.
-- **Re-installation during its own cleanup.** A handler is not on the stack
-  while its own `finally` body runs, but nothing proves a record was not put
-  back there.
-
-Both are authored-blob-only, like the families above. They are filed as a
-follow-up for flow-sensitive expected-handler-chain metadata, which is the shape
-that would close them; this layer does not claim they are closed.
-
-## Test coverage
-
-| Requirement | Coverage |
-|---|---|
-| Explicit throw and ordinary runtime catch | `explicit_throw_transfers_the_original_value_to_catch`; `runtime_errors_are_caught_as_heap_backed_error_records` |
-| Tool/effect failure and structured operation metadata | `effect_failure_is_a_throw_with_structured_operation_metadata` |
-| Normal, exceptional, nested, and replacement finally behavior | `finally_runs_on_normal_and_exceptional_paths_and_a_new_throw_replaces_the_old_one` |
-| Cross-frame unwind | `throw_unwinds_function_frames_to_the_callers_handler` |
-| `break`/`continue` across try, catch and finally bodies | `exception_control_flow_cases.rs`: pending finallys run inner-to-outer, nested loops unwind only to their own loop, no handler or finally record outlives its region in the durable continuation, and a finally entered by a `break` resumes to the break after a suspension |
-| Error identity through a cleanup-only unwind | `a_cleanup_only_scope_preserves_the_runtime_error_identity`; `a_cleanup_only_scope_preserves_an_effect_failure_identity`; `a_cleanup_only_scope_keeps_the_failing_expression_span`; `a_suspended_cleanup_chain_resumes_with_the_original_error` |
-| Suspension inside try, catch and finally | `continuation_round_trips_inside_try_and_finally`; `effects_suspend_inside_finally_with_pending_errors_and_gc_stress`; `suspension_inside_a_catch_body_is_byte_identical_under_gc_stress` |
-| Every uncatchable terminal | `execution_terminals_bypass_a_surrounding_catch` covers instruction, deadline, memory, frame-depth, and cancellation terminals; `memory_exhaustion_while_importing_the_error_record_stays_terminal` and `frame_depth_exhaustion_inside_a_catch_body_is_terminal` cover terminals raised from inside the exception machinery, and `cancellation_observed_mid_unwind_is_terminal` covers a host that cancels once the cleanup chain is running |
-| N-frame/finally/iterator interaction | `exception_unwind_crosses_frames_finally_chains_and_iterators` |
-| Unwinding across a builtin callback frame | `a_throw_escapes_a_builtin_map_callback` |
-| Thrown-slot aliasing and catch-binding copy semantics | `every_boundary_of_a_caught_throw_stays_capturable`; `mutating_the_catch_binding_leaves_the_thrown_slot_alone` |
-| Retry occurrence and replay identity | `effect_failure_catch_retry_is_a_new_occurrence` proves occurrences advance from 1 to 2 |
-| Malformed durable state | `malformed_exception_continuations_fail_closed` covers out-of-range handler, cross-function target, oversized stack base, invalid finally target, and frame-identity mismatch; `exception_wire_cases.rs` covers reordered handler stacks (cross-frame and same-frame), handler and finally targets that are not scope entries, a non-monotonic finally stack, and handlers substituted for a sibling cleanup scope or an unrelated catch scope |
-| Internal invariant violations stay terminal | `an_invalid_exception_state_bypasses_a_surrounding_catch` |
-| Format-version fail-closed | `a_v2_shaped_continuation_fails_closed` |
-| Cross-process determinism and exactly-once cleanup | `independent_processes_dump_identical_exception_continuations`; `a_cleanup_chain_is_exactly_once_across_a_process_boundary` |
-| GC stress with live handler/error state | `effects_suspend_inside_finally_with_pending_errors_and_gc_stress` compares stress and non-stress continuation bytes and resumes the pending heap error |
-| Renderer refusal | `the_renderer_declines_try_and_throw_at_every_nesting` |
-| AST-only nesting bound | `stack_budget_most_expensive_ast_variant_at_the_nesting_cap` pins the 2 MiB budget at the cap with the most expensive per-level variant; `stack_budget_ast_try_finally_at_parser_max_depth` pins the new variants at the parser's cap; `ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort` drives real depths in child processes, because an abort cannot be caught in-process |
-| The parser's cap stays inside the AST cap | `every_parsed_shape_the_parser_accepts_stays_inside_the_ast_cap` walks ten parsed shape families to the parser's refusal point and requires each accepted program to pass the depth check and to link; `the_worst_parsed_shape_stays_inside_the_ast_cap` reports the deepest tree the family can build |
-| Loop control placement | `loop_control_outside_a_loop_is_a_typed_error_not_a_panic`; `a_bare_continue_at_the_program_root_is_a_typed_error` |
-| Deferred process terminals | `finish_inside_a_try_does_not_run_the_finally`; `fail_inside_a_try_does_not_run_the_finally` pin the deferral in process mode |
-| Taxonomy and code stability | `every_runtime_error_display_is_exact` also pins every variant's guest-facing code through an exhaustive match |
-| Public API route | `embedding_lashlang_functions::ast_only_exceptions_compile_and_execute` compiles and executes only through public AST APIs; `ast_construction_is_validated_before_compilation`, `runtime_errors_carry_a_code_and_a_taxonomy` and `a_suspended_cleanup_chain_exposes_its_exception_state` exercise the layer's remaining public surface, and all of it is now inventoried in `docs/api-example-coverage.toml` |
-
-### Existing test edits
-
-- Authored continuation fixtures state continuation format `4` and include
-  empty `handler_stack` and `finally_stack` fields.
-- Direct `VmContinuation` constructors initialize both new stacks as empty.
-- `rlm_prompt_claims` destructures `ShapingEmptyList` instead of matching a
-  borrowed literal, because the payload is now `Cow<'static, str>`.
-- Two `compile_ast` call sites in examples add `.expect(…)` for its new
-  `Result`.
-- No snapshot file changed, and no `.snap.new` file exists.
-
-## Review round
-
-Two independent adversarial reviews were run against `752f28ac3` (opus lane:
-BLOCK; sol-sub lane: APPROVE-WITH-FIXES). Every finding is closed above, with a
-red-side regression committed before each fix.
-
-| Finding | Severity | Status |
-|---|---|---|
-| `break`/`continue` crossing a `Try` leaks the handler and skips the finally | P0 | Fixed (compiler handler-scope stack, `AbandonFinally`) |
-| A catch-less `finally` rewrites the host-visible error identity | P1 | Fixed (durable pending-error origin) |
-| Handler/finally stacks validated as bags, not structures | P1 | Fixed (scope-extent table + monotonicity) |
-| Handler/finally targets only range-checked | P3 | Fixed by the same scope-extent match |
-| AST-only nesting depth uncapped | P2 | Fixed (`check_ast_nesting_depth`) |
-| Taxonomy is two non-exhaustive `matches!` lists | P2 | Fixed (`RuntimeError::taxonomy`) |
-| `RuntimeError::code` derived from `Debug` | P2 | Fixed (explicit table + pinning test) |
-| `ExecutionHost::is_cancelled` unwired in production | P3 | Wired; see the deferred item below for the end-to-end test |
-| `workflow_graph.rs` wildcard-swallows `Try`/`Throw` | P3 | Documented explicitly, with the renderer refusal pinned |
-
-A second, decisive fresh-eyes verification of that fix round returned BLOCK.
-Those findings are closed here, again red-side first.
-
-| Finding | Severity | Status |
-|---|---|---|
-| The AST cap refuses parsed programs the parser accepts | BLOCKER | Fixed (one measured budget; parser cap 40 to 30) |
-| A durable handler may name any scope in its function | BLOCKER | Fixed (scope anchored to a live code position) |
-| `Finish`/`Fail` inside a `try` skip the `finally` | P2 | Deliberate deferral, now documented and pinned |
-| `break`/`continue` in an AST-only function body panics `compile_ast` | P2 | Fixed (`validate_ast`) |
-| New public API absent from the coverage registry | P3 | Fixed (12 symbols registered and exercised) |
-| Breaking embedder changes carry no release note | P3 | Flagged below for the PR body |
-| `InvalidExceptionState` classified catchable | P3 | Fixed (uncatchable terminal) |
-| The code pin pins arms, not instances | P4 | Fixed (variant-count assertion) |
-
-`break`/`continue` inside a `finally` body is implemented to ECMA-262
-completion-replacement semantics rather than rejected at link time: the pending
-completion is discarded by `AbandonFinally` and the jump continues, and the
-enclosing scopes it still has to leave are emitted by the same handler-scope
-walk.
-
-## Verification results
-
-| Command | Result |
-|---|---|
-| `cargo check --workspace --all-targets --locked` | Pass |
-| `cargo test --workspace` | Pass, 136 test targets, 0 failures, run to the final doc-test target |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Pass |
-| `cargo fmt --all --check` | Pass |
-| `python3 scripts/check_included_file_formatting.py` | Pass, 37 included files |
-| `python3 scripts/lint_docs.py` | Pass, 46 HTML pages and 42 registry pages |
-| `bash scripts/check-rustdoc.sh` | Pass, 599 documented public members, 0 missing |
-| `python3 scripts/check_test_quarantines.py` | Pass |
-| `python3 scripts/check_api_example_coverage.py` | Pass, 8,065 entries |
-| `just perf-guard` | Pass, both legs with `--enforce-budgets` on this worktree's own target dir: 297 lashlang perf results plus 1 instruction profile, every scenario `within_stack_budget` against 2 MiB, no budget breached |
-| `bash scripts/check-production-file-size.sh` | Pass |
-| `git diff --check` | Pass |
-
-## Release notes owed by the PR body
-
-Two commits make breaking embedder changes without a `Release-Notes:` trailer of
-their own, so the PR body must carry them:
-
-- `0606e076e` makes `compile_ast` and `LinkedModule::link` return a `Result`.
-  Every embedder constructing an AST has to handle the new typed error.
-- `0b872cf1d` changes `RuntimeError`'s borrowed `&'static str` payloads to
-  `Cow<'static, str>`, which breaks anyone matching on them against a literal,
-  and pins the guest-visible `code()` strings as an explicit contract.
-
-The nesting-limit change carries its own trailer on `3cfec80f9`.
-
-## Deferred items
-
-- **`finish` and `fail` inside a `try` do not run the `finally`.** This is a
-  deliberate deferral, not an oversight. They are *process terminals*, not
-  function returns; ECMA-262's analogue (`process.exit`) skips `finally` too,
-  and deciding process-terminal-versus-completion semantics belongs in the layer
-  that has a real `return` to test against, not in one that has none.
-  **Constraint on FIG-1304/1305: a TypeScript `return` must lower to a real
-  function return and never to `Expr::Finish`.** If it does, cleanups are
-  dropped silently. `finish_inside_a_try_does_not_run_the_finally` and
-  `fail_inside_a_try_does_not_run_the_finally` pin the current behaviour in
-  process mode and name that constraint in their failure messages, so a lowering
-  that violates it trips red. (In *foreground* mode `fail` instead raises the
-  catchable `SessionProcessAdminOutsideProcess`, which does route through the
-  handler stack and run the finally — an artifact of the mode check, and one
-  more reason to pin rather than leave implicit.)
-- TS syntax and ECMA-262 lowering consume the AST/bytecode capability in a later
-  layer.
-- Textual lashlang exception syntax remains absent by design.
-- Suspension during the atomic unwind operation remains unsupported as
-  explicitly allowed; suspension inside try, catch and finally code is
-  implemented.
-- An end-to-end cancellation test at the `lash-lashlang-runtime` level is not
-  added. The wiring itself is a one-line delegation to the engine's cancellation
-  token, but driving a real process through that crate needs a
-  `ProcessEngineRunContext`, which only `lash-core`'s private process-worker test
-  harness can build; that crate has no process-execution test of its own to
-  extend. The taxonomy row is covered at the VM level by
-  `execution_terminals_bypass_a_surrounding_catch` and
-  `cancellation_observed_mid_unwind_is_terminal`.
+# FIG-1304 review fix report
+
+Branch: `samuel-fig-1304`
+
+Implementation baseline: `e3b073423` (reviewed FIG-1303 head)
+
+Round-1 fix baseline: `bf704079b` — a pre-rebase SHA, retained for provenance only. The branch was rebased onto `93874e275`; the reachable branch history is `218a580d7..HEAD`, and every commit cited in the ledgers below is an ancestor of the head.
+
+Round-2 fix baseline: `13e31367e` (first decisive fresh-eyes verification, verdict BLOCK)
+
+Round-3 fix baseline: `4dc2bd5cc` (round-2 closure verification, verdict BLOCK)
+
+Round-4 fix baseline: `712665428` (round-3 closure verification, verdict BLOCK)
+
+Round-5 fix baseline: `97c797c4b` (round-4 closure verification, verdict BLOCK)
+
+Round-6 fix baseline: `e9dbf4605` (round-5 closure verification, verdict BLOCK)
+
+Round-7 fix baseline: `bd1d5faa6` (round-6 closure verification, verdict BLOCK — the recorded escalation trigger fired)
+
+Outcome: all 22 merged findings from the Opus and sol-sub adversarial reviews are closed, all ten findings from the first verification round are closed, all five findings from the round-2 closure verification are closed, all five findings from the round-3 closure verification are closed, all four findings from the round-4 closure verification are closed, the single round-5 finding is closed, and the round-6 finding is closed along with the class it belonged to. **The no-abort guarantee no longer depends on the source-nesting preflight at all**: the source is bounded and the parse runs on a stack reserved in proportion to it, with measured margin, so stack exhaustion is arithmetically unreachable. The preflight remains for the diagnostic, and its generative guards remain as fast feedback on that. Accepted TypeScript operations now follow the checked Node v25.2.1 oracle, unsupported operations reject with stable `TS_*` diagnostics, the durable dialect marker fails closed without becoming VM identity, and the full repository gate battery passes.
+
+This layer is still a **pure calculator**. A TypeScript cell has no tool calls, no `await`, and no deferred tool resolution. Rendered tool signatures are synchronous descriptions for FIG-1305; they do not make tools executable here.
+
+## Finding ledger
+
+Each row identifies the committed failing regression and the commit that made it green. Shared commits contain separate focused tests for every item in their row. Every SHA below is reachable from the branch head; the round-1 ledger's original SHAs were pre-rebase and have been re-pointed at their rebased equivalents.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| 1 | Resume derives reference semantics from the compiled dialect; a non-aliased first suspension does not prevent later TypeScript aliasing. | `dae8b09f3` | `f3c783ac0` |
+| 2 | Lashlang refuses an authored TypeScript marker and any shared graph, regardless of the wire marker; failures are typed. | `dae8b09f3` | `f3c783ac0` |
+| 3 | `State::reference_semantics` is derived per program and no longer sticks historically. | `dae8b09f3` | `f3c783ac0` |
+| 4 | Missing, out-of-range, and negative reads produce `undefined`; non-negative writes extend arrays with holes; negative/non-index writes reject without element corruption. | `4e5ab8591` | `497737278` |
+| 5 | `typeof` distinguishes heap objects, arrays, and functions, while an unresolved operand returns `"undefined"`. | `4e5ab8591` | `497737278` |
+| 6 | Loose equality follows the recursive boolean-to-number rule, including `null == false` being false. | `4e5ab8591` | `497737278` |
+| 7 | TypeScript Number-to-String uses shortest round trips and ECMA exponent thresholds/formatting without changing Lashlang formatting. | `4e5ab8591` | `497737278` |
+| 8 | String-to-Number rejects Rust-only spellings and handles signed prefixes and arbitrarily large hexadecimal input per ECMA. | `4e5ab8591` | `497737278` |
+| 9 | TypeScript `split` and `join` use dialect-specific ECMA conversion, including empty separators and recursive array conversion. | `4e5ab8591` | `497737278` |
+| 10 | String/array `.length`, `NaN`, and `Infinity` are supported with UTF-16 string length. | `4e5ab8591` | `497737278` |
+| 11 | String relational comparison orders UTF-16 code units. | `4e5ab8591` | `497737278` |
+| 12 | Lone-surrogate literals reject as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; no lossy U+FFFD conversion occurs. | `4e5ab8591` | `497737278` |
+| 13 | A TypeScript `this` parameter is erased and does not affect runtime arity or binding. | `4e5ab8591` | `497737278` |
+| 14 | Both reads and writes of captured mutable bindings reject as `TS_MUTABLE_CAPTURE_UNSUPPORTED`. | `c334216ff` | `03aec52ef` |
+| 15 | Catch bodies have their own mangled lexical scope and cannot overwrite enclosing slots. | `c334216ff` | `03aec52ef` |
+| 16 | Unresolved identifiers and `arguments` reject statically as `TS_UNKNOWN_BINDING`; only `typeof unresolved` is legal. | `c334216ff` | `03aec52ef` |
+| 17 | Assignment to an undeclared name rejects statically and cannot create an implicit durable global. | `c334216ff` | `03aec52ef` |
+| 18 | Hoisted function declarations see top-level lexical bindings regardless of source order, including the README captured-object example and later-`const` captures. | `c334216ff`, `04a3dd981` | `03aec52ef`, `a0156878d` |
+| 19 | Lexical bindings named `print`, `finish`, or `console` win over host interception. | `c334216ff` | `03aec52ef` |
+| 20 | Source nesting is guarded before SWC/adapter recursion and reports `TS_SOURCE_NESTING_LIMIT` under the 2 MiB stack contract. | `457b6f5de` | `a5747ebc4` |
+| 21 | A checked-in Node v25.2.1 differential table permanently covers both review corpora and the fix findings. | `de1b3c94d` | `3f5b2d21c` |
+| 22 | The README/deviation register, structural diagnostics, `console.log` arity, and signature rendering now describe and enforce the real surface. | `7c90c79fd` | `bd72cfb63` |
+
+### Round 2 — decisive fresh-eyes verification
+
+The verification round returned BLOCK on two P0 defects and eight smaller findings. Each is closed below with its own red-then-green pair.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| P0-1 | Delimiter-free source nesting (`!`, unary `-`, `typeof`, `?:`, binary chains) no longer reaches SWC's recursive parser: one cumulative budget bounds every recursive source shape and returns `TS_SOURCE_NESTING_LIMIT`. Child-process regressions cover all five operator classes at 10k plus the original 10k-paren shape. | `1c51ef8fa` | `4cae4e930` |
+| P0-1b | That preflight initially accumulated statement keywords across sibling statements, so 28 flat `if`/`while` statements falsely rejected. Braces are now classified as statement blocks or object literals, and a statement boundary releases the operator run it terminates. | `c5d198ae9` | `599a424d3` |
+| P0-2 | Closure capture is transitive: a binding owned two or more function levels out is registered on every enclosing frame between the owner and the use site. | `2ec936167` | `c62c1089a` |
+| P1-3 | Mutually recursive and nested hoisted function declarations are accepted. Each cycle routes through one generated frame record; a nested declaration may read an enclosing function's bindings regardless of source order. | `4721fe8f9`, `d4d70c372` | `e788601b9` |
+| P1-4 | Source identifiers starting with `__typescript_` reject with the new `TS_RESERVED_IDENTIFIER`, so a user name can never clobber a generated binding — including a durable root global. | `bd0813712` | `e82e5e6d7` |
+| P2-5 | `ToNumber(String)` trims the literal ECMA-262 `StrWhiteSpace` set rather than Rust's `White_Space` property: ZWNBSP is whitespace, NEL is not. | `06a596efb` | `978645dd5` |
+| P2-6 | Both shape-dependent lone-surrogate runtime rejections (`split('')` and string indexing on astral characters, `TS_LONE_SURROGATE_UNSUPPORTED`) are registered and carry oracle rows. | `06a596efb` | `b49499b7e` |
+| P3-7 | Ledger SHAs re-pointed at reachable commits. | — | this report |
+| P3-8 | The exclusion list names compound assignment operators and the arity-1 restriction on mapped String methods, each backed by an executable rejection test. | — | `b49499b7e` |
+| P3-10 | The oracle's distinct-expression count is stated wherever its row count is cited. | — | `b49499b7e` |
+
+### Round 3 — round-2 closure verification
+
+The closure verification confirmed both round-1 P0s closed and returned BLOCK on one regression the round-2 fixes introduced, plus four smaller findings.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| R2-4 | The per-cycle frame record made any session that defined mutually recursive top-level functions unpersistable: record and members formed a heap cycle reachable from a durable root, so `Vm::suspend()` and `State::snapshot()` failed after the program had already run, and `__typescript_0_frame` sat in `runtime_globals` where the bound-variables prompt would render it. The frame-record lowering is removed; declaration cycles reject statically as `TS_MUTUAL_RECURSION_UNSUPPORTED` naming the cycle. | `10f2ff326` | `883e083a3` |
+| R2-1 | A newline in automatic-semicolon-insertion position releases the operator run, so semicolon-free statement sequences no longer reject at 27 statements. The release is suppressed while a statement form is open and when the next token continues the expression. | `ca1baf00d` | `4c91df3d3` |
+| R2-2 | Template holes draw on the source budget, so a long template rejects as `TS_SOURCE_NESTING_LIMIT` instead of leaking the shared AST's generic `TS_INVALID_SHARED_AST`. A sweep of eight shapes at every count to 80 proves no accepted-grammar source can reach that limit. | `ca1baf00d` | `4c91df3d3` |
+| R2-5 | A named function expression binds its own name inside its body, so the classic self-recursive function expression works; the generated namespace is reserved on that path too. | `250b549f0` | `0fac55e0e` |
+| R2-3 | The README states the budget in units with a measured per-form cost table instead of a bare 28. | — | `c6546721c` |
+
+### Round 4 — round-3 closure verification
+
+Round 3 closed every round-2 finding and re-opened the round-1 no-abort guarantee for two shape families nobody had enumerated. That is the third round in which the guarantee held for the shapes under test and failed for a shape outside them, so round 4 replaces the hand-written corpora with a generative guard.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| R3-1 | The ASI release treated every operand-opening keyword as able to end a statement, so `typeof\n`, `void\n`, `new\n` and `delete\n` chains released the budget on every line and aborted the process at ~1 500 lines. Only `return` among them can end a statement; a word's statement-ending and expression-ending bits are now tracked separately. | `b3c26f11f` | `160af2346` |
+| R3-2 | Postfix tails — call, subscript, tagged template — opened *and closed* a delimiter pair per link, so a chain of any length sat at depth one while the tree it produced was as deep as the chain. A single-line 20 000-link chain aborted. A postfix frame now charges a unit that survives the pair closing. Present since round 2. | `b3c26f11f` | `160af2346` |
+| R3-3 | A line comment consumed its own newline, so a trailing `//` suppressed the ASI release and 27 semicolon-free statements with trailing comments falsely rejected. The rule now runs on the transition out of the comment. | `b3c26f11f` | `160af2346` |
+| R3-4 | A root-level `catch` or block binding was mangled unconditionally and, at root, published a generated `__typescript_` name into the durable globals and the bound-variables prompt. Mangling now happens only where a name of the same spelling is actually visible; the residual shadowing case keeps a generated slot and the dialect filters the reserved prefix out of the prompt. | `b3c26f11f` | `3b1deab30` |
+| R3-5 | The per-form cost table carries the postfix cost, the ASI rules, and the re-measured ceilings. | — | `a66f822db` |
+
+### Round 5 — round-4 closure verification
+
+Round 4 closed every round-3 finding and endorsed the generative method, then failed on the argument that method was derived from. The exhaustiveness claim was stated against the *accepted surface*, but the preflight runs before SWC, and SWC parses all of TypeScript: a production this crate rejects later still recurses in the parser the guard exists to protect. Walking the parsed grammar instead turned up two uncharged families and a missing continuation token.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| R4-1 | Labelled statements recurse through `Identifier ':' Statement` with neither a delimiter nor a keyword to charge, and 502 bytes of `a:` aborted the process — the smallest abort of any round. A `:` at statement level with no conditional waiting for it now charges a unit. | `dc305a631` | `8cc05714a` |
+| R4-2 | `Expression as Type` and `Expression satisfies Type` are left-recursive in the parsed grammar and charged nothing; so did the type-level prefix operators (`keyof`, `readonly`, `infer`, `unique`, `asserts`, `is`). All are charged, and the cast keywords joined the continuation set so a newline-split chain is not released. | `dc305a631` | `8cc05714a` |
+| R4-3 | A backtick was missing from the continuation set, so a newline before a tagged template released the budget and zeroed the per-link charge added in round 4. | `dc305a631` | `8cc05714a` |
+| R4-4 | The one remaining generated-name residual — a block binding that actually shadows an outer name — is registered, and the register's numbering matches its contents. | — | `85634cb52` |
+
+### Round 6 — round-5 closure verification
+
+Round 5 closed every round-4 finding and judged the grammar axis genuinely closed: 53 fresh shapes, one hit. That one hit was on a third axis neither standing guard could see.
+
+| # | Finding and final behavior | Red commit | Fix commit |
+| ---: | --- | --- | --- |
+| R5-1 | The preflight's own lexer was ASCII-only, so a non-ASCII identifier character broke the word token: `previous` became a bare UTF-8 continuation byte, `can_end_expression` went false, and the label charge — the only charge with no second token to fall back on — stopped firing. 1 292 bytes of `aé:` aborted the process. Identifier scanning now treats every byte at or above `0x80` as an identifier character, walks `\uXXXX` and `\u{…}` identifier escapes, and stops at U+2028/U+2029, which end a line for automatic semicolon insertion and for line comments as they do in ECMAScript. | `1bf2a4503` | `7b2e25aaa` |
+
+The other lexical surfaces the verification enumerated were checked in the same pass. Numeric separators are benign — `1_000` splits into `1` and `_000`, and both halves classify as expression-ending, so nothing is disarmed. The Unicode line terminators were failing in the opposite direction: SWC ends a line on them and the scanner did not, which never aborts but did reject 120 U+2028-separated declarations that are perfectly legal; that is fixed with the same change and covered in the legal direction.
+
+The new fuzzer then found a defect nobody had reported: a `;` inside a `for` header, or a `,` between arguments, cleared the open-statement-form bookkeeping that suppresses the ASI release, so a newline could end a `for (;;)` before its body and release the budget. `8cc05714a` scopes that reset to statement level.
+
+Fixing R3-2 initially charged a statement head (`if (…)`) as a postfix call, which cost every `if`/`while` block a third unit and dropped its documented ceiling from 13 to 9; `7879c7f23` separates ending a statement from ending an expression and restores it.
+
+Closing R2-1 exposed one further abort shape of my own making — a newline-separated `if (1)` chain released the budget on every line and reached SWC unbounded — which the same fix closes by suppressing the release while a statement form is open; the 26-shape 2 MiB abort sweep covers it.
+
+The optional register line on `console.log` versus Node's inspector formatting landed with `b49499b7e`. Auxiliary round-3 repair: `0e47352a5` (strict-lint style). Auxiliary repairs are `a2bdf3b3d` (strict-lint style) and, from round 1, `074b24b3e` (synchronous signature docs assertion), `db4201eb7` and `ea8ca2aeb` (strict-lint style), and `67de889dd` (remove one redundant Lashlang test so its established package count remains 461). None changes the accepted language contract.
+
+## Review conflict resolution
+
+Item 14 was resolved by executing the competing claim, not by compromise. The exact Opus assign-only capture repro was committed in `c334216ff` and failed before the fix: a write to an outer `let` silently targeted a function-local slot. Therefore the Opus finding was correct and the sol-sub conclusion that no hole existed was incorrect for that shape. Commit `03aec52ef` applies the same ownership check to reads and writes and returns `TS_MUTABLE_CAPTURE_UNSUPPORTED` in both paths.
+
+## Design decisions
+
+### Array writes
+
+- `a[3] = 9` on `[1]` follows ECMAScript: the array extends and positions 1 and 2 are `undefined` holes.
+- Negative and other non-index writes would create named array-object properties, which the v1 heap-list representation cannot encode. They reject at runtime as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`.
+- Such a rejection never wraps the index or mutates an existing element.
+
+### `console.log`
+
+Free `console.log` accepts zero or more arguments. Each argument receives ECMA `ToString`, the results are joined with one ASCII space, and one host print effect is emitted. Zero arguments print the empty string. A lexical `console` binding is ordinary user data and takes precedence.
+
+### Source nesting
+
+The effective v1 TypeScript source-nesting budget is **28 levels, cumulative and shared**. It is one budget, not several independent ones: every open delimiter (`(`, `[`, `{`, and a template hole) and every nested recursive operator or statement form draws on the same 28 units. Recursive forms are the prefix operators (`!`, `~`, unary `+`/`-`, `typeof`, `void`, `delete`, `new`, `await`, `yield`), the binary, ternary and member operators, and the statement keywords (`if`, `while`, `do`, `for`, `in`, `instanceof`, `with`). Operator counts from an enclosing delimiter frame stay active while the scanner visits an inner expression, so mixed nesting can no longer reach a multiple of the nominal cap the way three independent delimiter counters allowed. A statement boundary — `;`, `,`, the `}` that closes a statement block, or a newline in automatic-semicolon-insertion position — releases the operator run it terminates, so a flat sequence of statements is one level deep however long it runs, punctuated or not. The ASI release is suppressed while a statement form is still open (`if (1)` alone on a line is not a complete statement) and when the next token continues the expression (a leading `.`, `+`, `(` and so on); both suppressions are load-bearing, since without them a newline-separated chain reaches the parser unbounded. A brace-free chain such as `if (1) if (1) …` still accumulates and rejects.
+
+A postfix tail — `f(1)`, `a[0]`, a member step, a tagged template — charges a unit that outlives the pair it closes, because the tail leaves the tree one level deeper than it found it. Without that charge a chain of any length stayed at depth one, which is how `f(1)(1)…` reached SWC unbounded from round 2 until round 4. The charge applies only where the preceding token can end an expression, so a statement head like `if (…)` is not mistaken for a call.
+
+Template holes draw on the budget like binary-chain terms, because a template lowers to a left-nested concatenation chain whose depth outlives each hole. That is what keeps the source budget binding *before* the shared AST's own nesting limit: a sweep of eight shapes — templates, concatenation, arrays, calls, member chains, prefix operators, ternaries and objects — at every count up to 80 confirms no accepted-grammar source can reach `TS_INVALID_SHARED_AST`. The 28 is a budget in units, not visible levels; the README carries the measured per-form cost table. The adapter enforces the same 28 with one shared counter across statement and expression conversion.
+
+Level 28 compiles and executes on a 2 MiB child-thread stack; level 29 rejects as `TS_SOURCE_NESTING_LIMIT`. Child-process regressions across six shapes — 10,000 parentheses and 10,000 each of `!`, unary `-`, `typeof`, `?:`, and `+` chains — prove named-diagnostic-not-abort behavior; before the fix the last five aborted the process with a SIGABRT stack overflow at roughly 1.6 KB of source. Block lowering was flattened enough to make 28 the pinned source-level budget rather than exposing the shared AST's internal per-node cost.
+
+### Mutual recursion
+
+**v1 does not support mutually recursive function declarations.** Closures capture by value, so a cycle of hoisted declarations has no emission order: every member needs its peers' values before any of them exists.
+
+Round 2 routed each strongly connected component through a generated frame record — members captured the record instead of their peers and rebound them on entry. It worked in memory and failed at the durability boundary: the record holds the member closures while every member closure captures the record, which is a heap cycle, and because both are root-level bindings the cycle is reachable from a durable root. Cyclic heap objects are rejected at durable capture (register item 3), so every `print`, cell boundary and between-turn snapshot in a session that defined such a group failed with an internal `UnserializableValue` — after the program had already run. Trading a compile-time diagnostic for a runtime persistence failure is strictly worse, and the frame record was also the layer's only generated **global**, so it reached `runtime_globals` and would have rendered into the model-facing bound-variables prompt.
+
+The lowering is removed. A declaration cycle now rejects statically as `TS_MUTUAL_RECURSION_UNSUPPORTED` and names the cycle it found (`cycle: isEven -> isOdd -> isEven`), which is the honest form of the same deferral that item 3 already carries. Everything adjacent stays supported: self-recursion, named self-recursive function expressions, nested declarations reading enclosing bindings in any source order, and acyclic declaration chains, which keep the topological emission. A durability regression suspends and snapshots every accepted binding shape and asserts that no generated name ever reaches the global surface.
+
+### Tool signatures and structural diagnostics
+
+Rendered signatures are synchronous. Unsafe or reserved tool identifiers use collision-proof hexadecimal `__lash_tool_...` names, unsafe properties are quoted, and user names cannot collide with the generated namespace. Default parameters, rest parameters, and ambient declarations reject precisely as `TS_PARAMETER_DEFAULT_UNSUPPORTED`, `TS_PARAMETER_REST_UNSUPPORTED`, and `TS_DECLARE_UNSUPPORTED`.
+
+## Durable dialect outcome
+
+The continuation marker is a persistence requirement and lower bound, not VM identity. The compiled program dialect selects the VM behavior on fresh install and resume. TypeScript may persist a reachable acyclic shared graph; Lashlang continues to require its exclusive-ownership forest. Program/marker mismatch, shared Lashlang state, dangling references, cycles, unreachable objects, and invalid accounting fail closed with typed errors. Flag derivation occurs for each program, so prior TypeScript execution cannot contaminate later Lashlang execution.
+
+## Differential oracle
+
+`crates/lash-typescript/tests/differential/expectations.tsv` contains 310 committed rows plus its header:
+
+| Provenance | Rows |
+| --- | ---: |
+| Opus review corpus | 163 |
+| sol-sub review corpus | 124 |
+| Combined fix findings | 23 |
+
+Duplicates are retained to keep provenance counts executable: the 310 rows carry **237 distinct expressions**, so the table's effective corner coverage is that of 237 behaviours, not 310. Regeneration under Node v25.2.1 after the round-2 additions is byte-identical to the committed table apart from the six new rows. `generate.mjs` stamps and requires Node `v25.2.1`; regeneration is a deliberate reviewed action, never part of an ordinary test run. Accepted rows compare observable output, static rejections compare their named diagnostic, and the unrepresentable array-property write compares its named runtime rejection.
+
+## Honest deviation register
+
+These are the only intentional deviations for the accepted v1 surface. They are runtime-system or representation constraints, not alternate silent semantics:
+
+1. Existing instruction, wall-clock, logical-memory, and call-frame limits may terminate execution with typed VM bound errors.
+2. TypeScript source nesting is limited to 28 budget units and rejects as `TS_SOURCE_NESTING_LIMIT`, and a cell is limited to 64 KiB of source, rejecting as `TS_SOURCE_TOO_LARGE`. The size bound is a runtime-system constraint: it is what makes the parse-stack reservation finite, and so what makes stack exhaustion arithmetically unreachable.
+3. Cyclic heap objects reject at durable capture. Shared acyclic identity is preserved; cycle-capable durable graph encoding is deferred.
+4. Mutable lexical captures reject as `TS_MUTABLE_CAPTURE_UNSUPPORTED` on both reads and writes until durable lexical cells exist. Immutable captures and mutation through captured object references work.
+5. The host boundary is JSON-shaped: object properties holding `undefined` are omitted, array elements become `null`, and incoming JSON cannot manufacture `undefined`.
+6. Lone UTF-16 surrogates are not representable by the v1 UTF-8 value model. Literals reject statically as `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; two further shapes produce one only at runtime and reject there as `TS_LONE_SURROGATE_UNSUPPORTED` — splitting a string containing an astral character into units, and indexing into one. Both are catchable TypeScript exceptions.
+7. Negative and other non-index array writes reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; non-negative out-of-range writes retain ECMAScript hole-extension behavior.
+8. Identifiers starting with `__typescript_` are reserved for the lowerer's generated bindings and reject as `TS_RESERVED_IDENTIFIER`.
+9. `console.log` is host-defined rather than ECMA-262 and prints ECMA `ToString` of each argument, so `console.log({a: 1})` prints `[object Object]` where Node's inspector prints `{ a: 1 }`.
+10. A block-scoped binding that shadows an outer name of the same spelling is lowered to a generated slot, which is the one place a `__typescript_` name can appear in persisted globals. It is dead by any turn boundary and the dialect filters the reserved prefix out of the bound-variables prompt, so it is never rendered.
+11. Mutually recursive function declarations reject as `TS_MUTUAL_RECURSION_UNSUPPORTED` with the cycle named. This is item 3's deferral seen from the front end: the only v1 lowering for the shape builds a durable-rooted heap cycle, so the shape fails closed at compile time instead of at the durability boundary.
+
+No reviewed semantic divergence was moved into this register.
+
+## Compatibility and identity evidence
+
+The Opus seven-program corpus was compiled independently from base `e3b073423` and fix-round head `67de889dd`. For every program, module refs, host-requirements refs, raw `ModuleArtifact::to_store_bytes()` output, and normalized first-effect continuation bytes matched. The concatenated identity records on both sides have SHA-256:
+
+`b76f7578d37928ac4c8b044f62b7bbedd40e0079c114627b428063efa8dc603d`
+
+The continuation comparison removes only `active_execution_elapsed` (pre-existing nondeterminism), `format_version`, and the new `reference_semantics` persistence marker, exactly as the reviewer probe does. `CompiledProgram` debug text intentionally gained `dialect: Lashlang`; this is diagnostic metadata and is not part of the artifact or continuation byte comparison. The dedicated package run remains exactly **461 Lashlang unit tests**, all passing with the pre-existing semantic expectations.
+
+## Gate results
+
+Commands ran unpiped from `/workspace/code/lash-fig-1304` with `CARGO_TARGET_DIR=/workspace/.cargo-target-lash-fig-1304` where applicable. The table below is the round-2 battery, rerun in full on the final tree.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `cargo check --workspace --all-targets --locked` | PASS | Entire workspace and all targets checked. |
+| `cargo test --workspace --locked` | PASS | Full unit, integration, property, UI/trybuild, simulation, conformance, and doctest suite completed with zero failures. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS | Zero warnings. |
+| `cargo fmt --all --check` | PASS | No formatting drift. |
+| `python3 scripts/check_included_file_formatting.py` | PASS | 37 include-assembled Rust files checked. |
+| `python3 scripts/lint_docs.py` | PASS | 46 HTML pages and 42 registry pages checked. |
+| `bash scripts/check-rustdoc.sh` | PASS | 599 `lash-core` public members documented, 0 missing; workspace docs built. |
+| `python3 scripts/check_test_quarantines.py` | PASS | Quarantine metadata valid. |
+| `python3 scripts/check_api_example_coverage.py` | PASS | 8,065 API coverage entries satisfied. |
+| `just perf-guard` | PASS | 297 Lashlang perf results and 1 profile result; runtime and stack budgets passed. |
+| `bash scripts/check-production-file-size.sh` | PASS | Production and test/support files remain within repository budgets. |
+| `git diff --check 93874e275..HEAD` | PASS | No whitespace errors across the whole branch before the final report commit. |
+| `cargo test -p lash-typescript --locked` | PASS | 220 tests across unit, depth, dialect, differential, ECMA, rejection, scoping, structural, and curated test262 suites (94 before round 2, 109 before round 3, 115 before round 4, 165 before round 5, 194 before round 6, 210 before round 7, 219 before the residual round). |
+| Committed Node differential table | PASS | All 310 rows match the checked Node v25.2.1 expectations or named rejection; regeneration under Node v25.2.1 reproduces the committed file byte for byte. |
+| `node crates/lash-typescript/tests/differential/generate.mjs` | PASS | Deliberate regeneration, Node version stamped and enforced by the generator. |
+| Base-vs-head Lashlang byte identity | PASS | Seven of seven raw artifact and normalized continuation records match; combined SHA-256 shown above. |
+| `cargo test -p lashlang --locked` | PASS | 461 unit tests passed, unchanged; all package integration/property/stack tests also passed. |
+| Lexical-fidelity sweep (14 units x 2 axes x 20 000 repeats, 2 MiB child processes) | PASS | Non-ASCII identifiers, identifier escapes, numeric separators and Unicode line terminators, in the nesting direction; the legal direction covers 120-statement programs of each. |
+| Generative family sweep (66 units x 2 axes x 100 000 repeats, 2 MiB child processes) | PASS | Every recursive production of the grammar SWC parses, and mixed combinations, inline and one per line, returns `TS_SOURCE_NESTING_LIMIT` with a clean exit. |
+| SWC AST node-kind classification | PASS | Exhaustive wildcard-free matches over `Expr`, `Stmt` and `TsType`; a new SWC variant is a compile error. |
+| **Abort corpus with the preflight disabled (29 shapes, filled to the 64 KiB bound, one child process each)** | **PASS** | The load-bearing guard: every shape that aborted in any round returns a diagnostic or a parse with the preflight switched off. |
+| **Fuzzed sources with the preflight disabled (192 sources, 8 child processes)** | PASS | |
+| Oversized source rejection | PASS | 64 KiB + 1 rejects as `TS_SOURCE_TOO_LARGE`; a source at the bound compiles. |
+| Unavailable reservation under a 2 GiB `RLIMIT_AS` | PASS | A cap-sized cell fails closed as `TS_PARSE_RESOURCES_UNAVAILABLE`; small cells keep parsing. Mutation-checked: restoring the old mapping turns the test red. |
+| Mutation power-check (label regate reverted) | RED as designed on the unit sweep, green on the no-abort guards, then restored | The intended split: a missing charge is now a diagnostic regression, not a crash. |
+| Deterministic parser fuzzer (4 096 sources x 4 lengths, child processes) | PASS | No source built from the charged alphabet drives SWC past the stack budget; half the corpus pairs a lexical atom with a charge-bearing tail, and the corpus is required to reach the budget on more than half its sources. |
+| Mutation power-check (identifier `>= 0x80` rule deleted) | RED as designed, then restored | Both the lexical sweep and the fuzzer fail; the tree is restored and green. |
+| Legal ASI corpus (trailing/block comments, CRLF, multiline templates, newline arrow bodies, 120-statement sequences) | PASS | No false rejection. |
+| Shared-AST leak sweep (8 shapes x 80 counts) | PASS | No accepted-grammar source reaches `TS_INVALID_SHARED_AST`. |
+| Durability corpus (suspend + snapshot) | PASS | Every accepted binding shape suspends, encodes its continuation, and snapshots; no generated name reaches the global surface. |
+
+The first verification pass exposed a stale docs-snippet assertion that still expected `Promise` signatures and two strict-lint style findings. Commits `074b24b3e`, `db4201eb7`, and `ea8ca2aeb` corrected them; every affected gate and the full battery were rerun successfully on the corrected tree. In round 2 the workspace suite exited 0 on the first run; the `lash-sqlite-store` `sqlite_real_turn_crash_matrix` seeded flake recorded by the verifier (P3-9) did not reproduce, and it remains a pre-existing concurrency-load flake unrelated to this layer — no TypeScript or Lashlang code path is involved.
+
+Round 7 reran the whole battery again, workspace suite green on the first run. Round 6 reran the whole battery again, workspace suite green on the first run. Round 5 reran the whole battery once more on the final tree, workspace suite green on the first run. Round 4 reran the whole battery again on the final tree, with the workspace suite green on the first run. Round 3 reran the whole battery on the final tree; the workspace suite again exited 0 on the first run and the `sqlite_real_turn_crash_matrix` seeded flake did not recur.
+
+The `ToNumber(String)` whitespace correction lives in `crates/lashlang/src/runtime/javascript.rs`, which is reached only through the `JavaScriptUnary`/`JavaScriptBinary` opcodes the TypeScript lowering emits. No Lashlang program semantics, and no semantic hash, change with it.
+
+## Explicitly deferred
+
+- FIG-1305 owns TypeScript tool execution and `await`; this layer deliberately disables both and also disables deferred tool resolution.
+- Continuation `active_execution_elapsed` nondeterminism predates this layer and remains deferred; the byte-identity method normalizes that field explicitly.
+- Cycle-capable durable graphs and durable mutable lexical cells remain deferred and fail closed as documented above.
+
+No compatibility shim, fallback parser, dual execution path, migration adapter, silent semantic divergence, or `docs/adr/` change was added.
+
+## Round-2 verification note
+
+### Round 7 — the escalation
+
+Round 6 found R6-1: a contextual keyword used as a label name (`type:` x 200, 1 002 bytes) aborted the process, because the label charge was gated on `can_end_expression`, itself derived from the automatic-semicolon-insertion reserved-word list — one predicate answering two different questions. It was the third consecutive defect in the same charge, and the third consecutive round in which the standing guards were correct about the axis they modelled while the abort sat one definition to the side of it. The escalation trigger recorded in round 6 fired, and the orchestrator honoured it.
+
+**What changed.** The guarantee moved off the preflight and onto arithmetic.
+
+| # | Change | Commit |
+| ---: | --- | --- |
+| 1 | A TypeScript cell is bounded at 64 KiB and rejects with `TS_SOURCE_TOO_LARGE`, registered as a runtime-system constraint. Nothing in the RLM layer bounded cell source before this. | `157335263` |
+| 2 | Parsing runs on a dedicated thread whose stack is `8 MiB + 40 000 x source_bytes`. | `157335263` |
+| 3 | `tests/no_abort_guarantee.rs` disables the preflight entirely and runs every shape that aborted in any of the six rounds — filled to the accepted bound — plus the fuzzer's corpus. Each must return a diagnostic or a parse. | `dfe45d7c7` |
+| 4 | R6-1 fixed properly in the preflight: the label charge asks its own narrower question, `can_name_a_label`, instead of reusing the ASI exclusion list. The fuzzer's indivisible pairing is extended to 22 contextual keywords. | `dfe45d7c7`, `ad6ce80e4` |
+
+**The arithmetic.** The worst case is **one source byte per nesting level**. The first version of this derivation claimed two — an opener and a closer — and the round-7 verification falsified it: `(` repeated with no closers is a complete recursive-descent recursion of depth `n` from `n` bytes, SWC only discovers the problem at end of input, and that same shape is simultaneously the most expensive *per level*, so the densest source and the deepest frames coincide instead of trading off. Re-measured on the unclosed forms, by binary search with each attempt in its own process: unclosed `(` costs ~19 900 bytes per source byte, unclosed `{` ~12 000, unclosed `[` ~11 300, `A<` ~9 300, label chains ~5 600. The verification measured the same worst shape at up to **22 540**, which is the figure the constant is set against. Usage is linear in depth — at depths 1 000 through 8 000 the per-level cost varies by under half a percent — which is what makes extrapolating to the bound sound.
+
+Reserving 40 000 bytes per source byte therefore leaves a margin of about **1.8x** (40 000 / 22 540), not the 4x first claimed. An independent check agrees: the worst shape at the bound touches 1 228 MB of the 2 508 MB reserved, **2.04x** by peak RSS. The margin is accepted rather than widened for two reasons. Restoring 4x would reserve 5.9 GiB for a cap-sized cell, which makes the address-space requirement worse — the reservation already fails closed under an `RLIMIT_AS` below 2 GiB. And the margin is *guarded* rather than asserted: the unclosed-delimiter worst cases now fill the bound in `no_abort_guarantee.rs` with the preflight disabled, so a future SWC whose frames outgrew the reservation would fail CI rather than production. Correcting this mattered more than an ordinary documentation bug would: round 7 exists because five rounds of prose arguments about SWC kept being wrong, and an arithmetic argument resting on a false premise is that same failure mode one level up.
+
+At the 64 KiB bound the largest reservation is 8 MiB + 2.44 GiB of address space; pages commit when touched, and an ordinary cell touches a few hundred kilobytes. A 4 GiB reservation spawns and joins in about 80 microseconds, 256 concurrent cap-sized parses all complete, and a cap-sized cell costs about 30 ms end to end — nearly all of it mapping and unmapping the reservation rather than parsing.
+
+Only the parse and the drop of its output scale with the source. Everything downstream is bounded independently: the adapter refuses to convert past 28 levels, so the normalized tree is at most that deep, the lowerer walks that tree, and `lashlang` rejects any shared AST deeper than its own 64-level limit. The base allowance covers all of it.
+
+**What the guards mean now.** They have different jobs, and the round-7 mutation check makes the split explicit. Reverting the label regate turns `depth_guard.rs`'s unit sweep **red**, because that sweep is the guard on the preflight's charges — the diagnostic-quality property. It leaves the fuzzer and the no-abort corpus **green**, and that is the intended outcome rather than a weakness: after the structural change a missing charge is a worse diagnostic, not a dead process. That is precisely what retiring the class means.
+
+Round 6 added a third axis to the guards and, with it, a stopping rule. The first two axes are about the grammar: which productions recurse, and whether each is charged. The third is about the lexer: the preflight tokenises the source itself, so it is a second implementation of SWC's lexer, and a charge gated on a token boundary is disarmed wherever the two disagree. That axis has its own enumerable surface — Unicode identifiers, identifier escapes, numeric separators, Unicode line terminators — and it is now swept in both directions and drawn from by the fuzzer, whose lexical half pairs an atom with the charge-bearing token that follows it. Both guards were re-verified by mutation: deleting the `>= 0x80` rule turns the lexical sweep and the fuzzer red, and restoring it returns them to green.
+
+**Escalation trigger, on the record.** Three axes is where this approach stops earning further patches. If a subsequent verification round finds an abort that is *neither* a missing grammar family *nor* within the widened lexical axis, the response is not another charge: it is to bound the recursion where it actually happens — parse in a subprocess, or on a thread with a guard page and a recovered signal — so the guarantee stops depending on this crate's lexer agreeing with SWC's at all. That is a design change with its own cost, which is why it is a trigger and not the current plan; the structure being defended against is real, though, since a hand-written scanner that must match another parser's tokenisation is a standing source of exactly this class of defect.
+
+The round-5 fixes corrected the *premise* of the method. Round 4's argument enumerated the recursive productions of the accepted surface; the preflight, however, protects SWC, which parses the whole TypeScript grammar, so every production the dialect rejects later — labels, casts, type operators — still recurses in it and still had to be charged. `src/adapter/nesting.rs` now says so explicitly and walks the parsed grammar, and two mechanical cross-checks in `tests/grammar_coverage.rs` stop the argument from drifting again: an exhaustive wildcard-free match over SWC's own `Expr`, `Stmt` and `TsType` node kinds, which fails to compile if SWC gains a variant that nobody has classified; and a deterministic fuzzer that draws sources from the charged alphabet — biased towards small sub-alphabets, because uniform sequences hide an uncharged family behind its charged neighbours — and parses each inside a child process on the stack contract. The fuzzer was validated by deleting the label charge and confirming it fails, and it found the `for`-header separator defect on its first honest run.
+
+The round-4 fixes changed the method, not only the code. The no-abort property had been verified against hand-written shape corpora three rounds running, and each round a family outside the corpus aborted the process. `src/adapter/nesting.rs` now carries the argument that the accepted grammar's recursive productions fall into exactly five families — prefix, infix, postfix, delimiter, statement form — with the reasoning for why nothing else recurses, and `tests/depth_guard.rs` turns that argument into the standing guard: 48 generated units, each repeated to 100 000 and parsed in its own process on the 2 MiB stack contract, covering every family and mixed combinations of them. The instance tests remain, but they are no longer what carries the guarantee. Writing the sweep found both round-3 P0s immediately.
+
+The round-3 fixes were likewise driven red-first: the durability regression suspends and snapshots the way an RLM session does between turns, so it reproduces R2-4 at the boundary the verifier used rather than through `lashlang::execute`, which is exactly what the round-2 scoping tests missed.
+
+The round-2 fixes were driven red-first against the verifier's own repros: the nine-source nesting sweep on a 2 MiB stack, the three transitive-capture programs, the two mutual-recursion and nested-declaration programs, and both generated-namespace collisions were each reproduced before any fix and are now permanent regressions. Two of the verifier's findings led further than reported: the round-1 nesting preflight also accumulated statement keywords across sibling statements, so 28 flat `if` statements falsely rejected (closed as P0-1b), and the mutual-recursion fix additionally required nested declarations to see enclosing-function bindings independent of source order.

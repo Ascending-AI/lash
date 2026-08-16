@@ -13,7 +13,7 @@ pub use types::{
 
 use super::exceptions::PendingErrorOrigin;
 
-pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 4;
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
@@ -52,6 +52,7 @@ impl TestSuspension {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct VmContinuation {
     pub format_version: u32,
+    pub reference_semantics: bool,
     pub instruction_pointer: usize,
     pub active_function: Option<u32>,
     #[serde(
@@ -213,6 +214,7 @@ mod continuation_serde {
     #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
     enum ValueWire {
         Null,
+        Undefined,
         Bool(bool),
         Number(NumberWire),
         String(String),
@@ -266,6 +268,7 @@ mod continuation_serde {
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
         Ok(match value {
             Value::Null => ValueWire::Null,
+            Value::Undefined => ValueWire::Undefined,
             Value::Bool(value) => ValueWire::Bool(*value),
             Value::Number(value) => ValueWire::Number(NumberWire {
                 version: NUMBER_WIRE_VERSION,
@@ -293,6 +296,7 @@ mod continuation_serde {
     fn value_from_wire(value: ValueWire) -> Result<Value, &'static str> {
         Ok(match value {
             ValueWire::Null => Value::Null,
+            ValueWire::Undefined => Value::Undefined,
             ValueWire::Bool(value) => Value::Bool(value),
             ValueWire::Number(value) => {
                 if value.version != NUMBER_WIRE_VERSION {
@@ -719,6 +723,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap: Self::new_heap(host),
             heap_initialized: false,
             extras_heapified: false,
+            reference_semantics: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -754,6 +759,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap: Self::new_heap(host),
             heap_initialized: false,
             extras_heapified: false,
+            reference_semantics: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -878,8 +884,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             })
             .collect::<Result<Vec<_>, ContinuationError>>()?;
 
-        let continuation = VmContinuation {
+        let mut continuation = VmContinuation {
             format_version: VM_CONTINUATION_FORMAT_VERSION,
+            reference_semantics: false,
             instruction_pointer: self.ip,
             active_function: self
                 .active_function
@@ -912,7 +919,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_execution_elapsed: self.active_execution_elapsed,
             heap: VmHeapContinuation::new(self.heap.clone()),
         };
-        validate_continuation(&continuation)?;
+        if let Err(error) = validate_continuation(&continuation) {
+            if !self.reference_semantics {
+                return Err(error);
+            }
+            continuation.reference_semantics = true;
+            validate_continuation(&continuation)?;
+        }
         Ok(continuation)
     }
 
@@ -928,6 +941,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 expected: VM_CONTINUATION_FORMAT_VERSION,
                 found: continuation.format_version,
             });
+        }
+        let reference_semantics = program.dialect == CompilationDialect::Typescript;
+        if continuation.reference_semantics && !reference_semantics {
+            return Err(ContinuationError::ReferenceSemanticsDialectMismatch);
         }
         validate_continuation(&continuation)?;
         validate_program_continuation(&continuation, &program.chunk)?;
@@ -1116,6 +1133,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             },
             heap_initialized: true,
             extras_heapified: false,
+            reference_semantics,
             // A resumed VM records assignments from here on. Continuations are
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are
@@ -1135,6 +1153,7 @@ mod tests {
     fn empty_continuation(heap: Heap) -> VmContinuation {
         VmContinuation {
             format_version: VM_CONTINUATION_FORMAT_VERSION,
+            reference_semantics: false,
             instruction_pointer: 0,
             active_function: None,
             operand_stack: Vec::new(),

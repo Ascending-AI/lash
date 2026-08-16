@@ -155,6 +155,11 @@ pub enum RuntimeError {
     /// List assignment used an index that is not an integer.
     #[error("list assignment index must be an integer")]
     InvalidListAssignmentIndex,
+    /// TypeScript array assignment targeted a property the v1 heap cannot store.
+    #[error(
+        "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED: array property `{key}` is not representable in the v1 heap"
+    )]
+    TypeScriptArrayNonIndexPropertyUnsupported { key: String },
     /// A builtin received the wrong number of arguments.
     #[error("`{name}` takes {expected} arg(s), got {actual}")]
     InvalidArgumentCount {
@@ -469,6 +474,7 @@ impl RuntimeError {
             Self::CannotAssignIndex { .. } => ErrorTaxonomy::Catchable,
             Self::CannotAssignThroughIndex { .. } => ErrorTaxonomy::Catchable,
             Self::InvalidListAssignmentIndex => ErrorTaxonomy::Catchable,
+            Self::TypeScriptArrayNonIndexPropertyUnsupported { .. } => ErrorTaxonomy::Catchable,
             Self::InvalidArgumentCount { .. } => ErrorTaxonomy::Catchable,
             Self::EmptyUnsupported => ErrorTaxonomy::Catchable,
             Self::KeysUnsupported => ErrorTaxonomy::Catchable,
@@ -590,6 +596,9 @@ impl RuntimeError {
             Self::CannotAssignIndex { .. } => "CannotAssignIndex",
             Self::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
             Self::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
+            Self::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
+                "TypeScriptArrayNonIndexPropertyUnsupported"
+            }
             Self::InvalidArgumentCount { .. } => "InvalidArgumentCount",
             Self::EmptyUnsupported => "EmptyUnsupported",
             Self::KeysUnsupported => "KeysUnsupported",
@@ -782,6 +791,7 @@ mod tests {
                 actual: "value".into(),
             },
             RuntimeError::InvalidListAssignmentIndex,
+            RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key: "-1".into() },
             RuntimeError::InvalidArgumentCount {
                 name: "call".into(),
                 expected: "one or two".into(),
@@ -1088,6 +1098,9 @@ mod tests {
                 RuntimeError::InvalidListAssignmentIndex => {
                     "list assignment index must be an integer"
                 }
+                RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
+                    "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED: array property `-1` is not representable in the v1 heap"
+                }
                 RuntimeError::InvalidArgumentCount { .. } => {
                     "`call` takes one or two arg(s), got 3"
                 }
@@ -1268,7 +1281,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 110] = [
+    const RUNTIME_ERROR_CODES: [&str; 111] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1304,6 +1317,7 @@ mod tests {
         "CannotAssignIndex",
         "CannotAssignThroughIndex",
         "InvalidListAssignmentIndex",
+        "TypeScriptArrayNonIndexPropertyUnsupported",
         "InvalidArgumentCount",
         "EmptyUnsupported",
         "KeysUnsupported",
@@ -1426,6 +1440,9 @@ mod tests {
             RuntimeError::CannotAssignIndex { .. } => "CannotAssignIndex",
             RuntimeError::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
             RuntimeError::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
+            RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
+                "TypeScriptArrayNonIndexPropertyUnsupported"
+            }
             RuntimeError::InvalidArgumentCount { .. } => "InvalidArgumentCount",
             RuntimeError::EmptyUnsupported => "EmptyUnsupported",
             RuntimeError::KeysUnsupported => "KeysUnsupported",

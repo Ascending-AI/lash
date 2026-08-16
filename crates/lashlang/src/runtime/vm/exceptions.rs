@@ -120,6 +120,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    pub(super) fn abandon_finally_keep_value(&mut self) -> Result<(), RuntimeError> {
+        let value = self.pop_stack()?;
+        self.abandon_finally()?;
+        self.stack.push(value);
+        Ok(())
+    }
+
     pub(super) fn finish_finally(&mut self) -> Result<Option<FinallyEscape>, RuntimeError> {
         let Some(finally) = self.finally_stack.pop() else {
             return Err(RuntimeError::InvalidExceptionState {

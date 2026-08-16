@@ -305,6 +305,7 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
     let slot_count = program.chunk.slot_names.len();
     let base = VmContinuation {
         format_version: VM_CONTINUATION_FORMAT_VERSION,
+        reference_semantics: false,
         instruction_pointer: 0,
         active_function: None,
         operand_stack: Vec::new(),

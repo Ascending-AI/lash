@@ -31,6 +31,7 @@ members = [
     "crates/lash-subagents",
     "crates/lash-perf",
     "crates/lashlang",
+    "crates/lash-typescript",
     "examples/agent-service",
     "examples/agent-workbench",
     "examples/docs-snippets",
@@ -121,6 +122,7 @@ percent-encoding = "2.3"
 regex = "1"
 reqwest = { version = "0.13", default-features = false }
 rmp-serde = "1.3.1"
+ryu = "1"
 rmcp = { version = "1.6", default-features = false }
 restate-sdk = { version = "0.10", default-features = false, features = ["http_server"] }
 schemars = "0.8"
@@ -138,6 +140,8 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 unicode-normalization = "0.1"
 uuid = "1"
+num-bigint = "0.4"
+num-traits = "0.2"
 
 
 # Internal crates — lockstep with [workspace.package].version. These carry the
@@ -172,6 +176,10 @@ lash-tools = { path = "crates/lash-tools", version = "=0.0.0-dev" }
 lash-trace = { path = "crates/lash-trace", version = "=0.0.0-dev" }
 lash-sqlite-store = { path = "crates/lash-sqlite-store", version = "=0.0.0-dev" }
 lashlang = { path = "crates/lashlang", version = "=0.0.0-dev" }
+lash-typescript = { path = "crates/lash-typescript", version = "=0.0.0-dev" }
+swc_common = "=25.0.0"
+swc_ecma_ast = "=28.0.0"
+swc_ecma_parser = { version = "=44.0.0", default-features = false, features = ["typescript"] }
 [profile.release]
 lto = "thin"
 strip = true

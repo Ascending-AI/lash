@@ -182,6 +182,7 @@ impl ResourceHandle {
 #[derive(Clone, Debug)]
 pub enum Value {
     Null,
+    Undefined,
     Bool(bool),
     Number(f64),
     String(CompactString),
@@ -215,6 +216,7 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Null, Self::Null) => true,
+            (Self::Undefined, Self::Undefined) => true,
             (Self::Bool(left), Self::Bool(right)) => left == right,
             (Self::Number(left), Self::Number(right)) => left == right,
             (Self::String(left), Self::String(right)) => left == right,
@@ -815,6 +817,7 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Null => write!(f, "null"),
+            Self::Undefined => write!(f, "undefined"),
             Self::Bool(value) => write!(f, "{value}"),
             Self::Number(value) => write_number(f, *value),
             Self::String(value) => write!(f, "{value}"),

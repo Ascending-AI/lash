@@ -102,8 +102,16 @@ pub(super) fn instruction_heap_plan(
         | I::Throw
         | I::BuildTuple(_)
         | I::BuildList(_)
-        | I::BuildRecord(_) => InstructionHeapPlan::heap_native(),
+        | I::BuildHeapList(_)
+        | I::BuildRecord(_)
+        | I::BuildHeapRecord(_)
+        | I::Duplicate
+        | I::JavaScriptUnary(_)
+        | I::JavaScriptBinary(_)
+        | I::Intrinsic(IntrinsicOp::JavaScriptSplit | IntrinsicOp::JavaScriptJoin)
+        | I::IsNullish => InstructionHeapPlan::heap_native(),
         I::StoreName(_) => InstructionHeapPlan::heap_native(),
+        I::HeapPathAssign { .. } => InstructionHeapPlan::heap_native(),
         // These export the operands they need through the heap themselves.
         I::AddAssignIndexNumber { .. } | I::AddAssignIndexSlotNumber { .. } => {
             InstructionHeapPlan::heap_native()
@@ -114,6 +122,7 @@ pub(super) fn instruction_heap_plan(
         // Pure pushes and jumps read nothing from the stack.
         I::PushConst(_)
         | I::PushNull
+        | I::PushUndefined
         | I::PushBool(_)
         | I::PushNumber(_)
         | I::LoadName(_)
@@ -127,6 +136,7 @@ pub(super) fn instruction_heap_plan(
         | I::EnterFinally { .. }
         | I::EndFinally
         | I::AbandonFinally => InstructionHeapPlan::stack(Top(0)),
+        I::AbandonFinallyKeepValue => InstructionHeapPlan::heap_native(),
 
         // Single-operand opcodes.
         I::Field(_)

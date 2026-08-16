@@ -1,0 +1,124 @@
+typeof undefined
+typeof null
+typeof 1
+typeof 'a'
+typeof true
+typeof {}
+typeof []
+typeof (function f(){})
+null == undefined
+null === undefined
+NaN == NaN
+-0 === 0
+'' == 0
+'0' == false
+[] == false
+[] == ''
+[] == 0
+[1] == 1
+[1,2] == '1,2'
+({}) == '[object Object]'
+'abc' < 'abd'
+'10' < '9'
+10 < 9
+'10' < 9
+null >= 0
+null > 0
+undefined == 0
+true + true
+1 + '2'
+'2' + 1
+1 - '2'
+'3' * '4'
+[] + []
+[] + {}
+1 + []
+1 + {}
+{}
+[1,2] + 3
+'a' + undefined
+'a' + null
+`${undefined}`
+`${null}`
+`${[1,2]}`
+`${[1,[2,3]]}`
+`${[null,undefined,1]}`
+`${{a:1}}`
+`${-0}`
+`${0}`
+`${1/0}`
+`${-1/0}`
+`${0/0}`
+`${1e21}`
+`${1e20}`
+`${1e-6}`
+`${1e-7}`
+`${1e100}`
+`${5e-324}`
+`${0.1+0.2}`
+`${123456789012345678901234567890}`
+`${-1e21}`
+`${1.5e-10}`
+`${100000000000000000000}`
+1e21
+1e-7
+0.1+0.2
++'inf'
++'infinity'
++'Infinity'
++'+Infinity'
++'-Infinity'
++'+0x10'
++'0x10'
++'0b101'
++'0o17'
++' 12 '
++''
++'  '
++'12abc'
++'1_0'
++'0xFFFFFFFFFFFFFFFFF'
++null
++undefined
++true
++[]
++[5]
++[1,2]
++{}
+-'5'
+!''
+!0
+!-0
+!NaN
+![]
+!({})
+!'0'
+0 || 'x'
+'' || 'x'
+1 && 2
+0 && 2
+null ?? 'd'
+undefined ?? 'd'
+0 ?? 'd'
+'' ?? 'd'
+false ?? 'd'
+'abc'.toUpperCase()
+'ABC'.toLowerCase()
+'  a  '.trim()
+'abc'.startsWith('a')
+'abc'.endsWith('c')
+'abc'.includes('')
+'abc'.includes('b')
+'abc'.split('')
+'a,b'.split(',')
+''.split(',')
+'abc'.split('b')
+[1,2,3].join('-')
+[1,null,2].join(',')
+[].join(',')
+[[1,2],3].join(',')
+[1,2].includes(1)
+'abc' === 'abc'
+1 === 1.0
+'5' == 5
+' \t\n 5 ' == 5

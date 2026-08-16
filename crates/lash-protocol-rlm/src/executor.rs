@@ -74,6 +74,70 @@ async fn execute_code_unbounded_for_tests(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_code_with_bounds(
+    state: RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    request: ExecRequest,
+    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    lashlang_surface: LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    session_projected_bindings: RlmProjectedBindings,
+    projection_resolver: Arc<dyn ProjectionResolver>,
+    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
+) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
+    execute_code_with_dialect_and_bounds(
+        state,
+        ctx,
+        request,
+        artifact_store,
+        lashlang_surface,
+        deferred_tool_resolver,
+        session_projected_bindings,
+        projection_resolver,
+        lashlang_execution_trace_config,
+        execution_bounds,
+        SourceDialect::Lashlang,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_typescript_code_with_bounds(
+    state: RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    request: ExecRequest,
+    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    lashlang_surface: LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    session_projected_bindings: RlmProjectedBindings,
+    projection_resolver: Arc<dyn ProjectionResolver>,
+    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
+) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
+    execute_code_with_dialect_and_bounds(
+        state,
+        ctx,
+        request,
+        artifact_store,
+        lashlang_surface,
+        deferred_tool_resolver,
+        session_projected_bindings,
+        projection_resolver,
+        lashlang_execution_trace_config,
+        execution_bounds,
+        SourceDialect::Typescript,
+    )
+    .await
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceDialect {
+    Lashlang,
+    Typescript,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_code_with_dialect_and_bounds(
     mut state: RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
@@ -84,6 +148,7 @@ pub(crate) async fn execute_code_with_bounds(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
+    source_dialect: SourceDialect,
 ) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
     let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
@@ -99,6 +164,7 @@ pub(crate) async fn execute_code_with_bounds(
         projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
+        source_dialect,
     ))
     .await;
     Ok((state, response))
@@ -231,6 +297,7 @@ async fn execute_code_inner(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
+    source_dialect: SourceDialect,
 ) -> ExecResponse {
     state.mark_execution_started();
     select_deferred_resolution_link(state, &ctx);
@@ -259,7 +326,9 @@ async fn execute_code_inner(
     // Catalog is never mutated — resolution is link-scoped only. A resolver is
     // present only under hosts that configure RLM deferral; most hosts ship
     // none and this is a no-op.
-    if deferred_tool_resolver.is_some() || !state.deferred_resolutions.is_empty() {
+    if source_dialect == SourceDialect::Lashlang
+        && (deferred_tool_resolver.is_some() || !state.deferred_resolutions.is_empty())
+    {
         let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve");
         if let Ok(program) = lashlang::parse(code) {
             host_environment = lash_lashlang_runtime::resolve_and_fold_deferred(
@@ -290,15 +359,48 @@ async fn execute_code_inner(
     }
     host_environment = host_environment.with_globals(live_global_names);
 
-    let compile_result = {
+    let compile_result: Result<_, String> = {
         let _phase = ctx.named_phase("rlm_lashlang.compile_link");
-        state
-            .linked_programs
-            .get_or_compile(code, &host_environment)
+        match source_dialect {
+            SourceDialect::Lashlang => state
+                .linked_programs
+                .get_or_compile(code, &host_environment)
+                .map_err(|error| match error {
+                    lashlang::LinkedProgramCacheError::Parse(error) => {
+                        format_rlm_parse_diagnostic(code, &error)
+                    }
+                    lashlang::LinkedProgramCacheError::Link(error) => {
+                        format_rlm_link_diagnostic(code, &error)
+                    }
+                }),
+            // TypeScript is parsed here rather than by the cache, so the cache
+            // is asked first: otherwise every cell would pay a full parse even
+            // when its linked program is already cached.
+            SourceDialect::Typescript => match state.linked_programs.cached_linked_program(
+                code,
+                &host_environment,
+                lashlang::CompilationDialect::Typescript,
+            ) {
+                Some(program) => Ok(program),
+                None => lash_typescript::parse(code)
+                    .map_err(|error| error.to_string())
+                    .and_then(|program| {
+                        state
+                            .linked_programs
+                            .get_or_compile_ast(
+                                code,
+                                program,
+                                &host_environment,
+                                lashlang::CompilationDialect::Typescript,
+                            )
+                            .map_err(|error| format_rlm_link_diagnostic(code, &error))
+                    }),
+            },
+        }
     };
     let cached_program = match compile_result {
         Ok(program) => program,
-        Err(lashlang::LinkedProgramCacheError::Parse(err)) => {
+        Err(error) => {
             return ExecResponse {
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
@@ -306,20 +408,7 @@ async fn execute_code_inner(
                 executed_calls: Vec::new(),
                 images: Vec::new(),
                 printed_images: Vec::new(),
-                error: Some(format_rlm_parse_diagnostic(code, &err)),
-                duration_ms: start.elapsed().as_millis() as u64,
-                terminal_finish: None,
-            };
-        }
-        Err(lashlang::LinkedProgramCacheError::Link(err)) => {
-            return ExecResponse {
-                observations: Vec::new(),
-                observation_truncation: Vec::new(),
-                tool_calls: Vec::new(),
-                executed_calls: Vec::new(),
-                images: Vec::new(),
-                printed_images: Vec::new(),
-                error: Some(format_rlm_link_diagnostic(code, &err)),
+                error: Some(error),
                 duration_ms: start.elapsed().as_millis() as u64,
                 terminal_finish: None,
             };
@@ -922,7 +1011,7 @@ mod tests {
     }
 
     async fn execute_test_code(state: RlmExecutionState, code: String) -> RlmExecutionState {
-        let (state, response) = execute_code_unbounded_for_tests(
+        let (state, response) = Box::pin(execute_code_unbounded_for_tests(
             state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
@@ -936,7 +1025,7 @@ mod tests {
             RlmProjectedBindings::default(),
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
-        )
+        ))
         .await
         .expect("execute test Lashlang");
         assert_eq!(response.error, None, "test Lashlang execution failed");
@@ -3268,7 +3357,7 @@ mod tests {
                 "FIG1195_FLAT_GROWTH full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
                 measured.len()
             );
-            assert_eq!(full_state_bytes, 136_690);
+            assert_eq!(full_state_bytes, 136_711);
             assert_eq!(minimum, 21_047);
             assert_eq!(maximum, 21_101);
         });
@@ -3296,7 +3385,7 @@ mod tests {
                 .to_canonical_bytes()
                 .expect("accumulated canonical state")
                 .len();
-            assert_eq!(full_state_bytes, 1_104_932);
+            assert_eq!(full_state_bytes, 1_104_953);
             let _initial = state.snapshot_execution_state().expect("initial snapshot");
             state.acknowledge_execution_state_capture();
 

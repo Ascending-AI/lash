@@ -142,7 +142,7 @@ fn materialize_projected_json(value: Value) -> Value {
 pub(crate) fn flow_to_json_value<'a>(value: &'a FlowValue) -> ProjectedFuture<'a, Value> {
     Box::pin(async move {
         match value {
-            FlowValue::Null => Value::Null,
+            FlowValue::Null | FlowValue::Undefined => Value::Null,
             FlowValue::Bool(value) => Value::Bool(*value),
             FlowValue::Number(value) => json_number(*value),
             FlowValue::String(value) => Value::String(value.to_string()),
@@ -181,6 +181,9 @@ pub(crate) fn flow_to_json_value<'a>(value: &'a FlowValue) -> ProjectedFuture<'a
 pub(crate) async fn flow_record_to_json_value(record: &FlowRecord) -> Value {
     let mut object = serde_json::Map::with_capacity(record.len());
     for (key, value) in record.iter() {
+        if matches!(value, FlowValue::Undefined) {
+            continue;
+        }
         object.insert(key.to_string(), flow_to_json_value(value).await);
     }
     Value::Object(object)
@@ -307,6 +310,7 @@ fn rehydrate_projected_value<'a>(
                 Ok(changed)
             }
             FlowValue::Null
+            | FlowValue::Undefined
             | FlowValue::Bool(_)
             | FlowValue::Number(_)
             | FlowValue::String(_)
@@ -360,4 +364,31 @@ pub(crate) fn projection_ref_from_seed_value(
     serde_json::from_value::<ProjectionRef>(inner.clone())
         .map(Some)
         .map_err(|err| RlmProjectedSeedError::invalid_projection_ref(name, err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn undefined_uses_json_stringify_container_rules() {
+        let record = FlowRecord::from_iter([
+            ("absent".to_string(), FlowValue::Undefined),
+            ("present".to_string(), FlowValue::Null),
+            (
+                "items".to_string(),
+                FlowValue::List(vec![FlowValue::Undefined, FlowValue::Null].into()),
+            ),
+        ]);
+
+        assert_eq!(
+            flow_record_to_json_value(&record).await,
+            serde_json::json!({"present": null, "items": [null, null]})
+        );
+        assert_eq!(
+            json_to_flow_value(serde_json::Value::Null),
+            FlowValue::Null,
+            "JSON has no representation that can manufacture undefined"
+        );
+    }
 }
