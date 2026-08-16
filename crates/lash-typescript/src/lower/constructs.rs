@@ -113,6 +113,7 @@ impl Lowerer {
                 None,
             ));
         }
+        let nested_function = self.current_function() != 0;
         let index = self.root_scope_depth.saturating_sub(1);
         let scope = self
             .scopes
@@ -127,6 +128,9 @@ impl Lowerer {
                 owner_function: 0,
             },
         );
+        if nested_function {
+            self.intrinsic_global_slots.insert(name.to_string());
+        }
         Ok(true)
     }
 
@@ -677,15 +681,17 @@ impl Lowerer {
             && let TsAssignTarget::Member { object, property } = target
             && let Some(global) = global_this_member_name(object, property)
         {
-            if self.current_function() != 0 {
-                return Err(Diagnostic::new(
-                    DiagnosticCode::UnsupportedExpression,
-                    "Unsupported: assigning a direct globalThis property inside a function. Pass a session-state object into the function and mutate one of its nested fields.",
-                    None,
-                ));
-            }
             self.ensure_global_binding(global)?;
             let result = self.temporary("global_assignment");
+            if self.current_function() != 0 {
+                return Ok(LashExpr::Block(vec![
+                    Self::temp_assignment(&result, self.lower_expr(value)?),
+                    LashExpr::BuiltinCall {
+                        name: "__typescript_global_set".into(),
+                        args: vec![LashExpr::String(global.into()), Self::variable(&result)],
+                    },
+                ]));
+            }
             return Ok(LashExpr::Block(vec![
                 Self::temp_assignment(&result, self.lower_expr(value)?),
                 LashExpr::Assign {

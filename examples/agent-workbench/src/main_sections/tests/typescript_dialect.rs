@@ -253,11 +253,7 @@ fn the_workbench_typescript_tutorials_link() {
 
     // The linker must be able to reject, or an empty hit list proves nothing.
     assert!(
-        lash_typescript::link(
-            "const source = { a: 1 };\nconst { a } = source;\nfinish(a);",
-            &environment
-        )
-        .is_err(),
+        lash_typescript::link("finish(/unsupported/.test('unsupported'));", &environment).is_err(),
         "the control must be refused"
     );
 }

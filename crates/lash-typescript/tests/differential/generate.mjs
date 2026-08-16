@@ -11,7 +11,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 89],
+  ['findings', 'findings-expressions.txt', 97],
 ];
 
 const rejected = new Map([

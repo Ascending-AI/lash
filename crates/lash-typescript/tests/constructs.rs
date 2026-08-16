@@ -187,3 +187,89 @@ fn async_helpers_and_promise_all_use_the_resumable_map_driver() {
         Value::String("2,3".into())
     );
 }
+
+#[test]
+fn async_map_all_settled_wraps_each_callback_settlement() {
+    assert_eq!(
+        finished(
+            r#"
+            async function classify(x) {
+                if (x === 2) { throw 'boom'; }
+                if (x === 3) { return; }
+                if (x === 4) { function nested() { return 14; } return nested(); }
+                return x + 10;
+            }
+            const values = await Promise.allSettled(
+                [1, 2, 3, 4].map(async x => await classify(x))
+            );
+            finish(JSON.stringify(values));
+            "#,
+        ),
+        Value::String(
+            r#"[{"status":"fulfilled","value":11},{"status":"rejected","reason":"boom"},{"status":"fulfilled"},{"status":"fulfilled","value":14}]"#.into()
+        )
+    );
+}
+
+#[test]
+fn nested_global_assignment_and_uri_codecs_use_registered_intrinsics() {
+    assert_eq!(
+        finished(
+            r#"
+            function setAnswer(value) { return globalThis.answer = value; }
+            const assigned = setAnswer(7);
+            let malformed;
+            try { decodeURIComponent('%E0%A4%A'); }
+            catch (error) { malformed = `${error.name}|${error.message}|${error instanceof URIError}`; }
+            let surrogate;
+            try { encodeURIComponent('\uD800'); }
+            catch (error) { surrogate = `${error.name}|${error.message}|${error instanceof URIError}`; }
+            finish([
+                assigned,
+                globalThis.answer,
+                encodeURIComponent('a b/é😀'),
+                decodeURIComponent('a%20b%2F%C3%A9%F0%9F%98%80'),
+                encodeURI('https://x.test/a b?x=é#z'),
+                decodeURI('https://x.test/a%20b?x=%3F%23%2F'),
+                malformed,
+                surrogate,
+            ]);
+            "#,
+        ),
+        Value::List(
+            vec![
+                Value::Number(7.0),
+                Value::Number(7.0),
+                Value::String("a%20b%2F%C3%A9%F0%9F%98%80".into()),
+                Value::String("a b/é😀".into()),
+                Value::String("https://x.test/a%20b?x=%C3%A9#z".into()),
+                Value::String("https://x.test/a b?x=%3F%23%2F".into()),
+                Value::String("URIError|URI malformed|true".into()),
+                Value::String("URIError|URI malformed|true".into()),
+            ]
+            .into(),
+        )
+    );
+}
+
+#[test]
+fn every_wpa_private_intrinsic_shape_links_through_the_production_wrapper() {
+    let environment = lashlang::LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        lashlang::LashlangAbilities::all(),
+    );
+    for source in [
+        "const e = new Error('x'); finish(e instanceof Error);",
+        "globalThis.present = 1; finish('present' in globalThis);",
+        "globalThis.removed = 1; finish(delete globalThis.removed);",
+        "function add(a,b){return a+b;} finish(add(...[1,2]));",
+        "finish(await Promise.all([1,2].map(async x => x + 1)));",
+        "function collect(a=1,...rest){return [a,...rest];} finish(collect(undefined,2));",
+        "function set(){return globalThis.nested=3;} finish(set());",
+        "finish([encodeURIComponent('a b'),decodeURIComponent('a%20b'),encodeURI('a b'),decodeURI('a%20b')]);",
+    ] {
+        lash_typescript::link(source, &environment).unwrap_or_else(|error| {
+            panic!("source must link through the production wrapper: {source}: {error}")
+        });
+    }
+}

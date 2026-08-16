@@ -375,3 +375,11 @@ findings	86	accept	"(() => { const o={a:1,b:2}; const p=o; const ok=delete o.a; 
 findings	87	accept	"(() => [0,1,2].filter(Boolean).join(','))()"	"1,2"	-
 findings	88	accept	"(() => { const [a,b]=Array.from([7,8].values()); return `${a}|${b}`; })()"	"7|8"	-
 findings	89	accept	"(() => { const m=new Map([['a',1]]); return Object.fromEntries(m.entries()).a; })()"	"1"	-
+findings	90	accept	"(() => { function f(){ return globalThis.__fig1413=7; } const value=f(); delete globalThis.__fig1413; return value; })()"	"7"	-
+findings	91	accept	"(() => { const f=[]; for(let i=0;i<2;i++){ f[f.length]=()=>i; } return `${f[0]()}|${f[1]()}`; })()"	"0|1"	-
+findings	92	accept	"encodeURIComponent('a b/é😀')"	"a%20b%2F%C3%A9%F0%9F%98%80"	-
+findings	93	accept	"decodeURIComponent('a%20b%2F%C3%A9%F0%9F%98%80')"	"a b/é😀"	-
+findings	94	accept	"encodeURI('https://x.test/a b?x=é#z')"	"https://x.test/a%20b?x=%C3%A9#z"	-
+findings	95	accept	"decodeURI('https://x.test/a%20b?x=%3F%23%2F')"	"https://x.test/a b?x=%3F%23%2F"	-
+findings	96	accept	"(() => { try { decodeURIComponent('%E0%A4%A'); } catch (e) { return `${e.name}|${e.message}|${e instanceof URIError}`; } })()"	"URIError|URI malformed|true"	-
+findings	97	accept	"(() => { try { encodeURIComponent('\\uD800'); } catch (e) { return `${e.name}|${e.message}|${e instanceof URIError}`; } })()"	"URIError|URI malformed|true"	-

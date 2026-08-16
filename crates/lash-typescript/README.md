@@ -15,7 +15,8 @@ every binding and assignment position, defaults/rest, optional chains, array/cal
 spread, compound/logical assignment, update operators, arrays, records, and calls.
 Arithmetic includes exponentiation and ECMA `ToInt32`/`ToUint32` bitwise and shift
 operators. `in` is an own-property query because dialect objects have no prototypes;
-`instanceof` accepts the Error family, Map, Set, Date, RegExp, Array, and Object.
+`instanceof` accepts the Error family, Map, Set, Date, RegExp, URL,
+URLSearchParams, Array, and Object.
 `console.log`
 accepts any arity and prints its arguments after ECMA `ToString` conversion,
 joined by one space; lexical bindings named `console` take precedence.
@@ -31,8 +32,11 @@ Cells are scripts and may use top-level `await` for tools, process handles,
 `sleep`, `Promise.all`, and `Promise.allSettled`; `waitSignal` is
 process-only and rejects at the cell top level by name. Async functions and arrows
 are accepted when every awaited value is transitively grounded in this agent surface;
-`await Promise.all(xs.map(async x => ...))` uses the durable sequential async-map
-driver. Promise chaining, synthetic promises, `race`, and `any` remain named rejects.
+`await Promise.all(xs.map(async x => ...))` and its `Promise.allSettled`
+counterpart use the durable sequential async-map driver. The all-settled form
+wraps each callback in guest `try`/`catch`, so a rejection becomes that input's
+`{status: "rejected", reason}` record and later callbacks still run. Promise
+chaining, synthetic promises, `race`, and `any` remain named rejects.
 Tool calls require `await` and use explicit `typescript.tool` module paths;
 their prompt signatures return `Promise<T>`. Unknown module paths participate
 in the executor's deferred tool-resolution path.
@@ -66,6 +70,12 @@ This is a runtime-system constraint, not an alternate semantics.
 at the same journal boundary as other effects and replay never samples the VM's
 clock or RNG. The Error family plus Map, Set, Date, and RegExp are the explicit
 exceptions to the general `new` rejection.
+
+`encodeURIComponent`, `decodeURIComponent`, `encodeURI`, and `decodeURI` lower
+to deterministic pure VM codecs. Malformed percent encodings and lone-surrogate
+encoder literals throw a real heap-backed `URIError("URI malformed")`. `btoa`
+and `atob` remain named rejections with a host-tool repair because Node exposes
+their failures as `DOMException`, which is not a runtime heap kind.
 
 `URL` and `URLSearchParams` are durable mutable heap objects with reference
 identity. `new URL(input, base?)` accepts an absolute URL or resolves against a
@@ -190,7 +200,9 @@ language semantics:
   `undefined` are omitted and array elements become `null`; incoming JSON
   cannot manufacture `undefined`.
 - Lone UTF-16 surrogates are not representable in the v1 UTF-8 value model, so
-  literals reject with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`. Indexing an
+  literals reject with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`, except that a
+  direct `encodeURI`/`encodeURIComponent` literal is preserved long enough to
+  throw Node's real `URIError`. Indexing an
   astral string at one UTF-16 unit, `Object.values`/`Object.entries` when their
   string receiver would produce those units, and the two empty-separator
   expansions — `split('')` and `replaceAll('', …)`, both of which ECMA defines
@@ -211,12 +223,10 @@ language semantics:
 - Async array callbacks run sequentially in v1
   (`TS_ASYNC_MAP_SEQUENTIAL_V1`): result order matches Node, while callback
   interleaving and shared-mutation order can differ.
-- Direct `globalThis.name` reads, top-level writes, nested-path mutation,
-  membership, and deletion share the same durable session slots as top-level
-  bindings. A direct assignment
-  to `globalThis.name` from inside a function rejects until the runtime exposes
-  a root-global set operation; pass a session-state object and mutate its nested
-  fields instead.
+- Direct `globalThis.name` reads and writes, including replacement from inside
+  a function, plus nested-path mutation, membership, and deletion share the
+  same durable session slots as top-level bindings. Nested-function replacement
+  uses the root-global set intrinsic and returns the assigned value.
 - `console.log` is host-defined rather than ECMA-262, and prints ECMA
   `ToString` of each argument. Node's inspector formatting is not reproduced:
   `console.log({a: 1})` prints `[object Object]` where Node prints `{ a: 1 }`.
@@ -395,10 +405,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 376 rows, of which 303 are distinct
+The Node differential table carries 384 rows, of which 311 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of the 303 unique rows rather than of 376 distinct behaviours. Both counts
+that of the 311 unique rows rather than of 384 distinct behaviours. Both counts
 are pinned against the table by `committed_row_counts_match_the_register`, and
 the generator pins each lane's own row count, so neither this paragraph nor a
 lane can drift from the corpus in silence.

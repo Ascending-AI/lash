@@ -2,6 +2,7 @@ use lashlang::{
     AbilityOp, AbilityResult, Declaration, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, ResourceOperationBatchResult, ResourceOperationResult, State, Value, Vm, VmRunOutcome,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Host;
 
@@ -341,6 +342,56 @@ impl ExecutionHost for SettledHost {
             _ => Err(ExecutionHostError::new("unexpected settled ability")),
         }
     }
+}
+
+struct SequentialAsyncMapHost {
+    calls: AtomicUsize,
+}
+
+impl ExecutionHost for SequentialAsyncMapHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperation(_) => {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(AbilityResult::Value(Value::String("ok".into())))
+                } else {
+                    Err(ExecutionHostError::new("boom"))
+                }
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new(
+                "unexpected sequential async-map ability",
+            )),
+        }
+    }
+}
+
+#[test]
+fn promise_all_settled_async_map_catches_each_effect_failure_and_continues() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(
+        "finish(await Promise.allSettled(['a','b'].map(async url => await web.fetch({url}))));",
+        &environment,
+    )
+    .expect("allSettled async map should link");
+    let host = SequentialAsyncMapHost {
+        calls: AtomicUsize::new(0),
+    };
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &host,
+    ))
+    .expect("an individual callback rejection must not abort the async map");
+    assert_eq!(host.calls.load(Ordering::SeqCst), 2);
+    let ExecutionOutcome::Finished(Value::List(items)) = outcome else {
+        panic!("allSettled async map returns a list, got {outcome:?}");
+    };
+    assert_eq!(items.len(), 2);
+    let rendered = format!("{items:?}");
+    assert!(rendered.contains("fulfilled"), "{rendered}");
+    assert!(rendered.contains("rejected"), "{rendered}");
+    assert!(rendered.contains("boom"), "{rendered}");
 }
 
 #[test]

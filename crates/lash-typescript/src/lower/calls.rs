@@ -101,17 +101,43 @@ impl Lowerer {
             }
             if matches!(
                 name.as_str(),
-                "encodeURIComponent"
-                    | "decodeURIComponent"
-                    | "encodeURI"
-                    | "decodeURI"
-                    | "btoa"
-                    | "atob"
+                "encodeURIComponent" | "decodeURIComponent" | "encodeURI" | "decodeURI"
             ) {
+                let [value] = args else {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        format!("{name} expects exactly one argument"),
+                        None,
+                    ));
+                };
+                if matches!(name.as_str(), "encodeURIComponent" | "encodeURI")
+                    && matches!(value, Expr::LoneSurrogateString)
+                {
+                    return Ok(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
+                        name: "__typescript_heap_new".into(),
+                        args: vec![
+                            LashExpr::String("URIError".into()),
+                            LashExpr::String("URI malformed".into()),
+                        ],
+                    })));
+                }
+                let intrinsic = match name.as_str() {
+                    "encodeURIComponent" => "__typescript_encode_uri_component",
+                    "decodeURIComponent" => "__typescript_decode_uri_component",
+                    "encodeURI" => "__typescript_encode_uri",
+                    "decodeURI" => "__typescript_decode_uri",
+                    _ => unreachable!(),
+                };
+                return Ok(LashExpr::BuiltinCall {
+                    name: intrinsic.into(),
+                    args: vec![self.lower_expr(value)?],
+                });
+            }
+            if matches!(name.as_str(), "btoa" | "atob") {
                 return Err(Diagnostic::new(
                     DiagnosticCode::MethodUnsupported,
                     format!(
-                        "Unsupported: {name}. Perform deterministic URI or base64 conversion in a host tool until the pure codec lowering lands."
+                        "Unsupported: {name}. Use a deterministic host tool until the runtime can preserve Node's DOMException identity."
                     ),
                     None,
                 ));

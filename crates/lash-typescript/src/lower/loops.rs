@@ -295,6 +295,7 @@ fn mentions_binding(expr: &Expr, binding: &str) -> bool {
         | Expr::Number(_)
         | Expr::String(_) => false,
         Expr::This => false,
+        Expr::LoneSurrogateString => false,
         Expr::Update { target, .. } => assign_target_mentions_binding(target, binding),
         Expr::Delete { object, property } => {
             mentions_binding(object, binding)
@@ -677,7 +678,8 @@ fn visit_expressions<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         | Expr::Number(_)
         | Expr::String(_)
         | Expr::Ident(_)
-        | Expr::This => {}
+        | Expr::This
+        | Expr::LoneSurrogateString => {}
         Expr::Update { target, .. } => {
             if let TsAssignTarget::Member { object, property } = target {
                 walk(object);

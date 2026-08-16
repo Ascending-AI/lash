@@ -250,3 +250,17 @@ fn instance_method_inventory_matches_the_lowerer() {
         );
     }
 }
+
+#[test]
+fn base64_globals_keep_the_dom_exception_repair_diagnostic() {
+    for source in ["finish(btoa('x'));", "finish(atob('eA=='));"] {
+        let error = lash_typescript::compile(source)
+            .expect_err("base64 globals remain outside the exact runtime surface");
+        assert_eq!(
+            error.code,
+            lash_typescript::DiagnosticCode::MethodUnsupported
+        );
+        assert!(error.message.contains("DOMException"), "{error}");
+        assert!(error.message.contains("host tool"), "{error}");
+    }
+}

@@ -218,6 +218,7 @@ pub(crate) enum Expr {
         object: Box<Expr>,
         property: MemberProperty,
     },
+    LoneSurrogateString,
 }
 
 #[derive(Clone, Debug)]
@@ -981,19 +982,12 @@ impl Adapter {
                 swc::Lit::Null(_) => Expr::Null,
                 swc::Lit::Bool(value) => Expr::Bool(value.value),
                 swc::Lit::Num(value) => Expr::Number(value.value),
-                swc::Lit::Str(value) => Expr::String(
-                    value
-                        .value
-                        .as_str()
-                        .ok_or_else(|| {
-                            reject(
-                                DiagnosticCode::LoneSurrogateLiteralUnsupported,
-                                "string literals containing lone UTF-16 surrogates",
-                                span,
-                            )
-                        })?
-                        .to_string(),
-                ),
+                swc::Lit::Str(value) => value
+                    .value
+                    .as_str()
+                    .map_or(Expr::LoneSurrogateString, |value| {
+                        Expr::String(value.to_string())
+                    }),
                 swc::Lit::Regex(_) => {
                     return Err(reject(
                         DiagnosticCode::RegExpUnsupported,

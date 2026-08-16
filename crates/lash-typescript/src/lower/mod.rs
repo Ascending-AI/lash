@@ -19,6 +19,7 @@ use stdlib::*;
 mod loops;
 use loops::*;
 mod array_map;
+mod await_expr;
 mod calls;
 mod constructs;
 mod graph;
@@ -89,9 +90,18 @@ pub(crate) fn lower_with_ambient(
     lowerer.scopes.push(ambient_scope);
     lowerer.scopes.push(Scope::default());
     let expressions = lowerer.lower_statements(&program.statements, true)?;
+    let mut root_global_initializers = lowerer
+        .intrinsic_global_slots
+        .iter()
+        .map(|name| LashExpr::Assign {
+            target: AssignTarget::variable(name.as_str().into()),
+            expr: Box::new(LashExpr::Undefined),
+        })
+        .collect::<Vec<_>>();
+    root_global_initializers.extend(expressions);
     Ok(LashProgram {
         declarations: lowerer.declarations,
-        main: LashExpr::Block(expressions),
+        main: LashExpr::Block(root_global_initializers),
         declaration_spans: Vec::new(),
         expression_spans: Vec::new(),
         expression_source_spans: Vec::new(),
@@ -164,6 +174,7 @@ struct Lowerer {
     process_handle_bindings: BTreeSet<String>,
     async_bindings: BTreeSet<String>,
     iterable_kinds: BTreeMap<String, String>,
+    intrinsic_global_slots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
 }
 
@@ -1026,6 +1037,13 @@ impl Lowerer {
                 prefix,
             } => self.lower_update(target, *delta, *prefix)?,
             Expr::Delete { object, property } => self.lower_delete(object, property)?,
+            Expr::LoneSurrogateString => {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::LoneSurrogateLiteralUnsupported,
+                    "string literals containing lone UTF-16 surrogates",
+                    None,
+                ));
+            }
         })
     }
 
@@ -1190,155 +1208,6 @@ impl Lowerer {
         Ok(LashExpr::ProcessRef {
             process: process_name.as_str().into(),
         })
-    }
-
-    fn lower_await(&mut self, inner: &Expr) -> Result<LashExpr, Diagnostic> {
-        let async_helper = match inner {
-            Expr::Call { callee, .. } => match callee.as_ref() {
-                Expr::Ident(name) => self
-                    .scopes
-                    .iter()
-                    .rev()
-                    .find_map(|scope| scope.bindings.get(name))
-                    .is_some_and(|binding| self.async_bindings.contains(&binding.internal)),
-                Expr::Function(function) => function.is_async,
-                _ => false,
-            },
-            _ => false,
-        };
-        let promise_kind = match inner {
-            Expr::Call { callee, args }
-                if matches!(
-                    callee.as_ref(),
-                    Expr::Member {
-                        object,
-                        property: MemberProperty::Field(method),
-                    } if matches!(object.as_ref(), Expr::Ident(name) if name == "Promise" && !self.has_binding(name))
-                        && matches!(method.as_str(), "all" | "allSettled")
-                ) =>
-            {
-                let Expr::Member {
-                    property: MemberProperty::Field(method),
-                    ..
-                } = callee.as_ref()
-                else {
-                    unreachable!()
-                };
-                let [CallArg::Value(value)] = args.as_slice() else {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::UnsupportedExpression,
-                        format!("Promise.{method} expects one iterable"),
-                        None,
-                    ));
-                };
-                let async_map = matches!(
-                    value,
-                    Expr::Call { callee, args }
-                        if matches!(callee.as_ref(), Expr::Member { property: MemberProperty::Field(map), .. } if map == "map")
-                            && matches!(args.as_slice(), [CallArg::Value(Expr::Function(function))] if function.is_async)
-                );
-                if !matches!(value, Expr::Array(_)) && !async_map {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::AwaitUnsupported,
-                        format!("Promise.{method} currently requires an array iterable"),
-                        None,
-                    ));
-                }
-                Some((method.as_str(), value))
-            }
-            _ => None,
-        };
-        self.await_depth += 1;
-        let (mode, lowered) = if let Some((mode, value)) = promise_kind {
-            (Some(mode), self.lower_expr(value))
-        } else {
-            (None, self.lower_expr(inner))
-        };
-        self.await_depth -= 1;
-        let lowered = lowered?;
-        if async_helper {
-            return Ok(lowered);
-        }
-        if mode == Some("all")
-            && matches!(&lowered, LashExpr::BuiltinCall { name, .. } if name.as_str() == "__typescript_async_map")
-        {
-            return Ok(lowered);
-        }
-        if mode.is_some() && has_unsupported_aggregate_effect(&lowered) {
-            return Err(Diagnostic::new(
-                DiagnosticCode::AwaitUnsupported,
-                "Promise.all/allSettled currently aggregate tool promises and resolved values; process and timer promises require separate await expressions",
-                None,
-            ));
-        }
-        if mode.is_some() && has_nested_aggregate_effect(&lowered) {
-            return Err(Diagnostic::new(
-                DiagnosticCode::AwaitUnsupported,
-                "Promise.all/allSettled tool promises must be top-level array elements",
-                None,
-            ));
-        }
-        if mode.is_some()
-            && has_aggregate_effect_leaf(&lowered)
-            && has_unbatchable_aggregate_value(&lowered)
-        {
-            return Err(Diagnostic::new(
-                DiagnosticCode::AwaitUnsupported,
-                "Promise.all/allSettled cannot mix tool promises with computed function or assignment values in v1",
-                None,
-            ));
-        }
-        if matches!(
-            lowered,
-            LashExpr::SleepFor(_)
-                | LashExpr::SleepUntil(_)
-                | LashExpr::WaitSignal { .. }
-                | LashExpr::SignalRun { .. }
-                | LashExpr::Wake(_)
-                | LashExpr::Finish(_)
-                | LashExpr::Fail(_)
-        ) {
-            return Ok(lowered);
-        }
-        if mode == Some("allSettled") {
-            let has_effect = has_aggregate_effect_leaf(&lowered);
-            let settled = settle_aggregate_leaves(lowered);
-            let values = if has_effect {
-                LashExpr::Await(Box::new(settled))
-            } else {
-                settled
-            };
-            return Ok(all_settled_results(values));
-        }
-        if mode == Some("all") {
-            if has_aggregate_effect_leaf(&lowered) {
-                return Ok(LashExpr::Await(Box::new(unwrap_aggregate_leaves(lowered))));
-            }
-            return Ok(lowered);
-        }
-        if matches!(lowered, LashExpr::ReceiverCall { .. }) {
-            return Ok(LashExpr::Await(Box::new(LashExpr::ResultUnwrap(Box::new(
-                lowered,
-            )))));
-        }
-        if matches!(lowered, LashExpr::StartProcess(_)) {
-            return Ok(LashExpr::ResultUnwrap(Box::new(LashExpr::Await(Box::new(
-                lowered,
-            )))));
-        }
-        if matches!(
-            &lowered,
-            LashExpr::Variable(name) if self.process_handle_bindings.contains(name.as_str())
-        ) {
-            return Ok(LashExpr::ResultUnwrap(Box::new(LashExpr::Await(Box::new(
-                lowered,
-            )))));
-        }
-        Err(Diagnostic::new(
-            DiagnosticCode::AwaitUnsupported,
-            "await supports tools, process handles, sleep, waitSignal, and Promise.all/allSettled",
-            None,
-        ))
     }
 
     fn lower_assign_target(&mut self, target: &TsAssignTarget) -> Result<AssignTarget, Diagnostic> {

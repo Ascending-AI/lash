@@ -283,9 +283,14 @@ fn string_relational_comparison_uses_utf16_code_units() {
 
 #[test]
 fn lone_surrogate_literals_reject_without_lossy_transcoding() {
-    let error = lash_typescript::validate(r#"finish('\uD800');"#)
-        .expect_err("lone surrogates are not representable in v1");
-    assert_eq!(error.code.as_str(), "TS_LONE_SURROGATE_LITERAL_UNSUPPORTED");
+    for source in [
+        r#"finish('\uD800');"#,
+        r#"function encodeURI(value) { return 'shadowed'; } finish(encodeURI('\uD800'));"#,
+    ] {
+        let error = lash_typescript::validate(source)
+            .expect_err("lone surrogates are not representable in ordinary guest values");
+        assert_eq!(error.code.as_str(), "TS_LONE_SURROGATE_LITERAL_UNSUPPORTED");
+    }
 }
 
 #[test]
