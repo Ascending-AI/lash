@@ -544,6 +544,7 @@ async fn provider_hang(
         "renewed_generation": renewed.get("fencing_token"),
         "holder_matches_running_worker": holder_matches,
         "renewals_current_while_parked": renewals_current,
+        "renewed_count": capture.named("session_execution_lease.renewed").len(),
         "reading_while_parked": reading(parked.as_ref()),
         "reading_after_commit": reading(after_commit.as_ref()),
         "turn_committed_after_release": committed,
@@ -757,6 +758,7 @@ async fn commit_cas_livelock(
     }
 
     let rejections = capture.named("session_execution_lease.commit_cas_rejected");
+    let busy_advisories = capture.named("session_execution_lease.busy_advisory");
     let observer = backend.core(
         scripted_provider(),
         owner("triage-observer", "triage-observer:boot-1"),
@@ -782,6 +784,10 @@ async fn commit_cas_livelock(
         "rounds": rounds,
         "commit_cas_rejected_count": rejections.len(),
         "commit_cas_rejected": rejections,
+        "busy_advisory_count": busy_advisories.len(),
+        "busy_advisory": busy_advisories,
+        "busy_wait_count": capture.named("session_execution_lease.busy_wait").len(),
+        "busy_gave_up_count": capture.named("session_execution_lease.busy_gave_up").len(),
         "lease_lost_count": capture.named("session_execution_lease.lost").len(),
         "taken_over_count": capture.named("session_execution_lease.taken_over").len(),
         "reading_after_livelock": reading(after.as_ref()),

@@ -9,7 +9,7 @@
 actually has. A turn that stops producing output has three causes that look identical from
 outside (a hanging provider, a lease that moved to another worker, two writers livelocked
 on one session head), and the operations page claims two surfaces distinguish them: the
-`session_lease_diagnostics` snapshot and the four `session_execution_lease.*` trace events.
+`session_lease_diagnostics` snapshot and the `session_execution_lease.*` trace events.
 The judgment is a comparison: every reading and every event the page promises must appear,
 carry the fields the page names, and mean what the page says it means.
 
@@ -63,10 +63,14 @@ the case that used to go unreported.
    error is captured. A run that treats lease loss as proof of failure contradicts the
    contract the docs stake the "do not kill it" instruction on.
 4. **Livelock is recurrence, not one collision.** Every round of sustained misrouting must
-   produce a rejection carrying `lease_lost = false`, `lane_held = false`, and a head revision
-   that moved on, with no `taken_over` in the timeline. A single rejection is ordinary
-   concurrent-writer contention and the operations page says so separately; a run that shows
-   one collision has not evidenced the diagnosis that prescribes an identity fix.
+   first emit `busy_advisory` with `outcome = proceeding_under_commit_cas`; the busy claimant
+   proceeds lane-less and neither waits nor gives up. The head CAS then produces a rejection
+   carrying `lease_lost = false`, `lane_held = true` on the rejected lane-holder side, and a
+   head revision that moved on, with no `taken_over` in the timeline. A single rejection is
+   ordinary concurrent-writer contention and the operations page says so separately; a run
+   that shows one collision has not evidenced the diagnosis that prescribes an identity fix.
+   This is the corrected criterion tracked by FIG-1380; the previously published
+   `lane_held = false` criterion was inverted.
 5. **Diagnostics never authorize an action.** No phase may use the reading to fence, cancel,
    or kill anything. If a step needs the lease to decide behavior, the step is wrong.
 6. **Docs claims are assertions.** Each documented statement about triage is scored against
@@ -95,7 +99,7 @@ companion runs before it stages anything.
 green (the documented procedure's Rust block is compiled from `examples/docs-snippets` and
 must still match it).
 
-**Expected observable evidence.** The lease-event suite covers all four transitions
+**Expected observable evidence.** The lease-event suite covers the recovery transitions,
 including the negative case (a renewal that failed while the row still names this owner is
 not reported as a takeover). The facade suite covers absent, unheld, current, and lapsed
 readings plus the no-disturbance property.
@@ -133,21 +137,21 @@ abandoned lease row is seeded: TTL zero, claimed through the store, no guard and
 task behind it. A real turn then claims the session.
 
 **Action.** Read the `taken_over` event with every field, the `session_execution_lease.lost` count, the
-readings either side of the sweep, and the sweeping turn's recorded fate.
+readings either side of the sweep, and the sweeping turn's committed outcome.
 
 **Expected observable evidence.** Exactly one `taken_over`, at `INFO`, emitted by the
 successor: its own `generation`/`owner_id`/`incarnation_id` are the winner's, and
 `displaced_owner_id`/`displaced_fencing_token` name the abandoned holder exactly, strictly
 below the winner's generation. `lease_lost_count` is `0`, because the abandoned holder runs
 nothing. The pre-sweep reading names the abandoned holder as `lapsed`; the post-sweep reading
-names the successor at a higher generation. The sweeping turn then settles, and the run
-records which way.
+names the successor at a higher generation or is already `unheld` after release. The sweeping
+turn commits after takeover.
 
 **Judgment — FAIL if:** no `taken_over` appears, it is emitted by anyone but the winner, it
 names the wrong displaced holder or generation, the generation did not advance, a claim
 reports displacing itself, the pre-sweep reading is not a lapsed row naming the abandoned
-holder, the operator read still shows the old holder afterwards, or the turn neither
-committed nor reported an error. A `session_execution_lease.lost` in this phase is also a failure: it means
+holder, the operator read still shows the old holder afterwards, or the successor turn does
+not commit. A `session_execution_lease.lost` in this phase is also a failure: it means
 the loser was alive, so the run silently substituted the easy case for the one under test.
 
 ## Phase 3 — Livelock: sustained misrouting, repeated rejections
@@ -155,24 +159,31 @@ the loser was alive, so the run silently substituted the easy case for the one u
 **Setup.** `04-commit-cas-livelock.jsonl`. Three rounds of the misconfiguration the docs
 name: two runtime opens are handed the same session under one explicit core worker identity.
 Their owner id and boot incarnation match, but their runtime-minted executor ids differ. The
-second claim is therefore Busy rather than reentry; the busy claimant remains lane-less, both
-run a turn at once, and the head CAS alone selects the winner. Each round is a fresh pair,
-which is what a retry-on-conflict host does after losing.
+second claim is therefore Busy rather than reentry; `busy_advisory` records
+`outcome = proceeding_under_commit_cas`, the busy claimant remains lane-less without entering
+the durable queued-drain wait/give-up policy, both run a turn at once, and the head CAS alone
+selects the winner. Each round is a fresh pair, which is what a retry-on-conflict host does
+after losing.
 
-**Action.** Read `rounds_attempted`, `rounds_with_a_rejection`, the per-round records, and
-every `commit_cas_rejected` event.
+**Action.** Read `rounds_attempted`, `rounds_with_a_rejection`, the per-round records, every
+`busy_advisory`, the `busy_wait`/`busy_gave_up` counts, and every `commit_cas_rejected` event.
 
 **Expected observable evidence.** Every round has exactly one winner and one rejected
 commit, so `rounds_with_a_rejection` equals `rounds_attempted` and the rejection count is at
-least one per round. Each rejection is `WARN` and carries session id, owner id, incarnation
-id, executor id, `lease_lost = false`, `lane_held = false`, and an `actual_head_revision`
-strictly above `expected_head_revision`. No `session_execution_lease.lost` and no `taken_over` appear, so the
-situation is unambiguously a recurring race rather than a handoff.
+least one per round. Every busy claimant emits `busy_advisory` with
+`outcome = proceeding_under_commit_cas`; `busy_wait_count` and `busy_gave_up_count` stay `0`.
+Each rejection is `WARN` and carries session id, owner id, incarnation id, executor id,
+`lease_lost = false`, `lane_held = true` on the rejected lane-holder side, and an
+`actual_head_revision` strictly above `expected_head_revision`. No
+`session_execution_lease.lost` and no `taken_over` appear, so the situation is unambiguously
+a recurring race rather than a handoff. FIG-1380 records the correction from the formerly
+inverted `lane_held = false` criterion.
 
 **Judgment — FAIL if:** any round has zero or two winners, any round produces no rejection
 (then the misrouting is not actually recurring and the run has proved contention, not
-livelock), a rejection reports `lease_lost = true` or `lane_held = true`, the head revisions
-do not show the head moving on, or a handoff event appears alongside.
+livelock), a busy claimant waits, gives up, or omits the proceeding-under-CAS advisory, a
+rejection reports `lease_lost = true` or `lane_held = false`, the head revisions do not show
+the head moving on, or a handoff event appears alongside.
 
 ## Phase 4 — Score the documented procedure against the observed run
 
@@ -185,10 +196,11 @@ rendered section text as `06-docs-claims.txt`.
 | The read is a snapshot that never claims, renews, or releases | `02-provider-hang.jsonl` (repeated reads against a live holder), `01-facade-read-tests.log` |
 | An absent session reads differently from an unheld lane | `01-facade-read-tests.log` |
 | Every lease event carries session id and the applicable owner, incarnation, and executor identities | all three phase artifacts |
-| The four events sit at the levels the table names | `acquired`/`taken_over` INFO, `lost`/`commit_cas_rejected` WARN, in all three artifacts |
+| Acquisition, takeover, loss, and CAS rejection sit at the documented levels | `acquired`/`taken_over` INFO, `lost`/`commit_cas_rejected` WARN, in all three artifacts |
 | `Current` with no `session_execution_lease.lost` means the turn is blocked inside itself | `02-provider-hang.jsonl` |
 | The winner reports `taken_over` naming the holder it displaced, even when that holder is dead | `03-lease-takeover.jsonl` (`lease_lost_count` is 0) |
 | A lost lease does not mean the turn failed, so do not kill the runner | `03-lease-takeover.jsonl` (`turn_committed_after_takeover`) |
+| A Busy turn claimant proceeds lane-less under the head CAS rather than using the durable queued-drain wait/give-up policy | `04-commit-cas-livelock.jsonl` (`busy_advisory`, zero `busy_wait`/`busy_gave_up`) |
 | One rejection is contention; *repeated* rejections with `lease_lost = false` are livelock, and the fix is worker identity | `04-commit-cas-livelock.jsonl` (per-round records) |
 | Only `commit_cas_rejected` proves a turn did not publish | `03-lease-takeover.jsonl` versus `04-commit-cas-livelock.jsonl` |
 | Lease churn is trace telemetry, not durable session history | absence of any lease entry in session events; the events exist only in the captured timeline |
@@ -210,14 +222,15 @@ confirm no container or host port was left behind (the companion owns none).
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Contract coverage | four-event suite and facade-read suite green; docs lint green | | `00-trace-event-tests.log`, `01-facade-read-tests.log`, `05-docs-lint.log` |
+| Contract coverage | lease-event suite and facade-read suite green; docs lint green | | `00-trace-event-tests.log`, `01-facade-read-tests.log`, `05-docs-lint.log` |
 | Provider hang | `current` reading naming the parked worker, positive headroom, zero lease-trouble events | | `02-provider-hang.jsonl` |
 | Lease release on commit | the committed turn's lane reads `unheld` | | `02-provider-hang.jsonl` |
 | Winner-emitted takeover | one `taken_over` from the winner naming the abandoned holder and generation | | `03-lease-takeover.jsonl` |
 | Dead loser stays silent | `lease_lost_count` is 0, so the event does not depend on loser liveness | | `03-lease-takeover.jsonl` |
-| Lease loss is not failure | the sweeping turn's fate recorded and self-consistent | | `03-lease-takeover.jsonl` |
-| CAS livelock recurs | every round: one commit, one rejection with `lease_lost = false` and `lane_held = false` from a different executor under the same host owner | | `04-commit-cas-livelock.jsonl` |
-| Backend agreement | every phase reported the same verdicts on each configured backend | | all phase artifacts |
+| Lease loss is not failure | the successor turn commits after takeover | | `03-lease-takeover.jsonl` |
+| CAS livelock recurs | every round: one lane-less claimant records `outcome = proceeding_under_commit_cas`, zero wait/give-up events, one commit, and one rejected lane-holder reports `lease_lost = false`, `lane_held = true` (FIG-1380 correction) | | `04-commit-cas-livelock.jsonl` |
+| Executor recovery dispositions | renewal-backed `current` becomes `unheld`; a lapsed dead holder is named by one winner-emitted `taken_over` with no loser event and a committed successor; Busy proceeds lane-less without wait/give-up and head CAS decides | | `07-executor-recovery-law.json` |
+| Backend agreement | every phase and normalized recovery disposition reported the same verdicts on each configured backend | | all phase artifacts, `07-executor-recovery-law.json` |
 | Docs agreement | every scored claim matched an artifact | | `06-docs-claims.txt` |
 | Teardown | panic gate clean; no owned containers or ports remain | | `session-lease-triage-e2e.log` |
 
