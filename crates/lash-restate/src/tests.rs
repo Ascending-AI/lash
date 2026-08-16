@@ -10396,7 +10396,7 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
                     })
                     .await
                     .expect("inspect early intent children");
-                assert_eq!(durable_state["version"], serde_json::json!(2));
+                assert_eq!(durable_state["version"], serde_json::json!(3));
                 assert_eq!(
                     durable_state["parent_end_actions"]
                         .as_array()
