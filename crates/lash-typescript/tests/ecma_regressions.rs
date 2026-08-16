@@ -585,3 +585,45 @@ fn a_member_call_on_undefined_names_the_undefined_receiver() {
         "{error}"
     );
 }
+
+/// Past the ECMA array limit the answer is node's `RangeError`, not a clamp.
+///
+/// `Array.from` used to build its array in the pure stdlib function, which has
+/// no heap to charge and so did the only thing it could: clamp `length` to
+/// `u32::MAX` and `collect()`. That is two failures in one — the guest gets an
+/// array of a length it never asked for, and the pre-charge in the VM was the
+/// only thing standing between a guest constant and a raw four-billion-element
+/// allocation. Both array-like branches now build through the charged path, so
+/// the limit is reported rather than silently applied.
+#[test]
+fn an_array_like_length_past_the_ecma_limit_is_a_catchable_range_error() {
+    for source in [
+        "try { Array.from({ length: 2 ** 32 }); } catch (error: any) { finish(error.name + ': ' + error.message); } finish('not thrown');",
+        "try { Array.from({ length: 1e12 }, (_, index: number) => index); } catch (error: any) { finish(error.name + ': ' + error.message); } finish('not thrown');",
+        "const source: any = { length: 2 ** 40 }; try { Array.from(source); } catch (error: any) { finish(error.name + ': ' + error.message); } finish('not thrown');",
+    ] {
+        assert_eq!(
+            finished(source),
+            Value::String("RangeError: Invalid array length".into()),
+            "{source}"
+        );
+    }
+}
+
+/// Lengths under the array limit keep their node-exact answers.
+#[test]
+fn array_like_lengths_under_the_limit_are_node_exact() {
+    for (source, expected) in [
+        ("finish(Array.from({ length: -1 }).length);", 0.0),
+        ("finish(Array.from({ length: 2.7 }).length);", 2.0),
+        ("finish(Array.from({ length: NaN }).length);", 0.0),
+        ("finish(Array.from({}).length);", 0.0),
+        ("finish(Array.from({ length: 2, 0: 'a' }).length);", 2.0),
+    ] {
+        assert_eq!(finished(source), Value::Number(expected), "{source}");
+    }
+    assert_eq!(
+        finished("finish(Array.from({ length: 2, 0: 'a' })[1] === undefined);"),
+        Value::Bool(true)
+    );
+}

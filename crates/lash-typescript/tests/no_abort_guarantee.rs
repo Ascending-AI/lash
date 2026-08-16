@@ -504,3 +504,65 @@ fn regexp_size_depth_and_giant_quantifiers_fail_without_aborting() {
         }
     }
 }
+
+/// The guarantee has a runtime half: an *accepted* cell must not be able to
+/// name an allocation that takes the process down either.
+///
+/// Source size bounds what the parser sees; it bounds nothing about what the
+/// program then asks the heap for. `Array.from({ length: N })` is the shortest
+/// expression in the language that names an arbitrary allocation — eleven
+/// bytes of source per order of magnitude — so every N here must come back as
+/// a named diagnostic or a value, never as an abort or an OOM kill. The host
+/// below states no bounds at all, which is the shape of every host that has
+/// not thought about memory.
+#[test]
+fn guest_named_allocations_fail_without_aborting() {
+    struct UnboundedHost;
+
+    impl lashlang::ExecutionHost for UnboundedHost {
+        async fn perform(
+            &self,
+            op: lashlang::AbilityOp,
+        ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+            match op {
+                lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityResult::Value(value)),
+                _ => Err(lashlang::ExecutionHostError::new("unsupported ability")),
+            }
+        }
+    }
+
+    let lengths = [
+        "0",
+        "1000",
+        "-1",
+        "NaN",
+        "2 ** 31",
+        "2 ** 32 - 1",
+        "2 ** 32",
+        "1e12",
+        "Number.MAX_SAFE_INTEGER",
+        "Infinity",
+    ];
+    for length in lengths {
+        for source in [
+            format!("finish(Array.from({{ length: {length} }}).length);"),
+            format!("finish(Array.from({{ length: {length} }}, (_, i: number) => i).length);"),
+            format!("finish(Array.of(...Array.from({{ length: {length} }})).length);"),
+        ] {
+            let Ok(program) = lash_typescript::compile(&source) else {
+                continue;
+            };
+            let outcome = futures::executor::block_on(lashlang::execute(
+                &program,
+                &mut lashlang::State::new(),
+                &UnboundedHost,
+            ));
+            if let Err(error) = outcome {
+                assert!(
+                    !error.to_string().is_empty(),
+                    "an over-budget allocation must fail by name: {source}"
+                );
+            }
+        }
+    }
+}

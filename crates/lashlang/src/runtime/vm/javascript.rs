@@ -474,43 +474,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(result);
             return Ok(());
         }
-        if let [Value::String(method), source] = values.as_slice()
-            && matches!(method.as_str(), "Array.from" | "Lash.ArrayFromIterable")
-        {
-            let record = match source {
-                Value::Ref(id) => match self.heap.get(*id)? {
-                    HeapObject::Record(record) => Some(record.as_ref()),
-                    _ => None,
-                },
-                Value::Record(record) => Some(record.as_ref()),
-                _ => None,
-            };
-            if let Some(record) = record {
-                let length = record
-                    .get("length")
-                    .map(javascript_to_number)
-                    .unwrap_or(0.0);
-                let length = if length.is_nan() || length <= 0.0 {
-                    0.0
-                } else {
-                    length.trunc()
-                };
-                if length > u32::MAX as f64 {
-                    let error = self.heap.allocate_error(
-                        ErrorKind::RangeError,
-                        "Invalid array length".to_string(),
-                        None,
-                        None,
-                    )?;
-                    return Err(RuntimeError::UncaughtException { value: error });
-                }
-                self.heap.ensure_list_allocation_len(length as usize)?;
-            }
-        }
         for value in &mut values {
             if matches!(value, Value::Ref(_)) {
                 *value = self.heap.export_for_instruction(value)?;
             }
+        }
+        // Array-likes are the one stdlib shape whose result size a guest names
+        // outright, so they are built here rather than in `javascript_stdlib`:
+        // the pure function has no heap to charge, and a `collect()` there is a
+        // raw allocation of whatever `length` says.
+        if let [Value::String(method), Value::Record(record)] = values.as_slice()
+            && matches!(method.as_str(), "Array.from" | "Lash.ArrayFromIterable")
+        {
+            let elements = self.array_like_elements(record)?;
+            self.stack.push(Value::List(elements.into()));
+            return Ok(());
         }
         let result = javascript_stdlib(&values)?;
         if let Value::String(value) = &result {
@@ -518,6 +496,46 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         self.stack.push(result);
         Ok(())
+    }
+
+    /// Materialises the dense array an array-like (`{ length, 0, 1, ... }`)
+    /// denotes, charging the whole allocation before the first element exists.
+    ///
+    /// `length` is guest-chosen, so this is the cheapest way to name an
+    /// arbitrarily large allocation in the language. Past the ECMA array limit
+    /// it is `RangeError: Invalid array length`, exactly as node reports it;
+    /// under the limit but over the heap budget it is the typed memory
+    /// diagnostic. Neither is a clamp: silently truncating to `u32::MAX` would
+    /// hand the guest an array of a length it did not ask for.
+    fn array_like_elements(&mut self, record: &Record) -> Result<Vec<Value>, RuntimeError> {
+        let length = record
+            .get("length")
+            .map(javascript_to_number)
+            .unwrap_or(0.0);
+        let length = if length.is_nan() || length <= 0.0 {
+            0.0
+        } else {
+            length.trunc()
+        };
+        if length > u32::MAX as f64 {
+            let error = self.heap.allocate_error(
+                ErrorKind::RangeError,
+                "Invalid array length".to_string(),
+                None,
+                None,
+            )?;
+            return Err(RuntimeError::UncaughtException { value: error });
+        }
+        let length = length as usize;
+        self.heap.ensure_list_allocation_len(length)?;
+        Ok((0..length)
+            .map(|index| {
+                record
+                    .get(&index.to_string())
+                    .cloned()
+                    .unwrap_or(Value::Undefined)
+            })
+            .collect())
     }
 
     fn execute_javascript_heap_method(
@@ -996,28 +1014,6 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
                 .collect::<Vec<_>>()
                 .into(),
         )),
-        ("Lash.ArrayFromIterable", [Value::Record(record)]) => {
-            let length = record
-                .get("length")
-                .map(javascript_to_number)
-                .unwrap_or(0.0);
-            let length = if length.is_nan() || length <= 0.0 {
-                0
-            } else {
-                length.trunc().min(u32::MAX as f64) as usize
-            };
-            Ok(Value::List(
-                (0..length)
-                    .map(|index| {
-                        record
-                            .get(&index.to_string())
-                            .cloned()
-                            .unwrap_or(Value::Undefined)
-                    })
-                    .collect::<Vec<_>>()
-                    .into(),
-            ))
-        }
         ("Array.from", [Value::List(values) | Value::Tuple(values)]) => {
             Ok(Value::List(values.to_vec().into()))
         }
@@ -1028,28 +1024,6 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
                 .collect::<Vec<_>>()
                 .into(),
         )),
-        ("Array.from", [Value::Record(record)]) => {
-            let length = record
-                .get("length")
-                .map(javascript_to_number)
-                .unwrap_or(0.0);
-            let length = if length.is_nan() || length <= 0.0 {
-                0
-            } else {
-                length.trunc().min(u32::MAX as f64) as usize
-            };
-            Ok(Value::List(
-                (0..length)
-                    .map(|index| {
-                        record
-                            .get(&index.to_string())
-                            .cloned()
-                            .unwrap_or(Value::Undefined)
-                    })
-                    .collect::<Vec<_>>()
-                    .into(),
-            ))
-        }
         ("Array.of", values) => Ok(Value::List(values.to_vec().into())),
         ("String.fromCharCode", values) => utf16_value(
             values
