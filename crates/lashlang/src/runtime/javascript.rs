@@ -6,7 +6,7 @@ use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 
-use super::{Value, is_truthy};
+use super::{Value, debug_assert_exported_value, is_truthy};
 
 pub(crate) const MAX_JAVASCRIPT_STRING_BYTES: usize = 8 * 1024 * 1024;
 
@@ -177,6 +177,10 @@ pub(crate) fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
         Value::Record(_) | Value::Image(_) | Value::Resource(_) => {
             Value::String("[object Object]".into())
         }
+        Value::Ref(_) => {
+            debug_assert_exported_value("scalar JavaScript primitive coercion");
+            Value::String("[object Object]".into())
+        }
         other => other.clone(),
     }
 }
@@ -267,6 +271,10 @@ pub(crate) fn javascript_to_string(value: &Value) -> String {
         Value::Number(value) if *value == 0.0 => "0".to_string(),
         Value::Number(value) => javascript_number_to_string(*value),
         Value::String(value) => value.to_string(),
+        Value::Ref(_) | Value::Projected(_) => {
+            debug_assert_exported_value("scalar JavaScript string coercion");
+            "[object Object]".to_string()
+        }
         value => match javascript_to_primitive_string_or_number(value) {
             Value::String(value) => value.to_string(),
             primitive => javascript_to_string(&primitive),
@@ -275,7 +283,10 @@ pub(crate) fn javascript_to_string(value: &Value) -> String {
 }
 
 pub(crate) fn javascript_array_index(index: &Value) -> Option<usize> {
-    let key = javascript_to_string(index);
+    javascript_array_index_key(&javascript_to_string(index))
+}
+
+pub(crate) fn javascript_array_index_key(key: &str) -> Option<usize> {
     if key.is_empty() || (key.len() > 1 && key.starts_with('0')) {
         return None;
     }

@@ -153,12 +153,20 @@ pub(crate) fn read_javascript_index_direct(
     target: Value,
     index: Value,
 ) -> Result<Value, RuntimeError> {
+    let key = javascript_to_string(&index);
+    read_javascript_index_direct_with_key(target, &key)
+}
+
+pub(crate) fn read_javascript_index_direct_with_key(
+    target: Value,
+    key: &str,
+) -> Result<Value, RuntimeError> {
     match target {
-        Value::List(values) | Value::Tuple(values) => Ok(javascript_array_index(&index)
+        Value::List(values) | Value::Tuple(values) => Ok(javascript_array_index_key(key)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined)),
         Value::String(value) => {
-            let Some(index) = javascript_array_index(&index) else {
+            let Some(index) = javascript_array_index_key(key) else {
                 return Ok(Value::Undefined);
             };
             let Some(unit) = value.encode_utf16().nth(index) else {
@@ -170,10 +178,7 @@ pub(crate) fn read_javascript_index_direct(
                     reason: "TS_LONE_SURROGATE_UNSUPPORTED: string indexing produced an unrepresentable lone surrogate".to_string(),
                 })
         }
-        Value::Record(record) => Ok(record
-            .get(&javascript_to_string(&index))
-            .cloned()
-            .unwrap_or(Value::Undefined)),
+        Value::Record(record) => Ok(record.get(key).cloned().unwrap_or(Value::Undefined)),
         Value::Null | Value::Undefined => Err(RuntimeError::CannotIndex {
             actual: value_type_name(&target).to_string(),
         }),
@@ -233,15 +238,13 @@ pub(crate) fn read_javascript_heap_index(
     id: HeapId,
     index: &Value,
 ) -> Result<Value, RuntimeError> {
+    let key = heap.javascript_to_string(index)?;
     Ok(match heap.get(id)? {
-        HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index(index)
+        HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index_key(&key)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined),
-        HeapObject::Record(record) => record
-            .get(&javascript_to_string(index))
-            .cloned()
-            .unwrap_or(Value::Undefined),
-        HeapObject::RegExp(regexp) => match javascript_to_string(index).as_str() {
+        HeapObject::Record(record) => record.get(&key).cloned().unwrap_or(Value::Undefined),
+        HeapObject::RegExp(regexp) => match key.as_str() {
             "lastIndex" => Value::Number(regexp.last_index as f64),
             "source" => Value::String(regexp.pattern.as_str().into()),
             "flags" => Value::String(regexp.flags.as_str().into()),
@@ -252,13 +255,9 @@ pub(crate) fn read_javascript_heap_index(
             "unicode" => Value::Bool(regexp.flags.contains('u')),
             _ => Value::Undefined,
         },
-        HeapObject::Map(map) if javascript_to_string(index) == "size" => {
-            Value::Number(map.entries.len() as f64)
-        }
-        HeapObject::Set(set) if javascript_to_string(index) == "size" => {
-            Value::Number(set.values.len() as f64)
-        }
-        HeapObject::Error(error) => match javascript_to_string(index).as_str() {
+        HeapObject::Map(map) if key == "size" => Value::Number(map.entries.len() as f64),
+        HeapObject::Set(set) if key == "size" => Value::Number(set.values.len() as f64),
+        HeapObject::Error(error) => match key.as_str() {
             "name" => Value::String(error.kind.name().into()),
             "message" => Value::String(error.message.as_str().into()),
             "cause" => error.cause.clone().unwrap_or(Value::Undefined),

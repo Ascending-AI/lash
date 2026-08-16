@@ -495,6 +495,17 @@ impl Heap {
         Ok(javascript_to_number(&primitive))
     }
 
+    pub(crate) fn javascript_to_string(&self, value: &Value) -> Result<String, RuntimeError> {
+        if matches!(value, Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_))) {
+            return Err(RuntimeError::ValidationFailed {
+                reason: "TS_DATE_STRING_COERCION_PENDING: Date string coercion is not implemented"
+                    .to_string(),
+            });
+        }
+        let primitive = self.javascript_to_primitive_string_or_number(value)?;
+        Ok(javascript_to_string(&primitive))
+    }
+
     fn javascript_to_primitive_inner(
         &self,
         value: &Value,
@@ -520,7 +531,7 @@ impl Heap {
             Some(HeapObject::Date(date)) => Value::Number(date.milliseconds),
             Some(HeapObject::Map(_)) => Value::String("[object Map]".into()),
             Some(HeapObject::Set(_)) => Value::String("[object Set]".into()),
-            Some(HeapObject::RegExp(_)) => Value::String("[object RegExp]".into()),
+            Some(HeapObject::RegExp(regexp)) => Value::String(regexp_string(regexp).into()),
             Some(HeapObject::Error(error)) => Value::String(
                 if error.message.is_empty() {
                     error.kind.name().to_string()
@@ -564,6 +575,15 @@ impl Heap {
             .collect::<Result<Vec<_>, _>>()
             .map(|items| items.join(","))
     }
+}
+
+pub(crate) fn regexp_string(regexp: &RegExpObject) -> String {
+    let pattern = if regexp.pattern.is_empty() {
+        "(?:)"
+    } else {
+        regexp.pattern.as_str()
+    };
+    format!("/{pattern}/{}", regexp.flags)
 }
 
 fn normalize_same_value_zero_storage(value: Value) -> Value {

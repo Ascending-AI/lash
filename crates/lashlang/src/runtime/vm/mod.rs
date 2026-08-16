@@ -54,8 +54,8 @@ use super::{
     execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values, javascript_join,
     javascript_split, materialize_projected_async, materialize_value, range_bounds,
     range_bounds_async, read_field_direct, read_index_direct, read_javascript_field_direct,
-    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct,
-    unwrap_tool_result, unwrap_type_value,
+    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct_with_key,
+    regexp_string, unwrap_tool_result, unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -621,7 +621,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                self.stack.push(Value::Bool(is_truthy(&value)));
+                self.stack
+                    .push(Value::Bool(self.is_truthy_for_dialect(&value)?));
             }
             Instruction::Jump(target) => self.ip = target,
             Instruction::JumpIfFalse(target) => {
@@ -633,7 +634,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                if !is_truthy(&value) {
+                if !self.is_truthy_for_dialect(&value)? {
                     self.observe_branch_selection(
                         self.current_instruction_ip(),
                         ProcessBranchSelection::Else,
@@ -739,7 +740,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                if is_truthy(&value) {
+                if self.is_truthy_for_dialect(&value)? {
                     self.observe_branch_selection(
                         self.current_instruction_ip(),
                         ProcessBranchSelection::Then,
@@ -1007,7 +1008,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             Instruction::Index => {
-                let index = self.pop_stack()?;
+                let index = materialize_projected_async(self.pop_stack()?).await;
                 let target = self.pop_stack()?;
                 let value = match target {
                     Value::Projected(projected) => {
@@ -1062,7 +1063,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     }
                     UnaryOp::Not => Value::Bool(match &value {
                         Value::Projected(_) => !is_truthy_async(&value).await,
-                        _ => !is_truthy(&value),
+                        _ => !self.is_truthy_for_dialect(&value)?,
                     }),
                 };
                 self.stack.push(value);
@@ -1083,7 +1084,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy_async(&value).await,
-                    _ => is_truthy(&value),
+                    _ => self.is_truthy_for_dialect(&value)?,
                 };
                 self.stack.push(Value::Bool(truthy));
             }
@@ -1091,7 +1092,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy_async(&value).await,
-                    _ => is_truthy(&value),
+                    _ => self.is_truthy_for_dialect(&value)?,
                 };
                 if !truthy {
                     self.observe_branch_selection(
@@ -1121,7 +1122,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy_async(&value).await,
-                    _ => is_truthy(&value),
+                    _ => self.is_truthy_for_dialect(&value)?,
                 };
                 if truthy {
                     self.observe_branch_selection(

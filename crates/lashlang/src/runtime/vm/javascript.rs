@@ -5,6 +5,16 @@ use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
 use super::*;
 
 impl<H: ExecutionHost> Vm<'_, H> {
+    pub(super) fn is_truthy_for_dialect(&self, value: &Value) -> Result<bool, RuntimeError> {
+        if let Value::Ref(id) = value
+            && self.reference_semantics
+            && self.heap.is_javascript_exotic(*id)?
+        {
+            return Ok(true);
+        }
+        Ok(is_truthy(value))
+    }
+
     pub(super) fn read_dialect_field(
         &mut self,
         target: Value,
@@ -37,7 +47,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return read_index_direct(target, index);
         }
         if self.reference_semantics {
-            read_javascript_index_direct(target, index)
+            let key = self.heap.javascript_to_string(&index)?;
+            read_javascript_index_direct_with_key(target, &key)
         } else {
             read_index_direct(target, index)
         }
@@ -98,8 +109,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 } else {
                     number
                 }));
+        } else if op == JavaScriptUnaryOp::Not && matches!(value, Value::Ref(_)) {
+            self.stack.push(Value::Bool(false));
         } else {
-            // Every JavaScript object is truthy, including an exotic reference.
             self.stack.push(eval_javascript_unary(value, op));
         }
         Ok(())
@@ -241,7 +253,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             ("RegExp", "valueOf", []) | ("Map", "valueOf", []) | ("Set", "valueOf", []) => {
                 Some(Value::Ref(receiver))
             }
-            ("RegExp", "toString", []) => Some(Value::String("[object RegExp]".into())),
+            ("RegExp", "toString", []) => {
+                let HeapObject::RegExp(regexp) = self.heap.get(receiver)? else {
+                    unreachable!("RegExp receiver kind was checked")
+                };
+                Some(Value::String(regexp_string(regexp).into()))
+            }
             ("Map", "toString", []) => Some(Value::String("[object Map]".into())),
             ("Set", "toString", []) => Some(Value::String("[object Set]".into())),
             ("Date", "valueOf" | "getTime", []) => Some(Value::Number(
@@ -249,7 +266,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .date_milliseconds(receiver)?
                     .expect("Date receiver was checked"),
             )),
-            ("Date", "toString", []) => Some(Value::String("[object Date]".into())),
+            ("Date", "toString", []) => {
+                return Err(js_stdlib_error(
+                    "TS_DATE_STRING_COERCION_PENDING: Date string coercion is not implemented",
+                ));
+            }
             (kind, "toString", []) if ErrorKind::from_name(kind).is_some() => {
                 let HeapObject::Error(error) = self.heap.get(receiver)? else {
                     unreachable!("Error receiver kind was checked")

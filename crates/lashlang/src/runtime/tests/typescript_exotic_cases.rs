@@ -148,6 +148,205 @@ async fn regexp_last_index_uses_heap_aware_to_number_and_to_length() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn reference_index_keys_use_heap_aware_string_coercion() {
+    let program = Program::block(vec![
+        ts_assign(
+            "record",
+            Expr::Record(vec![
+                ("a".into(), Expr::Number(1.0)),
+                ("1,2,3".into(), Expr::Number(12.0)),
+            ]),
+        ),
+        ts_assign("object_key", Expr::Record(Vec::new())),
+        ts_assign("array", Expr::List(vec![Expr::Number(1.0)])),
+        ts_assign("empty_list_key", Expr::List(Vec::new())),
+        ts_assign("map", heap_new("Map", Vec::new())),
+        ts_assign(
+            "nested_list_key",
+            Expr::List(vec![
+                Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
+                Expr::Number(3.0),
+            ]),
+        ),
+        Expr::Finish(Box::new(Expr::List(vec![
+            Expr::Index {
+                target: Box::new(Expr::Variable("record".into())),
+                index: Box::new(Expr::Variable("object_key".into())),
+            },
+            Expr::Index {
+                target: Box::new(Expr::Variable("array".into())),
+                index: Box::new(Expr::Variable("empty_list_key".into())),
+            },
+            Expr::Index {
+                target: Box::new(Expr::Variable("map".into())),
+                index: Box::new(Expr::Variable("object_key".into())),
+            },
+            Expr::Index {
+                target: Box::new(Expr::Variable("record".into())),
+                index: Box::new(Expr::Variable("nested_list_key".into())),
+            },
+        ]))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![
+                Value::Undefined,
+                Value::Undefined,
+                Value::Undefined,
+                Value::Number(12.0),
+            ]
+            .into()
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn date_reference_index_key_uses_the_pending_string_coercion_error() {
+    let program = Program::block(vec![
+        ts_assign("record", Expr::Record(Vec::new())),
+        ts_assign("date_key", heap_new("Date", vec![Expr::Number(42.0)])),
+        Expr::Finish(Box::new(Expr::Index {
+            target: Box::new(Expr::Variable("record".into())),
+            index: Box::new(Expr::Variable("date_key".into())),
+        })),
+    ]);
+    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
+        .expect("compile Date index-key coercion regression");
+    let error = execute(&compiled, &mut State::new(), &Host)
+        .await
+        .expect_err("Date index-key coercion remains a loud deviation");
+    assert!(
+        error
+            .to_string()
+            .contains("TS_DATE_STRING_COERCION_PENDING"),
+        "{error}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn regexp_string_coercion_matches_node() {
+    let program = Program::block(vec![
+        ts_assign(
+            "regexp",
+            heap_new(
+                "RegExp",
+                vec![Expr::String("a+".into()), Expr::String("g".into())],
+            ),
+        ),
+        ts_assign(
+            "empty_regexp",
+            heap_new(
+                "RegExp",
+                vec![
+                    Expr::String(String::new().into()),
+                    Expr::String(String::new().into()),
+                ],
+            ),
+        ),
+        Expr::Finish(Box::new(Expr::List(vec![
+            Expr::JavaScriptBinary {
+                left: Box::new(Expr::String(String::new().into())),
+                op: crate::JavaScriptBinaryOp::Add,
+                right: Box::new(Expr::Variable("regexp".into())),
+            },
+            heap_method("toString", "regexp", Vec::new()),
+            heap_method("toString", "empty_regexp", Vec::new()),
+        ]))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![
+                Value::String("/a+/g".into()),
+                Value::String("/a+/g".into()),
+                Value::String("/(?:)/".into()),
+            ]
+            .into()
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn date_to_string_uses_the_pending_string_coercion_error() {
+    let program = Program::block(vec![
+        ts_assign("date", heap_new("Date", vec![Expr::Number(42.0)])),
+        Expr::Finish(Box::new(heap_method("toString", "date", Vec::new()))),
+    ]);
+    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
+        .expect("compile Date toString regression");
+    let error = execute(&compiled, &mut State::new(), &Host)
+        .await
+        .expect_err("Date toString remains a loud deviation");
+    assert!(
+        error
+            .to_string()
+            .contains("TS_DATE_STRING_COERCION_PENDING"),
+        "{error}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn javascript_unary_plus_and_minus_use_exact_reference_to_number() {
+    let mut expressions = Vec::new();
+    for (name, value) in [
+        ("one", Expr::List(vec![Expr::Number(1.0)])),
+        ("empty", Expr::List(Vec::new())),
+        (
+            "many",
+            Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
+        ),
+        ("record", Expr::Record(Vec::new())),
+        ("map", heap_new("Map", Vec::new())),
+        ("date", heap_new("Date", vec![Expr::Number(42.0)])),
+    ] {
+        expressions.push(ts_assign(name, value));
+    }
+    expressions.push(Expr::Finish(Box::new(Expr::List(
+        [
+            "one", "empty", "many", "record", "map", "date", "one", "empty", "many", "record",
+            "map", "date",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| Expr::JavaScriptUnary {
+            op: if index < 6 {
+                crate::JavaScriptUnaryOp::Plus
+            } else {
+                crate::JavaScriptUnaryOp::Negate
+            },
+            expr: Box::new(Expr::Variable(name.into())),
+        })
+        .collect(),
+    ))));
+
+    let ExecutionOutcome::Finished(Value::List(values)) =
+        run_typescript_ast_across_every_effect(Program::block(expressions)).await
+    else {
+        panic!("unary reference coercions should finish as a list")
+    };
+    assert_eq!(values[0], Value::Number(1.0));
+    assert_eq!(values[1], Value::Number(0.0));
+    assert!(matches!(values[2], Value::Number(value) if value.is_nan()));
+    assert!(matches!(values[3], Value::Number(value) if value.is_nan()));
+    assert!(matches!(values[4], Value::Number(value) if value.is_nan()));
+    assert_eq!(values[5], Value::Number(42.0));
+    assert_eq!(values[6], Value::Number(-1.0));
+    assert!(matches!(values[7], Value::Number(value) if value.to_bits() == (-0.0_f64).to_bits()));
+    assert!(matches!(values[8], Value::Number(value) if value.is_nan()));
+    assert!(matches!(values[9], Value::Number(value) if value.is_nan()));
+    assert!(matches!(values[10], Value::Number(value) if value.is_nan()));
+    assert_eq!(values[11], Value::Number(-42.0));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "heap references must be exported before truthiness")]
+fn scalar_truthiness_asserts_on_unexported_references() {
+    is_truthy(&Value::Ref(HeapId::from_counter(1)));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn nested_regexp_last_index_write_survives_park_and_restore() {
     let program = Program::block(vec![
         ts_assign(

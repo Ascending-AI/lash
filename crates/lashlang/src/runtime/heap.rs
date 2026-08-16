@@ -13,7 +13,7 @@ pub use id::HeapId;
 pub(crate) use javascript_exotics::RegExpProgramCache;
 pub(crate) use javascript_exotics::{
     DateObject, ErrorKind, ErrorObject, MAX_JAVASCRIPT_LENGTH, MapObject, RegExpObject, SetObject,
-    canonical_regexp_flags, same_value_zero,
+    canonical_regexp_flags, regexp_string, same_value_zero,
 };
 pub(crate) use validation::PersistedRoots;
 
